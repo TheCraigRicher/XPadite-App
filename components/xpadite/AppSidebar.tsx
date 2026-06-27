@@ -21,7 +21,8 @@ const LogoutIcon = () => (
 )
 
 const MENU_ITEMS = [
-  { icon: '📅', label: 'Calendar' },
+  { icon: '📊', label: 'Analytics' },
+  { icon: '📅', label: 'Sync Google Calendar' },
   { icon: '🎯', label: 'Goal Setting with AI' },
   { icon: '👥', label: 'Meetings' },
   { icon: '🔔', label: 'Reminders' },
@@ -100,7 +101,7 @@ export function AppSidebar() {
           ))}
         </nav>
 
-        {/* Sign out — always at the bottom */}
+        {/* Sign out at the very bottom */}
         <div
           className="flex-shrink-0 p-3"
           style={{ borderTop: '0.5px solid rgba(255,255,255,0.08)' }}

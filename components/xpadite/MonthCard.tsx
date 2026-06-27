@@ -10,28 +10,22 @@ function isStreakDay(data: DayData | undefined): boolean {
   return !!(data.productive || data.hyper || data.milestone)
 }
 
-const ChartBarIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-2.5 h-2.5">
-    <line x1="18" y1="20" x2="18" y2="10" strokeLinecap="round" />
-    <line x1="12" y1="20" x2="12" y2="4" strokeLinecap="round" />
-    <line x1="6" y1="20" x2="6" y2="14" strokeLinecap="round" />
-  </svg>
-)
-
 interface MonthCardProps {
   month: number
   isCurrentMonth: boolean
   onDayDoubleClick?: (key: string, month: number, day: number) => void
   onMonthDashboard?: (month: number) => void
+  onMonthZoom?: (month: number) => void
 }
 
-interface CellData {
+interface Cell {
   day: number
   key: string
   dayOfWeek: number
+  isGhost: boolean
 }
 
-export function MonthCard({ month, isCurrentMonth, onDayDoubleClick, onMonthDashboard }: MonthCardProps) {
+export function MonthCard({ month, isCurrentMonth, onDayDoubleClick, onMonthDashboard, onMonthZoom }: MonthCardProps) {
   const { calData, updateDay, setToast } = useApp()
 
   const clickRef = useRef<{
@@ -40,18 +34,44 @@ export function MonthCard({ month, isCurrentMonth, onDayDoubleClick, onMonthDash
     timer: ReturnType<typeof setTimeout> | null
   }>({ key: null, count: 0, timer: null })
 
-  const { cells, totalDays } = useMemo(() => {
+  const { cells, totalDays } = useMemo<{ cells: Cell[]; totalDays: number }>(() => {
     const fd = new Date(APP_YEAR, month, 1).getDay()
     const td = new Date(APP_YEAR, month + 1, 0).getDate()
-    const result: Array<CellData | null> = []
-    for (let i = 0; i < fd; i++) result.push(null)
+    const prevTd = new Date(APP_YEAR, month, 0).getDate() // last day of previous month
+    const result: Cell[] = []
+
+    // Ghost prefix (last days of previous month)
+    for (let i = fd - 1; i >= 0; i--) {
+      result.push({
+        day: prevTd - i,
+        key: `ghost-prev-${month}-${i}`,
+        dayOfWeek: (fd - 1 - i) === -1 ? 6 : (fd - 1 - i),
+        isGhost: true,
+      })
+    }
+
+    // Real days
     for (let d = 1; d <= td; d++) {
       result.push({
         day: d,
         key: dateKey(APP_YEAR, month, d),
         dayOfWeek: (fd + d - 1) % 7,
+        isGhost: false,
       })
     }
+
+    // Ghost suffix (first days of next month)
+    const remainder = result.length % 7
+    const suffixCount = remainder === 0 ? 0 : 7 - remainder
+    for (let d = 1; d <= suffixCount; d++) {
+      result.push({
+        day: d,
+        key: `ghost-next-${month}-${d}`,
+        dayOfWeek: (fd + td + d - 1) % 7,
+        isGhost: true,
+      })
+    }
+
     return { cells: result, totalDays: td }
   }, [month])
 
@@ -86,21 +106,20 @@ export function MonthCard({ month, isCurrentMonth, onDayDoubleClick, onMonthDash
     <div
       className="rounded-xl p-2 transition-all duration-200"
       style={{
-        background: isCurrentMonth ? 'var(--xp-card)' : 'var(--xp-bg3)',
-        border: isCurrentMonth
-          ? '1px solid rgba(124,58,237,0.2)'
-          : '0.5px solid var(--xp-bdr)',
-        boxShadow: isCurrentMonth ? '0 2px 8px rgba(124,58,237,0.07)' : 'none',
+        background: isCurrentMonth ? '#eff6ff' : 'var(--xp-card)',
+        border: isCurrentMonth ? '1px solid #bfdbfe' : '0.5px solid var(--xp-bdr)',
+        boxShadow: isCurrentMonth ? '0 2px 8px rgba(59,130,246,0.08)' : 'none',
       }}
     >
       {/* Month header */}
       <div className="flex items-center justify-between mb-1.5">
-        <span
-          className="text-[11px] font-semibold"
-          style={{ color: isCurrentMonth ? 'var(--xp-acc)' : 'var(--xp-txt)' }}
+        <button
+          onClick={() => onMonthZoom?.(month)}
+          className="text-[11px] font-semibold transition-colors hover:underline"
+          style={{ color: isCurrentMonth ? '#2563eb' : 'var(--xp-txt)' }}
         >
           {MONTHS[month]}
-        </span>
+        </button>
         <button
           onClick={e => { e.stopPropagation(); onMonthDashboard?.(month) }}
           className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] transition-colors hover:text-violet-500"
@@ -110,28 +129,29 @@ export function MonthCard({ month, isCurrentMonth, onDayDoubleClick, onMonthDash
             color: 'var(--xp-txt3)',
           }}
         >
-          <ChartBarIcon /> Dashboard
+          📊 Dashboard
         </button>
       </div>
 
       {/* Day headers */}
       <div className="grid grid-cols-7 mb-0.5">
         {DAY_HEADERS.map((d, i) => (
-          <div
-            key={d}
-            className="text-center text-[7.5px] font-medium"
-            style={{ color: i === 0 ? '#f97316' : 'var(--xp-txt3)' }}
-          >
+          <div key={d} className="text-center text-[7.5px] font-medium" style={{ color: i === 0 ? '#f97316' : 'var(--xp-txt3)' }}>
             {d}
           </div>
         ))}
       </div>
 
-      {/* Day cells — no gap so connectors are seamless */}
+      {/* Cells */}
       <div className="grid grid-cols-7">
-        {cells.map((cell, idx) => {
-          if (!cell) {
-            return <div key={`e${idx}`} className="aspect-square" />
+        {cells.map((cell) => {
+          // Ghost cells — non-interactive filler days
+          if (cell.isGhost) {
+            return (
+              <div key={cell.key} className="aspect-square flex items-center justify-center text-[8px]" style={{ color: 'var(--xp-bdr2)' }}>
+                {cell.day}
+              </div>
+            )
           }
 
           const dayData = calData[cell.key]
@@ -142,37 +162,56 @@ export function MonthCard({ month, isCurrentMonth, onDayDoubleClick, onMonthDash
           const todayCell = isToday(APP_YEAR, month, cell.day)
           const isSun = cell.dayOfWeek === 0
 
-          // Streak connections — only within same week row
+          // Streak connections
           const prevKey = cell.day > 1 ? dateKey(APP_YEAR, month, cell.day - 1) : null
           const nextKey = cell.day < totalDays ? dateKey(APP_YEAR, month, cell.day + 1) : null
           const connectLeft = streak && cell.dayOfWeek !== 0 && !!prevKey && isStreakDay(calData[prevKey])
           const connectRight = streak && cell.dayOfWeek !== 6 && !!nextKey && isStreakDay(calData[nextKey])
 
-          // Circle style
+          // Determine what to render in the circle
+          let circleContent: React.ReactNode
           let circleStyle: React.CSSProperties = {
             color: isSun ? '#f97316' : 'var(--xp-txt3)',
             fontSize: '9px',
           }
-          if (productive && !hyper && !milestone) {
+
+          if (hyper) {
+            circleContent = (
+              <div className="relative flex items-center justify-center w-full h-full">
+                <span style={{ fontSize: '13px', lineHeight: 1 }}>🔥</span>
+                <span className="absolute text-[7px] font-bold" style={{ color: '#1a1a1a', textShadow: '0 0 3px rgba(255,255,255,0.8)' }}>{cell.day}</span>
+              </div>
+            )
+            circleStyle = { background: 'rgba(251,191,36,0.15)' }
+          } else if (milestone) {
+            circleContent = (
+              <div className="relative flex items-center justify-center w-full h-full">
+                <span style={{ fontSize: '13px', lineHeight: 1 }}>🏆</span>
+                <span className="absolute text-[7px] font-bold" style={{ color: '#1a1a1a', textShadow: '0 0 3px rgba(255,255,255,0.8)' }}>{cell.day}</span>
+              </div>
+            )
+            circleStyle = { background: 'rgba(124,58,237,0.1)' }
+          } else if (productive) {
+            circleContent = cell.day
             circleStyle = {
               background: '#16a34a',
               color: 'white',
               fontSize: '9px',
               fontWeight: 600,
+              boxShadow: '0 0 0 2.5px rgba(22,163,74,0.25)',
             }
-          } else if (todayCell && !streak) {
+          } else if (todayCell) {
+            circleContent = cell.day
             circleStyle = {
               color: 'var(--xp-acc)',
-              background: 'rgba(124,58,237,0.1)',
+              background: 'rgba(124,58,237,0.08)',
               outline: '1.5px solid var(--xp-acc)',
               outlineOffset: '-1px',
               fontSize: '9px',
             }
+          } else {
+            circleContent = cell.day
           }
-
-          // Emoji content for special days
-          const isEmoji = hyper || milestone
-          const content = hyper ? '🔥' : milestone ? '🏆' : cell.day
 
           return (
             <div
@@ -181,46 +220,21 @@ export function MonthCard({ month, isCurrentMonth, onDayDoubleClick, onMonthDash
               onClick={() => handleCellClick(cell.key, cell.day, streak)}
               title={streak ? 'Click to unmark · Double-click to edit' : 'Click to mark productive'}
             >
-              {/* Left streak connector */}
+              {/* Left connector */}
               {connectLeft && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: 0,
-                    right: '50%',
-                    top: '50%',
-                    height: 2,
-                    background: '#16a34a',
-                    transform: 'translateY(-50%)',
-                    zIndex: 0,
-                    pointerEvents: 'none',
-                  }}
-                />
+                <div style={{ position: 'absolute', left: 0, right: '50%', top: '50%', height: 2, background: '#16a34a', transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
               )}
-
-              {/* Right streak connector */}
+              {/* Right connector */}
               {connectRight && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: '50%',
-                    right: -1,
-                    top: '50%',
-                    height: 2,
-                    background: '#16a34a',
-                    transform: 'translateY(-50%)',
-                    zIndex: 0,
-                    pointerEvents: 'none',
-                  }}
-                />
+                <div style={{ position: 'absolute', left: '50%', right: -1, top: '50%', height: 2, background: '#16a34a', transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
               )}
 
-              {/* Day circle */}
+              {/* Circle */}
               <div
-                className="absolute inset-[8%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-110"
-                style={{ zIndex: 1, ...circleStyle, fontSize: isEmoji ? '11px' : '9px' }}
+                className="absolute inset-[8%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-110 overflow-hidden"
+                style={{ zIndex: 1, ...circleStyle }}
               >
-                {content}
+                {circleContent}
               </div>
             </div>
           )

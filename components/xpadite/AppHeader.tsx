@@ -89,9 +89,48 @@ export function AppHeader({ onYearDash, onMotivate }: AppHeaderProps) {
   const elapsed = activeSession ? now - activeSession.startTs : 0
 
   return (
-    <header style={{ background: 'var(--xp-hdr)', borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}>
-      <div style={{ maxWidth: 1360, margin: '0 auto', padding: '0 16px', display: 'flex', alignItems: 'center', gap: 8, height: 52 }}>
+    <header
+      style={{
+        background: 'var(--xp-hdr)',
+        borderBottom: '0.5px solid rgba(255,255,255,0.06)',
+      }}
+    >
+      {/* Row 1: logo + brand name, centered */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          padding: '10px 16px 4px',
+        }}
+      >
+        <XpaditeLogo variant="light" size={26} />
+        <span
+          style={{
+            color: 'white',
+            fontWeight: 700,
+            fontSize: 18,
+            letterSpacing: '0.12em',
+            userSelect: 'none',
+          }}
+        >
+          XPADITE
+        </span>
+      </div>
 
+      {/* Row 2: all controls, centered within max-width */}
+      <div
+        style={{
+          maxWidth: 1360,
+          margin: '0 auto',
+          padding: '0 16px 8px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          flexWrap: 'wrap',
+        }}
+      >
         {/* Burger */}
         <button
           onClick={() => setSidebarOpen(true)}
@@ -102,107 +141,92 @@ export function AppHeader({ onYearDash, onMotivate }: AppHeaderProps) {
           <BurgerIcon />
         </button>
 
-        {/* Logo */}
-        <div className="flex-shrink-0">
-          <XpaditeLogo variant="light" size={24} />
-        </div>
+        <div className="w-px h-4 flex-shrink-0" style={{ background: 'rgba(255,255,255,0.12)' }} />
 
-        {/* Divider */}
-        <div className="w-px h-5 flex-shrink-0" style={{ background: 'rgba(255,255,255,0.12)' }} />
+        {/* Clock controls + timer */}
+        <span
+          className="text-xs font-mono px-2 py-1 rounded-md flex-shrink-0"
+          style={{
+            background: activeSession ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
+            color: activeSession ? '#86efac' : 'rgba(255,255,255,0.4)',
+            border: `0.5px solid ${activeSession ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.08)'}`,
+          }}
+        >
+          {formatHMS(elapsed)}
+        </span>
 
-        {/* Clock controls */}
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <span
-            className="text-xs font-mono px-2.5 py-1 rounded-md flex-shrink-0"
+        <button
+          onClick={clockIn}
+          disabled={!!activeSession}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all duration-150 disabled:opacity-35 disabled:cursor-not-allowed flex-shrink-0"
+          style={{ background: 'rgba(22,163,74,0.85)' }}
+        >
+          <PlayIcon /> Clock In
+        </button>
+
+        <button
+          onClick={clockOut}
+          disabled={!activeSession}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all duration-150 disabled:opacity-35 disabled:cursor-not-allowed flex-shrink-0"
+          style={{ background: 'rgba(185,28,28,0.85)' }}
+        >
+          <StopIcon /> Clock Out
+        </button>
+
+        {activeSession && (
+          <span className="text-[11px] truncate" style={{ color: '#93c5fd', maxWidth: 120 }}>
+            ● {activeSession.actName}
+          </span>
+        )}
+
+        {/* Spacer */}
+        <div style={{ flex: 1 }} />
+
+        {/* Motivate Me */}
+        <button
+          onClick={onMotivate}
+          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150 hover:bg-white/10 flex-shrink-0"
+          style={{ color: 'rgba(255,255,255,0.65)', border: '0.5px solid rgba(255,255,255,0.12)' }}
+        >
+          ✨ Motivate Me
+        </button>
+
+        {/* Year Dashboard */}
+        <button
+          onClick={onYearDash}
+          className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150 hover:bg-white/10 flex-shrink-0"
+          style={{ color: 'rgba(255,255,255,0.65)', border: '0.5px solid rgba(255,255,255,0.12)' }}
+        >
+          📊 Yearly
+        </button>
+
+        {/* Sun / pill / Moon toggle */}
+        <button
+          onClick={() => setIsDark(!isDark)}
+          aria-label="Toggle dark mode"
+          className="flex items-center gap-1.5 flex-shrink-0"
+        >
+          <span style={{ color: isDark ? 'rgba(255,255,255,0.3)' : '#fbbf24', transition: 'color 0.25s' }}>
+            <SunIcon />
+          </span>
+          <div
+            className="relative rounded-full transition-colors duration-300"
             style={{
-              background: activeSession ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
-              color: activeSession ? '#86efac' : 'rgba(255,255,255,0.45)',
-              border: `0.5px solid ${activeSession ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.08)'}`,
+              width: 36,
+              height: 20,
+              background: isDark ? '#4f46e5' : 'rgba(255,255,255,0.2)',
+              border: '0.5px solid rgba(255,255,255,0.2)',
             }}
           >
-            {formatHMS(elapsed)}
-          </span>
-
-          <button
-            onClick={clockIn}
-            disabled={!!activeSession}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all duration-150 disabled:opacity-35 disabled:cursor-not-allowed flex-shrink-0"
-            style={{ background: 'rgba(22,163,74,0.85)' }}
-          >
-            <PlayIcon /> Clock In
-          </button>
-
-          <button
-            onClick={clockOut}
-            disabled={!activeSession}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all duration-150 disabled:opacity-35 disabled:cursor-not-allowed flex-shrink-0"
-            style={{ background: 'rgba(185,28,28,0.85)' }}
-          >
-            <StopIcon /> Clock Out
-          </button>
-
-          {activeSession && (
-            <span
-              className="text-[11px] truncate min-w-0"
-              style={{ color: '#93c5fd' }}
-            >
-              ● {activeSession.actName}
-            </span>
-          )}
-        </div>
-
-        {/* Right cluster */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {/* Motivate Me */}
-          <button
-            onClick={onMotivate}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150 hover:bg-white/10"
-            style={{ color: 'rgba(255,255,255,0.65)', border: '0.5px solid rgba(255,255,255,0.12)' }}
-          >
-            ✨ Motivate Me
-          </button>
-
-          {/* Year Dashboard */}
-          <button
-            onClick={onYearDash}
-            className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150 hover:bg-white/10"
-            style={{ color: 'rgba(255,255,255,0.65)', border: '0.5px solid rgba(255,255,255,0.12)' }}
-          >
-            📊 Yearly
-          </button>
-
-          {/* Simple sun / moon pill toggle */}
-          <button
-            onClick={() => setIsDark(!isDark)}
-            aria-label="Toggle dark mode"
-            className="flex items-center gap-1.5"
-          >
-            {/* Sun */}
-            <span style={{ color: isDark ? 'rgba(255,255,255,0.3)' : '#fbbf24', transition: 'color 0.25s' }}>
-              <SunIcon />
-            </span>
-            {/* Pill track */}
             <div
-              className="relative rounded-full transition-colors duration-300"
-              style={{
-                width: 36,
-                height: 20,
-                background: isDark ? '#4f46e5' : 'rgba(255,255,255,0.2)',
-                border: '0.5px solid rgba(255,255,255,0.2)',
-              }}
-            >
-              <div
-                className="absolute top-[2px] w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-300"
-                style={{ transform: isDark ? 'translateX(18px)' : 'translateX(2px)' }}
-              />
-            </div>
-            {/* Moon */}
-            <span style={{ color: isDark ? '#a78bfa' : 'rgba(255,255,255,0.3)', transition: 'color 0.25s' }}>
-              <MoonIcon />
-            </span>
-          </button>
-        </div>
-
+              className="absolute top-[2px] w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-300"
+              style={{ transform: isDark ? 'translateX(18px)' : 'translateX(2px)' }}
+            />
+          </div>
+          <span style={{ color: isDark ? '#a78bfa' : 'rgba(255,255,255,0.3)', transition: 'color 0.25s' }}>
+            <MoonIcon />
+          </span>
+        </button>
       </div>
     </header>
   )

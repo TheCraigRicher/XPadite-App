@@ -16,7 +16,8 @@ interface MonthZoomModalProps {
 }
 
 export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomModalProps) {
-  const { calData, updateDay, setToast } = useApp()
+  const { calData, updateDay, setToast, isDark } = useApp()
+  const gapColor = isDark ? '#1a1a28' : '#ffffff'
 
   const clickRef = useRef<{
     key: string | null
@@ -159,36 +160,85 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
               const connectLeft = streak && cell.dayOfWeek !== 0 && !!prevKey && isStreakDay(calData[prevKey])
               const connectRight = streak && cell.dayOfWeek !== 6 && !!nextKey && isStreakDay(calData[nextKey])
 
-              let circleContent: React.ReactNode
-              let circleStyle: React.CSSProperties = {
-                color: isSun ? '#f97316' : 'var(--xp-txt3)',
-                fontSize: '13px',
+              // Circle is inset-[8%] → edge at 8% / 92%; gap-1 cells need -4 to span gap
+              const connL = connectLeft && (
+                <div style={{ position: 'absolute', left: 0, right: '92%', top: '50%', height: 2.5, background: '#16a34a', transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
+              )
+              const connR = connectRight && (
+                <div style={{ position: 'absolute', left: '92%', right: -4, top: '50%', height: 2.5, background: '#16a34a', transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
+              )
+
+              // ── Fire Day ──────────────────────────────────────────
+              if (hyper) {
+                return (
+                  <div
+                    key={cell.key}
+                    className="aspect-square relative cursor-pointer select-none group"
+                    onClick={() => handleCellClick(cell.key, cell.day, streak)}
+                    title="Fire Day!"
+                  >
+                    {connL}{connR}
+                    <div
+                      className="absolute inset-[2%] flex items-center justify-center group-hover:scale-110 transition-transform duration-150"
+                      style={{ zIndex: 1 }}
+                    >
+                      <span style={{ fontSize: '30px', lineHeight: 1, userSelect: 'none' }}>🔥</span>
+                    </div>
+                    <span
+                      style={{
+                        position: 'absolute', top: '45%', left: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: 2, fontSize: '9px', fontWeight: 900,
+                        color: '#0a0a0a',
+                        textShadow: '0 0 5px rgba(255,255,255,1), 0 0 10px rgba(255,255,255,0.8)',
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      {cell.day}
+                    </span>
+                  </div>
+                )
               }
 
-              if (hyper) {
-                circleContent = (
-                  <div className="relative flex items-center justify-center w-full h-full">
-                    <span style={{ fontSize: '20px', lineHeight: 1 }}>🔥</span>
-                    <span className="absolute text-[10px] font-bold" style={{ color: '#1a1a1a', textShadow: '0 0 4px rgba(255,255,255,0.9)' }}>{cell.day}</span>
+              // ── Trophy / Milestone ─────────────────────────────────
+              if (milestone) {
+                return (
+                  <div
+                    key={cell.key}
+                    className="aspect-square relative cursor-pointer select-none group"
+                    onClick={() => handleCellClick(cell.key, cell.day, streak)}
+                    title="Milestone!"
+                  >
+                    {connL}{connR}
+                    <div
+                      className="absolute inset-[2%] flex items-center justify-center group-hover:scale-110 transition-transform duration-150"
+                      style={{ zIndex: 1 }}
+                    >
+                      <span style={{ fontSize: '30px', lineHeight: 1, userSelect: 'none' }}>🏆</span>
+                    </div>
+                    <span
+                      style={{
+                        position: 'absolute', top: '32%', left: '50%',
+                        transform: 'translate(-50%, -50%)',
+                        zIndex: 2, fontSize: '9px', fontWeight: 900,
+                        color: '#0a0a0a',
+                        textShadow: '0 0 5px rgba(255,255,255,1), 0 0 10px rgba(255,255,255,0.8)',
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      {cell.day}
+                    </span>
                   </div>
                 )
-                circleStyle = { background: 'rgba(251,191,36,0.15)' }
-              } else if (milestone) {
-                circleContent = (
-                  <div className="relative flex items-center justify-center w-full h-full">
-                    <span style={{ fontSize: '20px', lineHeight: 1 }}>🏆</span>
-                    <span className="absolute text-[10px] font-bold" style={{ color: '#1a1a1a', textShadow: '0 0 4px rgba(255,255,255,0.9)' }}>{cell.day}</span>
-                  </div>
-                )
-                circleStyle = { background: 'rgba(124,58,237,0.1)' }
-              } else if (productive) {
-                circleContent = cell.day
-                circleStyle = { background: '#16a34a', color: 'white', fontWeight: 700, fontSize: '13px', boxShadow: '0 0 0 3px rgba(22,163,74,0.25)' }
+              }
+
+              // ── Productive / Today / Default ──────────────────────
+              let circleStyle: React.CSSProperties = { color: isSun ? '#f97316' : 'var(--xp-txt3)', fontSize: '13px' }
+
+              if (productive) {
+                circleStyle = { background: '#16a34a', color: 'white', fontWeight: 700, fontSize: '13px', boxShadow: `0 0 0 2.5px ${gapColor}, 0 0 0 5.5px rgba(22,163,74,0.7)` }
               } else if (todayCell) {
-                circleContent = cell.day
                 circleStyle = { color: 'var(--xp-acc)', background: 'rgba(124,58,237,0.08)', outline: '2px solid var(--xp-acc)', outlineOffset: '-1px', fontSize: '13px' }
-              } else {
-                circleContent = cell.day
               }
 
               return (
@@ -197,13 +247,12 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
                   className="aspect-square relative cursor-pointer select-none group"
                   onClick={() => handleCellClick(cell.key, cell.day, streak)}
                 >
-                  {connectLeft && <div style={{ position: 'absolute', left: 0, right: '50%', top: '50%', height: 2.5, background: '#16a34a', transform: 'translateY(-50%)', zIndex: 0 }} />}
-                  {connectRight && <div style={{ position: 'absolute', left: '50%', right: -2, top: '50%', height: 2.5, background: '#16a34a', transform: 'translateY(-50%)', zIndex: 0 }} />}
+                  {connL}{connR}
                   <div
-                    className="absolute inset-[6%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-105 overflow-hidden"
+                    className="absolute inset-[8%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-105"
                     style={{ zIndex: 1, ...circleStyle }}
                   >
-                    {circleContent}
+                    {cell.day}
                   </div>
                 </div>
               )

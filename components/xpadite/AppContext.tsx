@@ -1,7 +1,7 @@
 'use client'
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import type { CalendarData, WorkSession, Activity, ActiveSession, DayData } from './types'
+import type { CalendarData, WorkSession, Activity, ActiveSession, DayData, ActiveTaskTimer } from './types'
 
 const DEFAULT_ACTIVITIES: Activity[] = [
   { id: 'a1', name: 'Work', color: '#7c3aed' },
@@ -9,6 +9,14 @@ const DEFAULT_ACTIVITIES: Activity[] = [
   { id: 'a3', name: 'Learning', color: '#0891b2' },
   { id: 'a4', name: 'Coding', color: '#6366f1' },
   { id: 'a5', name: 'Personal', color: '#d97706' },
+  { id: 'a-meal', name: '🍽 Meal', color: '#f59e0b' },
+  { id: 'a-break', name: '☕ Break', color: '#64748b' },
+]
+
+// Built-in activities that should always exist even for users with existing saved data
+const BUILTIN_EXTRAS: Activity[] = [
+  { id: 'a-meal', name: '🍽 Meal', color: '#f59e0b' },
+  { id: 'a-break', name: '☕ Break', color: '#64748b' },
 ]
 
 export const EMPTY_DAY: DayData = {
@@ -33,6 +41,8 @@ interface AppContextValue {
   setIsDark: (v: boolean) => void
   activeSession: ActiveSession | null
   setActiveSession: (s: ActiveSession | null) => void
+  activeTaskTimer: ActiveTaskTimer | null
+  setActiveTaskTimer: (t: ActiveTaskTimer | null) => void
   removingMode: boolean
   setRemovingMode: (v: boolean) => void
   sidebarOpen: boolean
@@ -56,6 +66,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [selectedActId, setSelectedActId] = useState<string>(DEFAULT_ACTIVITIES[0].id)
   const [isDark, setIsDark] = useState(false)
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null)
+  const [activeTaskTimer, setActiveTaskTimer] = useState<ActiveTaskTimer | null>(null)
   const [removingMode, setRemovingMode] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -64,7 +75,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const d = localStorage.getItem('xp9d')
-      if (d) setCalData(JSON.parse(d))
+      if (d) {
+        const parsed = JSON.parse(d) as CalendarData
+        // Migrate: ensure all tasks have sessions array
+        Object.values(parsed).forEach(day => {
+          day.tasks?.forEach(task => {
+            if (!Array.isArray(task.sessions)) task.sessions = []
+          })
+        })
+        setCalData(parsed)
+      }
     } catch {}
     try {
       const s = localStorage.getItem('xp9s')
@@ -74,6 +94,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const a = localStorage.getItem('xp9a')
       if (a) {
         const parsed: Activity[] = JSON.parse(a)
+        // Ensure built-in activities always exist
+        BUILTIN_EXTRAS.forEach(b => {
+          if (!parsed.some(act => act.id === b.id)) parsed.push(b)
+        })
         if (parsed.length) {
           setActivitiesState(parsed)
           setSelectedActId(parsed[0].id)
@@ -133,6 +157,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       selectedActId, setSelectedActId,
       isDark, setIsDark,
       activeSession, setActiveSession,
+      activeTaskTimer, setActiveTaskTimer,
       removingMode, setRemovingMode,
       sidebarOpen, setSidebarOpen,
       toast, setToast,

@@ -1,3 +1,11 @@
+export interface TaskSession {
+  id: string
+  startTs: number
+  endTs: number | null
+  note: string
+  tags: string[]
+}
+
 export interface Task {
   id: string
   text: string
@@ -7,6 +15,7 @@ export interface Task {
   timerEnd: number | null
   actId: string
   milestone?: boolean
+  sessions: TaskSession[]
 }
 
 export interface DayData {
@@ -43,4 +52,13 @@ export interface ActiveSession {
   actColor: string
   startTs: number
   dateKey: string
+}
+
+export interface ActiveTaskTimer {
+  taskId: string
+  dateKey: string
+  sessionId: string
+  startTs: number
+  taskText: string
+  taskIndex: number
 }

@@ -11,6 +11,8 @@ import { LegendRow } from './LegendRow'
 import { CalendarSection } from './CalendarSection'
 import { DayModal } from './DayModal'
 import { MonthZoomModal } from './MonthZoomModal'
+import { DayDashboardModal } from './DayDashboardModal'
+import { YearlyDashboardModal } from './YearlyDashboardModal'
 
 interface XpaditeAppProps {
   email: string
@@ -133,8 +135,10 @@ interface ModalDay { key: string; month: number; day: number }
 function ThemedApp({ email: _email }: XpaditeAppProps) {
   const { isDark, toast, setToast } = useApp()
   const [modalDay, setModalDay] = useState<ModalDay | null>(null)
+  const [dashboardDay, setDashboardDay] = useState<ModalDay | null>(null)
   const [zoomedMonth, setZoomedMonth] = useState<number | null>(null)
   const [motivationOpen, setMotivationOpen] = useState(false)
+  const [yearlyOpen, setYearlyOpen] = useState(false)
 
   // Auto-dismiss toast
   useEffect(() => {
@@ -161,7 +165,7 @@ function ThemedApp({ email: _email }: XpaditeAppProps) {
 
       {/* Header (two-row: logo + controls) */}
       <AppHeader
-        onYearDash={() => {}}
+        onYearDash={() => setYearlyOpen(true)}
         onMotivate={() => setMotivationOpen(true)}
       />
 
@@ -186,6 +190,18 @@ function ThemedApp({ email: _email }: XpaditeAppProps) {
           month={modalDay.month}
           day={modalDay.day}
           onClose={() => setModalDay(null)}
+          onDashboard={() => { setDashboardDay(modalDay); setModalDay(null) }}
+        />
+      )}
+
+      {/* Day Dashboard Modal */}
+      {dashboardDay && (
+        <DayDashboardModal
+          dateKey={dashboardDay.key}
+          month={dashboardDay.month}
+          day={dashboardDay.day}
+          onClose={() => setDashboardDay(null)}
+          onBack={() => { setModalDay(dashboardDay); setDashboardDay(null) }}
         />
       )}
 
@@ -197,6 +213,9 @@ function ThemedApp({ email: _email }: XpaditeAppProps) {
           onDayDoubleClick={(key, month, day) => { setZoomedMonth(null); setModalDay({ key, month, day }) }}
         />
       )}
+
+      {/* Yearly Dashboard Modal */}
+      {yearlyOpen && <YearlyDashboardModal onClose={() => setYearlyOpen(false)} />}
 
       {/* Motivation modal */}
       {motivationOpen && <MotivationModal onClose={() => setMotivationOpen(false)} />}

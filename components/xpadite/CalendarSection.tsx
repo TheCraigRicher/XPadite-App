@@ -79,7 +79,7 @@ export function CalendarSection({ onDayDoubleClick, onMonthDashboard, onMonthZoo
         style={{
           background: 'var(--xp-card)',
           border: '0.5px solid var(--xp-bdr)',
-          boxShadow: '0 4px 24px rgba(0,0,0,0.07), 0 1px 4px rgba(0,0,0,0.04)',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)',
           maxWidth: 1160,
           margin: '0 auto',
         }}

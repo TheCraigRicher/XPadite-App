@@ -26,7 +26,8 @@ interface Cell {
 }
 
 export function MonthCard({ month, isCurrentMonth, onDayDoubleClick, onMonthDashboard, onMonthZoom }: MonthCardProps) {
-  const { calData, updateDay, setToast } = useApp()
+  const { calData, updateDay, setToast, isDark } = useApp()
+  const gapColor = isDark ? '#1a1a28' : '#ffffff'
 
   const clickRef = useRef<{
     key: string | null
@@ -129,7 +130,7 @@ export function MonthCard({ month, isCurrentMonth, onDayDoubleClick, onMonthDash
             color: 'var(--xp-txt3)',
           }}
         >
-          📊 Dashboard
+          📊 Monthly Dashboard
         </button>
       </div>
 
@@ -145,7 +146,6 @@ export function MonthCard({ month, isCurrentMonth, onDayDoubleClick, onMonthDash
       {/* Cells */}
       <div className="grid grid-cols-7">
         {cells.map((cell) => {
-          // Ghost cells — non-interactive filler days
           if (cell.isGhost) {
             return (
               <div key={cell.key} className="aspect-square flex items-center justify-center text-[8px]" style={{ color: 'var(--xp-bdr2)' }}>
@@ -162,46 +162,95 @@ export function MonthCard({ month, isCurrentMonth, onDayDoubleClick, onMonthDash
           const todayCell = isToday(APP_YEAR, month, cell.day)
           const isSun = cell.dayOfWeek === 0
 
-          // Streak connections
           const prevKey = cell.day > 1 ? dateKey(APP_YEAR, month, cell.day - 1) : null
           const nextKey = cell.day < totalDays ? dateKey(APP_YEAR, month, cell.day + 1) : null
           const connectLeft = streak && cell.dayOfWeek !== 0 && !!prevKey && isStreakDay(calData[prevKey])
           const connectRight = streak && cell.dayOfWeek !== 6 && !!nextKey && isStreakDay(calData[nextKey])
 
-          // Determine what to render in the circle
-          let circleContent: React.ReactNode
-          let circleStyle: React.CSSProperties = {
-            color: isSun ? '#f97316' : 'var(--xp-txt3)',
-            fontSize: '9px',
+          // Connectors stop at circle edge (inset-[11%] → circle edge at 11% / 89%)
+          const connL = connectLeft && (
+            <div style={{ position: 'absolute', left: 0, right: '89%', top: '50%', height: 2, background: '#16a34a', transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
+          )
+          const connR = connectRight && (
+            <div style={{ position: 'absolute', left: '89%', right: -1, top: '50%', height: 2, background: '#16a34a', transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
+          )
+
+          // ── Fire Day ────────────────────────────────────────────────
+          if (hyper) {
+            return (
+              <div
+                key={cell.key}
+                className="aspect-square relative cursor-pointer select-none group"
+                onClick={() => handleCellClick(cell.key, cell.day, streak)}
+                title="Fire Day! Click to unmark · Double-click to edit"
+              >
+                {connL}{connR}
+                <div
+                  className="absolute inset-[3%] flex items-center justify-center group-hover:scale-110 transition-transform duration-150"
+                  style={{ zIndex: 1 }}
+                >
+                  <span style={{ fontSize: '22px', lineHeight: 1, userSelect: 'none' }}>🔥</span>
+                </div>
+                <span
+                  style={{
+                    position: 'absolute', top: '46%', left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    zIndex: 2, fontSize: '6px', fontWeight: 900,
+                    color: '#0a0a0a',
+                    textShadow: '0 0 4px rgba(255,255,255,1), 0 0 8px rgba(255,255,255,0.8)',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {cell.day}
+                </span>
+              </div>
+            )
           }
 
-          if (hyper) {
-            circleContent = (
-              <div className="relative flex items-center justify-center w-full h-full">
-                <span style={{ fontSize: '13px', lineHeight: 1 }}>🔥</span>
-                <span className="absolute text-[7px] font-bold" style={{ color: '#1a1a1a', textShadow: '0 0 3px rgba(255,255,255,0.8)' }}>{cell.day}</span>
+          // ── Trophy / Milestone Day ───────────────────────────────────
+          if (milestone) {
+            return (
+              <div
+                key={cell.key}
+                className="aspect-square relative cursor-pointer select-none group"
+                onClick={() => handleCellClick(cell.key, cell.day, streak)}
+                title="Milestone! Click to unmark · Double-click to edit"
+              >
+                {connL}{connR}
+                <div
+                  className="absolute inset-[3%] flex items-center justify-center group-hover:scale-110 transition-transform duration-150"
+                  style={{ zIndex: 1 }}
+                >
+                  <span style={{ fontSize: '22px', lineHeight: 1, userSelect: 'none' }}>🏆</span>
+                </div>
+                <span
+                  style={{
+                    position: 'absolute', top: '33%', left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    zIndex: 2, fontSize: '6px', fontWeight: 900,
+                    color: '#0a0a0a',
+                    textShadow: '0 0 4px rgba(255,255,255,1), 0 0 8px rgba(255,255,255,0.8)',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {cell.day}
+                </span>
               </div>
             )
-            circleStyle = { background: 'rgba(251,191,36,0.15)' }
-          } else if (milestone) {
-            circleContent = (
-              <div className="relative flex items-center justify-center w-full h-full">
-                <span style={{ fontSize: '13px', lineHeight: 1 }}>🏆</span>
-                <span className="absolute text-[7px] font-bold" style={{ color: '#1a1a1a', textShadow: '0 0 3px rgba(255,255,255,0.8)' }}>{cell.day}</span>
-              </div>
-            )
-            circleStyle = { background: 'rgba(124,58,237,0.1)' }
-          } else if (productive) {
-            circleContent = cell.day
+          }
+
+          // ── Productive / Today / Default ─────────────────────────────
+          let circleStyle: React.CSSProperties = { color: isSun ? '#f97316' : 'var(--xp-txt3)', fontSize: '9px' }
+
+          if (productive) {
             circleStyle = {
               background: '#16a34a',
               color: 'white',
               fontSize: '9px',
               fontWeight: 600,
-              boxShadow: '0 0 0 2.5px rgba(22,163,74,0.25)',
+              boxShadow: `0 0 0 2px ${gapColor}, 0 0 0 4.5px rgba(22,163,74,0.7)`,
             }
           } else if (todayCell) {
-            circleContent = cell.day
             circleStyle = {
               color: 'var(--xp-acc)',
               background: 'rgba(124,58,237,0.08)',
@@ -209,8 +258,6 @@ export function MonthCard({ month, isCurrentMonth, onDayDoubleClick, onMonthDash
               outlineOffset: '-1px',
               fontSize: '9px',
             }
-          } else {
-            circleContent = cell.day
           }
 
           return (
@@ -220,21 +267,12 @@ export function MonthCard({ month, isCurrentMonth, onDayDoubleClick, onMonthDash
               onClick={() => handleCellClick(cell.key, cell.day, streak)}
               title={streak ? 'Click to unmark · Double-click to edit' : 'Click to mark productive'}
             >
-              {/* Left connector */}
-              {connectLeft && (
-                <div style={{ position: 'absolute', left: 0, right: '50%', top: '50%', height: 2, background: '#16a34a', transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
-              )}
-              {/* Right connector */}
-              {connectRight && (
-                <div style={{ position: 'absolute', left: '50%', right: -1, top: '50%', height: 2, background: '#16a34a', transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
-              )}
-
-              {/* Circle */}
+              {connL}{connR}
               <div
-                className="absolute inset-[8%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-110 overflow-hidden"
+                className="absolute inset-[11%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-110"
                 style={{ zIndex: 1, ...circleStyle }}
               >
-                {circleContent}
+                {cell.day}
               </div>
             </div>
           )

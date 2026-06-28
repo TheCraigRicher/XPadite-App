@@ -25,6 +25,7 @@ export interface DayData {
   tasks: Task[]
   journal: string
   milestone?: boolean
+  goal?: boolean
 }
 
 export type CalendarData = Record<string, DayData>

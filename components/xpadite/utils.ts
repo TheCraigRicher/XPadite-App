@@ -94,13 +94,14 @@ export function getMonthStats(data: CalendarData, year: number, month: number) {
   const prefix = `${year}-${String(month + 1).padStart(2, '0')}-`
   const keys = Object.keys(data).filter(k => k.startsWith(prefix))
   const totalDays = new Date(year, month + 1, 0).getDate()
-  const productiveDays = keys.filter(k => data[k]?.productive || data[k]?.hyper || data[k]?.milestone).length
+  const productiveDays = keys.filter(k => data[k]?.productive || data[k]?.hyper || data[k]?.milestone || data[k]?.goal).length
   const hyperDays = keys.filter(k => data[k]?.hyper).length
   const milestoneDays = keys.filter(k => data[k]?.milestone).length
+  const goalDays = keys.filter(k => data[k]?.goal).length
   const completionRate = totalDays > 0 ? Math.round((productiveDays / totalDays) * 100) : 0
   const totalTasks = keys.reduce((s, k) => s + (data[k]?.tasks?.length ?? 0), 0)
   const completedTasks = keys.reduce((s, k) => s + (data[k]?.tasks?.filter(t => t.done).length ?? 0), 0)
-  return { productiveDays, hyperDays, milestoneDays, completionRate, totalTasks, completedTasks, totalDays }
+  return { productiveDays, hyperDays, milestoneDays, goalDays, completionRate, totalTasks, completedTasks, totalDays }
 }
 
 export function getDayOfYear(): number {

@@ -1,9 +1,55 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useApp, EMPTY_DAY } from './AppContext'
 import type { Task, TaskSession } from './types'
 import { formatMs, formatHMS, formatTime, APP_YEAR } from './utils'
+
+// ─── Confetti Pop ─────────────────────────────────────────────────────────────
+
+function ConfettiPop({ onDone }: { onDone: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 1500)
+    return () => clearTimeout(t)
+  }, [onDone])
+
+  const COLORS = ['#f97316', '#7c3aed', '#22d3ee', '#4ade80', '#fbbf24', '#f472b6', '#a78bfa', '#34d399', '#fb7185', '#60a5fa']
+  const particles = Array.from({ length: 18 }, (_, i) => {
+    const angle = (i / 18) * 360 + (Math.random() * 20 - 10)
+    const dist = 55 + Math.random() * 60
+    const rad = (angle * Math.PI) / 180
+    return {
+      color: COLORS[i % COLORS.length],
+      tx: Math.cos(rad) * dist,
+      ty: Math.sin(rad) * dist - 20,
+      rot: Math.random() * 540 - 270,
+      size: 4 + Math.random() * 5,
+      delay: Math.random() * 0.15,
+      isRect: i % 3 !== 0,
+    }
+  })
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      {particles.map((p, i) => (
+        <div
+          key={i}
+          style={{
+            position: 'absolute',
+            width: p.size,
+            height: p.isRect ? p.size * 2.2 : p.size,
+            borderRadius: p.isRect ? 2 : '50%',
+            background: p.color,
+            ['--tx' as string]: `${p.tx}px`,
+            ['--ty' as string]: `${p.ty}px`,
+            ['--rot' as string]: `${p.rot}deg`,
+            animation: `xp-confetti 1.3s ${p.delay}s cubic-bezier(0.2,0.8,0.4,1) forwards`,
+          } as React.CSSProperties}
+        />
+      ))}
+    </div>
+  )
+}
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -516,6 +562,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   const [notesOpen, setNotesOpen] = useState(false)
   const [now, setNow] = useState(Date.now())
   const [dragItemId, setDragItemId] = useState<string | null>(null)
+  const [showConfetti, setShowConfetti] = useState(false)
+  const onConfettiDone = useCallback(() => setShowConfetti(false), [])
 
   const dateLabel = useMemo(() => {
     const d = new Date(APP_YEAR, month, day)
@@ -547,6 +595,11 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   }
   function toggleMilestone() {
     updateDay(dateKey, prev => ({ ...prev, milestone: !prev.milestone, productive: !prev.milestone ? true : prev.productive }))
+  }
+  function toggleGoal() {
+    const wasGoal = !!dayData.goal
+    updateDay(dateKey, prev => ({ ...prev, goal: !prev.goal, productive: !prev.goal ? true : prev.productive }))
+    if (!wasGoal) setShowConfetti(true)
   }
 
   // ── Tasks ─────────────────────────────────────────────────────────────────
@@ -770,12 +823,13 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
           </button>
         </div>
 
-        {/* Milestone row */}
+        {/* Milestone + Goal row */}
         <div
-          className="flex items-center px-4 py-2 flex-shrink-0"
+          className="flex items-center gap-2 px-4 py-2 flex-shrink-0"
           style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}
         >
           <TogglePill active={!!dayData.milestone} color="#7c3aed" label="🏆 Milestone day" onClick={toggleMilestone} />
+          <TogglePill active={!!dayData.goal} color="#0891b2" label="🎯 Goal Achieved" onClick={toggleGoal} />
         </div>
 
         {/* ── Scrollable body ────────────────────────────────────────────── */}
@@ -965,6 +1019,9 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
           </button>
         </div>
       </div>
+
+      {/* Confetti — only on Goal Achieved activation */}
+      {showConfetti && <ConfettiPop onDone={onConfettiDone} />}
     </div>
   )
 }

@@ -6,7 +6,7 @@ import { dateKey, isToday, DAY_HEADERS, MONTHS, APP_YEAR, getMonthStats } from '
 import type { DayData } from './types'
 
 function isStreakDay(data: DayData | undefined): boolean {
-  return !!(data?.productive || data?.hyper || data?.milestone)
+  return !!(data?.productive || data?.hyper || data?.milestone || data?.goal)
 }
 
 interface MonthZoomModalProps {
@@ -82,6 +82,7 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
     { label: 'Completion Rate', value: `${stats.completionRate}%`, icon: '📊' },
     { label: '🔥 Hyper Days', value: stats.hyperDays, icon: '' },
     { label: '🏆 Milestones', value: stats.milestoneDays, icon: '' },
+    { label: '🎯 Goals Hit', value: stats.goalDays, icon: '' },
     { label: 'Tasks Done', value: `${stats.completedTasks}/${stats.totalTasks}`, icon: '✓' },
   ]
 
@@ -152,6 +153,7 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
               const productive = !!dayData?.productive
               const hyper = !!dayData?.hyper
               const milestone = !!dayData?.milestone
+              const goal = !!dayData?.goal
               const todayCell = isToday(APP_YEAR, month, cell.day)
               const isSun = cell.dayOfWeek === 0
 
@@ -160,42 +162,26 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
               const connectLeft = streak && cell.dayOfWeek !== 0 && !!prevKey && isStreakDay(calData[prevKey])
               const connectRight = streak && cell.dayOfWeek !== 6 && !!nextKey && isStreakDay(calData[nextKey])
 
-              // Circle is inset-[8%] → edge at 8% / 92%; gap-1 cells need -4 to span gap
+              // Emoji cells extend to center; circles stop at edge (92% in zoom with gap-1)
+              const connEdge = hyper || milestone || goal ? '50%' : '92%'
               const connL = connectLeft && (
-                <div style={{ position: 'absolute', left: 0, right: '92%', top: '50%', height: 2.5, background: '#16a34a', transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
+                <div style={{ position: 'absolute', left: 0, right: connEdge, top: '50%', height: 2.5, background: '#16a34a', transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
               )
               const connR = connectRight && (
-                <div style={{ position: 'absolute', left: '92%', right: -4, top: '50%', height: 2.5, background: '#16a34a', transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
+                <div style={{ position: 'absolute', left: connEdge, right: -4, top: '50%', height: 2.5, background: '#16a34a', transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
               )
 
               // ── Fire Day ──────────────────────────────────────────
               if (hyper) {
                 return (
-                  <div
-                    key={cell.key}
-                    className="aspect-square relative cursor-pointer select-none group"
-                    onClick={() => handleCellClick(cell.key, cell.day, streak)}
-                    title="Fire Day!"
-                  >
+                  <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)} title="Fire Day!">
                     {connL}{connR}
-                    <div
-                      className="absolute inset-[2%] flex items-center justify-center group-hover:scale-110 transition-transform duration-150"
-                      style={{ zIndex: 1 }}
-                    >
-                      <span style={{ fontSize: '30px', lineHeight: 1, userSelect: 'none' }}>🔥</span>
+                    <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
+                      <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '30px', lineHeight: 1, userSelect: 'none' }}>🔥</span>
+                      <span style={{ position: 'absolute', top: '65%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 2, fontSize: '9px', fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 5px rgba(255,255,255,1)', pointerEvents: 'none' }}>
+                        {cell.day}
+                      </span>
                     </div>
-                    <span
-                      style={{
-                        position: 'absolute', top: '45%', left: '50%',
-                        transform: 'translate(-50%, -50%)',
-                        zIndex: 2, fontSize: '9px', fontWeight: 900,
-                        color: '#0a0a0a',
-                        textShadow: '0 0 5px rgba(255,255,255,1), 0 0 10px rgba(255,255,255,0.8)',
-                        pointerEvents: 'none',
-                      }}
-                    >
-                      {cell.day}
-                    </span>
                   </div>
                 )
               }
@@ -203,31 +189,31 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
               // ── Trophy / Milestone ─────────────────────────────────
               if (milestone) {
                 return (
-                  <div
-                    key={cell.key}
-                    className="aspect-square relative cursor-pointer select-none group"
-                    onClick={() => handleCellClick(cell.key, cell.day, streak)}
-                    title="Milestone!"
-                  >
+                  <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)} title="Milestone!">
                     {connL}{connR}
-                    <div
-                      className="absolute inset-[2%] flex items-center justify-center group-hover:scale-110 transition-transform duration-150"
-                      style={{ zIndex: 1 }}
-                    >
-                      <span style={{ fontSize: '30px', lineHeight: 1, userSelect: 'none' }}>🏆</span>
+                    <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
+                      {/* Subtle purple star — sits behind trophy, above connector */}
+                      <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '28px', color: 'rgba(167, 139, 250, 0.20)', filter: 'drop-shadow(0 0 6px rgba(167, 139, 250, 0.55))', userSelect: 'none', lineHeight: 1, zIndex: 0 }}>★</span>
+                      <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '30px', lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🏆</span>
+                      <span style={{ position: 'absolute', top: '37%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 2, fontSize: '9px', fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 5px rgba(255,255,255,1)', pointerEvents: 'none' }}>
+                        {cell.day}
+                      </span>
                     </div>
-                    <span
-                      style={{
-                        position: 'absolute', top: '32%', left: '50%',
-                        transform: 'translate(-50%, -50%)',
-                        zIndex: 2, fontSize: '9px', fontWeight: 900,
-                        color: '#0a0a0a',
-                        textShadow: '0 0 5px rgba(255,255,255,1), 0 0 10px rgba(255,255,255,0.8)',
-                        pointerEvents: 'none',
-                      }}
-                    >
-                      {cell.day}
-                    </span>
+                  </div>
+                )
+              }
+
+              // ── Goal Achieved ──────────────────────────────────────
+              if (goal) {
+                return (
+                  <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)} title="Goal Achieved!">
+                    {connL}{connR}
+                    <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
+                      <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '28px', lineHeight: 1, userSelect: 'none' }}>🎯</span>
+                      <span style={{ position: 'absolute', top: '52%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 2, fontSize: '9px', fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 5px rgba(255,255,255,1)', pointerEvents: 'none' }}>
+                        {cell.day}
+                      </span>
+                    </div>
                   </div>
                 )
               }
@@ -262,7 +248,7 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
 
         {/* Month stats */}
         <div
-          className="grid grid-cols-5 gap-2 px-4 py-3"
+          className="grid grid-cols-6 gap-2 px-4 py-3"
           style={{ borderTop: '0.5px solid var(--xp-bdr)', background: 'var(--xp-bg3)' }}
         >
           {STAT_ITEMS.map(s => (

@@ -7,7 +7,7 @@ import type { DayData } from "./types";
 
 function isStreakDay(data: DayData | undefined): boolean {
   if (!data) return false;
-  return !!(data.productive || data.hyper || data.milestone);
+  return !!(data.productive || data.hyper || data.milestone || data.goal);
 }
 
 interface MonthCardProps {
@@ -47,10 +47,9 @@ export function MonthCard({
   }>(() => {
     const fd = new Date(APP_YEAR, month, 1).getDay();
     const td = new Date(APP_YEAR, month + 1, 0).getDate();
-    const prevTd = new Date(APP_YEAR, month, 0).getDate(); // last day of previous month
+    const prevTd = new Date(APP_YEAR, month, 0).getDate();
     const result: Cell[] = [];
 
-    // Ghost prefix (last days of previous month)
     for (let i = fd - 1; i >= 0; i--) {
       result.push({
         day: prevTd - i,
@@ -59,8 +58,6 @@ export function MonthCard({
         isGhost: true,
       });
     }
-
-    // Real days
     for (let d = 1; d <= td; d++) {
       result.push({
         day: d,
@@ -69,8 +66,6 @@ export function MonthCard({
         isGhost: false,
       });
     }
-
-    // Ghost suffix (first days of next month)
     const remainder = result.length % 7;
     const suffixCount = remainder === 0 ? 0 : 7 - remainder;
     for (let d = 1; d <= suffixCount; d++) {
@@ -81,7 +76,6 @@ export function MonthCard({
         isGhost: true,
       });
     }
-
     return { cells: result, totalDays: td };
   }, [month]);
 
@@ -184,6 +178,7 @@ export function MonthCard({
           const productive = !!dayData?.productive;
           const hyper = !!dayData?.hyper;
           const milestone = !!dayData?.milestone;
+          const goal = !!dayData?.goal;
           const todayCell = isToday(APP_YEAR, month, cell.day);
           const isSun = cell.dayOfWeek === 0;
 
@@ -204,13 +199,15 @@ export function MonthCard({
             !!nextKey &&
             isStreakDay(calData[nextKey]);
 
-          // Connectors stop at circle edge (inset-[11%] → circle edge at 11% / 89%)
+          // Emoji cells extend connector to center so the emoji covers the mid-section.
+          // Productive circles stop at the circle edge (85% offset).
+          const connEdge = hyper || milestone || goal ? "50%" : "85%";
           const connL = connectLeft && (
             <div
               style={{
                 position: "absolute",
                 left: 0,
-                right: "85%",
+                right: connEdge,
                 top: "50%",
                 height: 2,
                 background: "#16a34a",
@@ -224,7 +221,7 @@ export function MonthCard({
             <div
               style={{
                 position: "absolute",
-                left: "85%",
+                left: connEdge,
                 right: -1,
                 top: "50%",
                 height: 2,
@@ -247,12 +244,17 @@ export function MonthCard({
               >
                 {connL}
                 {connR}
+                {/* Unified hover: emoji + date scale together */}
                 <div
-                  className="absolute inset-[3%] flex items-center justify-center group-hover:scale-110 transition-transform duration-150"
+                  className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110"
                   style={{ zIndex: 1 }}
                 >
                   <span
                     style={{
+                      position: "absolute",
+                      top: "50%",
+                      left: "50%",
+                      transform: "translate(-50%, -50%)",
                       fontSize: "30px",
                       lineHeight: 1,
                       userSelect: "none",
@@ -260,22 +262,22 @@ export function MonthCard({
                   >
                     🔥
                   </span>
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: "65%",
+                      left: "50%",
+                      transform: "translate(-50%, -50%)",
+                      zIndex: 2,
+                      fontSize: "9px",
+                      fontWeight: 700,
+                      color: "#0a0a0a",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    {cell.day}
+                  </span>
                 </div>
-                <span
-                  style={{
-                    position: "absolute",
-                    top: "60%",
-                    left: "50%",
-                    transform: "translate(-50%, -50%)",
-                    zIndex: 2,
-                    fontSize: "9px",
-                    fontWeight: 700,
-                    color: "#0a0a0a",
-                    pointerEvents: "none",
-                  }}
-                >
-                  {cell.day}
-                </span>
               </div>
             );
           }
@@ -291,37 +293,111 @@ export function MonthCard({
               >
                 {connL}
                 {connR}
+                {/* Unified hover: star + emoji + date scale together */}
                 <div
-                  className="absolute inset-[3%] flex items-center justify-center group-hover:scale-110 transition-transform duration-150"
+                  className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110"
                   style={{ zIndex: 1 }}
                 >
+                  {/* Subtle purple star — sits behind trophy, above connector */}
                   <span
                     style={{
+                      position: "absolute",
+                      top: "50%",
+                      left: "50%",
+                      transform: "translate(-50%, -50%)",
+                      fontSize: "24px",
+                      color: "rgba(167, 139, 250, 0.20)",
+                      filter: "drop-shadow(0 0 5px rgba(167, 139, 250, 0.55))",
+                      userSelect: "none",
+                      lineHeight: 1,
+                      zIndex: 0,
+                    }}
+                  >
+                    ★
+                  </span>
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: "50%",
+                      left: "50%",
+                      transform: "translate(-50%, -50%)",
                       fontSize: "26px",
                       lineHeight: 1,
                       userSelect: "none",
+                      zIndex: 1,
                     }}
                   >
                     🏆
                   </span>
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: "37%",
+                      left: "50%",
+                      transform: "translate(-50%, -50%)",
+                      zIndex: 2,
+                      fontSize: "7px",
+                      fontWeight: 700,
+                      color: "#0a0a0a",
+                      textShadow:
+                        "0 0 4px rgba(255,255,255,1), 0 0 8px rgba(255,255,255,0.8)",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    {cell.day}
+                  </span>
                 </div>
-                <span
-                  style={{
-                    position: "absolute",
-                    top: "37%",
-                    left: "50%",
-                    transform: "translate(-50%, -50%)",
-                    zIndex: 2,
-                    fontSize: "7px",
-                    fontWeight: 700,
-                    color: "#0a0a0a",
-                    textShadow:
-                      "0 0 4px rgba(255,255,255,1), 0 0 8px rgba(255,255,255,0.8)",
-                    pointerEvents: "none",
-                  }}
+              </div>
+            );
+          }
+
+          // ── Goal Achieved Day ────────────────────────────────────────
+          if (goal) {
+            return (
+              <div
+                key={cell.key}
+                className="aspect-square relative cursor-pointer select-none group"
+                onClick={() => handleCellClick(cell.key, cell.day, streak)}
+                title="Goal Achieved! Click to unmark · Double-click to edit"
+              >
+                {connL}
+                {connR}
+                {/* Unified hover: emoji + date scale together */}
+                <div
+                  className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110"
+                  style={{ zIndex: 1 }}
                 >
-                  {cell.day}
-                </span>
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: "50%",
+                      left: "50%",
+                      transform: "translate(-50%, -50%)",
+                      fontSize: "34px",
+                      lineHeight: 1,
+                      userSelect: "none",
+                    }}
+                  >
+                    🎯
+                  </span>
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: "52%",
+                      left: "50%",
+                      transform: "translate(-50%, -50%)",
+                      zIndex: 2,
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      color: "#000000",
+                      textShadow:
+                        "0 0 4px rgba(255,255,255,1), 0 0 8px rgba(255,255,255,0.8)",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    {cell.day}
+                  </span>
+                </div>
               </div>
             );
           }

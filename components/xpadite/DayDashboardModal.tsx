@@ -64,12 +64,13 @@ function DonutChart({ segments }: { segments: DonutSegment[] }) {
 // ─── Animated Gauge Meter ─────────────────────────────────────────────────────
 
 function GaugeMeter({ score }: { score: number }) {
-  const [animAngle, setAnimAngle] = useState(210)
+  // Starts at 180° (left end of semi-circle), animates to target angle
+  const [animAngle, setAnimAngle] = useState(180)
 
   useEffect(() => {
-    const targetAngle = 210 - (score / 100) * 240
-    const startAngle = 210
-    const duration = 1500
+    const targetAngle = 180 - (score / 100) * 180
+    const startAngle = 180
+    const duration = 1400
     const startTime = performance.now()
     let rafId: number
 
@@ -84,58 +85,77 @@ function GaugeMeter({ score }: { score: number }) {
     return () => cancelAnimationFrame(rafId)
   }, [score])
 
-  const cx = 160, cy = 135, r = 110, sw = 20
+  // True 180° semi-circle: cx=180, cy=170, r=120
+  // pt() uses standard math convention (y flipped for SVG)
+  const cx = 180, cy = 170, r = 120, sw = 20
   const toRad = (d: number) => (d * Math.PI) / 180
   const pt = (a: number, rr = r) => ({
     x: cx + rr * Math.cos(toRad(a)),
     y: cy - rr * Math.sin(toRad(a)),
   })
 
+  // 5 segments × 35° each, 1° gap between, spanning 180°→1°
   const segs = [
-    { from: 210, to: 162, color: '#64748b', label: 'Not Serious' },
-    { from: 162, to: 114, color: '#22d3ee', label: 'Normal' },
-    { from: 114, to: 66,  color: '#a3e635', label: 'Average' },
-    { from: 66,  to: 18,  color: '#f97316', label: 'Advanced' },
-    { from: 18,  to: -30, color: '#ef4444', label: 'Elite Mode' },
+    { from: 180, to: 145, color: '#64748b', label: 'Not Serious' },
+    { from: 144, to: 109, color: '#22d3ee', label: 'Normal' },
+    { from: 108, to: 73,  color: '#a3e635', label: 'Average' },
+    { from: 72,  to: 37,  color: '#f97316', label: 'Advanced' },
+    { from: 36,  to: 1,   color: '#ef4444', label: 'Elite Mode' },
   ]
 
-  function arcPath(from: number, to: number) {
-    const s = pt(from), e = pt(to)
-    const large = Math.abs(from - to) > 180 ? 1 : 0
-    return `M ${s.x.toFixed(1)} ${s.y.toFixed(1)} A ${r} ${r} 0 ${large} 0 ${e.x.toFixed(1)} ${e.y.toFixed(1)}`
+  // sweep=0 → CCW in SVG screen space → draws through the top of the circle
+  function arcPath(from: number, to: number, rr = r) {
+    const s = pt(from, rr), e = pt(to, rr)
+    return `M ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${rr} ${rr} 0 0 0 ${e.x.toFixed(2)} ${e.y.toFixed(2)}`
   }
 
-  const needleTip = pt(animAngle, r * 0.76)
-  const levelIdx = Math.min(4, Math.floor(score / 20))
+  const needleTip = pt(animAngle, r * 0.82)
+  const levelIdx = Math.min(4, Math.floor((score / 100) * 5))
   const levelColors = segs.map(s => s.color)
-
-  const labelR = r + 28
-  const labelPts = segs.map(s => pt((s.from + s.to) / 2, labelR))
+  const labelR = r + 22
 
   return (
-    <div className="flex flex-col items-center">
-      <svg viewBox="0 0 320 188" className="w-full max-w-[340px]">
+    <div className="flex flex-col items-center w-full">
+      <svg viewBox="0 0 360 200" className="w-full max-w-[420px]">
+        {/* Background track */}
+        <path
+          d={arcPath(180, 1)}
+          fill="none"
+          stroke="rgba(148,163,184,0.15)"
+          strokeWidth={sw + 6}
+          strokeLinecap="butt"
+        />
+        {/* Colored segments */}
         {segs.map(s => (
           <path key={s.label} d={arcPath(s.from, s.to)} fill="none" stroke={s.color} strokeWidth={sw} strokeLinecap="butt" />
         ))}
-        <text x={labelPts[0].x.toFixed(1)} y={labelPts[0].y.toFixed(1)} fontSize="8.5" fill={segs[0].color} textAnchor="middle">Not Serious</text>
-        <text x={labelPts[1].x.toFixed(1)} y={labelPts[1].y.toFixed(1)} fontSize="8.5" fill={segs[1].color} textAnchor="middle">Normal</text>
-        <text x={labelPts[2].x.toFixed(1)} y={(labelPts[2].y - 2).toFixed(1)} fontSize="8.5" fill={segs[2].color} textAnchor="middle">Average</text>
-        <text x={labelPts[3].x.toFixed(1)} y={labelPts[3].y.toFixed(1)} fontSize="8.5" fill={segs[3].color} textAnchor="middle">Advanced</text>
-        <text x={labelPts[4].x.toFixed(1)} y={labelPts[4].y.toFixed(1)} fontSize="8.5" fill={segs[4].color} textAnchor="middle">Elite Mode</text>
+        {/* Segment labels at outer radius */}
+        {segs.map(s => {
+          const lp = pt((s.from + s.to) / 2, labelR)
+          return (
+            <text key={s.label} x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} fontSize="8" fill={s.color} textAnchor="middle" dominantBaseline="middle">
+              {s.label}
+            </text>
+          )
+        })}
+        {/* Needle */}
         <line
           x1={cx} y1={cy}
-          x2={needleTip.x.toFixed(1)} y2={needleTip.y.toFixed(1)}
+          x2={needleTip.x.toFixed(2)} y2={needleTip.y.toFixed(2)}
           stroke="var(--xp-txt)"
-          strokeWidth={2.5}
+          strokeWidth={3}
           strokeLinecap="round"
         />
-        <circle cx={cx} cy={cy} r={8} fill="var(--xp-txt)" />
-        <circle cx={cx} cy={cy} r={4} fill="var(--xp-card)" />
+        {/* Pivot */}
+        <circle cx={cx} cy={cy} r={9} fill="var(--xp-txt)" />
+        <circle cx={cx} cy={cy} r={4.5} fill="var(--xp-card)" />
+        {/* Score inside arc */}
+        <text x={cx} y={cy + 22} textAnchor="middle" fontSize="10" fill="var(--xp-txt3)">
+          {`Focus Score: ${score}%`}
+        </text>
       </svg>
-      <div className="text-center -mt-3">
-        <p className="text-base font-bold" style={{ color: levelColors[levelIdx] }}>{segs[levelIdx].label}</p>
-        <p className="text-xs mt-0.5" style={{ color: 'var(--xp-txt3)' }}>Focus Score: {score}%</p>
+      <div className="text-center -mt-2">
+        <p className="text-sm font-bold" style={{ color: levelColors[levelIdx] }}>{segs[levelIdx].label}</p>
       </div>
     </div>
   )

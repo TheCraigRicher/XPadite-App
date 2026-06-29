@@ -203,6 +203,7 @@ export function ActivityBar() {
     setRemovingMode,
   } = useApp();
   const [showAddModal, setShowAddModal] = useState(false);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   return (
     <>
@@ -261,11 +262,25 @@ export function ActivityBar() {
               onClick={() => {
                 if (!removingMode) setSelectedActId(a.id);
               }}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs cursor-pointer transition-all duration-150 select-none"
+              onMouseEnter={() => setHoveredId(a.id)}
+              onMouseLeave={() => setHoveredId(null)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs cursor-pointer select-none"
               style={{
                 color: a.color,
-                background: "var(--xp-bg3)",
-                border: `1.5px solid ${a.id === selectedActId && !removingMode ? a.color : "transparent"}`,
+                background:
+                  (a.id === selectedActId && !removingMode)
+                    ? a.color + '22'
+                    : hoveredId === a.id
+                    ? a.color + '18'
+                    : 'var(--xp-bg3)',
+                border: `1.5px solid ${
+                  a.id === selectedActId && !removingMode
+                    ? a.color
+                    : hoveredId === a.id
+                    ? a.color + '70'
+                    : 'transparent'
+                }`,
+                transition: 'background 0.2s ease, border-color 0.2s ease',
               }}
             >
               <span

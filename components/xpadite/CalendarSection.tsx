@@ -102,7 +102,7 @@ export function CalendarSection({ onDayDoubleClick, onMonthDashboard, onMonthZoo
             </button>
 
             {open[q.label] && (
-              <div className="grid grid-cols-3 gap-3 p-3 pt-0">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 p-3 pt-0">
                 {q.months.map(m => (
                   <div
                     key={m}

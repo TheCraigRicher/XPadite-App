@@ -11,8 +11,10 @@ import { LegendRow } from './LegendRow'
 import { CalendarSection } from './CalendarSection'
 import { DayModal } from './DayModal'
 import { MonthZoomModal } from './MonthZoomModal'
+import { MonthFullPage } from './MonthFullPage'
 import { DayDashboardModal } from './DayDashboardModal'
 import { YearlyDashboardModal } from './YearlyDashboardModal'
+import { GalleryModal } from './GalleryModal'
 
 interface XpaditeAppProps {
   email: string
@@ -137,8 +139,10 @@ function ThemedApp({ email: _email }: XpaditeAppProps) {
   const [modalDay, setModalDay] = useState<ModalDay | null>(null)
   const [dashboardDay, setDashboardDay] = useState<ModalDay | null>(null)
   const [zoomedMonth, setZoomedMonth] = useState<number | null>(null)
+  const [fullPageMonth, setFullPageMonth] = useState<number | null>(null)
   const [motivationOpen, setMotivationOpen] = useState(false)
   const [yearlyOpen, setYearlyOpen] = useState(false)
+  const [galleryOpen, setGalleryOpen] = useState(false)
 
   // Auto-dismiss toast
   useEffect(() => {
@@ -158,7 +162,7 @@ function ThemedApp({ email: _email }: XpaditeAppProps) {
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       }}
     >
-      <AppSidebar />
+      <AppSidebar onGallery={() => setGalleryOpen(true)} />
 
       {/* Daily quote bar */}
       <QuoteBar />
@@ -177,7 +181,7 @@ function ThemedApp({ email: _email }: XpaditeAppProps) {
           <LegendRow />
           <CalendarSection
             onDayDoubleClick={(key, month, day) => setModalDay({ key, month, day })}
-            onMonthZoom={month => setZoomedMonth(month)}
+            onMonthZoom={month => setFullPageMonth(month)}
             onMonthDashboard={month => setZoomedMonth(month)}
           />
         </main>
@@ -205,7 +209,15 @@ function ThemedApp({ email: _email }: XpaditeAppProps) {
         />
       )}
 
-      {/* Month Zoom Modal */}
+      {/* Month Full Page (opened from month name click) */}
+      {fullPageMonth !== null && (
+        <MonthFullPage
+          month={fullPageMonth}
+          onClose={() => setFullPageMonth(null)}
+        />
+      )}
+
+      {/* Month Zoom Modal (opened from 📊 Monthly Dashboard button) */}
       {zoomedMonth !== null && (
         <MonthZoomModal
           month={zoomedMonth}
@@ -219,6 +231,9 @@ function ThemedApp({ email: _email }: XpaditeAppProps) {
 
       {/* Motivation modal */}
       {motivationOpen && <MotivationModal onClose={() => setMotivationOpen(false)} />}
+
+      {/* Gallery modal */}
+      {galleryOpen && <GalleryModal onClose={() => setGalleryOpen(false)} />}
 
       {/* Toast */}
       {toast && (

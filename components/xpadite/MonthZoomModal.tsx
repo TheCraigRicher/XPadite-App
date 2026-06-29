@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useApp } from './AppContext'
 import { dateKey, isToday, DAY_HEADERS, MONTHS, APP_YEAR, getMonthStats } from './utils'
+import { ShareCardModal } from './ShareCardModal'
 import type { DayData } from './types'
 
 function isStreakDay(data: DayData | undefined): boolean {
@@ -18,6 +19,7 @@ interface MonthZoomModalProps {
 export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomModalProps) {
   const { calData, updateDay, setToast, isDark } = useApp()
   const gapColor = isDark ? '#1a1a28' : '#ffffff'
+  const [shareOpen, setShareOpen] = useState(false)
 
   const clickRef = useRef<{
     key: string | null
@@ -87,6 +89,7 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
   ]
 
   return (
+    <>
     <div
       className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-12 overflow-y-auto"
       style={{ background: 'rgba(0,0,0,0.6)' }}
@@ -117,13 +120,22 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
               Single click to mark productive · Double-click to edit
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="text-sm transition-colors hover:text-red-400 flex-shrink-0"
-            style={{ color: 'var(--xp-txt3)' }}
-          >
-            × Close
-          </button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={() => setShareOpen(true)}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all hover:opacity-85"
+              style={{ background: '#7c3aed' }}
+            >
+              📤 Share
+            </button>
+            <button
+              onClick={onClose}
+              className="text-sm transition-colors hover:text-red-400"
+              style={{ color: 'var(--xp-txt3)' }}
+            >
+              × Close
+            </button>
+          </div>
         </div>
 
         {/* Large calendar grid */}
@@ -260,5 +272,7 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
         </div>
       </div>
     </div>
+    {shareOpen && <ShareCardModal month={month} onClose={() => setShareOpen(false)} />}
+    </>
   )
 }

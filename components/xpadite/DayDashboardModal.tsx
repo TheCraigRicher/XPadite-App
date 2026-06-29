@@ -61,102 +61,187 @@ function DonutChart({ segments }: { segments: DonutSegment[] }) {
   )
 }
 
-// ─── Animated Gauge Meter ─────────────────────────────────────────────────────
+// ─── Animated Gauge Meter (reference-style, single continuous arc) ────────────
 
 function GaugeMeter({ score }: { score: number }) {
-  // Starts at 180° (left end of semi-circle), animates to target angle
-  const [animAngle, setAnimAngle] = useState(180)
+  const { isDark } = useApp()
+  const [animScore, setAnimScore] = useState(0)
 
   useEffect(() => {
-    const targetAngle = 180 - (score / 100) * 180
-    const startAngle = 180
-    const duration = 1400
+    const duration = 1600
     const startTime = performance.now()
     let rafId: number
-
     function tick(now: number) {
       const t = Math.min((now - startTime) / duration, 1)
       const eased = 1 - Math.pow(1 - t, 3)
-      setAnimAngle(startAngle + (targetAngle - startAngle) * eased)
+      setAnimScore(score * eased)
       if (t < 1) rafId = requestAnimationFrame(tick)
+      else setAnimScore(score)
     }
-
     rafId = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafId)
   }, [score])
 
-  // True 180° semi-circle: cx=180, cy=170, r=120
-  // pt() uses standard math convention (y flipped for SVG)
-  const cx = 180, cy = 170, r = 120, sw = 20
+  const cx = 220, cy = 200, r = 120, sw = 28
   const toRad = (d: number) => (d * Math.PI) / 180
   const pt = (a: number, rr = r) => ({
     x: cx + rr * Math.cos(toRad(a)),
     y: cy - rr * Math.sin(toRad(a)),
   })
 
-  // 5 segments × 35° each, 1° gap between, spanning 180°→1°
+  // Single continuous half-circle arc (180° → 0° through top, SVG-CCW sweep=0)
+  const p0 = pt(180), p1 = pt(0)
+  const fullArc = `M ${p0.x.toFixed(2)} ${p0.y.toFixed(2)} A ${r} ${r} 0 0 0 ${p1.x.toFixed(2)} ${p1.y.toFixed(2)}`
+  const arcLen = Math.PI * r        // half-circumference ≈ 376.99
+  const segLen = arcLen / 5         // each 36° segment
+
+  // Five equal segments — contiguous, no gaps
   const segs = [
-    { from: 180, to: 145, color: '#64748b', label: 'Not Serious' },
-    { from: 144, to: 109, color: '#22d3ee', label: 'Normal' },
-    { from: 108, to: 73,  color: '#a3e635', label: 'Average' },
-    { from: 72,  to: 37,  color: '#f97316', label: 'Advanced' },
-    { from: 36,  to: 1,   color: '#ef4444', label: 'Elite Mode' },
+    { offset: 0,           color: '#94a3b8', glow: 'rgba(148,163,184,0.3)',  label: 'Not Serious', emoji: '' },
+    { offset: segLen,      color: '#eab308', glow: 'rgba(234,179,8,0.35)',   label: 'Normal',      emoji: '' },
+    { offset: segLen * 2,  color: '#22c55e', glow: 'rgba(34,197,94,0.35)',   label: 'Average',     emoji: '' },
+    { offset: segLen * 3,  color: '#a855f7', glow: 'rgba(168,85,247,0.35)',  label: 'Advanced',    emoji: '🔥' },
+    { offset: segLen * 4,  color: '#ef4444', glow: 'rgba(239,68,68,0.35)',   label: 'Elite Mode',  emoji: '🚀' },
   ]
 
-  // sweep=0 → CCW in SVG screen space → draws through the top of the circle
-  function arcPath(from: number, to: number, rr = r) {
-    const s = pt(from, rr), e = pt(to, rr)
-    return `M ${s.x.toFixed(2)} ${s.y.toFixed(2)} A ${rr} ${rr} 0 0 0 ${e.x.toFixed(2)} ${e.y.toFixed(2)}`
-  }
+  const li = score < 20 ? 0 : score < 40 ? 1 : score < 60 ? 2 : score < 80 ? 3 : 4
+  const animAngle = 180 - (animScore / 100) * 180
+  const needleTip = pt(animAngle, r * 0.75)
 
-  const needleTip = pt(animAngle, r * 0.82)
-  const levelIdx = Math.min(4, Math.floor((score / 100) * 5))
-  const levelColors = segs.map(s => s.color)
-  const labelR = r + 22
+  // Segment boundary angles for ticks/labels
+  const marks = [
+    { angle: 180, label: '0'   },
+    { angle: 144, label: '20'  },
+    { angle: 108, label: '40'  },
+    { angle: 72,  label: '60'  },
+    { angle: 36,  label: '80'  },
+    { angle: 0,   label: '100' },
+  ]
+  const segMidAngles = [162, 126, 90, 54, 18]
+
+  // Theme-adaptive colors
+  const panelBg    = isDark ? '#0b0b18'              : '#f1f5f9'
+  const trackColor = isDark ? 'rgba(255,255,255,0.05)': 'rgba(0,0,0,0.06)'
+  const titleFill  = isDark ? 'rgba(255,255,255,0.28)': 'rgba(0,0,0,0.35)'
+  const tickStroke = isDark ? 'rgba(255,255,255,0.28)': 'rgba(0,0,0,0.3)'
+  const numFill    = isDark ? 'rgba(255,255,255,0.38)': 'rgba(0,0,0,0.4)'
+  const scoreFill  = isDark ? 'white'                 : '#0f172a'
+  const scoreSubFl = isDark ? 'rgba(255,255,255,0.38)': 'rgba(0,0,0,0.35)'
+  const shimmer    = isDark ? 'rgba(255,255,255,0.08)': 'rgba(255,255,255,0.5)'
+  const hubBody    = isDark ? '#111827'               : '#e2e8f0'
+  const hubStroke  = segs[li].color
+  const circuitStk = isDark ? 'rgba(99,179,237,0.07)' : 'rgba(99,179,237,0.12)'
 
   return (
     <div className="flex flex-col items-center w-full">
-      <svg viewBox="0 0 360 200" className="w-full max-w-[420px]">
-        {/* Background track */}
-        <path
-          d={arcPath(180, 1)}
-          fill="none"
-          stroke="rgba(148,163,184,0.15)"
-          strokeWidth={sw + 6}
-          strokeLinecap="butt"
-        />
-        {/* Colored segments */}
-        {segs.map(s => (
-          <path key={s.label} d={arcPath(s.from, s.to)} fill="none" stroke={s.color} strokeWidth={sw} strokeLinecap="butt" />
-        ))}
-        {/* Segment labels at outer radius */}
-        {segs.map(s => {
-          const lp = pt((s.from + s.to) / 2, labelR)
-          return (
-            <text key={s.label} x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} fontSize="8" fill={s.color} textAnchor="middle" dominantBaseline="middle">
-              {s.label}
-            </text>
-          )
-        })}
-        {/* Needle */}
-        <line
-          x1={cx} y1={cy}
-          x2={needleTip.x.toFixed(2)} y2={needleTip.y.toFixed(2)}
-          stroke="var(--xp-txt)"
-          strokeWidth={3}
-          strokeLinecap="round"
-        />
-        {/* Pivot */}
-        <circle cx={cx} cy={cy} r={9} fill="var(--xp-txt)" />
-        <circle cx={cx} cy={cy} r={4.5} fill="var(--xp-card)" />
-        {/* Score inside arc */}
-        <text x={cx} y={cy + 22} textAnchor="middle" fontSize="10" fill="var(--xp-txt3)">
-          {`Focus Score: ${score}%`}
+      <svg viewBox="0 0 440 285" className="w-full max-w-[500px]">
+        <defs>
+          <filter id="gm-glow" x="-80%" y="-80%" width="260%" height="260%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="gm-needle" x="-100%" y="-100%" width="300%" height="300%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <radialGradient id="gm-hub" cx="38%" cy="32%">
+            <stop offset="0%" stopColor="rgba(255,255,255,0.18)"/>
+            <stop offset="100%" stopColor="rgba(0,0,0,0.65)"/>
+          </radialGradient>
+        </defs>
+
+        {/* Panel background */}
+        <rect x={0} y={0} width={440} height={285} rx={14} fill={panelBg}/>
+
+        {/* Circuit texture */}
+        <g stroke={circuitStk} strokeWidth="0.8" fill="none">
+          <line x1="60" y1="130" x2="160" y2="130"/><line x1="280" y1="130" x2="380" y2="130"/>
+          <line x1="220" y1="50" x2="220" y2="90"/>
+          <line x1="130" y1="170" x2="90" y2="170"/><line x1="310" y1="170" x2="350" y2="170"/>
+          <circle cx="160" cy="130" r="2.5" fill="rgba(99,179,237,0.15)" stroke="none"/>
+          <circle cx="280" cy="130" r="2.5" fill="rgba(99,179,237,0.15)" stroke="none"/>
+          <circle cx="220" cy="90"  r="2.5" fill="rgba(99,179,237,0.15)" stroke="none"/>
+        </g>
+
+        {/* Title */}
+        <text x={cx} y={22} textAnchor="middle" fontSize="8.5" fill={titleFill} fontWeight="600" letterSpacing="3">
+          PERFORMANCE ANALYTICS
         </text>
+
+        {/* Background track — single arc */}
+        <path d={fullArc} fill="none" stroke={trackColor} strokeWidth={sw + 10} strokeLinecap="butt"/>
+
+        {/* Glow layers — same arc, dasharray reveals each segment */}
+        {segs.map((s, i) => (
+          <path key={`gl${i}`} d={fullArc} fill="none" stroke={s.glow}
+            strokeWidth={sw + 14} strokeLinecap="butt" filter="url(#gm-glow)"
+            strokeDasharray={`${segLen.toFixed(2)} ${arcLen.toFixed(2)}`}
+            strokeDashoffset={`${(-s.offset).toFixed(2)}`}/>
+        ))}
+
+        {/* Main colored segments — single arc, dasharray */}
+        {segs.map((s, i) => (
+          <path key={`sg${i}`} d={fullArc} fill="none" stroke={s.color}
+            strokeWidth={sw} strokeLinecap="butt"
+            strokeDasharray={`${segLen.toFixed(2)} ${arcLen.toFixed(2)}`}
+            strokeDashoffset={`${(-s.offset).toFixed(2)}`}/>
+        ))}
+
+        {/* Shimmer highlight */}
+        {segs.map((s, i) => (
+          <path key={`sh${i}`} d={fullArc} fill="none" stroke={shimmer}
+            strokeWidth={3} strokeLinecap="butt"
+            strokeDasharray={`${segLen.toFixed(2)} ${arcLen.toFixed(2)}`}
+            strokeDashoffset={`${(-s.offset - 7).toFixed(2)}`}/>
+        ))}
+
+        {/* Tick marks at boundaries */}
+        {marks.map((m, i) => {
+          const inner = pt(m.angle, r - sw / 2 - 3)
+          const outer = pt(m.angle, r + sw / 2 + 5)
+          return <line key={`tk${i}`} x1={inner.x.toFixed(1)} y1={inner.y.toFixed(1)} x2={outer.x.toFixed(1)} y2={outer.y.toFixed(1)} stroke={tickStroke} strokeWidth="1.8" strokeLinecap="round"/>
+        })}
+
+        {/* Score numbers outside arc */}
+        {marks.map((m, i) => {
+          const lp = pt(m.angle, r + sw / 2 + 18)
+          return <text key={`sn${i}`} x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} textAnchor="middle" dominantBaseline="middle" fontSize="8" fill={numFill} fontWeight="500">{m.label}</text>
+        })}
+
+        {/* Category labels */}
+        {segs.map((s, i) => {
+          const lp = pt(segMidAngles[i], r + sw / 2 + 44)
+          return <text key={`cl${i}`} x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} textAnchor="middle" dominantBaseline="middle" fontSize="8" fill={s.color} fontWeight="700">{s.label}</text>
+        })}
+
+        {/* Needle glow */}
+        <line x1={cx} y1={cy} x2={needleTip.x.toFixed(2)} y2={needleTip.y.toFixed(2)} stroke={segs[li].color} strokeWidth={6} strokeLinecap="round" filter="url(#gm-needle)" opacity={0.55}/>
+        {/* Needle */}
+        <line x1={cx} y1={cy} x2={needleTip.x.toFixed(2)} y2={needleTip.y.toFixed(2)} stroke={segs[li].color} strokeWidth={2.5} strokeLinecap="round"/>
+
+        {/* Hub glow ring */}
+        <circle cx={cx} cy={cy} r={17} fill="none" stroke={hubStroke} strokeWidth={1} opacity={0.4} filter="url(#gm-glow)"/>
+        {/* Hub body */}
+        <circle cx={cx} cy={cy} r={14} fill={hubBody} stroke={hubStroke} strokeWidth={1.5}/>
+        <circle cx={cx} cy={cy} r={9}  fill="url(#gm-hub)"/>
+        <circle cx={cx} cy={cy} r={4}  fill={segs[li].color} opacity={0.85}/>
+        <circle cx={cx} cy={cy} r={2}  fill="white" opacity={0.4}/>
+
+        {/* Score */}
+        <text x={cx - 6} y={cy + 44} textAnchor="end" fontSize="38" fontWeight="900" fill={scoreFill} fontFamily="-apple-system,BlinkMacSystemFont,sans-serif">
+          {Math.round(animScore)}
+        </text>
+        <text x={cx} y={cy + 38} textAnchor="start" fontSize="16" fill={scoreSubFl} fontFamily="-apple-system,BlinkMacSystemFont,sans-serif">
+          /100
+        </text>
+
+        {/* Performance label — with emoji via foreignObject for reliable rendering */}
+        <foreignObject x={cx - 100} y={cy + 50} width="200" height="28">
+          <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 700, color: segs[li].color, letterSpacing: 0.5 }}>
+            {segs[li].emoji ? `${segs[li].emoji} ${segs[li].label}` : segs[li].label}
+          </div>
+        </foreignObject>
       </svg>
-      <div className="text-center -mt-2">
-        <p className="text-sm font-bold" style={{ color: levelColors[levelIdx] }}>{segs[levelIdx].label}</p>
-      </div>
     </div>
   )
 }

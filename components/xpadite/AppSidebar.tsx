@@ -31,7 +31,11 @@ const MENU_ITEMS = [
   { icon: '❓', label: 'Help & Feedback' },
 ]
 
-export function AppSidebar() {
+interface AppSidebarProps {
+  onGallery?: () => void
+}
+
+export function AppSidebar({ onGallery }: AppSidebarProps) {
   const { sidebarOpen, setSidebarOpen } = useApp()
   const router = useRouter()
 
@@ -88,7 +92,10 @@ export function AppSidebar() {
           {MENU_ITEMS.map(item => (
             <button
               key={item.label}
-              onClick={() => setSidebarOpen(false)}
+              onClick={() => {
+                setSidebarOpen(false)
+                if (item.label === 'Gallery') onGallery?.()
+              }}
               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors duration-150 hover:bg-white/7"
               style={{
                 color: '#cbd5e1',

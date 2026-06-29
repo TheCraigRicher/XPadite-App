@@ -135,10 +135,10 @@ export function AppHeader({ onYearDash, onMotivate }: AppHeaderProps) {
             <BurgerIcon />
           </button>
 
-          <div className="w-px h-4 flex-shrink-0" style={{ background: 'rgba(255,255,255,0.12)' }} />
+          <div className="hidden sm:block w-px h-4 flex-shrink-0" style={{ background: 'rgba(255,255,255,0.12)' }} />
 
           <span
-            className="text-xs font-mono px-2 py-1 rounded-md flex-shrink-0"
+            className="hidden sm:inline-flex text-xs font-mono px-2 py-1 rounded-md flex-shrink-0"
             style={{
               background: activeSession ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
               color: activeSession ? '#86efac' : 'rgba(255,255,255,0.4)',
@@ -154,7 +154,7 @@ export function AppHeader({ onYearDash, onMotivate }: AppHeaderProps) {
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all duration-150 disabled:opacity-35 disabled:cursor-not-allowed flex-shrink-0"
             style={{ background: 'rgba(22,163,74,0.85)' }}
           >
-            <PlayIcon /> Clock In
+            <PlayIcon /> <span className="hidden sm:inline">Clock In</span>
           </button>
 
           <button
@@ -163,7 +163,7 @@ export function AppHeader({ onYearDash, onMotivate }: AppHeaderProps) {
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all duration-150 disabled:opacity-35 disabled:cursor-not-allowed flex-shrink-0"
             style={{ background: 'rgba(185,28,28,0.85)' }}
           >
-            <StopIcon /> Clock Out
+            <StopIcon /> <span className="hidden sm:inline">Clock Out</span>
           </button>
 
           {activeSession && (
@@ -173,11 +173,10 @@ export function AppHeader({ onYearDash, onMotivate }: AppHeaderProps) {
           )}
         </div>
 
-        {/* CENTER: Active task indicator — always visible */}
+        {/* CENTER: Active task indicator — hidden on mobile */}
         <div
+          className="hidden sm:flex items-center"
           style={{
-            display: 'flex',
-            alignItems: 'center',
             gap: 8,
             padding: '4px 16px',
             borderRadius: 20,

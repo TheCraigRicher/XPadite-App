@@ -89,9 +89,9 @@ function GaugeMeter({ score }: { score: number }) {
     y: cy - rr * Math.sin(toRad(a)),
   })
 
-  // Single continuous half-circle arc (180° → 0° through top, SVG-CCW sweep=0)
+  // Single continuous half-circle arc: sweep=1 draws through (220,80) — the top dome
   const p0 = pt(180), p1 = pt(0)
-  const fullArc = `M ${p0.x.toFixed(2)} ${p0.y.toFixed(2)} A ${r} ${r} 0 0 0 ${p1.x.toFixed(2)} ${p1.y.toFixed(2)}`
+  const fullArc = `M ${p0.x.toFixed(2)} ${p0.y.toFixed(2)} A ${r} ${r} 0 0 1 ${p1.x.toFixed(2)} ${p1.y.toFixed(2)}`
   const arcLen = Math.PI * r        // half-circumference ≈ 376.99
   const segLen = arcLen / 5         // each 36° segment
 
@@ -120,21 +120,21 @@ function GaugeMeter({ score }: { score: number }) {
   const segMidAngles = [162, 126, 90, 54, 18]
 
   // Theme-adaptive colors
-  const panelBg    = isDark ? '#0b0b18'              : '#f1f5f9'
   const trackColor = isDark ? 'rgba(255,255,255,0.05)': 'rgba(0,0,0,0.06)'
-  const titleFill  = isDark ? 'rgba(255,255,255,0.28)': 'rgba(0,0,0,0.35)'
-  const tickStroke = isDark ? 'rgba(255,255,255,0.28)': 'rgba(0,0,0,0.3)'
-  const numFill    = isDark ? 'rgba(255,255,255,0.38)': 'rgba(0,0,0,0.4)'
+  const titleFill  = isDark ? 'rgba(255,255,255,0.32)': 'rgba(0,0,0,0.35)'
+  const tickStroke = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.3)'
+  const numFill    = isDark ? 'rgba(255,255,255,0.55)': 'rgba(0,0,0,0.45)'
   const scoreFill  = isDark ? 'white'                 : '#0f172a'
   const scoreSubFl = isDark ? 'rgba(255,255,255,0.38)': 'rgba(0,0,0,0.35)'
   const shimmer    = isDark ? 'rgba(255,255,255,0.08)': 'rgba(255,255,255,0.5)'
   const hubBody    = isDark ? '#111827'               : '#e2e8f0'
   const hubStroke  = segs[li].color
-  const circuitStk = isDark ? 'rgba(99,179,237,0.07)' : 'rgba(99,179,237,0.12)'
+  const circuitStk = isDark ? 'rgba(99,179,237,0.1)'  : 'rgba(99,179,237,0.12)'
+  const glowOpacity = isDark ? 1 : 0.4
 
   return (
     <div className="flex flex-col items-center w-full">
-      <svg viewBox="0 0 440 285" className="w-full max-w-[500px]">
+      <svg viewBox="0 0 440 295" className="w-full max-w-[500px]">
         <defs>
           <filter id="gm-glow" x="-80%" y="-80%" width="260%" height="260%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/>
@@ -148,10 +148,14 @@ function GaugeMeter({ score }: { score: number }) {
             <stop offset="0%" stopColor="rgba(255,255,255,0.18)"/>
             <stop offset="100%" stopColor="rgba(0,0,0,0.65)"/>
           </radialGradient>
+          <radialGradient id="gm-panel" cx="50%" cy="30%" r="85%">
+            <stop offset="0%" stopColor="#161626"/>
+            <stop offset="100%" stopColor="#08080f"/>
+          </radialGradient>
         </defs>
 
         {/* Panel background */}
-        <rect x={0} y={0} width={440} height={285} rx={14} fill={panelBg}/>
+        <rect x={0} y={0} width={440} height={295} rx={14} fill={isDark ? 'url(#gm-panel)' : 'var(--xp-bg2)'}/>
 
         {/* Circuit texture */}
         <g stroke={circuitStk} strokeWidth="0.8" fill="none">
@@ -163,8 +167,8 @@ function GaugeMeter({ score }: { score: number }) {
           <circle cx="220" cy="90"  r="2.5" fill="rgba(99,179,237,0.15)" stroke="none"/>
         </g>
 
-        {/* Title */}
-        <text x={cx} y={22} textAnchor="middle" fontSize="8.5" fill={titleFill} fontWeight="600" letterSpacing="3">
+        {/* Title — raised to sit clearly above arc labels */}
+        <text x={cx} y={14} textAnchor="middle" fontSize="8.5" fill={titleFill} fontWeight="600" letterSpacing="3">
           PERFORMANCE ANALYTICS
         </text>
 
@@ -174,7 +178,7 @@ function GaugeMeter({ score }: { score: number }) {
         {/* Glow layers — same arc, dasharray reveals each segment */}
         {segs.map((s, i) => (
           <path key={`gl${i}`} d={fullArc} fill="none" stroke={s.glow}
-            strokeWidth={sw + 14} strokeLinecap="butt" filter="url(#gm-glow)"
+            strokeWidth={sw + 14} strokeLinecap="butt" filter="url(#gm-glow)" opacity={glowOpacity}
             strokeDasharray={`${segLen.toFixed(2)} ${arcLen.toFixed(2)}`}
             strokeDashoffset={`${(-s.offset).toFixed(2)}`}/>
         ))}
@@ -195,22 +199,22 @@ function GaugeMeter({ score }: { score: number }) {
             strokeDashoffset={`${(-s.offset - 7).toFixed(2)}`}/>
         ))}
 
-        {/* Tick marks at boundaries */}
+        {/* Tick marks — short dashes just outside the colored band */}
         {marks.map((m, i) => {
-          const inner = pt(m.angle, r - sw / 2 - 3)
-          const outer = pt(m.angle, r + sw / 2 + 5)
+          const inner = pt(m.angle, r + sw / 2 + 2)
+          const outer = pt(m.angle, r + sw / 2 + 12)
           return <line key={`tk${i}`} x1={inner.x.toFixed(1)} y1={inner.y.toFixed(1)} x2={outer.x.toFixed(1)} y2={outer.y.toFixed(1)} stroke={tickStroke} strokeWidth="1.8" strokeLinecap="round"/>
         })}
 
-        {/* Score numbers outside arc */}
+        {/* Score numbers — inside the arc, readable and upright */}
         {marks.map((m, i) => {
-          const lp = pt(m.angle, r + sw / 2 + 18)
-          return <text key={`sn${i}`} x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} textAnchor="middle" dominantBaseline="middle" fontSize="8" fill={numFill} fontWeight="500">{m.label}</text>
+          const lp = pt(m.angle, r - sw / 2 - 26)
+          return <text key={`sn${i}`} x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} textAnchor="middle" dominantBaseline="middle" fontSize="9" fill={numFill} fontWeight="600">{m.label}</text>
         })}
 
-        {/* Category labels */}
+        {/* Category labels — radius trimmed so "Average" clears the title above */}
         {segs.map((s, i) => {
-          const lp = pt(segMidAngles[i], r + sw / 2 + 44)
+          const lp = pt(segMidAngles[i], r + sw / 2 + 34)
           return <text key={`cl${i}`} x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} textAnchor="middle" dominantBaseline="middle" fontSize="8" fill={s.color} fontWeight="700">{s.label}</text>
         })}
 
@@ -522,7 +526,6 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
 
         {/* ── Performance Gauge (animated) ──────────────────────── */}
         <div className="mx-4 mb-3 rounded-xl p-5" style={{ background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
-          <p className="text-[11px] font-semibold mb-4 text-center" style={{ color: 'var(--xp-txt)' }}>Performance Rating</p>
           <GaugeMeter score={stats?.score ?? 0} />
         </div>
 

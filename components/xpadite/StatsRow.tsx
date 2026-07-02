@@ -31,7 +31,7 @@ function useOdometer(target: number, duration = 550): number {
   return cur
 }
 
-function AnimVal({ raw }: { raw: string }) {
+function AnimVal({ raw, accentColor }: { raw: string; accentColor?: string }) {
   // Parse a leading number for odometer if string is "X / Y" or "X%" or "Xh Ym"
   const numMatch = raw.match(/^(\d+)(.*)$/)
   const num = numMatch ? parseInt(numMatch[1]) : null
@@ -39,11 +39,19 @@ function AnimVal({ raw }: { raw: string }) {
   const animated = useOdometer(num ?? 0)
 
   return (
-    <span className="text-lg font-semibold" style={{ color: 'var(--xp-acc)', fontVariantNumeric: 'tabular-nums' }}>
+    <span className="text-lg font-semibold" style={{ color: accentColor ?? 'var(--xp-acc)', fontVariantNumeric: 'tabular-nums', transition: 'color 180ms ease' }}>
       {num !== null ? `${animated}${suffix}` : raw}
     </span>
   )
 }
+
+// Per-card accent colors: Productive Days → Yellow, Current Streak → Green, Progress → Cyan, Total Hours → Purple
+const STAT_ACCENTS = [
+  { hex: '#f59e0b', rgb: '245,158,11'  },
+  { hex: '#22c55e', rgb: '34,197,94'   },
+  { hex: '#06b6d4', rgb: '6,182,212'   },
+  { hex: '#7c3aed', rgb: '124,58,237'  },
+]
 
 // ─── Scope calculations ───────────────────────────────────────────────────────
 
@@ -195,9 +203,10 @@ const SCOPES: { key: Scope; label: string; color: string }[] = [
 ]
 
 export function StatsRow() {
-  const { calData, sessions } = useApp()
+  const { calData, sessions, isDark } = useApp()
   const [scope, setScope] = useState<Scope>('today')
   const [hoveredScope, setHoveredScope] = useState<Scope | null>(null)
+  const [hoveredStat, setHoveredStat] = useState<number | null>(null)
   const today = useMemo(() => new Date(), [])
 
   const stats = useMemo(
@@ -247,18 +256,32 @@ export function StatsRow() {
 
       {/* Stat cards */}
       <div className="flex justify-center gap-3 px-4 py-2.5 flex-wrap">
-        {items.map(item => (
-          <div
-            key={item.label}
-            className="text-center px-3.5 py-2 rounded-xl min-w-[90px]"
-            style={{ background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}
-          >
-            <AnimVal raw={item.raw} />
-            <div className="text-[10px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>
-              {item.label}
+        {items.map((item, idx) => {
+          const ac = STAT_ACCENTS[idx]
+          const hovered = hoveredStat === idx
+          const bgAlpha = isDark ? 0.12 : 0.08
+          const bdrAlpha = isDark ? 0.38 : 0.25
+          const shadowAlpha = isDark ? 0.20 : 0.12
+          return (
+            <div
+              key={item.label}
+              className="text-center px-3.5 py-2 rounded-xl min-w-[90px]"
+              style={{
+                background: hovered ? `rgba(${ac.rgb},${bgAlpha})` : 'var(--xp-bg3)',
+                border: `0.5px solid ${hovered ? `rgba(${ac.rgb},${bdrAlpha})` : 'var(--xp-bdr)'}`,
+                boxShadow: hovered ? `0 4px 16px rgba(${ac.rgb},${shadowAlpha})` : 'none',
+                transition: 'background 200ms ease, border-color 200ms ease, box-shadow 200ms ease',
+              }}
+              onMouseEnter={() => setHoveredStat(idx)}
+              onMouseLeave={() => setHoveredStat(null)}
+            >
+              <AnimVal raw={item.raw} accentColor={hovered ? ac.hex : undefined} />
+              <div className="text-[10px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>
+                {item.label}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

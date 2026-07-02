@@ -113,19 +113,48 @@ function MotivationModal({ onClose }: { onClose: () => void }) {
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 
-function Toast({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+function Toast({ message, exiting, onDismiss }: { message: string; exiting: boolean; onDismiss: () => void }) {
+  // Prefix "~" = branded purple info style. "\n" splits title from body.
+  const isInfo = message.startsWith('~')
+  const clean = isInfo ? message.slice(1) : message
+  const nl = clean.indexOf('\n')
+  const title = nl >= 0 ? clean.slice(0, nl) : undefined
+  const body  = nl >= 0 ? clean.slice(nl + 1) : clean
+
   return (
     <div
-      className="flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl text-sm max-w-xs"
+      className={exiting ? 'xp-toast-out' : ''}
       style={{
-        background: '#1e1030',
-        color: '#e8e8f0',
-        border: '0.5px solid rgba(255,255,255,0.12)',
-        animation: 'toast-in 0.25s ease-out',
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 12,
+        padding: '12px 16px',
+        borderRadius: 14,
+        minWidth: 240,
+        maxWidth: 320,
+        boxShadow: '0 8px 32px rgba(0,0,0,0.30)',
+        background: isInfo ? 'linear-gradient(135deg, #6d28d9 0%, #7c3aed 100%)' : '#1e1030',
+        border: `0.5px solid ${isInfo ? 'rgba(167,139,250,0.4)' : 'rgba(255,255,255,0.12)'}`,
+        animation: exiting ? undefined : 'toast-in 0.25s ease-out',
       }}
     >
-      <span className="flex-1 text-[13px] leading-snug">{message}</span>
-      <button onClick={onDismiss} className="text-xs opacity-50 hover:opacity-100 transition-opacity flex-shrink-0">✕</button>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {title && (
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'white', marginBottom: 3, lineHeight: 1.3 }}>
+            {title}
+          </div>
+        )}
+        <div style={{ fontSize: 12, color: isInfo ? 'rgba(255,255,255,0.82)' : '#e8e8f0', lineHeight: 1.45 }}>
+          {body}
+        </div>
+      </div>
+      <button
+        onClick={onDismiss}
+        style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', flexShrink: 0, marginTop: 1, lineHeight: 1 }}
+        className="hover:opacity-100 transition-opacity"
+      >
+        ✕
+      </button>
     </div>
   )
 }
@@ -136,6 +165,7 @@ interface ModalDay { key: string; month: number; day: number }
 
 function ThemedApp({ email: _email }: XpaditeAppProps) {
   const { isDark, toast, setToast } = useApp()
+  const [toastExiting, setToastExiting] = useState(false)
   const [modalDay, setModalDay] = useState<ModalDay | null>(null)
   const [dashboardDay, setDashboardDay] = useState<ModalDay | null>(null)
   const [zoomedMonth, setZoomedMonth] = useState<number | null>(null)
@@ -144,11 +174,13 @@ function ThemedApp({ email: _email }: XpaditeAppProps) {
   const [yearlyOpen, setYearlyOpen] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
 
-  // Auto-dismiss toast
+  // Auto-dismiss toast with fade-out
   useEffect(() => {
-    if (!toast) return
-    const t = setTimeout(() => setToast(null), 2800)
-    return () => clearTimeout(t)
+    if (!toast) { setToastExiting(false); return }
+    setToastExiting(false)
+    const t1 = setTimeout(() => setToastExiting(true), 2700)
+    const t2 = setTimeout(() => setToast(null), 3000)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
   }, [toast, setToast])
 
   return (
@@ -238,7 +270,11 @@ function ThemedApp({ email: _email }: XpaditeAppProps) {
       {/* Toast */}
       {toast && (
         <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 200 }}>
-          <Toast message={toast} onDismiss={() => setToast(null)} />
+          <Toast
+            message={toast}
+            exiting={toastExiting}
+            onDismiss={() => { setToastExiting(true); setTimeout(() => setToast(null), 300) }}
+          />
         </div>
       )}
     </div>

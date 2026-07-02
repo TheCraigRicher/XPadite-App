@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useApp } from './AppContext'
 import { dateKey, isToday, DAY_HEADERS, MONTHS, APP_YEAR, getMonthStats } from './utils'
 import { ShareCardModal } from './ShareCardModal'
+import { GaugeMeter } from './GaugeMeter'
 import type { DayData } from './types'
 
 function isStreakDay(data: DayData | undefined): boolean {
@@ -54,6 +55,35 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
   }, [month])
 
   const stats = useMemo(() => getMonthStats(calData, APP_YEAR, month), [calData, month])
+
+  const monthScore = useMemo(() => {
+    const today = new Date()
+    const isCurrentMonth = today.getMonth() === month && today.getFullYear() === APP_YEAR
+    const daysInMonth = new Date(APP_YEAR, month + 1, 0).getDate()
+    const elapsed = isCurrentMonth ? today.getDate() : daysInMonth
+    const rate = elapsed > 0 ? (stats.productiveDays / elapsed) * 100 : 0
+
+    let totalMs = 0
+    for (let d = 1; d <= elapsed; d++) {
+      const k = dateKey(APP_YEAR, month, d)
+      calData[k]?.tasks?.forEach(t => {
+        ;(t.sessions ?? []).filter(s => s.endTs !== null).forEach(s => { totalMs += s.endTs! - s.startTs })
+      })
+    }
+    const hours = totalMs / 3_600_000
+
+    let score = 0
+    if (rate >= 30) score += 20
+    if (rate >= 50) score += 20
+    if (rate >= 70) score += 15
+    if (rate >= 90) score += 15
+    if (hours >= 5)  score += 10
+    if (hours >= 15) score += 5
+    if (stats.hyperDays >= 1)     score += 8
+    if (stats.milestoneDays >= 1) score += 5
+    if (stats.goalDays >= 1)      score += 2
+    return Math.min(100, score)
+  }, [stats, month, calData])
 
   const handleCellClick = useCallback((key: string, day: number, wasStreak: boolean) => {
     if (clickRef.current.key !== key) {
@@ -256,6 +286,11 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
               )
             })}
           </div>
+        </div>
+
+        {/* Performance Gauge */}
+        <div className="mx-4 mb-3 rounded-xl p-4" style={{ background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
+          <GaugeMeter score={monthScore} />
         </div>
 
         {/* Month stats */}

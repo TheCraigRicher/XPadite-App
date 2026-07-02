@@ -24,32 +24,104 @@ const ChevronIcon = () => (
   </svg>
 );
 
+// ─── Emoji picker ─────────────────────────────────────────────────────────────
+
+const EMOJI_CATS = [
+  {
+    tab: '💼',
+    emojis: ['💻', '🖥️', '📱', '⌨️', '📂', '📊', '📈', '📝', '✏️', '🔬', '🎯', '💡', '🔑', '💼', '📋', '🗂️', '📞', '🖊️', '📎', '📌'],
+  },
+  {
+    tab: '💪',
+    emojis: ['🏋️', '🧘', '🚶', '🏃', '🚴', '🏊', '⚽', '🎾', '🧗', '💪', '🥗', '🍎', '😴', '🧠', '🏥', '🥦', '🏆', '🎽', '🤸', '🧬'],
+  },
+  {
+    tab: '🎨',
+    emojis: ['🎨', '🎵', '🎸', '🎹', '📸', '🎬', '✍️', '📖', '🎭', '🎮', '🎲', '🎧', '🎤', '🎻', '🎺', '🖌️', '📚', '🎼', '🎥', '🎞️'],
+  },
+  {
+    tab: '🌍',
+    emojis: ['☕', '🍳', '🛒', '🏠', '🚗', '✈️', '🌱', '🐾', '💰', '❤️', '🌟', '⭐', '🔥', '✅', '💫', '🌈', '🎁', '💎', '🌙', '⚡'],
+  },
+];
+
+interface EmojiPickerProps {
+  onSelect: (emoji: string) => void;
+  onClear: () => void;
+}
+
+function EmojiPicker({ onSelect, onClear }: EmojiPickerProps) {
+  const [cat, setCat] = useState(0);
+
+  return (
+    <div
+      className="absolute top-full left-0 mt-1 rounded-xl shadow-2xl z-50 overflow-hidden"
+      style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', width: 228 }}
+    >
+      {/* Category tabs */}
+      <div className="flex items-center gap-0.5 p-1.5 pb-0" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
+        {EMOJI_CATS.map((c, i) => (
+          <button
+            key={i}
+            onClick={() => setCat(i)}
+            className="flex-1 h-7 rounded-lg text-base transition-all"
+            style={{ background: cat === i ? 'rgba(124,58,237,0.12)' : 'transparent' }}
+          >
+            {c.tab}
+          </button>
+        ))}
+        <button
+          onClick={onClear}
+          title="No emoji"
+          className="w-7 h-7 rounded-lg text-[11px] flex items-center justify-center transition-colors hover:bg-black/5 flex-shrink-0"
+          style={{ color: '#9ca3af', marginLeft: 2 }}
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Emoji grid */}
+      <div className="grid grid-cols-5 gap-0.5 p-2 max-h-36 overflow-y-auto">
+        {EMOJI_CATS[cat].emojis.map(emoji => (
+          <button
+            key={emoji}
+            onClick={() => onSelect(emoji)}
+            className="aspect-square rounded-lg text-xl flex items-center justify-center hover:bg-black/5 transition-colors"
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Shared color picker ──────────────────────────────────────────────────────
 
 interface ColorPickerProps {
-  color: string
-  onChange: (c: string) => void
-  /** Colors already taken by OTHER activities (not the one being edited) */
-  takenColors: string[]
-  duplicateError: boolean
+  color: string;
+  onChange: (c: string) => void;
+  takenColors: string[];
+  duplicateError: boolean;
 }
 
 function ColorPicker({ color, onChange, takenColors, duplicateError }: ColorPickerProps) {
-  const customRef = useRef<HTMLInputElement>(null)
-  const isCustom = !COLOR_PALETTE.includes(color as typeof COLOR_PALETTE[number])
+  const isCustom = !COLOR_PALETTE.includes(color as typeof COLOR_PALETTE[number]);
+  const [showCustom, setShowCustom] = useState(isCustom);
 
   return (
     <div>
-      <div className="flex gap-1.5 flex-wrap">
+      {/* Preset swatches */}
+      <div className="flex gap-1.5 flex-wrap items-center">
         {COLOR_PALETTE.map((c) => {
-          const taken = takenColors.includes(c)
-          const selected = color === c
+          const taken = takenColors.includes(c);
+          const selected = color === c;
           return (
             <button
               key={c}
-              onClick={() => onChange(c)}
+              onClick={() => { onChange(c); setShowCustom(false); }}
               title={taken ? "Already in use" : c}
-              className="w-5 h-5 rounded-full transition-all duration-150 relative"
+              className="w-5 h-5 rounded-full transition-all duration-150"
               style={{
                 background: c,
                 border: selected ? "2.5px solid #0f172a" : "2.5px solid transparent",
@@ -57,38 +129,45 @@ function ColorPicker({ color, onChange, takenColors, duplicateError }: ColorPick
                 opacity: taken && !selected ? 0.3 : 1,
               }}
             />
-          )
+          );
         })}
 
-        {/* Custom color swatch — opens native picker */}
+        {/* Custom toggle */}
         <button
-          onClick={() => customRef.current?.click()}
-          title="Custom color"
-          className="w-5 h-5 rounded-full transition-all duration-150 flex items-center justify-center overflow-hidden"
+          onClick={() => setShowCustom(s => !s)}
+          className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-medium transition-all duration-150"
           style={{
-            background: "conic-gradient(red,yellow,lime,cyan,blue,magenta,red)",
-            border: isCustom ? "2.5px solid #0f172a" : "2.5px solid transparent",
-            transform: isCustom ? "scale(1.2)" : "scale(1)",
+            background: isCustom ? color + '22' : '#f3f4f6',
+            border: `1.5px solid ${isCustom ? color + '80' : '#e5e7eb'}`,
+            color: isCustom ? color : '#9ca3af',
           }}
         >
-          <input
-            ref={customRef}
-            type="color"
-            value={isCustom ? color : "#ffffff"}
-            onChange={(e) => onChange(e.target.value)}
-            className="opacity-0 absolute w-0 h-0 pointer-events-none"
-            tabIndex={-1}
-          />
+          {isCustom && <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: color }} />}
+          Custom
+          <span style={{ display: 'inline-block', transform: showCustom ? 'rotate(180deg)' : 'none', transition: 'transform 180ms ease' }}>▾</span>
         </button>
       </div>
 
-      {isCustom && (
-        <div className="flex items-center gap-1.5 mt-2">
-          <span
-            className="w-3.5 h-3.5 rounded-full flex-shrink-0 border border-black/10"
-            style={{ background: color }}
-          />
-          <span className="text-[10px] font-mono" style={{ color: "#6b7280" }}>{color}</span>
+      {/* Native color picker */}
+      {showCustom && (
+        <div className="mt-2 rounded-xl p-3 flex items-center gap-3" style={{ background: 'rgba(0,0,0,0.04)', border: '0.5px solid rgba(0,0,0,0.09)' }}>
+          <div
+            className="relative w-9 h-9 rounded-xl flex-shrink-0 overflow-hidden cursor-pointer"
+            style={{ background: color, boxShadow: '0 2px 8px rgba(0,0,0,0.15)', border: '1px solid rgba(0,0,0,0.08)' }}
+            title="Tap to pick a custom color"
+          >
+            <input
+              type="color"
+              value={color.startsWith('#') && color.length === 7 ? color : '#7c3aed'}
+              onChange={e => onChange(e.target.value)}
+              className="absolute inset-0 w-full h-full cursor-pointer"
+              style={{ opacity: 0, padding: 0, margin: 0, border: 'none' }}
+            />
+          </div>
+          <div>
+            <p className="text-[10px] mb-0.5" style={{ color: '#9ca3af' }}>Tap to pick</p>
+            <code className="text-[11px] font-mono" style={{ color: '#6b7280' }}>{color}</code>
+          </div>
         </div>
       )}
 
@@ -98,7 +177,7 @@ function ColorPicker({ color, onChange, takenColors, duplicateError }: ColorPick
         </p>
       )}
     </div>
-  )
+  );
 }
 
 // ─── Add modal ────────────────────────────────────────────────────────────────
@@ -107,9 +186,21 @@ function AddActivityModal({ onClose }: { onClose: () => void }) {
   const { addActivity, setSelectedActId, activities } = useApp();
   const [name, setName] = useState("");
   const [color, setColor] = useState<string>(COLOR_PALETTE[0]);
+  const [emoji, setEmoji] = useState("");
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [duplicateError, setDuplicateError] = useState(false);
+  const emojiRef = useRef<HTMLDivElement>(null);
 
   const takenColors = activities.map((a) => a.color.toLowerCase());
+
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    function onOutside(e: MouseEvent) {
+      if (emojiRef.current && !emojiRef.current.contains(e.target as Node)) setShowEmojiPicker(false);
+    }
+    document.addEventListener("mousedown", onOutside);
+    return () => document.removeEventListener("mousedown", onOutside);
+  }, [showEmojiPicker]);
 
   function handleColorChange(c: string) {
     setColor(c);
@@ -123,7 +214,7 @@ function AddActivityModal({ onClose }: { onClose: () => void }) {
       setDuplicateError(true);
       return;
     }
-    const newAct: Activity = { id: "a" + Date.now(), name: trimmed, color };
+    const newAct: Activity = { id: "a" + Date.now(), name: trimmed, color, emoji: emoji || undefined };
     addActivity(newAct);
     setSelectedActId(newAct.id);
     onClose();
@@ -136,6 +227,29 @@ function AddActivityModal({ onClose }: { onClose: () => void }) {
         style={{ border: "0.5px solid rgba(0,0,0,0.08)" }}
       >
         <h3 className="text-sm font-semibold text-gray-800 mb-4">Add Activity</h3>
+
+        {/* Emoji picker */}
+        <label className="block text-xs text-gray-500 mb-1">Emoji</label>
+        <div className="relative mb-4" ref={emojiRef}>
+          <button
+            type="button"
+            onClick={() => setShowEmojiPicker(s => !s)}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border w-full text-left transition-all"
+            style={{
+              borderColor: emoji ? color + '60' : '#e5e7eb',
+              background: emoji ? color + '0d' : '#f9fafb',
+            }}
+          >
+            <span className="text-xl w-6 text-center leading-none">{emoji || '🙂'}</span>
+            <span className="text-xs text-gray-400">{emoji ? 'Change emoji' : 'Pick an emoji'}</span>
+          </button>
+          {showEmojiPicker && (
+            <EmojiPicker
+              onSelect={e => { setEmoji(e); setShowEmojiPicker(false); }}
+              onClear={() => { setEmoji(""); setShowEmojiPicker(false); }}
+            />
+          )}
+        </div>
 
         <label className="block text-xs text-gray-500 mb-1">Name</label>
         <input
@@ -179,20 +293,31 @@ function AddActivityModal({ onClose }: { onClose: () => void }) {
 // ─── Edit modal ───────────────────────────────────────────────────────────────
 
 interface EditActivityModalProps {
-  activity: Activity
-  onClose: () => void
+  activity: Activity;
+  onClose: () => void;
 }
 
 function EditActivityModal({ activity, onClose }: EditActivityModalProps) {
   const { updateActivity, activities } = useApp();
   const [name, setName] = useState(activity.name);
   const [color, setColor] = useState(activity.color);
+  const [emoji, setEmoji] = useState(activity.emoji ?? "");
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [duplicateError, setDuplicateError] = useState(false);
+  const emojiRef = useRef<HTMLDivElement>(null);
 
-  // Colors used by OTHER activities (not this one)
   const takenColors = activities
     .filter((a) => a.id !== activity.id)
     .map((a) => a.color.toLowerCase());
+
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    function onOutside(e: MouseEvent) {
+      if (emojiRef.current && !emojiRef.current.contains(e.target as Node)) setShowEmojiPicker(false);
+    }
+    document.addEventListener("mousedown", onOutside);
+    return () => document.removeEventListener("mousedown", onOutside);
+  }, [showEmojiPicker]);
 
   function handleColorChange(c: string) {
     setColor(c);
@@ -202,7 +327,6 @@ function EditActivityModal({ activity, onClose }: EditActivityModalProps) {
   function save() {
     const trimmed = name.trim();
     if (!trimmed) return;
-    // Only block duplicate if the chosen color is different from the original
     if (
       color.toLowerCase() !== activity.color.toLowerCase() &&
       takenColors.includes(color.toLowerCase())
@@ -210,7 +334,7 @@ function EditActivityModal({ activity, onClose }: EditActivityModalProps) {
       setDuplicateError(true);
       return;
     }
-    updateActivity(activity.id, { name: trimmed, color });
+    updateActivity(activity.id, { name: trimmed, color, emoji: emoji || undefined });
     onClose();
   }
 
@@ -221,6 +345,29 @@ function EditActivityModal({ activity, onClose }: EditActivityModalProps) {
         style={{ border: "0.5px solid rgba(0,0,0,0.08)" }}
       >
         <h3 className="text-sm font-semibold text-gray-800 mb-4">Edit Activity</h3>
+
+        {/* Emoji picker */}
+        <label className="block text-xs text-gray-500 mb-1">Emoji</label>
+        <div className="relative mb-4" ref={emojiRef}>
+          <button
+            type="button"
+            onClick={() => setShowEmojiPicker(s => !s)}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm border w-full text-left transition-all"
+            style={{
+              borderColor: emoji ? color + '60' : '#e5e7eb',
+              background: emoji ? color + '0d' : '#f9fafb',
+            }}
+          >
+            <span className="text-xl w-6 text-center leading-none">{emoji || '🙂'}</span>
+            <span className="text-xs text-gray-400">{emoji ? 'Change emoji' : 'Pick an emoji'}</span>
+          </button>
+          {showEmojiPicker && (
+            <EmojiPicker
+              onSelect={e => { setEmoji(e); setShowEmojiPicker(false); }}
+              onClear={() => { setEmoji(""); setShowEmojiPicker(false); }}
+            />
+          )}
+        </div>
 
         <label className="block text-xs text-gray-500 mb-1">Name</label>
         <input
@@ -263,7 +410,7 @@ function EditActivityModal({ activity, onClose }: EditActivityModalProps) {
 // ─── Dropdown ─────────────────────────────────────────────────────────────────
 
 function ActivityDropdown() {
-  const { activities, selectedActId, setSelectedActId, removingMode } = useApp();
+  const { activities, selectedActId, setSelectedActId, removingMode, activeSession, setToast } = useApp();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -279,16 +426,48 @@ function ActivityDropdown() {
   const selected = activities.find((a) => a.id === selectedActId) ?? activities[0];
   if (!selected) return null;
 
+  function handleTrigger() {
+    if (activeSession) {
+      setToast('~Active session in progress\nPlease clock out of your current task before selecting another.');
+      return;
+    }
+    if (!removingMode) setOpen((o) => !o);
+  }
+
+  function handleSelect(id: string) {
+    if (activeSession && id !== selectedActId) {
+      setToast('~Active session in progress\nPlease clock out of your current task before selecting another.');
+      setOpen(false);
+      return;
+    }
+    setSelectedActId(id);
+    setOpen(false);
+  }
+
+  const displayName = (a: Activity) => (a.emoji ? a.emoji + ' ' : '') + a.name;
+
   return (
     <div ref={ref} className="relative flex-shrink-0">
       <button
-        onClick={() => { if (!removingMode) setOpen((o) => !o); }}
+        onClick={handleTrigger}
         className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all duration-150 hover:border-violet-400"
-        style={{ borderColor: selected.color + "60", background: selected.color + "15", color: selected.color }}
+        style={{
+          borderColor: selected.color + "60",
+          background: selected.color + "15",
+          color: selected.color,
+          opacity: activeSession ? 0.7 : 1,
+          cursor: activeSession ? 'not-allowed' : 'pointer',
+        }}
       >
         <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: selected.color }} />
-        {selected.name}
-        <ChevronIcon />
+        {displayName(selected)}
+        {activeSession ? (
+          <svg viewBox="0 0 12 12" fill="currentColor" className="w-2.5 h-2.5 opacity-60">
+            <path d="M9 5V4a3 3 0 0 0-6 0v1H2v6h8V5H9zm-5-1a2 2 0 1 1 4 0v1H4V4zm2 5.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/>
+          </svg>
+        ) : (
+          <ChevronIcon />
+        )}
       </button>
 
       {open && (
@@ -299,12 +478,12 @@ function ActivityDropdown() {
           {activities.map((a) => (
             <button
               key={a.id}
-              onClick={() => { setSelectedActId(a.id); setOpen(false); }}
+              onClick={() => handleSelect(a.id)}
               className="w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left transition-colors hover:bg-black/5"
               style={{ color: a.id === selectedActId ? a.color : "var(--xp-txt)", fontWeight: a.id === selectedActId ? 600 : 400 }}
             >
               <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: a.color }} />
-              {a.name}
+              {displayName(a)}
               {a.id === selectedActId && <span className="ml-auto">✓</span>}
             </button>
           ))}
@@ -317,10 +496,19 @@ function ActivityDropdown() {
 // ─── ActivityBar ──────────────────────────────────────────────────────────────
 
 export function ActivityBar() {
-  const { activities, selectedActId, setSelectedActId, removeActivity, removingMode, setRemovingMode } = useApp();
+  const { activities, selectedActId, setSelectedActId, removeActivity, removingMode, setRemovingMode, activeSession, setToast } = useApp();
   const [showAddModal, setShowAddModal] = useState(false);
   const [editActivity, setEditActivity] = useState<Activity | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  function handlePillClick(id: string) {
+    if (removingMode) return;
+    if (activeSession && id !== selectedActId) {
+      setToast('~Active session in progress\nPlease clock out of your current task before selecting another.');
+      return;
+    }
+    setSelectedActId(id);
+  }
 
   return (
     <>
@@ -363,7 +551,7 @@ export function ActivityBar() {
         {activities.map((a) => (
           <div key={a.id} className="relative flex-shrink-0">
             <div
-              onClick={() => { if (!removingMode) setSelectedActId(a.id); }}
+              onClick={() => handlePillClick(a.id)}
               onDoubleClick={() => { if (!removingMode) setEditActivity(a); }}
               onMouseEnter={() => setHoveredId(a.id)}
               onMouseLeave={() => setHoveredId(null)}
@@ -388,7 +576,7 @@ export function ActivityBar() {
               }}
             >
               <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: a.color }} />
-              {a.name}
+              {a.emoji ? a.emoji + ' ' : ''}{a.name}
             </div>
 
             {removingMode && (

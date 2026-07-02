@@ -44,6 +44,7 @@ export interface Activity {
   id: string
   name: string
   color: string
+  emoji?: string
 }
 
 export interface ActiveSession {

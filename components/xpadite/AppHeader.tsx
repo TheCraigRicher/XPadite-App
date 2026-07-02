@@ -59,6 +59,7 @@ export function AppHeader({ onYearDash, onMotivate }: AppHeaderProps) {
     activities, selectedActId,
     setSidebarOpen,
     updateDay,
+    setToast,
   } = useApp()
 
   const [now, setNow] = useState(Date.now())
@@ -69,13 +70,16 @@ export function AppHeader({ onYearDash, onMotivate }: AppHeaderProps) {
   }, [])
 
   function clockIn() {
-    if (activeSession) return
+    if (activeSession) {
+      setToast('~Active session in progress\nPlease clock out of your current task before starting another.')
+      return
+    }
     const act = activities.find(a => a.id === selectedActId) ?? activities[0]
     if (!act) return
     setActiveSession({
       id: 's' + Date.now(),
       actId: act.id,
-      actName: act.name,
+      actName: (act.emoji ? act.emoji + ' ' : '') + act.name,
       actColor: act.color,
       startTs: Date.now(),
       dateKey: todayKey(),
@@ -173,15 +177,15 @@ export function AppHeader({ onYearDash, onMotivate }: AppHeaderProps) {
           )}
         </div>
 
-        {/* CENTER: Active task indicator — hidden on mobile */}
+        {/* CENTER: Active task / session indicator — hidden on mobile */}
         <div
           className="hidden sm:flex items-center"
           style={{
             gap: 8,
             padding: '4px 16px',
             borderRadius: 20,
-            background: activeTaskTimer ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.04)',
-            border: `0.5px solid ${activeTaskTimer ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.05)'}`,
+            background: (activeTaskTimer || activeSession) ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.04)',
+            border: `0.5px solid ${(activeTaskTimer || activeSession) ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.05)'}`,
             whiteSpace: 'nowrap',
           }}
         >
@@ -217,6 +221,29 @@ export function AppHeader({ onYearDash, onMotivate }: AppHeaderProps) {
               </span>
               <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#86efac', fontWeight: 700 }}>
                 {formatHMS(taskElapsed)}
+              </span>
+            </>
+          ) : activeSession ? (
+            <>
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  background: '#ef4444',
+                  display: 'inline-block',
+                  flexShrink: 0,
+                  animation: 'xp-blink 1.4s ease-in-out infinite',
+                }}
+              />
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontWeight: 700, letterSpacing: '0.08em' }}>
+                ACTIVE
+              </span>
+              <span style={{ fontSize: 10, color: activeSession.actColor, fontWeight: 600, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {activeSession.actName}
+              </span>
+              <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#86efac', fontWeight: 700 }}>
+                {formatHMS(elapsed)}
               </span>
             </>
           ) : (

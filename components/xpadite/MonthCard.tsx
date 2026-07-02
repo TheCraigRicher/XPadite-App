@@ -100,6 +100,14 @@ export function MonthCard({
   const { calData, updateDay, setToast, isDark } = useApp();
   const gapColor = isDark ? "#1a1a28" : "#ffffff";
 
+  // Ring animation — tracks the key of a day that just became productive
+  const [newlyMarkedKey, setNewlyMarkedKey] = useState<string | null>(null);
+  const ringTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const calDataRef = useRef(calData);
+  calDataRef.current = calData;
+
+  useEffect(() => () => { if (ringTimerRef.current) clearTimeout(ringTimerRef.current) }, []);
+
   // ── Share panel state ──────────────────────────────────────────────────────
   const [panelOpen, setPanelOpen]     = useState(false);
   const [panelAnim, setPanelAnim]     = useState(false);
@@ -246,11 +254,17 @@ export function MonthCard({
       if (clickRef.current.count === 1) {
         clickRef.current.timer = setTimeout(() => {
           clickRef.current = { key: null, count: 0, timer: null };
+          const wasProductive = !!(calDataRef.current[key]?.productive);
           updateDay(key, (prev) => ({
             ...prev,
             productive: !prev.productive,
             hyper: prev.productive ? false : prev.hyper,
           }));
+          if (!wasProductive) {
+            if (ringTimerRef.current) clearTimeout(ringTimerRef.current);
+            setNewlyMarkedKey(key);
+            ringTimerRef.current = setTimeout(() => setNewlyMarkedKey(null), 600);
+          }
           if (!wasStreak) setToast("Day Complete ✅  Great work. See you tomorrow.");
         }, 260);
       } else if (clickRef.current.count === 2) {
@@ -259,7 +273,7 @@ export function MonthCard({
         onDayDoubleClick?.(key, month, day);
       }
     },
-    [updateDay, setToast, onDayDoubleClick, month],
+    [updateDay, setToast, onDayDoubleClick, month, setNewlyMarkedKey],
   );
 
   return (
@@ -370,6 +384,22 @@ export function MonthCard({
               <div className="absolute inset-[23%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-110" style={{ zIndex: 1, ...circleStyle }}>
                 {cell.day}
               </div>
+              {productive && cell.key === newlyMarkedKey && (
+                <svg viewBox="0 0 100 100" className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 3 }}>
+                  <circle
+                    cx="50" cy="50" r="34"
+                    transform="rotate(-90 50 50)"
+                    fill="none"
+                    stroke="rgba(22,163,74,0.85)"
+                    strokeWidth="3.5"
+                    pathLength="1"
+                    strokeDasharray="1"
+                    strokeDashoffset="1"
+                    className="xp-ring-draw-circle"
+                    style={{ animation: 'xp-ring-draw 440ms ease-in-out forwards' }}
+                  />
+                </svg>
+              )}
             </div>
           );
         })}

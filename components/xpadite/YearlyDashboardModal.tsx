@@ -1,8 +1,9 @@
 'use client'
 
-import { useMemo, useEffect, useState } from 'react'
+import { useMemo, useEffect } from 'react'
 import { useApp } from './AppContext'
 import { formatMs, APP_YEAR, MONTHS } from './utils'
+import { GaugeMeter } from './GaugeMeter'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -88,70 +89,6 @@ function DonutChart({ segments }: { segments: { color: string; pct: number }[] }
   )
 }
 
-function AnimatedGauge({ score }: { score: number }) {
-  const [animAngle, setAnimAngle] = useState(210)
-
-  useEffect(() => {
-    const targetAngle = 210 - (score / 100) * 240
-    const duration = 1600
-    const startTime = performance.now()
-    let rafId: number
-    function tick(now: number) {
-      const t = Math.min((now - startTime) / duration, 1)
-      const eased = 1 - Math.pow(1 - t, 3)
-      setAnimAngle(210 + (targetAngle - 210) * eased)
-      if (t < 1) rafId = requestAnimationFrame(tick)
-    }
-    rafId = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(rafId)
-  }, [score])
-
-  const cx = 160, cy = 135, r = 110, sw = 20
-  const toRad = (d: number) => (d * Math.PI) / 180
-  const pt = (a: number, rr = r) => ({
-    x: cx + rr * Math.cos(toRad(a)),
-    y: cy - rr * Math.sin(toRad(a)),
-  })
-
-  const segs = [
-    { from: 210, to: 162, color: '#64748b', label: 'Not Serious' },
-    { from: 162, to: 114, color: '#22d3ee', label: 'Normal' },
-    { from: 114, to: 66,  color: '#a3e635', label: 'Average' },
-    { from: 66,  to: 18,  color: '#f97316', label: 'Advanced' },
-    { from: 18,  to: -30, color: '#ef4444', label: 'Elite Mode' },
-  ]
-
-  function arcPath(from: number, to: number) {
-    const s = pt(from), e = pt(to)
-    const large = Math.abs(from - to) > 180 ? 1 : 0
-    return `M ${s.x.toFixed(1)} ${s.y.toFixed(1)} A ${r} ${r} 0 ${large} 0 ${e.x.toFixed(1)} ${e.y.toFixed(1)}`
-  }
-
-  const needleTip = pt(animAngle, r * 0.76)
-  const labelR = r + 28
-  const levelIdx = Math.min(4, Math.floor(score / 20))
-
-  return (
-    <div className="flex flex-col items-center">
-      <svg viewBox="0 0 320 188" className="w-full max-w-[340px]">
-        {segs.map(s => (
-          <path key={s.label} d={arcPath(s.from, s.to)} fill="none" stroke={s.color} strokeWidth={sw} strokeLinecap="butt" />
-        ))}
-        {segs.map(s => {
-          const lp = pt((s.from + s.to) / 2, labelR)
-          return <text key={s.label} x={lp.x.toFixed(1)} y={lp.y.toFixed(1)} fontSize="8.5" fill={s.color} textAnchor="middle">{s.label}</text>
-        })}
-        <line x1={cx} y1={cy} x2={needleTip.x.toFixed(1)} y2={needleTip.y.toFixed(1)} stroke="var(--xp-txt)" strokeWidth={2.5} strokeLinecap="round" />
-        <circle cx={cx} cy={cy} r={8} fill="var(--xp-txt)" />
-        <circle cx={cx} cy={cy} r={4} fill="var(--xp-card)" />
-      </svg>
-      <div className="text-center -mt-3">
-        <p className="text-base font-bold" style={{ color: segs[levelIdx].color }}>{segs[levelIdx].label}</p>
-        <p className="text-xs mt-0.5" style={{ color: 'var(--xp-txt3)' }}>Annual Performance: {score}%</p>
-      </div>
-    </div>
-  )
-}
 
 function MonthlyBars({ data }: { data: { label: string; ms: number; isCurrent: boolean }[] }) {
   const maxMs = Math.max(...data.map(d => d.ms), 1)
@@ -217,9 +154,12 @@ export function YearlyDashboardModal({ onClose }: YearlyDashboardModalProps) {
     let bestDayMs = 0
     let bestDayLabel = ''
 
+    const today = new Date()
+    const todayCutoff = `${APP_YEAR}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+
     for (let m = 0; m < 12; m++) {
       const prefix = `${APP_YEAR}-${String(m + 1).padStart(2, '0')}-`
-      Object.entries(calData).filter(([k]) => k.startsWith(prefix)).forEach(([k, day]) => {
+      Object.entries(calData).filter(([k]) => k.startsWith(prefix) && k <= todayCutoff).forEach(([k, day]) => {
         if (day.productive || day.hyper || day.milestone) productiveDays++
         if (day.hyper) hyperDays++
         if (day.milestone) milestoneDays++
@@ -368,8 +308,7 @@ export function YearlyDashboardModal({ onClose }: YearlyDashboardModalProps) {
 
         {/* ── Annual Performance Gauge ────────────────────────────── */}
         <div className="mx-4 mb-3 rounded-xl p-5" style={{ background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
-          <p className="text-[11px] font-semibold mb-4 text-center" style={{ color: 'var(--xp-txt)' }}>Annual Performance Rating</p>
-          <AnimatedGauge score={stats.score} />
+          <GaugeMeter score={stats.score} />
         </div>
 
         {/* ── Yearly Progress Graph ───────────────────────────────── */}

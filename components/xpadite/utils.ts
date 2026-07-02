@@ -8,8 +8,16 @@ export const MONTHS = [
 export const DAY_HEADERS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'] as const
 
 export const COLOR_PALETTE = [
-  '#7c3aed', '#16a34a', '#0891b2', '#d97706', '#dc2626',
-  '#db2777', '#059669', '#ea580c', '#6366f1', '#0f172a',
+  // Purples / Indigos
+  '#7c3aed', '#6366f1', '#8b5cf6', '#a855f7',
+  // Blues / Cyans
+  '#0891b2', '#0ea5e9', '#06b6d4', '#3b82f6',
+  // Greens / Teals
+  '#16a34a', '#059669', '#10b981', '#14b8a6',
+  // Yellows / Oranges
+  '#f59e0b', '#d97706', '#ea580c', '#f97316',
+  // Reds / Pinks
+  '#dc2626', '#e11d48', '#db2777', '#ec4899',
 ] as const
 
 export const APP_YEAR = new Date().getFullYear()

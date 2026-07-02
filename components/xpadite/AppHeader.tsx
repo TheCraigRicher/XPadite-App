@@ -246,7 +246,7 @@ export function AppHeader({ onYearDash, onMotivate }: AppHeaderProps) {
             className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all duration-150 hover:opacity-85 hover:scale-105 flex-shrink-0"
             style={{ background: '#7c3aed', border: '0.5px solid rgba(167,139,250,0.35)' }}
           >
-            🔥 Motivate Me
+            Motivate Me 🔥
           </button>
 
           {/* 📊 Yearly */}

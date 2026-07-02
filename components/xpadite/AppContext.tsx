@@ -35,6 +35,7 @@ interface AppContextValue {
   activities: Activity[]
   addActivity: (a: Activity) => void
   removeActivity: (id: string) => void
+  updateActivity: (id: string, patch: Partial<Activity>) => void
   selectedActId: string
   setSelectedActId: (id: string) => void
   isDark: boolean
@@ -132,6 +133,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     })
   }, [])
 
+  const updateActivity = useCallback((id: string, patch: Partial<Activity>) => {
+    setActivitiesState(prev => {
+      const next = prev.map(a => a.id === id ? { ...a, ...patch } : a)
+      try { localStorage.setItem('xp9a', JSON.stringify(next)) } catch {}
+      return next
+    })
+  }, [])
+
   const removeActivity = useCallback((id: string) => {
     setActivitiesState(prev => {
       const next = prev.filter(a => a.id !== id)
@@ -153,7 +162,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     <AppContext.Provider value={{
       calData, updateDay,
       sessions, addSession,
-      activities, addActivity, removeActivity,
+      activities, addActivity, removeActivity, updateActivity,
       selectedActId, setSelectedActId,
       isDark, setIsDark,
       activeSession, setActiveSession,

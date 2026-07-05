@@ -448,8 +448,8 @@ export function MonthCard({
           ))}
         </div>
 
-        {/* Calendar grid — natural weeks; content-start keeps rows compact, flex-1 pushes Share button to bottom */}
-        <div className="grid grid-cols-7 gap-y-1 flex-1 content-start">
+        {/* Calendar grid — natural compact height; spacer below pushes Share button to bottom */}
+        <div className="grid grid-cols-7">
           {cells.map((cell) => {
             if (cell.isGhost) {
               return (
@@ -681,7 +681,7 @@ export function MonthCard({
               );
 
             let circleStyle: React.CSSProperties = {
-              color: isSun ? "#f97316" : isDark ? "#E5E7EB" : "#374151",
+              color: isSun ? "#f97316" : isDark ? "var(--xp-txt3)" : "#374151",
               fontSize: "9px",
             };
 
@@ -744,6 +744,9 @@ export function MonthCard({
             );
           })}
         </div>
+
+        {/* Spacer: absorbs remaining height so Share button sits at the bottom without stretching the calendar */}
+        <div className="flex-1" />
 
         {/* Share button — pinned to bottom of card via flex-col layout */}
         <div className="flex justify-center pt-3 pb-2">

@@ -64,3 +64,23 @@ export interface ActiveTaskTimer {
   taskText: string
   taskIndex: number
 }
+
+export type RepeatFrequency = 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly'
+
+export interface Reminder {
+  id: string
+  taskId: string
+  dateKey: string
+  taskText: string
+  reminderTime: string               // "HH:MM" 24-hour local time
+  repeatFrequency: RepeatFrequency
+  soundEnabled: boolean
+  browserNotificationEnabled: boolean
+  emailEnabled: boolean
+  emailAddress: string
+  isActive: boolean                  // true = user wants this reminder; never set false by local firing
+  nextRunAt: number                  // Unix ms
+  lastSentAt: number | null
+  localFiredAt: number | null        // local-only, never synced to Supabase; set when in-app/sound/browser alert fires
+  timezone?: string                  // IANA timezone captured at save time, e.g. "America/Vancouver"
+}

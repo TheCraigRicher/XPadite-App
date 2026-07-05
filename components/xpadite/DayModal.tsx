@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useApp, EMPTY_DAY } from './AppContext'
 import type { Task, TaskSession } from './types'
 import { formatMs, formatHMS, formatTime, APP_YEAR } from './utils'
+import { ReminderModal } from './ReminderModal'
 
 // ─── Confetti Pop ─────────────────────────────────────────────────────────────
 
@@ -237,10 +238,11 @@ interface TaskMenuProps {
   onAdjustTime: () => void
   onDuplicate: () => void
   onDelete: () => void
+  onSetReminder: () => void
   onClose: () => void
 }
 
-function TaskMenu({ onAdjustTime, onDuplicate, onDelete, onClose }: TaskMenuProps) {
+function TaskMenu({ onAdjustTime, onDuplicate, onDelete, onSetReminder, onClose }: TaskMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -252,6 +254,7 @@ function TaskMenu({ onAdjustTime, onDuplicate, onDelete, onClose }: TaskMenuProp
   }, [onClose])
 
   const items = [
+    { icon: '🔔', label: 'Set Reminder', action: onSetReminder },
     { icon: '⏱', label: 'Adjust Time', action: onAdjustTime },
     { icon: '⧉', label: 'Duplicate Task', action: onDuplicate },
     { icon: '🗑', label: 'Delete Task', action: onDelete, danger: true },
@@ -286,6 +289,7 @@ interface TaskRowProps {
   isActive: boolean
   now: number
   editMode: boolean
+  dateKey: string
   onToggle: () => void
   onDelete: () => void
   onDuplicate: () => void
@@ -295,18 +299,20 @@ interface TaskRowProps {
   onTextChange: (text: string) => void
   onActChange: (actId: string) => void
   onAdjustTime: (startTs: number, endTs: number, note: string) => void
+  onSetReminder: () => void
   onDragStart: () => void
   onDragOver: (e: React.DragEvent) => void
   onDrop: () => void
 }
 
 function TaskRow({
-  task, index, isActive, now, editMode,
+  task, index, isActive, now, editMode, dateKey,
   onToggle, onDelete, onDuplicate, onStartTimer, onStopTimer,
-  onJournalChange, onTextChange, onActChange, onAdjustTime,
+  onJournalChange, onTextChange, onActChange, onAdjustTime, onSetReminder,
   onDragStart, onDragOver, onDrop,
 }: TaskRowProps) {
-  const { activities } = useApp()
+  const { activities, reminders } = useApp()
+  const hasReminder = reminders.some(r => r.taskId === task.id && r.dateKey === dateKey && r.isActive)
   const [journalOpen, setJournalOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [adjustOpen, setAdjustOpen] = useState(false)
@@ -357,6 +363,18 @@ function TaskRow({
           >
             {task.done && <span className="text-white font-bold leading-none" style={{ fontSize: 9 }}>✓</span>}
           </button>
+
+          {/* Bell — visible only when an active reminder exists */}
+          {hasReminder && (
+            <button
+              onClick={onSetReminder}
+              title="Edit reminder"
+              className="flex-shrink-0 transition-transform hover:scale-110"
+              style={{ fontSize: 13, lineHeight: 1, color: '#a78bfa' }}
+            >
+              🔔
+            </button>
+          )}
 
           {/* Title */}
           {editMode ? (
@@ -447,6 +465,7 @@ function TaskRow({
             </button>
             {menuOpen && (
               <TaskMenu
+                onSetReminder={() => { onSetReminder(); setMenuOpen(false) }}
                 onAdjustTime={() => setAdjustOpen(true)}
                 onDuplicate={onDuplicate}
                 onDelete={onDelete}
@@ -553,7 +572,7 @@ interface DayModalProps {
 }
 
 export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModalProps) {
-  const { calData, updateDay, activeTaskTimer, setActiveTaskTimer, activities, activeSession, setActiveSession, selectedActId } = useApp()
+  const { calData, updateDay, activeTaskTimer, setActiveTaskTimer, activities, activeSession, setActiveSession, selectedActId, reminders } = useApp()
   const dayData = calData[dateKey] ?? { ...EMPTY_DAY }
 
   const [addingTask, setAddingTask] = useState(false)
@@ -563,6 +582,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   const [now, setNow] = useState(Date.now())
   const [dragItemId, setDragItemId] = useState<string | null>(null)
   const [showConfetti, setShowConfetti] = useState(false)
+  const [reminderTaskId, setReminderTaskId] = useState<string | null>(null)
   const onConfettiDone = useCallback(() => setShowConfetti(false), [])
 
   const dateLabel = useMemo(() => {
@@ -912,6 +932,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
                   isActive={activeTaskTimer?.taskId === task.id && activeTaskTimer.dateKey === dateKey}
                   now={now}
                   editMode={editMode}
+                  dateKey={dateKey}
                   onToggle={() => toggleTask(task.id)}
                   onDelete={() => deleteTask(task.id)}
                   onDuplicate={() => duplicateTask(task.id)}
@@ -921,6 +942,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
                   onTextChange={text => updateTaskText(task.id, text)}
                   onActChange={actId => updateTaskAct(task.id, actId)}
                   onAdjustTime={(s, e, n) => adjustTime(task.id, s, e, n)}
+                  onSetReminder={() => setReminderTaskId(task.id)}
                   onDragStart={() => setDragItemId(task.id)}
                   onDragOver={e => e.preventDefault()}
                   onDrop={() => handleDrop(task.id)}
@@ -1022,6 +1044,21 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
 
       {/* Confetti — only on Goal Achieved activation */}
       {showConfetti && <ConfettiPop onDone={onConfettiDone} />}
+
+      {/* Reminder modal */}
+      {reminderTaskId && (() => {
+        const reminderTask = dayData.tasks.find(t => t.id === reminderTaskId)
+        const existingReminder = reminders.find(r => r.taskId === reminderTaskId && r.dateKey === dateKey && r.isActive) ?? null
+        return reminderTask ? (
+          <ReminderModal
+            taskId={reminderTaskId}
+            dateKey={dateKey}
+            taskText={reminderTask.text}
+            existingReminder={existingReminder}
+            onClose={() => setReminderTaskId(null)}
+          />
+        ) : null
+      })()}
     </div>
   )
 }

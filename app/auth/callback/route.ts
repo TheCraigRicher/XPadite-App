@@ -26,8 +26,30 @@ export async function GET(request: NextRequest) {
       }
     )
 
-    const { error } = await supabase.auth.exchangeCodeForSession(code)
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+
     if (!error) {
+      // Write full_name to profiles on every successful auth exchange.
+      // This covers email-signup confirmation AND Google OAuth sign-in.
+      // After exchangeCodeForSession the client has the session in memory,
+      // so the authenticated UPDATE respects RLS (auth.uid() = id).
+      const user = data.user
+      if (user) {
+        const fullName =
+          (user.user_metadata?.full_name as string | null | undefined) ||
+          (user.user_metadata?.name as string | null | undefined) ||
+          null
+
+        if (fullName?.trim()) {
+          // Only set if the column is still null — never overwrite an existing name.
+          await supabase
+            .from('profiles')
+            .update({ full_name: fullName.trim() })
+            .eq('id', user.id)
+            .is('full_name', null)
+        }
+      }
+
       return NextResponse.redirect(`${origin}${next}`)
     }
   }

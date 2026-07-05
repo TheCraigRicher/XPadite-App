@@ -107,6 +107,7 @@ export function CalendarSection({ onDayDoubleClick, onMonthDashboard, onMonthZoo
                   <div
                     key={m}
                     ref={m === currentRealMonth ? currentMonthRef : null}
+                    className="flex flex-col"
                     style={{
                       transition: 'box-shadow 0.4s ease',
                       borderRadius: 12,

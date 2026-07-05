@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useApp, AppProvider } from './AppContext'
 import { getDayOfYear } from './utils'
 import { AppHeader } from './AppHeader'
@@ -159,11 +159,99 @@ function Toast({ message, exiting, onDismiss }: { message: string; exiting: bool
   )
 }
 
+// ─── Reminder sound (Web Audio API — no audio file needed) ───────────────────
+
+function playReminderSound() {
+  try {
+    const Ctx = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!Ctx) return
+    const ctx = new Ctx()
+    const play = (freq: number, start: number) => {
+      const osc  = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + start)
+      gain.gain.setValueAtTime(0, ctx.currentTime + start)
+      gain.gain.linearRampToValueAtTime(0.22, ctx.currentTime + start + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + 0.45)
+      osc.start(ctx.currentTime + start)
+      osc.stop(ctx.currentTime + start + 0.45)
+    }
+    play(880,  0)
+    play(1100, 0.18)
+    play(1320, 0.36)
+    setTimeout(() => ctx.close(), 1400)
+  } catch {}
+}
+
+// ─── Reminder checker (polls every 30s, fires in-app + browser + sound) ──────
+
+function ReminderChecker() {
+  const { reminders, fireReminderCtx, setToast } = useApp()
+
+  // Stable refs — interval reads from these so it never needs to restart
+  const remindersRef = useRef(reminders)
+  remindersRef.current = reminders
+  const fireRef = useRef(fireReminderCtx)
+  fireRef.current = fireReminderCtx
+  const toastRef = useRef(setToast)
+  toastRef.current = setToast
+
+  // Tracks which (id:nextRunAt) pairs have already fired this session
+  const firedRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    function check() {
+      const now = Date.now()
+      remindersRef.current.forEach(r => {
+        if (!r.isActive) return
+        // Once reminders: localFiredAt persists to localStorage and prevents re-firing
+        // across page refreshes. firedRef handles the current session only.
+        if (r.repeatFrequency === 'once' && r.localFiredAt !== null) return
+        if (r.nextRunAt > now) return
+        const key = `${r.id}:${r.nextRunAt}`
+        if (firedRef.current.has(key)) return
+        firedRef.current.add(key)
+
+        // In-app purple toast
+        toastRef.current(`~🔔 Reminder: ${r.taskText}\nTime to start your task.`)
+
+        // Browser notification (only if permission already granted)
+        if (
+          r.browserNotificationEnabled &&
+          typeof Notification !== 'undefined' &&
+          Notification.permission === 'granted'
+        ) {
+          new Notification(`🔔 ${r.taskText}`, {
+            body: 'Time to start your task.',
+            icon: '/favicon.ico',
+          })
+        }
+
+        // Sound alert
+        if (r.soundEnabled) playReminderSound()
+
+        // Advance nextRunAt or deactivate (once)
+        fireRef.current(r.id)
+      })
+    }
+
+    // Check immediately on mount (catches overdue reminders from while app was closed)
+    check()
+    const id = setInterval(check, 30_000)
+    return () => clearInterval(id)
+  }, []) // empty deps — interval is stable for the lifetime of this component
+
+  return null
+}
+
 // ─── ThemedApp ────────────────────────────────────────────────────────────────
 
 interface ModalDay { key: string; month: number; day: number }
 
-function ThemedApp({ email: _email }: XpaditeAppProps) {
+function ThemedApp(_props: XpaditeAppProps) {
   const { isDark, toast, setToast } = useApp()
   const [toastExiting, setToastExiting] = useState(false)
   const [modalDay, setModalDay] = useState<ModalDay | null>(null)
@@ -194,6 +282,7 @@ function ThemedApp({ email: _email }: XpaditeAppProps) {
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       }}
     >
+      <ReminderChecker />
       <AppSidebar onGallery={() => setGalleryOpen(true)} />
 
       {/* Daily quote bar */}
@@ -285,7 +374,7 @@ function ThemedApp({ email: _email }: XpaditeAppProps) {
 
 export function XpaditeApp({ email }: XpaditeAppProps) {
   return (
-    <AppProvider>
+    <AppProvider email={email}>
       <ThemedApp email={email} />
     </AppProvider>
   )

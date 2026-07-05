@@ -191,7 +191,8 @@ export function MonthCard({
   onMonthZoom,
 }: MonthCardProps) {
   const { calData, updateDay, setToast, isDark } = useApp();
-  const gapColor = isDark ? "#1a1a28" : "#ffffff";
+  // Match the actual card surface so the productive-circle inner ring blends in
+  const gapColor = isCurrentMonth ? "#eff6ff" : (isDark ? "#1a1a28" : "#ffffff");
 
   // Ring animation — tracks the key of a day that just became productive
   const [newlyMarkedKey, setNewlyMarkedKey] = useState<string | null>(null);
@@ -457,7 +458,9 @@ export function MonthCard({
                   key={cell.key}
                   className="aspect-square flex items-center justify-center text-[8px]"
                   style={{
-                    color: isDark ? "rgba(255,255,255,0.45)" : "#8f98a6",
+                    color: isDark
+                      ? (isCurrentMonth ? "#94a3b8" : "rgba(255,255,255,0.45)")
+                      : "#8f98a6",
                   }}
                 >
                   {cell.day}

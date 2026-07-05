@@ -650,7 +650,7 @@ export function MonthCard({
                     <span
                       style={{
                         position: "absolute",
-                        top: "50%",
+                        top: "44%",
                         left: "50%",
                         transform: "translate(-50%, -50%)",
                         fontSize: "34px",
@@ -664,7 +664,7 @@ export function MonthCard({
                       style={{
                         position: "absolute",
                         top: "52%",
-                        left: "50%",
+                        left: "46%",
                         transform: "translate(-50%, -50%)",
                         zIndex: 2,
                         fontSize: "10px",

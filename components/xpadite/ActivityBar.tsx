@@ -501,6 +501,139 @@ export function ActivityDropdown() {
   );
 }
 
+// ─── ConfirmRemoveModal ───────────────────────────────────────────────────────
+
+interface ConfirmRemoveModalProps {
+  activityName: string
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+function ConfirmRemoveModal({ activityName, onConfirm, onCancel }: ConfirmRemoveModalProps) {
+  const { isDark } = useApp()
+  const [hoverCancel, setHoverCancel] = useState(false)
+  const [hoverRemove, setHoverRemove] = useState(false)
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onCancel() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+
+  return (
+    <>
+      <style>{`
+        @keyframes xp-confirm-backdrop { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes xp-confirm-card { from { opacity: 0; transform: scale(0.93) translateY(6px) } to { opacity: 1; transform: scale(1) translateY(0) } }
+      `}</style>
+
+      {/* Frosted backdrop */}
+      <div
+        className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+        style={{
+          background: isDark ? 'rgba(10,4,24,0.65)' : 'rgba(30,10,60,0.32)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          animation: 'xp-confirm-backdrop 200ms ease forwards',
+        }}
+        onClick={onCancel}
+      >
+        {/* Card */}
+        <div
+          className="w-full max-w-[360px] px-8 pt-8 pb-7 text-center"
+          style={{
+            background: isDark ? '#15102a' : '#ffffff',
+            border: `1px solid ${isDark ? 'rgba(124,58,237,0.40)' : 'rgba(124,58,237,0.22)'}`,
+            borderRadius: 20,
+            boxShadow: isDark
+              ? '0 0 0 4px rgba(124,58,237,0.10), 0 32px 80px rgba(0,0,0,0.55), 0 8px 24px rgba(124,58,237,0.18)'
+              : '0 0 0 4px rgba(124,58,237,0.07), 0 24px 64px rgba(124,58,237,0.14), 0 6px 20px rgba(0,0,0,0.10)',
+            animation: 'xp-confirm-card 210ms cubic-bezier(0.34,1.06,0.64,1) forwards',
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Premium purple icon container */}
+          <div
+            style={{
+              width: 56, height: 56, borderRadius: '50%',
+              background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              margin: '0 auto 20px',
+              boxShadow: '0 6px 24px rgba(124,58,237,0.50)',
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" style={{ width: 22, height: 22 }}>
+              <polyline points="3 6 5 6 21 6" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M10 11v6M14 11v6" strokeLinecap="round" />
+              <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+
+          {/* Title */}
+          <h2 className="text-sm font-semibold mb-3" style={{ color: '#7c3aed' }}>
+            Remove Activity
+          </h2>
+
+          {/* Body */}
+          <p className="text-xs leading-relaxed mb-1"
+            style={{ color: isDark ? 'rgba(255,255,255,0.50)' : '#6b7280' }}>
+            Are you sure you want to remove
+          </p>
+          <p className="text-[13px] font-semibold mb-2"
+            style={{ color: isDark ? 'rgba(255,255,255,0.90)' : '#111827' }}>
+            &ldquo;{activityName}&rdquo;
+          </p>
+          <p className="text-[11px] mb-7"
+            style={{ color: isDark ? 'rgba(255,255,255,0.28)' : '#9ca3af' }}>
+            This action cannot be undone.
+          </p>
+
+          {/* Buttons */}
+          <div className="flex items-center justify-center gap-3">
+            {/* Cancel — purple border + text; hover: light purple tint */}
+            <button
+              onClick={onCancel}
+              onMouseEnter={() => setHoverCancel(true)}
+              onMouseLeave={() => setHoverCancel(false)}
+              className="px-6 py-2.5 rounded-xl text-sm font-medium"
+              style={{
+                background: hoverCancel
+                  ? 'rgba(124,58,237,0.09)'
+                  : isDark ? 'rgba(255,255,255,0.04)' : '#ffffff',
+                color: '#7c3aed',
+                border: '1px solid rgba(124,58,237,0.45)',
+                transition: 'background 150ms ease',
+              }}
+            >
+              Cancel
+            </button>
+
+            {/* Remove — XPadite purple fill; hover: brighter + stronger glow */}
+            <button
+              onClick={onConfirm}
+              onMouseEnter={() => setHoverRemove(true)}
+              onMouseLeave={() => setHoverRemove(false)}
+              className="px-6 py-2.5 rounded-xl text-sm font-medium text-white"
+              style={{
+                background: hoverRemove
+                  ? 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)'
+                  : 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                boxShadow: hoverRemove
+                  ? '0 6px 20px rgba(124,58,237,0.55)'
+                  : '0 3px 10px rgba(124,58,237,0.35)',
+                transition: 'background 150ms ease, box-shadow 150ms ease',
+              }}
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
 // ─── ActivityBar ──────────────────────────────────────────────────────────────
 
 interface ActivityBarProps {
@@ -511,14 +644,13 @@ export function ActivityBar({ onQotdTrigger }: ActivityBarProps) {
   const { activities, selectedActId, removeActivity } = useApp();
   const [showAddModal, setShowAddModal] = useState(false);
   const [editActivity, setEditActivity] = useState<Activity | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   const selectedAct = activities.find(a => a.id === selectedActId) ?? activities[0] ?? null;
 
   function handleRemove() {
     if (!selectedAct) return;
-    if (window.confirm(`Remove "${selectedAct.name}"?`)) {
-      removeActivity(selectedAct.id);
-    }
+    setConfirmRemove(true);
   }
 
   return (
@@ -581,6 +713,13 @@ export function ActivityBar({ onQotdTrigger }: ActivityBarProps) {
 
       {showAddModal && <AddActivityModal onClose={() => setShowAddModal(false)} />}
       {editActivity && <EditActivityModal activity={editActivity} onClose={() => setEditActivity(null)} />}
+      {confirmRemove && selectedAct && (
+        <ConfirmRemoveModal
+          activityName={selectedAct.name}
+          onConfirm={() => { removeActivity(selectedAct.id); setConfirmRemove(false); }}
+          onCancel={() => setConfirmRemove(false)}
+        />
+      )}
     </>
   );
 }

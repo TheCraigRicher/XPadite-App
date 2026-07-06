@@ -18,6 +18,14 @@ const MinusIcon = () => (
   </svg>
 );
 
+const EditIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+
 const ChevronIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
     <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
@@ -409,8 +417,8 @@ function EditActivityModal({ activity, onClose }: EditActivityModalProps) {
 
 // ─── Dropdown ─────────────────────────────────────────────────────────────────
 
-function ActivityDropdown() {
-  const { activities, selectedActId, setSelectedActId, removingMode, activeSession, setToast } = useApp();
+export function ActivityDropdown() {
+  const { activities, selectedActId, setSelectedActId, activeSession, setToast } = useApp();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -431,7 +439,7 @@ function ActivityDropdown() {
       setToast('~Active session in progress\nPlease clock out of your current task before selecting another.');
       return;
     }
-    if (!removingMode) setOpen((o) => !o);
+    setOpen((o) => !o);
   }
 
   function handleSelect(id: string) {
@@ -495,101 +503,80 @@ function ActivityDropdown() {
 
 // ─── ActivityBar ──────────────────────────────────────────────────────────────
 
-export function ActivityBar() {
-  const { activities, selectedActId, setSelectedActId, removeActivity, removingMode, setRemovingMode, activeSession, setToast } = useApp();
+interface ActivityBarProps {
+  onQotdTrigger: () => void
+}
+
+export function ActivityBar({ onQotdTrigger }: ActivityBarProps) {
+  const { activities, selectedActId, removeActivity } = useApp();
   const [showAddModal, setShowAddModal] = useState(false);
   const [editActivity, setEditActivity] = useState<Activity | null>(null);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
 
-  function handlePillClick(id: string) {
-    if (removingMode) return;
-    if (activeSession && id !== selectedActId) {
-      setToast('~Active session in progress\nPlease clock out of your current task before selecting another.');
-      return;
+  const selectedAct = activities.find(a => a.id === selectedActId) ?? activities[0] ?? null;
+
+  function handleRemove() {
+    if (!selectedAct) return;
+    if (window.confirm(`Remove "${selectedAct.name}"?`)) {
+      removeActivity(selectedAct.id);
     }
-    setSelectedActId(id);
   }
 
   return (
     <>
       <div
-        className="flex items-center gap-2 px-4 py-2 flex-wrap"
+        className="flex items-center gap-2 px-4 py-1.5"
         style={{ background: "var(--xp-bg2)", borderBottom: "0.5px solid var(--xp-bdr)" }}
       >
         {/* Label */}
-        <span className="text-[10px] uppercase tracking-widest font-medium flex-shrink-0" style={{ color: "var(--xp-txt3)" }}>
+        <span className="text-[10px] uppercase tracking-wider font-normal flex-shrink-0" style={{ color: "var(--xp-txt3)", opacity: 0.7 }}>
           Activities
         </span>
 
-        {/* Add */}
-        <button
-          onClick={() => { setRemovingMode(false); setShowAddModal(true); }}
-          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium text-white transition-opacity hover:opacity-80 flex-shrink-0"
-          style={{ background: "#7c3aed" }}
-        >
-          <PlusIcon /> Add
-        </button>
-
-        {/* Remove */}
-        <button
-          onClick={() => setRemovingMode(!removingMode)}
-          className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium transition-all duration-150 flex-shrink-0"
-          style={{
-            background: removingMode ? "#fef2f2" : "#f3f4f6",
-            color: removingMode ? "#ef4444" : "#6b7280",
-            border: `1px solid ${removingMode ? "#fecaca" : "#e5e7eb"}`,
-          }}
-        >
-          <MinusIcon /> Remove
-        </button>
-
-        <div className="w-px h-4 flex-shrink-0" style={{ background: "var(--xp-bdr2)" }} />
-
+        {/* Activity selector dropdown */}
         <ActivityDropdown />
 
-        {/* Pills — single-click selects, double-click edits */}
-        {activities.map((a) => (
-          <div key={a.id} className="relative flex-shrink-0">
-            <div
-              onClick={() => handlePillClick(a.id)}
-              onDoubleClick={() => { if (!removingMode) setEditActivity(a); }}
-              onMouseEnter={() => setHoveredId(a.id)}
-              onMouseLeave={() => setHoveredId(null)}
-              title="Double-click to edit"
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs cursor-pointer select-none"
-              style={{
-                color: a.color,
-                background:
-                  a.id === selectedActId && !removingMode
-                    ? a.color + "22"
-                    : hoveredId === a.id
-                    ? a.color + "18"
-                    : "var(--xp-bg3)",
-                border: `1.5px solid ${
-                  a.id === selectedActId && !removingMode
-                    ? a.color
-                    : hoveredId === a.id
-                    ? a.color + "70"
-                    : "transparent"
-                }`,
-                transition: "background 0.2s ease, border-color 0.2s ease",
-              }}
-            >
-              <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: a.color }} />
-              {a.emoji ? a.emoji + ' ' : ''}{a.name}
-            </div>
+        {/* Icon buttons: Add · Remove · Edit — equal w/h/gap for visual cohesion */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            onClick={() => setShowAddModal(true)}
+            title="Add activity"
+            className="w-7 h-7 rounded-full flex items-center justify-center transition-opacity duration-150 hover:opacity-70"
+            style={{ background: "rgba(124,58,237,0.08)", color: "#7c3aed", border: "0.5px solid rgba(124,58,237,0.25)" }}
+          >
+            <PlusIcon />
+          </button>
+          <button
+            onClick={handleRemove}
+            disabled={!selectedAct}
+            title="Remove selected activity"
+            className="w-7 h-7 rounded-full flex items-center justify-center transition-opacity duration-150 hover:opacity-70 disabled:opacity-30"
+            style={{ background: "rgba(124,58,237,0.08)", color: "#7c3aed", border: "0.5px solid rgba(124,58,237,0.25)" }}
+          >
+            <MinusIcon />
+          </button>
+          <button
+            onClick={() => { if (selectedAct) setEditActivity(selectedAct); }}
+            disabled={!selectedAct}
+            title="Edit selected activity"
+            className="w-7 h-7 rounded-full flex items-center justify-center transition-opacity duration-150 hover:opacity-70 disabled:opacity-30"
+            style={{ background: "rgba(124,58,237,0.08)", color: "#7c3aed", border: "0.5px solid rgba(124,58,237,0.25)" }}
+          >
+            <EditIcon />
+          </button>
+        </div>
 
-            {removingMode && (
-              <button
-                onClick={() => removeActivity(a.id)}
-                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center text-[11px] font-bold leading-none hover:bg-red-600 transition-colors shadow-sm z-10"
-                aria-label={`Remove ${a.name}`}
-              >
-                −
-              </button>
-            )}
-          </div>
-        ))}
+        {/* Push QOTD to far right */}
+        <div className="flex-1" />
+
+        {/* QOTD — matches Motivate Me / Yearly header button family */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onQotdTrigger(); }}
+          title="Quote of the Day"
+          className="hidden sm:flex items-center px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white flex-shrink-0 transition-opacity duration-150 hover:opacity-85"
+          style={{ background: "#7c3aed", border: "0.5px solid rgba(167,139,250,0.35)" }}
+        >
+          QOTD
+        </button>
       </div>
 
       {showAddModal && <AddActivityModal onClose={() => setShowAddModal(false)} />}

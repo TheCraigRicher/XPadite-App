@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useApp, AppProvider } from './AppContext'
-import { getDayOfYear } from './utils'
 import { AppHeader } from './AppHeader'
 import { AppSidebar } from './AppSidebar'
 import { ActivityBar } from './ActivityBar'
@@ -20,49 +19,34 @@ interface XpaditeAppProps {
   email: string
 }
 
-// ─── Quote of the Day ─────────────────────────────────────────────────────────
+// ─── QOTD data ────────────────────────────────────────────────────────────────
 
-const DAILY_QUOTES = [
-  "The secret of getting ahead is getting started.",
-  "Small steps every day compound into extraordinary results.",
-  "It always seems impossible until it's done.",
-  "Don't watch the clock; do what it does. Keep going.",
-  "The future depends on what you do today.",
-  "Success is not final, failure is not fatal — it's the courage to continue that counts.",
-  "You don't have to be great to start, but you have to start to be great.",
-  "Focus on being productive instead of busy.",
-  "Excellence is not an act, but a habit.",
-  "The only way to do great work is to love what you do.",
-  "Your limitation is only your imagination.",
-  "Push yourself, because no one else is going to do it for you.",
-  "Great things never come from comfort zones.",
-  "Dream it. Wish it. Do it.",
-  "Consistency is the foundation of achievement.",
-  "One productive day at a time — that's how it's built.",
-  "The discipline you maintain today builds the life you want tomorrow.",
+const QOTD_LIST = [
+  { quote: "The secret of getting ahead is getting started.", author: "Mark Twain" },
+  { quote: "Small steps every day compound into extraordinary results.", author: "Xpadite" },
+  { quote: "It always seems impossible until it's done.", author: "Nelson Mandela" },
+  { quote: "Don't watch the clock; do what it does. Keep going.", author: "Sam Levenson" },
+  { quote: "The future depends on what you do today.", author: "Mahatma Gandhi" },
+  { quote: "Success is not final, failure is not fatal — it's the courage to continue that counts.", author: "Winston Churchill" },
+  { quote: "Focus on being productive instead of busy.", author: "Anonymous" },
+  { quote: "Excellence is not an act, but a habit.", author: "Aristotle" },
+  { quote: "You don't have to be great to start, but you have to start to be great.", author: "Zig Ziglar" },
+  { quote: "Consistency is the foundation of achievement.", author: "Xpadite" },
+  { quote: "The discipline you maintain today builds the life you want tomorrow.", author: "Xpadite" },
+  { quote: "Push yourself, because no one else is going to do it for you.", author: "Anonymous" },
+  { quote: "Great things never come from comfort zones.", author: "Anonymous" },
+  { quote: "Your limitation is only your imagination.", author: "Anonymous" },
+  { quote: "One productive day at a time — that's how it's built.", author: "Xpadite" },
+  { quote: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
+  { quote: "Dream it. Wish it. Do it.", author: "Anonymous" },
 ]
 
-function QuoteBar() {
-  const dayOfYear = useMemo(() => getDayOfYear(), [])
-  const quote = DAILY_QUOTES[dayOfYear % DAILY_QUOTES.length]
-
-  return (
-    <div
-      style={{
-        background: 'linear-gradient(90deg, #4c1d95 0%, #5b21b6 50%, #4c1d95 100%)',
-        padding: '8px 20px',
-        textAlign: 'center',
-      }}
-    >
-      <span style={{ fontSize: 11, color: 'rgba(216,180,254,0.7)', fontWeight: 500, letterSpacing: '0.06em', marginRight: 6 }}>
-        QUOTE OF THE DAY
-      </span>
-      <span style={{ fontSize: 11.5, color: 'white', fontStyle: 'italic', fontWeight: 400 }}>
-        &ldquo;{quote}&rdquo;
-      </span>
-    </div>
-  )
-}
+// Deterministic per calendar day: same day → same quote
+const _qotdToday = (() => {
+  const d = new Date()
+  const key = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()
+  return QOTD_LIST[key % QOTD_LIST.length]
+})()
 
 // ─── Motivation Modal ─────────────────────────────────────────────────────────
 
@@ -262,6 +246,31 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [yearlyOpen, setYearlyOpen] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
 
+  // ── QOTD banner ──────────────────────────────────────────────────────────────
+  const [qotdIn, setQotdIn] = useState(false)
+  const qotdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => { if (qotdTimerRef.current) clearTimeout(qotdTimerRef.current) }, [])
+
+  // Click-outside dismisses banner while it's visible
+  useEffect(() => {
+    if (!qotdIn) return
+    function onDocClick() {
+      if (qotdTimerRef.current) { clearTimeout(qotdTimerRef.current); qotdTimerRef.current = null }
+      setQotdIn(false)
+    }
+    document.addEventListener('click', onDocClick)
+    return () => document.removeEventListener('click', onDocClick)
+  }, [qotdIn])
+
+  function triggerQotd() {
+    // Cancel any running auto-dismiss; show (or keep visible) and restart timer
+    if (qotdTimerRef.current) { clearTimeout(qotdTimerRef.current); qotdTimerRef.current = null }
+    setQotdIn(true)
+    qotdTimerRef.current = setTimeout(() => setQotdIn(false), 7000)
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
+
   // Auto-dismiss toast with fade-out
   useEffect(() => {
     if (!toast) { setToastExiting(false); return }
@@ -285,8 +294,39 @@ function ThemedApp(_props: XpaditeAppProps) {
       <ReminderChecker />
       <AppSidebar onGallery={() => setGalleryOpen(true)} />
 
-      {/* Daily quote bar */}
-      <QuoteBar />
+      {/* QOTD banner — in-flow, max-height collapse so header shifts down gracefully */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          overflow: 'hidden',
+          maxHeight: qotdIn ? '44px' : '0px',
+          opacity: qotdIn ? 1 : 0,
+          transition: 'max-height 300ms ease, opacity 250ms ease',
+          willChange: 'max-height, opacity',
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            background: 'linear-gradient(90deg, #4c1d95 0%, #5b21b6 50%, #4c1d95 100%)',
+            padding: '9px 24px',
+            textAlign: 'center',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          <span style={{ fontSize: 10, color: 'rgba(216,180,254,0.7)', fontWeight: 600, letterSpacing: '0.08em', marginRight: 8 }}>
+            QUOTE OF THE DAY
+          </span>
+          <span style={{ fontSize: 11.5, color: 'white', fontStyle: 'italic', fontWeight: 400 }}>
+            &ldquo;{_qotdToday.quote}&rdquo;
+          </span>
+          <span style={{ fontSize: 10, color: 'rgba(216,180,254,0.55)', marginLeft: 8 }}>
+            — {_qotdToday.author}
+          </span>
+        </div>
+      </div>
 
       {/* Header (two-row: logo + controls) */}
       <AppHeader
@@ -296,14 +336,13 @@ function ThemedApp(_props: XpaditeAppProps) {
 
       {/* Centered content */}
       <div style={{ maxWidth: 1360, width: '100%', margin: '0 auto', padding: '0 16px', flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <ActivityBar />
+        <ActivityBar onQotdTrigger={triggerQotd} />
         <main style={{ flex: 1 }}>
           <StatsRow />
           <LegendRow />
           <CalendarSection
             onDayDoubleClick={(key, month, day) => setModalDay({ key, month, day })}
             onMonthZoom={month => setFullPageMonth(month)}
-            onMonthDashboard={month => setZoomedMonth(month)}
           />
         </main>
       </div>
@@ -335,6 +374,7 @@ function ThemedApp(_props: XpaditeAppProps) {
         <MonthFullPage
           month={fullPageMonth}
           onClose={() => setFullPageMonth(null)}
+          onMonthDashboard={month => setZoomedMonth(month)}
         />
       )}
 

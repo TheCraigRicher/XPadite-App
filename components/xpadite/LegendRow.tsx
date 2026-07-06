@@ -43,18 +43,6 @@ export function LegendRow() {
         </div>
       </Tip>
 
-      <Tip content="Today — the current date">
-        <div className="flex items-center gap-1.5 text-xs cursor-default">
-          <div
-            className="w-4 h-4 rounded-full flex items-center justify-center text-[7px] font-semibold flex-shrink-0"
-            style={{ border: '2px solid var(--xp-acc)', color: 'var(--xp-acc)' }}
-          >
-            T
-          </div>
-          <span>Today</span>
-        </div>
-      </Tip>
-
       <Tip content="Streak — consecutive productive days connected in a chain">
         <div className="flex items-center gap-1.5 text-xs cursor-default">
           <div className="flex items-center flex-shrink-0">

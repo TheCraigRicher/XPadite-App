@@ -30,11 +30,10 @@ const currentQuarterLabel = QUARTERS[Math.floor(currentRealMonth / 3)].label
 
 interface CalendarSectionProps {
   onDayDoubleClick?: (key: string, month: number, day: number) => void
-  onMonthDashboard?: (month: number) => void
   onMonthZoom?: (month: number) => void
 }
 
-export function CalendarSection({ onDayDoubleClick, onMonthDashboard, onMonthZoom }: CalendarSectionProps) {
+export function CalendarSection({ onDayDoubleClick, onMonthZoom }: CalendarSectionProps) {
   const [open, setOpen] = useState<Record<string, boolean>>({
     Q1: true, Q2: true, Q3: true, Q4: true,
   })
@@ -107,7 +106,7 @@ export function CalendarSection({ onDayDoubleClick, onMonthDashboard, onMonthZoo
                   <div
                     key={m}
                     ref={m === currentRealMonth ? currentMonthRef : null}
-                    className="flex flex-col"
+                    className="flex flex-col h-full"
                     style={{
                       transition: 'box-shadow 0.4s ease',
                       borderRadius: 12,
@@ -118,7 +117,6 @@ export function CalendarSection({ onDayDoubleClick, onMonthDashboard, onMonthZoo
                       month={m}
                       isCurrentMonth={m === currentRealMonth}
                       onDayDoubleClick={onDayDoubleClick}
-                      onMonthDashboard={onMonthDashboard}
                       onMonthZoom={onMonthZoom}
                     />
                   </div>

@@ -172,7 +172,6 @@ interface MonthCardProps {
   month: number;
   isCurrentMonth: boolean;
   onDayDoubleClick?: (key: string, month: number, day: number) => void;
-  onMonthDashboard?: (month: number) => void;
   onMonthZoom?: (month: number) => void;
 }
 
@@ -187,7 +186,6 @@ export function MonthCard({
   month,
   isCurrentMonth,
   onDayDoubleClick,
-  onMonthDashboard,
   onMonthZoom,
 }: MonthCardProps) {
   const { calData, updateDay, setToast, isDark } = useApp();
@@ -206,6 +204,9 @@ export function MonthCard({
     },
     [],
   );
+
+  // ── Button hover state ─────────────────────────────────────────────────────
+  const [shareHov, setShareHov] = useState(false);
 
   // ── Share panel state ──────────────────────────────────────────────────────
   const [panelOpen, setPanelOpen] = useState(false);
@@ -346,9 +347,9 @@ export function MonthCard({
         isGhost: false,
       });
     }
-    // Pad only to complete the final partial week (never add a blank row)
+    // Always pad to 42 cells (6 rows) with ghost dates from the next month
     let nextDay = 1;
-    while (result.length % 7 !== 0) {
+    while (result.length < 42) {
       result.push({
         day: nextDay++,
         key: `ghost-next-${month}-${nextDay}`,
@@ -410,29 +411,14 @@ export function MonthCard({
             : "none",
         }}
       >
-        {/* Month header */}
-        <div className="flex items-center justify-between mb-5 px-2">
+        {/* Month header — centered now that the Dashboard button is gone */}
+        <div className="flex items-center justify-center px-2 mb-3">
           <button
             onClick={() => onMonthZoom?.(month)}
-            className="text-[11px] font-semibold transition-colors hover:underline"
+            className="text-[11px] font-semibold transition-colors hover:underline whitespace-nowrap"
             style={{ color: isCurrentMonth ? "#2563eb" : "var(--xp-txt)" }}
           >
             {MONTHS[month]}
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onMonthDashboard?.(month);
-            }}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold transition-all hover:opacity-80 active:scale-95"
-            style={{
-              background: "#7c3aed",
-              color: "white",
-              border: "none",
-              boxShadow: "0 1px 4px rgba(124,58,237,0.3)",
-            }}
-          >
-            📊 Monthly Dashboard
           </button>
         </div>
 
@@ -755,12 +741,15 @@ export function MonthCard({
         <div className="flex justify-center pt-3 pb-2">
           <button
             onClick={openPanel}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-semibold transition-all duration-200 hover:opacity-80 active:scale-95"
+            onMouseEnter={() => setShareHov(true)}
+            onMouseLeave={() => setShareHov(false)}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-semibold active:scale-95"
             style={{
-              background: "#7c3aed",
-              color: "white",
-              border: "none",
-              boxShadow: "0 1px 4px rgba(124,58,237,0.3)",
+              background: shareHov ? "#7c3aed" : "rgba(124,58,237,0.08)",
+              color:      shareHov ? "white"   : "#7c3aed",
+              border:     shareHov ? "1px solid transparent" : "1px solid rgba(124,58,237,0.30)",
+              boxShadow:  shareHov ? "0 1px 4px rgba(124,58,237,0.3)" : "none",
+              transition: "background 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease",
             }}
           >
             <ShareIcon />

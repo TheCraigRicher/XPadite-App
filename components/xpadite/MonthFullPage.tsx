@@ -294,9 +294,10 @@ function MonthWeeklyBars({ month, sessions }: { month: number; sessions: { dateK
 interface MonthFullPageProps {
   month: number
   onClose: () => void
+  onMonthDashboard?: (month: number) => void
 }
 
-export function MonthFullPage({ month, onClose }: MonthFullPageProps) {
+export function MonthFullPage({ month, onClose, onMonthDashboard }: MonthFullPageProps) {
   const { calData, sessions, activities } = useApp()
 
   useEffect(() => {
@@ -377,9 +378,20 @@ export function MonthFullPage({ month, onClose }: MonthFullPageProps) {
           <h1 className="text-sm font-bold" style={{ color: 'var(--xp-txt)' }}>
             {MONTHS[month]} {APP_YEAR}
           </h1>
-          <button onClick={onClose} className="text-sm transition-colors hover:text-red-400" style={{ color: 'var(--xp-txt3)' }}>
-            × Close
-          </button>
+          <div className="flex items-center gap-2">
+            {onMonthDashboard && (
+              <button
+                onClick={() => onMonthDashboard(month)}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all hover:opacity-85"
+                style={{ background: 'rgba(124,58,237,0.10)', color: '#7c3aed', border: '1px solid rgba(124,58,237,0.25)' }}
+              >
+                📊 Dashboard
+              </button>
+            )}
+            <button onClick={onClose} className="text-sm transition-colors hover:text-red-400" style={{ color: 'var(--xp-txt3)' }}>
+              × Close
+            </button>
+          </div>
         </div>
 
         {/* Two-column layout */}

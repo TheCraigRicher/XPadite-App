@@ -398,8 +398,8 @@ export function StatsRow() {
 
   return (
     <div>
-      {/* Time scope pills */}
-      <div className="flex items-center justify-center gap-1.5 pt-2 pb-0.5">
+      {/* Time scope pills + activity capsule */}
+      <div className="flex items-center justify-center gap-1.5 pt-2 pb-0.5 flex-wrap">
         {SCOPES.map(s => {
           const selected = scope === s.key
           const hovered  = hoveredScope === s.key && !selected
@@ -421,9 +421,12 @@ export function StatsRow() {
             </button>
           )
         })}
+
+        {/* Data scope selector — grouped with time scope pills */}
+        <DataScopeDropdown value={dataScope} onChange={setDataScope} />
       </div>
 
-      {/* Stat cards + data scope dropdown (always visible) */}
+      {/* Stat cards */}
       <div className="flex items-center justify-center gap-3 px-4 py-2.5 flex-wrap">
         {items.map((item, idx) => {
           const ac          = STAT_ACCENTS[idx]
@@ -451,11 +454,6 @@ export function StatsRow() {
             </div>
           )
         })}
-
-        {/* Data scope selector — always visible */}
-        <div className="self-center ml-1">
-          <DataScopeDropdown value={dataScope} onChange={setDataScope} />
-        </div>
       </div>
     </div>
   )

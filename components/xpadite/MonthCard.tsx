@@ -411,7 +411,7 @@ export function MonthCard({
             ? "1px solid #bfdbfe"
             : "0.5px solid var(--xp-bdr)",
           boxShadow: isCurrentMonth
-            ? "0 2px 8px rgba(59,130,246,0.08)"
+            ? `0 2px 8px rgba(59,130,246,0.08)${isDark ? `, 0 0 28px 8px ${hexToRgba(progressColor, 0.21)}, 0 0 56px 20px ${hexToRgba(progressColor, 0.11)}` : ''}`
             : "none",
         }}
       >
@@ -431,18 +431,24 @@ export function MonthCard({
               background: isZoomed
                 ? '#7c3aed'
                 : titleHovered
-                  ? (isDark ? 'rgba(255,255,255,0.90)' : '#111111')
-                  : (isDark ? 'rgba(255,255,255,0.06)' : '#f3f4f6'),
+                  ? '#111111'
+                  : isCurrentMonth
+                    ? '#ffffff'
+                    : (isDark ? 'rgba(255,255,255,0.06)' : '#f3f4f6'),
               color: isZoomed
                 ? '#ffffff'
                 : titleHovered
-                  ? (isDark ? '#111111' : '#ffffff')
-                  : (isDark ? 'rgba(255,255,255,0.72)' : '#374151'),
+                  ? '#ffffff'
+                  : isCurrentMonth
+                    ? '#374151'
+                    : (isDark ? 'rgba(255,255,255,0.72)' : '#374151'),
               border: isZoomed
                 ? '1px solid rgba(167,139,250,0.50)'
                 : titleHovered
-                  ? (isDark ? '1px solid rgba(255,255,255,0.80)' : '1px solid #111111')
-                  : (isDark ? '1px solid rgba(255,255,255,0.16)' : '1px solid #d1d5db'),
+                  ? '1px solid #111111'
+                  : isCurrentMonth
+                    ? '1px solid #c4cdd6'
+                    : (isDark ? '1px solid rgba(255,255,255,0.16)' : '1px solid #d1d5db'),
               boxShadow: isZoomed
                 ? '0 0 0 3px rgba(124,58,237,0.18), 0 2px 12px rgba(124,58,237,0.35)'
                 : 'none',
@@ -521,6 +527,7 @@ export function MonthCard({
                   top: "50%",
                   height: 2,
                   background: progressColor,
+                  boxShadow: isDark ? `0 0 7px 2px ${hexToRgba(progressColor, 0.28)}` : undefined,
                   transform: "translateY(-50%)",
                   zIndex: 0,
                   pointerEvents: "none",
@@ -536,6 +543,7 @@ export function MonthCard({
                   top: "50%",
                   height: 2,
                   background: progressColor,
+                  boxShadow: isDark ? `0 0 7px 2px ${hexToRgba(progressColor, 0.28)}` : undefined,
                   transform: "translateY(-50%)",
                   zIndex: 0,
                   pointerEvents: "none",

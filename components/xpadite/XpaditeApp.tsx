@@ -350,6 +350,16 @@ function ThemedApp(_props: XpaditeAppProps) {
         </main>
       </div>
 
+      {/* Month Full Page — rendered before DayModal so DayModal appears on top when opened from within */}
+      {fullPageMonth !== null && (
+        <MonthFullPage
+          month={fullPageMonth}
+          onClose={() => setFullPageMonth(null)}
+          onMonthDashboard={month => setZoomedMonth(month)}
+          onDayDoubleClick={(key, month, day) => setModalDay({ key, month, day })}
+        />
+      )}
+
       {/* DayModal */}
       {modalDay && (
         <DayModal
@@ -369,15 +379,6 @@ function ThemedApp(_props: XpaditeAppProps) {
           day={dashboardDay.day}
           onClose={() => setDashboardDay(null)}
           onBack={() => { setModalDay(dashboardDay); setDashboardDay(null) }}
-        />
-      )}
-
-      {/* Month Full Page (opened from month name click) */}
-      {fullPageMonth !== null && (
-        <MonthFullPage
-          month={fullPageMonth}
-          onClose={() => setFullPageMonth(null)}
-          onMonthDashboard={month => setZoomedMonth(month)}
         />
       )}
 

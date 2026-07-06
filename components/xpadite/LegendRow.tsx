@@ -1,6 +1,8 @@
 'use client'
 
 import { ReactNode } from 'react'
+import { useApp } from './AppContext'
+import { hexToRgba } from './utils'
 
 function Tip({ content, children }: { content: string; children: ReactNode }) {
   return (
@@ -18,6 +20,7 @@ function Tip({ content, children }: { content: string; children: ReactNode }) {
 }
 
 export function LegendRow() {
+  const { progressColor } = useApp()
   return (
     <div
       className="flex items-center justify-center gap-5 px-4 pb-3 flex-wrap"
@@ -28,8 +31,8 @@ export function LegendRow() {
           <div
             className="w-4 h-4 rounded-full flex-shrink-0"
             style={{
-              background: '#16a34a',
-              boxShadow: '0 0 0 2px rgba(22,163,74,0.25)',
+              background: progressColor,
+              boxShadow: `0 0 0 2px ${hexToRgba(progressColor, 0.25)}`,
             }}
           />
           <span>Productive</span>
@@ -46,11 +49,11 @@ export function LegendRow() {
       <Tip content="Streak — consecutive productive days connected in a chain">
         <div className="flex items-center gap-1.5 text-xs cursor-default">
           <div className="flex items-center flex-shrink-0">
-            <div className="w-3 h-3 rounded-full bg-green-600" style={{ boxShadow: '0 0 0 1.5px rgba(22,163,74,0.3)' }} />
-            <div className="w-3 h-0.5 bg-green-600" />
-            <div className="w-3 h-3 rounded-full bg-green-600" style={{ boxShadow: '0 0 0 1.5px rgba(22,163,74,0.3)' }} />
-            <div className="w-3 h-0.5 bg-green-600" />
-            <div className="w-3 h-3 rounded-full bg-green-600" style={{ boxShadow: '0 0 0 1.5px rgba(22,163,74,0.3)' }} />
+            <div className="w-3 h-3 rounded-full" style={{ background: progressColor, boxShadow: `0 0 0 1.5px ${hexToRgba(progressColor, 0.3)}` }} />
+            <div className="w-3 h-0.5" style={{ background: progressColor }} />
+            <div className="w-3 h-3 rounded-full" style={{ background: progressColor, boxShadow: `0 0 0 1.5px ${hexToRgba(progressColor, 0.3)}` }} />
+            <div className="w-3 h-0.5" style={{ background: progressColor }} />
+            <div className="w-3 h-3 rounded-full" style={{ background: progressColor, boxShadow: `0 0 0 1.5px ${hexToRgba(progressColor, 0.3)}` }} />
           </div>
           <span>Streak</span>
         </div>

@@ -9,6 +9,7 @@ import {
   MONTHS,
   APP_YEAR,
   getMonthStats,
+  hexToRgba,
 } from "./utils";
 import { generateShareCardDataUri } from "./ShareCardModal";
 import { addGalleryItem } from "./GalleryModal";
@@ -188,7 +189,7 @@ export function MonthCard({
   onDayDoubleClick,
   onMonthZoom,
 }: MonthCardProps) {
-  const { calData, updateDay, setToast, isDark } = useApp();
+  const { calData, updateDay, setToast, isDark, progressColor } = useApp();
   // Match the actual card surface so the productive-circle inner ring blends in
   const gapColor = isCurrentMonth ? "#eff6ff" : (isDark ? "#1a1a28" : "#ffffff");
 
@@ -489,7 +490,7 @@ export function MonthCard({
                   right: connEdge,
                   top: "50%",
                   height: 2,
-                  background: "#16a34a",
+                  background: progressColor,
                   transform: "translateY(-50%)",
                   zIndex: 0,
                   pointerEvents: "none",
@@ -504,7 +505,7 @@ export function MonthCard({
                   right: -1,
                   top: "50%",
                   height: 2,
-                  background: "#16a34a",
+                  background: progressColor,
                   transform: "translateY(-50%)",
                   zIndex: 0,
                   pointerEvents: "none",
@@ -676,11 +677,11 @@ export function MonthCard({
 
             if (productive)
               circleStyle = {
-                background: "#16a34a",
+                background: progressColor,
                 color: "white",
                 fontSize: "9px",
                 fontWeight: 600,
-                boxShadow: `0 0 0 2px ${gapColor}, 0 0 0 4.5px rgba(22,163,74,0.7)`,
+                boxShadow: `0 0 0 2px ${gapColor}, 0 0 0 4.5px ${hexToRgba(progressColor, 0.7)}`,
               };
             else if (todayCell)
               circleStyle = {
@@ -717,7 +718,7 @@ export function MonthCard({
                       r="34"
                       transform="rotate(-90 50 50)"
                       fill="none"
-                      stroke="rgba(22,163,74,0.85)"
+                      stroke={hexToRgba(progressColor, 0.85)}
                       strokeWidth="3.5"
                       pathLength="1"
                       strokeDasharray="1"

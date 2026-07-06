@@ -14,6 +14,7 @@ import { MonthFullPage } from './MonthFullPage'
 import { DayDashboardModal } from './DayDashboardModal'
 import { YearlyDashboardModal } from './YearlyDashboardModal'
 import { GalleryModal } from './GalleryModal'
+import { SettingsModal } from './SettingsModal'
 
 interface XpaditeAppProps {
   email: string
@@ -245,6 +246,7 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [motivationOpen, setMotivationOpen] = useState(false)
   const [yearlyOpen, setYearlyOpen] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // ── QOTD banner ──────────────────────────────────────────────────────────────
   const [qotdIn, setQotdIn] = useState(false)
@@ -292,7 +294,7 @@ function ThemedApp(_props: XpaditeAppProps) {
       }}
     >
       <ReminderChecker />
-      <AppSidebar onGallery={() => setGalleryOpen(true)} />
+      <AppSidebar onGallery={() => setGalleryOpen(true)} onSettings={() => setSettingsOpen(true)} />
 
       {/* QOTD banner — in-flow, max-height collapse so header shifts down gracefully */}
       <div
@@ -395,6 +397,9 @@ function ThemedApp(_props: XpaditeAppProps) {
 
       {/* Gallery modal */}
       {galleryOpen && <GalleryModal onClose={() => setGalleryOpen(false)} />}
+
+      {/* Settings modal */}
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
 
       {/* Toast */}
       {toast && (

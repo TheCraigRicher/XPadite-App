@@ -73,6 +73,8 @@ interface AppContextValue {
   setSidebarOpen: (v: boolean) => void
   toast: string | null
   setToast: (msg: string | null) => void
+  progressColor: string
+  setProgressColor: (c: string) => void
   // Reminders
   reminders: Reminder[]
   userEmail: string
@@ -100,6 +102,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const [removingMode, setRemovingMode] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  const [progressColor, setProgressColorRaw] = useState<string>('#16a34a')
   const [hydrated, setHydrated] = useState(false)
 
   const [reminders, setReminders] = useState<Reminder[]>([])
@@ -149,6 +152,10 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       const r = localStorage.getItem('xp9r')
       if (r) setReminders(JSON.parse(r) as Reminder[])
     } catch {}
+    try {
+      const pc = localStorage.getItem('xp-progress-color')
+      if (pc) setProgressColorRaw(pc)
+    } catch {}
     setHydrated(true)
   }, [])
 
@@ -193,6 +200,11 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       try { localStorage.setItem('xp9a', JSON.stringify(next)) } catch {}
       return next
     })
+  }, [])
+
+  const setProgressColor = useCallback((c: string) => {
+    setProgressColorRaw(c)
+    try { localStorage.setItem('xp-progress-color', c) } catch {}
   }, [])
 
   const removeActivity = useCallback((id: string) => {
@@ -342,6 +354,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       removingMode, setRemovingMode,
       sidebarOpen, setSidebarOpen,
       toast, setToast,
+      progressColor, setProgressColor,
       reminders, userEmail,
       upsertReminderCtx, removeReminderCtx, fireReminderCtx,
     }}>

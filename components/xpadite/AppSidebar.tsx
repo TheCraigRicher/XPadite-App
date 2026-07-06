@@ -33,9 +33,10 @@ const MENU_ITEMS = [
 
 interface AppSidebarProps {
   onGallery?: () => void
+  onSettings?: () => void
 }
 
-export function AppSidebar({ onGallery }: AppSidebarProps) {
+export function AppSidebar({ onGallery, onSettings }: AppSidebarProps) {
   const { sidebarOpen, setSidebarOpen } = useApp()
   const router = useRouter()
 
@@ -95,6 +96,7 @@ export function AppSidebar({ onGallery }: AppSidebarProps) {
               onClick={() => {
                 setSidebarOpen(false)
                 if (item.label === 'Gallery') onGallery?.()
+                if (item.label === 'Settings') onSettings?.()
               }}
               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors duration-150 hover:bg-white/7"
               style={{

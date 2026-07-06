@@ -172,6 +172,7 @@ function isStreakDay(data: DayData | undefined): boolean {
 interface MonthCardProps {
   month: number;
   isCurrentMonth: boolean;
+  isZoomed?: boolean;
   onDayDoubleClick?: (key: string, month: number, day: number) => void;
   onMonthZoom?: (month: number) => void;
 }
@@ -186,6 +187,7 @@ interface Cell {
 export function MonthCard({
   month,
   isCurrentMonth,
+  isZoomed = false,
   onDayDoubleClick,
   onMonthZoom,
 }: MonthCardProps) {
@@ -194,6 +196,7 @@ export function MonthCard({
   const gapColor = isCurrentMonth ? "#eff6ff" : (isDark ? "#1a1a28" : "#ffffff");
 
   // Ring animation — tracks the key of a day that just became productive
+  const [titleHovered, setTitleHovered] = useState(false);
   const [newlyMarkedKey, setNewlyMarkedKey] = useState<string | null>(null);
   const ringTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const calDataRef = useRef(calData);
@@ -412,12 +415,39 @@ export function MonthCard({
             : "none",
         }}
       >
-        {/* Month header — centered now that the Dashboard button is gone */}
+        {/* Month header */}
         <div className="flex items-center justify-center px-2 mb-3">
           <button
             onClick={() => onMonthZoom?.(month)}
-            className="text-[11px] font-semibold transition-colors hover:underline whitespace-nowrap"
-            style={{ color: isCurrentMonth ? "#2563eb" : "var(--xp-txt)" }}
+            onMouseEnter={() => setTitleHovered(true)}
+            onMouseLeave={() => setTitleHovered(false)}
+            className="whitespace-nowrap"
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              padding: '3px 10px',
+              borderRadius: 8,
+              cursor: 'pointer',
+              background: isZoomed
+                ? '#7c3aed'
+                : titleHovered
+                  ? (isDark ? 'rgba(255,255,255,0.90)' : '#111111')
+                  : (isDark ? 'rgba(255,255,255,0.06)' : '#f3f4f6'),
+              color: isZoomed
+                ? '#ffffff'
+                : titleHovered
+                  ? (isDark ? '#111111' : '#ffffff')
+                  : (isDark ? 'rgba(255,255,255,0.72)' : '#374151'),
+              border: isZoomed
+                ? '1px solid rgba(167,139,250,0.50)'
+                : titleHovered
+                  ? (isDark ? '1px solid rgba(255,255,255,0.80)' : '1px solid #111111')
+                  : (isDark ? '1px solid rgba(255,255,255,0.16)' : '1px solid #d1d5db'),
+              boxShadow: isZoomed
+                ? '0 0 0 3px rgba(124,58,237,0.18), 0 2px 12px rgba(124,58,237,0.35)'
+                : 'none',
+              transition: 'background 170ms ease, color 170ms ease, border-color 170ms ease, box-shadow 170ms ease',
+            }}
           >
             {MONTHS[month]}
           </button>

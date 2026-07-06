@@ -31,9 +31,10 @@ const currentQuarterLabel = QUARTERS[Math.floor(currentRealMonth / 3)].label
 interface CalendarSectionProps {
   onDayDoubleClick?: (key: string, month: number, day: number) => void
   onMonthZoom?: (month: number) => void
+  activeMonth?: number | null
 }
 
-export function CalendarSection({ onDayDoubleClick, onMonthZoom }: CalendarSectionProps) {
+export function CalendarSection({ onDayDoubleClick, onMonthZoom, activeMonth }: CalendarSectionProps) {
   const [open, setOpen] = useState<Record<string, boolean>>({
     Q1: true, Q2: true, Q3: true, Q4: true,
   })
@@ -116,6 +117,7 @@ export function CalendarSection({ onDayDoubleClick, onMonthZoom }: CalendarSecti
                     <MonthCard
                       month={m}
                       isCurrentMonth={m === currentRealMonth}
+                      isZoomed={activeMonth === m}
                       onDayDoubleClick={onDayDoubleClick}
                       onMonthZoom={onMonthZoom}
                     />

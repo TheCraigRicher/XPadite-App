@@ -345,6 +345,7 @@ function ThemedApp(_props: XpaditeAppProps) {
           <CalendarSection
             onDayDoubleClick={(key, month, day) => setModalDay({ key, month, day })}
             onMonthZoom={month => setFullPageMonth(month)}
+            activeMonth={fullPageMonth}
           />
         </main>
       </div>

@@ -561,6 +561,163 @@ function TaskRow({
   )
 }
 
+// ─── Today's Status Dropdown ──────────────────────────────────────────────────
+
+type StatusValue = 'milestone' | 'hyper' | 'goal' | 'productive'
+
+const STATUS_OPTIONS: { value: StatusValue; icon: string; label: string }[] = [
+  { value: 'productive', icon: '✅', label: 'Productive Day' },
+  { value: 'hyper',      icon: '🔥', label: 'Hyper Productive' },
+  { value: 'milestone',  icon: '🏆', label: 'Milestone Day' },
+  { value: 'goal',       icon: '🎯', label: 'Goal Achieved' },
+]
+
+function TodayStatusDropdown({
+  value,
+  onChange,
+  isDark,
+}: {
+  value: StatusValue | null
+  onChange: (v: StatusValue | null) => void
+  isDark: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [hovered, setHovered] = useState<StatusValue | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    setTimeout(() => document.addEventListener('mousedown', onOutside), 10)
+    return () => document.removeEventListener('mousedown', onOutside)
+  }, [open])
+
+  const selected = STATUS_OPTIONS.find(o => o.value === value)
+
+  return (
+    <>
+      <style>{`
+        @keyframes xp-status-drop-in {
+          from { opacity: 0; transform: translateY(-6px) }
+          to   { opacity: 1; transform: translateY(0) }
+        }
+      `}</style>
+      <div ref={containerRef} style={{ position: 'relative' }}>
+        {/* Trigger pill */}
+        <button
+          onClick={() => setOpen(o => !o)}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '5px 12px',
+            borderRadius: 20,
+            fontSize: 11,
+            fontWeight: 500,
+            border: `1px solid ${value ? 'rgba(124,58,237,0.35)' : 'var(--xp-bdr2)'}`,
+            background: value
+              ? 'rgba(124,58,237,0.07)'
+              : isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
+            color: value ? '#7c3aed' : 'var(--xp-txt3)',
+            cursor: 'pointer',
+            transition: 'border-color 150ms ease, background 150ms ease',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {selected ? `${selected.icon} ${selected.label}` : 'Not Selected'}
+          {/* Animated chevron */}
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            style={{
+              width: 12,
+              height: 12,
+              flexShrink: 0,
+              transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 200ms ease',
+            }}
+          >
+            <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+
+        {/* Dropdown panel */}
+        {open && (
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 'calc(100% + 6px)',
+              zIndex: 30,
+              minWidth: 210,
+              borderRadius: 14,
+              overflow: 'hidden',
+              background: isDark ? '#1a1530' : '#ffffff',
+              border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(124,58,237,0.18)'}`,
+              boxShadow: isDark
+                ? '0 16px 48px rgba(0,0,0,0.40), 0 4px 16px rgba(124,58,237,0.12)'
+                : '0 12px 40px rgba(0,0,0,0.14), 0 4px 12px rgba(0,0,0,0.08)',
+              animation: 'xp-status-drop-in 160ms cubic-bezier(0.16,1,0.3,1) forwards',
+            }}
+          >
+            {STATUS_OPTIONS.map(opt => {
+              const isActive = value === opt.value
+              const isHov = hovered === opt.value
+              return (
+                <button
+                  key={opt.value}
+                  onMouseEnter={() => setHovered(opt.value)}
+                  onMouseLeave={() => setHovered(null)}
+                  onClick={() => {
+                    onChange(isActive ? null : opt.value)
+                    setOpen(false)
+                    setHovered(null)
+                  }}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    padding: '10px 14px',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    border: 'none',
+                    borderLeft: `2.5px solid ${isActive ? '#7c3aed' : 'transparent'}`,
+                    background: isActive
+                      ? 'rgba(124,58,237,0.09)'
+                      : isHov ? 'rgba(124,58,237,0.05)' : 'transparent',
+                    transition: 'background 100ms ease',
+                  }}
+                >
+                  <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>{opt.icon}</span>
+                  <span style={{
+                    fontSize: 12,
+                    fontWeight: isActive ? 600 : 500,
+                    color: isActive ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.85)' : '#111827',
+                    flex: 1,
+                  }}>
+                    {opt.label}
+                  </span>
+                  {isActive && (
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5"
+                      style={{ width: 13, height: 13, flexShrink: 0 }}>
+                      <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
 // ─── DayModal ─────────────────────────────────────────────────────────────────
 
 interface DayModalProps {
@@ -572,8 +729,30 @@ interface DayModalProps {
 }
 
 export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModalProps) {
-  const { calData, updateDay, activeTaskTimer, setActiveTaskTimer, activities, activeSession, setActiveSession, selectedActId, reminders } = useApp()
+  const { calData, updateDay, activeTaskTimer, setActiveTaskTimer, activities, activeSession, setActiveSession, selectedActId, reminders, isDark } = useApp()
   const dayData = calData[dateKey] ?? { ...EMPTY_DAY }
+
+  const currentStatus: StatusValue | null =
+    dayData.milestone ? 'milestone' :
+    dayData.hyper ? 'hyper' :
+    dayData.goal ? 'goal' :
+    dayData.productive ? 'productive' : null
+
+  function handleStatusSelect(newValue: StatusValue | null) {
+    const wasGoal = !!dayData.goal
+    updateDay(dateKey, prev => {
+      if (newValue === null)
+        return { ...prev, productive: false, hyper: false, milestone: false, goal: false }
+      if (newValue === 'productive')
+        return { ...prev, productive: true, hyper: false, milestone: false, goal: false }
+      if (newValue === 'hyper')
+        return { ...prev, productive: true, hyper: true, milestone: false, goal: false }
+      if (newValue === 'milestone')
+        return { ...prev, productive: true, hyper: false, milestone: true, goal: false }
+      return { ...prev, productive: true, hyper: false, milestone: false, goal: true }
+    })
+    if (newValue === 'goal' && !wasGoal) setShowConfetti(true)
+  }
 
   const [addingTask, setAddingTask] = useState(false)
   const [newTaskText, setNewTaskText] = useState('')
@@ -826,30 +1005,26 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
           </button>
         </div>
 
-        {/* ── Toggles row ────────────────────────────────────────────────── */}
+        {/* ── Today's Status row ──────────────────────────────────────────── */}
         <div
-          className="flex items-center gap-2 px-4 py-2.5 flex-wrap flex-shrink-0"
+          className="flex items-center gap-3 px-4 py-2.5 flex-shrink-0 flex-wrap"
           style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}
         >
-          <TogglePill active={dayData.productive} color="#16a34a" label="✅ Productive day" onClick={toggleProductive} />
-          <TogglePill active={!!dayData.hyper} color="#f97316" label="🔥 Hyper Productive" onClick={toggleHyper} />
+          <span
+            className="text-[10px] font-semibold uppercase tracking-wider flex-shrink-0"
+            style={{ color: 'var(--xp-txt3)' }}
+          >
+            Today&apos;s Status
+          </span>
+          <TodayStatusDropdown value={currentStatus} onChange={handleStatusSelect} isDark={isDark} />
           <div style={{ flex: 1 }} />
           <button
             onClick={onDashboard}
             className="flex items-center gap-1.5 text-xs px-3.5 py-1.5 rounded-lg font-medium text-white transition-all hover:opacity-85 flex-shrink-0"
             style={{ background: '#7c3aed' }}
           >
-            📊 Today's Dashboard
+            📊 Today&apos;s Dashboard
           </button>
-        </div>
-
-        {/* Milestone + Goal row */}
-        <div
-          className="flex items-center gap-2 px-4 py-2 flex-shrink-0"
-          style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}
-        >
-          <TogglePill active={!!dayData.milestone} color="#7c3aed" label="🏆 Milestone day" onClick={toggleMilestone} />
-          <TogglePill active={!!dayData.goal} color="#0891b2" label="🎯 Goal Achieved" onClick={toggleGoal} />
         </div>
 
         {/* ── Scrollable body ────────────────────────────────────────────── */}

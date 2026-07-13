@@ -2,8 +2,22 @@
 
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { useApp } from './AppContext'
-import { dateKey, todayKey, MONTHS } from './utils'
-import type { CalendarData, WorkSession } from './types'
+import { dateKey, MONTHS } from './utils'
+import type { CalendarData, WorkSession, ActiveSession } from './types'
+import {
+  calculateDayScore,
+  calculateWeekProgress,
+  calculateMonthProgress,
+  calculateYearProgress,
+  calculateCurrentStreak,
+  calculateBestStreak,
+  calculateTotalMs,
+  calculateProductiveDays,
+  isProdDay,
+  buildWeekKeys,
+  buildMonthKeys,
+  buildYearKeys,
+} from './productivityEngine'
 
 type Scope     = 'today' | 'week' | 'month' | 'year'
 type DataScope = 'current' | number  // number = month index 0–11
@@ -77,41 +91,7 @@ function formatStreak(days: number): string {
   return months === 1 ? '1 month' : `${months} months`
 }
 
-// ─── Stats helpers ────────────────────────────────────────────────────────────
-
-function isProdDay(day: CalendarData[string] | undefined): boolean {
-  return !!(day?.productive || day?.hyper || day?.milestone || day?.goal)
-}
-
-function monthKeysList(year: number, mIdx: number): string[] {
-  const days = new Date(year, mIdx + 1, 0).getDate()
-  return Array.from({ length: days }, (_, i) => dateKey(year, mIdx, i + 1))
-}
-
-function getCurrentStreak(calData: CalendarData): number {
-  const d = new Date()
-  let streak = 0
-  while (true) {
-    const k = dateKey(d.getFullYear(), d.getMonth(), d.getDate())
-    if (isProdDay(calData[k])) { streak++; d.setDate(d.getDate() - 1) }
-    else break
-  }
-  return streak
-}
-
-function bestStreakInKeys(calData: CalendarData, keys: string[]): number {
-  let best = 0, cur = 0
-  for (const k of keys) {
-    if (isProdDay(calData[k])) { cur++; best = Math.max(best, cur) } else cur = 0
-  }
-  return best
-}
-
-function getScopeMs(sessions: WorkSession[], keys: Set<string>): number {
-  return sessions
-    .filter(s => s.endTs !== null && keys.has(s.dateKey))
-    .reduce((sum, s) => sum + (s.endTs! - s.startTs), 0)
-}
+// ─── Hours formatter ──────────────────────────────────────────────────────────
 
 function formatScopeHours(ms: number): string {
   if (!ms || ms < 0) return '0h'
@@ -139,115 +119,113 @@ const ZERO_RESULT: StatsResult = {
 }
 
 function computeStats(
-  calData:   CalendarData,
-  sessions:  WorkSession[],
-  scope:     Scope,
-  dataScope: DataScope,
-  today:     Date,
+  calData:       CalendarData,
+  sessions:      WorkSession[],
+  activeSession: ActiveSession | null,
+  scope:         Scope,
+  dataScope:     DataScope,
+  today:         Date,
 ): StatsResult {
   const y               = today.getFullYear()
   const currentMonthIdx = today.getMonth()
-  const tKey            = todayKey()
+  const tKey            = dateKey(y, currentMonthIdx, today.getDate())
 
   // ── Specific month selected ────────────────────────────────────────────────
-  // All scopes defer to the selected month for data; scope only affects framing.
   if (typeof dataScope === 'number') {
     const mIdx      = dataScope
     const isCurrent = mIdx === currentMonthIdx
 
-    // Today + different month → no overlap, show zeros
+    // Today + different month → no overlap
     if (scope === 'today' && !isCurrent) return ZERO_RESULT
 
-    // Today + current month → today's stats
+    // Today + current month → today's score
     if (scope === 'today' && isCurrent) {
+      const { score } = calculateDayScore(tKey, calData, sessions, activeSession, today)
       const prod = isProdDay(calData[tKey])
       return {
         productiveDays: `${prod ? 1 : 0} / 1`,
-        streak:         getCurrentStreak(calData),
-        progress:       `${prod ? 100 : 0}%`,
-        hours:          formatScopeHours(getScopeMs(sessions, new Set([tKey]))),
+        streak:         calculateCurrentStreak(calData, today),
+        progress:       `${score}%`,
+        hours:          formatScopeHours(calculateTotalMs(sessions, new Set([tKey]), activeSession, today)),
         isLiveStreak:   true,
       }
     }
 
-    // Week / Month / Year + specific month → full month stats
-    const keys     = monthKeysList(y, mIdx)
-    const keySet   = new Set(keys)
-    let productive = 0
-    for (const k of keys) { if (isProdDay(calData[k])) productive++ }
+    // Week / Month / Year + specific month → that month's full stats
+    const keys      = buildMonthKeys(mIdx, y, today)
+    const keySet    = new Set(keys)
+    const { count } = calculateProductiveDays(calData, keys)
+    const progress  = calculateMonthProgress(calData, sessions, isCurrent ? activeSession : null, mIdx, y, today)
+    const streak    = isCurrent
+      ? calculateCurrentStreak(calData, today)
+      : calculateBestStreak(calData, keys)
+    const ms = calculateTotalMs(sessions, keySet, isCurrent ? activeSession : null, today)
     return {
-      productiveDays: `${productive} / ${keys.length}`,
-      streak:         isCurrent ? getCurrentStreak(calData) : bestStreakInKeys(calData, keys),
-      progress:       `${Math.round((productive / keys.length) * 100)}%`,
-      hours:          formatScopeHours(getScopeMs(sessions, keySet)),
+      productiveDays: `${count} / ${keys.length}`,
+      streak,
+      progress:       `${progress}%`,
+      hours:          formatScopeHours(ms),
       isLiveStreak:   isCurrent,
     }
   }
 
   // ── dataScope === 'current' ────────────────────────────────────────────────
 
-  // Today / current
   if (scope === 'today') {
+    const { score } = calculateDayScore(tKey, calData, sessions, activeSession, today)
     const prod = isProdDay(calData[tKey])
+    const ms   = calculateTotalMs(sessions, new Set([tKey]), activeSession, today)
     return {
       productiveDays: `${prod ? 1 : 0} / 1`,
-      streak:         getCurrentStreak(calData),
-      progress:       `${prod ? 100 : 0}%`,
-      hours:          formatScopeHours(getScopeMs(sessions, new Set([tKey]))),
+      streak:         calculateCurrentStreak(calData, today),
+      progress:       `${score}%`,
+      hours:          formatScopeHours(ms),
       isLiveStreak:   true,
     }
   }
 
-  // Week / current — productive days vs full 7-day week; progress vs elapsed days
   if (scope === 'week') {
-    const dow      = today.getDay()
-    const weekKeys: string[] = []
-    let weekProd   = 0
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(today); d.setDate(today.getDate() - dow + i)
-      const k = dateKey(d.getFullYear(), d.getMonth(), d.getDate())
-      weekKeys.push(k)
-      if (isProdDay(calData[k])) weekProd++
-    }
-    const elapsedInWeek = dow + 1  // Sunday = 1, Saturday = 7
+    const keys      = buildWeekKeys(today)
+    const keySet    = new Set(keys)
+    const { count } = calculateProductiveDays(calData, keys)
+    const progress  = calculateWeekProgress(calData, sessions, activeSession, today)
+    const ms        = calculateTotalMs(sessions, keySet, activeSession, today)
     return {
-      productiveDays: `${weekProd} / 7`,
-      streak:         getCurrentStreak(calData),
-      progress:       `${Math.round((weekProd / elapsedInWeek) * 100)}%`,
-      hours:          formatScopeHours(getScopeMs(sessions, new Set(weekKeys))),
+      productiveDays: `${count} / ${keys.length}`,
+      streak:         calculateCurrentStreak(calData, today),
+      progress:       `${progress}%`,
+      hours:          formatScopeHours(ms),
       isLiveStreak:   true,
     }
   }
 
-  // Month / current — progress vs elapsed days in month (never count future)
   if (scope === 'month') {
-    const keys  = monthKeysList(y, currentMonthIdx)
-    let prod    = 0
-    for (const k of keys) { if (isProdDay(calData[k])) prod++ }
-    const elapsed = today.getDate()
+    const keys      = buildMonthKeys(currentMonthIdx, y, today)
+    const keySet    = new Set(keys)
+    const { count } = calculateProductiveDays(calData, keys)
+    const progress  = calculateMonthProgress(calData, sessions, activeSession, currentMonthIdx, y, today)
+    const ms        = calculateTotalMs(sessions, keySet, activeSession, today)
     return {
-      productiveDays: `${prod} / ${elapsed}`,
-      streak:         getCurrentStreak(calData),
-      progress:       `${Math.round((prod / elapsed) * 100)}%`,
-      hours:          formatScopeHours(getScopeMs(sessions, new Set(keys))),
+      productiveDays: `${count} / ${keys.length}`,
+      streak:         calculateCurrentStreak(calData, today),
+      progress:       `${progress}%`,
+      hours:          formatScopeHours(ms),
       isLiveStreak:   true,
     }
   }
 
-  // Year / current — year-to-date through today
-  const yearStart = new Date(y, 0, 1)
-  const elapsed   = Math.floor((today.getTime() - yearStart.getTime()) / 86_400_000) + 1
-  const allKeys: string[] = []
-  let prod = 0
-  for (let mo = 0; mo <= currentMonthIdx; mo++) {
-    for (const k of monthKeysList(y, mo)) { allKeys.push(k); if (isProdDay(calData[k])) prod++ }
-  }
+  // Year — best streak (not live current streak)
+  const keys      = buildYearKeys(y, today)
+  const keySet    = new Set(keys)
+  const { count } = calculateProductiveDays(calData, keys)
+  const progress  = calculateYearProgress(calData, sessions, activeSession, y, today)
+  const ms        = calculateTotalMs(sessions, keySet, activeSession, today)
   return {
-    productiveDays: `${prod} / ${elapsed}`,
-    streak:         getCurrentStreak(calData),
-    progress:       `${Math.round((prod / elapsed) * 100)}%`,
-    hours:          formatScopeHours(getScopeMs(sessions, new Set(allKeys))),
-    isLiveStreak:   true,
+    productiveDays: `${count} / ${keys.length}`,
+    streak:         calculateBestStreak(calData, keys),
+    progress:       `${progress}%`,
+    hours:          formatScopeHours(ms),
+    isLiveStreak:   false,
   }
 }
 
@@ -375,7 +353,7 @@ function DataScopeDropdown({ value, onChange }: DropdownProps) {
 // ─── StatsRow ─────────────────────────────────────────────────────────────────
 
 export function StatsRow() {
-  const { calData, sessions, isDark } = useApp()
+  const { calData, sessions, isDark, activeSession } = useApp()
   const [scope,        setScope]        = useState<Scope>('today')
   const [dataScope,    setDataScope]    = useState<DataScope>('current')
   const [hoveredScope, setHoveredScope] = useState<Scope | null>(null)
@@ -383,8 +361,8 @@ export function StatsRow() {
   const today           = useMemo(() => new Date(), [])
 
   const stats = useMemo(
-    () => computeStats(calData, sessions, scope, dataScope, today),
-    [calData, sessions, scope, dataScope, today],
+    () => computeStats(calData, sessions, activeSession, scope, dataScope, today),
+    [calData, sessions, activeSession, scope, dataScope, today],
   )
 
   const streakLabel = stats.isLiveStreak ? 'Current streak' : 'Best streak'

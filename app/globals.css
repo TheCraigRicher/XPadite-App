@@ -258,3 +258,79 @@ body {
     stroke-dashoffset: 0 !important;
   }
 }
+
+/* ─── Mobile responsive utilities ─────────────────────────────────────── */
+
+/* Shared bottom-nav height token */
+:root {
+  --xp-bottom-nav-h: 56px;
+}
+
+/* Main content bottom padding — !important beats the inline padding shorthand */
+@media (max-width: 639px) {
+  .xp-main-content {
+    padding-bottom: calc(var(--xp-bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 20px) !important;
+  }
+}
+
+/* Mobile calendar emoji scaling — override inline fontSize with !important */
+@media (max-width: 639px) {
+  .xp-emoji-fire   { font-size: 13px !important; }
+  .xp-emoji-star   { font-size: 10px !important; }
+  .xp-emoji-trophy { font-size: 12px !important; }
+  .xp-emoji-goal   { font-size: 13px !important; }
+}
+
+/* Streak connector — thinner on mobile */
+@media (max-width: 639px) {
+  .xp-streak-conn { height: 1px !important; }
+}
+
+/* Mobile bottom nav — explicit show/hide so it is never affected by Tailwind JIT edge cases */
+.xp-mobile-nav {
+  display: flex !important;
+}
+@media (min-width: 640px) {
+  .xp-mobile-nav {
+    display: none !important;
+  }
+}
+
+/* Toast floats above bottom nav on mobile */
+.xp-toast-wrapper {
+  bottom: 24px;
+}
+@media (max-width: 639px) {
+  .xp-toast-wrapper {
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    left: 16px;
+    right: 16px;
+  }
+  .xp-toast-wrapper > div {
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+  }
+}
+
+/* Stats panel: on sm+ always fully visible, overriding JS-driven inline maxHeight */
+@media (min-width: 640px) {
+  .xp-stats-collapse {
+    max-height: none !important;
+    overflow: visible !important;
+    opacity: 1 !important;
+    transition: none !important;
+  }
+}
+
+/* Ensure body doesn't produce horizontal scroll on mobile */
+html, body {
+  overflow-x: hidden;
+}
+
+/* Safe-area bottom padding for bottom nav */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .xp-safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

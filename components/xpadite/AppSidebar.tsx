@@ -20,23 +20,67 @@ const LogoutIcon = () => (
   </svg>
 )
 
-const MENU_ITEMS = [
-  { icon: '📊', label: 'Analytics' },
-  { icon: '📅', label: 'Sync Google Calendar' },
-  { icon: '🎯', label: 'Goal Setting with AI' },
-  { icon: '👥', label: 'Meetings' },
-  { icon: '🔔', label: 'Reminders' },
-  { icon: '🖼️', label: 'Gallery' },
-  { icon: '⚙️', label: 'Settings' },
-  { icon: '❓', label: 'Help & Feedback' },
+// ─── Menu structure ───────────────────────────────────────────────────────────
+
+type MenuAction =
+  | 'profile'
+  | 'analytics'
+  | 'activities'
+  | 'sync-calendar'
+  | 'goal-setting'
+  | 'meetings'
+  | 'reminders'
+  | 'gallery'
+  | 'settings'
+  | 'motivate'
+  | 'qotd'
+  | 'help'
+
+interface MenuItem {
+  icon: string
+  label: string
+  action: MenuAction
+  dividerBefore?: boolean
+}
+
+const MENU_ITEMS: MenuItem[] = [
+  { icon: '👤', label: 'Profile',               action: 'profile'        },
+  { icon: '📊', label: 'Analytics',             action: 'analytics',      dividerBefore: true },
+  { icon: '🎯', label: 'Activities',            action: 'activities'      },
+  { icon: '📅', label: 'Sync Google Calendar',  action: 'sync-calendar',  dividerBefore: true },
+  { icon: '✨', label: 'Goal Setting with AI',  action: 'goal-setting'    },
+  { icon: '👥', label: 'Meetings',              action: 'meetings'        },
+  { icon: '🔔', label: 'Reminders',             action: 'reminders'       },
+  { icon: '🖼️', label: 'Gallery',              action: 'gallery'          },
+  { icon: '⚙️', label: 'Settings',             action: 'settings'         },
+  { icon: '🔥', label: 'Motivate Me',           action: 'motivate',        dividerBefore: true },
+  { icon: '💬', label: 'Quote of the Day',      action: 'qotd'            },
+  { icon: '❓', label: 'Help & Feedback',       action: 'help',            dividerBefore: true },
 ]
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 interface AppSidebarProps {
   onGallery?: () => void
   onSettings?: () => void
+  onAnalytics?: () => void
+  onMotivate?: () => void
+  onQotd?: () => void
+  onProfile?: () => void
+  onActivities?: () => void
+  onReminders?: () => void
 }
 
-export function AppSidebar({ onGallery, onSettings }: AppSidebarProps) {
+export function AppSidebar({
+  onGallery,
+  onSettings,
+  onAnalytics,
+  onMotivate,
+  onQotd,
+  onProfile,
+  onActivities,
+  onReminders,
+}: AppSidebarProps) {
   const { sidebarOpen, setSidebarOpen } = useApp()
   const router = useRouter()
 
@@ -48,6 +92,26 @@ export function AppSidebar({ onGallery, onSettings }: AppSidebarProps) {
     )
     await supabase.auth.signOut()
     router.push('/login')
+  }
+
+  function handleAction(action: MenuAction) {
+    setSidebarOpen(false)
+    switch (action) {
+      case 'profile':        onProfile?.(); break
+      case 'analytics':      onAnalytics?.(); break
+      case 'activities':     onActivities?.(); break
+      case 'gallery':        onGallery?.(); break
+      case 'settings':       onSettings?.(); break
+      case 'motivate':       onMotivate?.(); break
+      case 'qotd':           onQotd?.(); break
+      case 'reminders':      onReminders?.(); break
+      // Stubs — close sidebar only
+      case 'sync-calendar':
+      case 'goal-setting':
+      case 'meetings':
+      case 'help':
+      default: break
+    }
   }
 
   return (
@@ -65,7 +129,7 @@ export function AppSidebar({ onGallery, onSettings }: AppSidebarProps) {
 
       {/* Drawer */}
       <div
-        className="fixed top-0 left-0 bottom-0 z-50 w-60 flex flex-col transition-transform duration-300 ease-out"
+        className="fixed top-0 left-0 bottom-0 z-50 w-64 flex flex-col transition-transform duration-300 ease-out"
         style={{
           background: '#0f172a',
           borderRight: '0.5px solid rgba(255,255,255,0.08)',
@@ -91,22 +155,19 @@ export function AppSidebar({ onGallery, onSettings }: AppSidebarProps) {
         {/* Nav items */}
         <nav className="flex-1 py-1 overflow-y-auto">
           {MENU_ITEMS.map(item => (
-            <button
-              key={item.label}
-              onClick={() => {
-                setSidebarOpen(false)
-                if (item.label === 'Gallery') onGallery?.()
-                if (item.label === 'Settings') onSettings?.()
-              }}
-              className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors duration-150 hover:bg-white/7"
-              style={{
-                color: '#cbd5e1',
-                borderBottom: '0.5px solid rgba(255,255,255,0.04)',
-              }}
-            >
-              <span className="text-base w-5 text-center flex-shrink-0">{item.icon}</span>
-              {item.label}
-            </button>
+            <div key={item.label}>
+              {item.dividerBefore && (
+                <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.06)', margin: '4px 0' }} />
+              )}
+              <button
+                onClick={() => handleAction(item.action)}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors duration-150 hover:bg-white/7"
+                style={{ color: '#cbd5e1' }}
+              >
+                <span className="text-base w-5 text-center flex-shrink-0">{item.icon}</span>
+                {item.label}
+              </button>
+            </div>
           ))}
         </nav>
 

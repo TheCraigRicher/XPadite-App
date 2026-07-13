@@ -15,6 +15,11 @@ import { DayDashboardModal } from './DayDashboardModal'
 import { YearlyDashboardModal } from './YearlyDashboardModal'
 import { GalleryModal } from './GalleryModal'
 import { SettingsModal } from './SettingsModal'
+import { MobileBottomNav } from './MobileBottomNav'
+import { ProfileModal } from './ProfileModal'
+import { ActivityManagerModal } from './ActivityManagerModal'
+import { dateKey } from './utils'
+import type { MobileTab } from './MobileBottomNav'
 
 interface XpaditeAppProps {
   email: string
@@ -99,7 +104,6 @@ function MotivationModal({ onClose }: { onClose: () => void }) {
 // ─── Toast ────────────────────────────────────────────────────────────────────
 
 function Toast({ message, exiting, onDismiss }: { message: string; exiting: boolean; onDismiss: () => void }) {
-  // Prefix "~" = branded purple info style. "\n" splits title from body.
   const isInfo = message.startsWith('~')
   const clean = isInfo ? message.slice(1) : message
   const nl = clean.indexOf('\n')
@@ -176,7 +180,6 @@ function playReminderSound() {
 function ReminderChecker() {
   const { reminders, fireReminderCtx, setToast } = useApp()
 
-  // Stable refs — interval reads from these so it never needs to restart
   const remindersRef = useRef(reminders)
   remindersRef.current = reminders
   const fireRef = useRef(fireReminderCtx)
@@ -184,7 +187,6 @@ function ReminderChecker() {
   const toastRef = useRef(setToast)
   toastRef.current = setToast
 
-  // Tracks which (id:nextRunAt) pairs have already fired this session
   const firedRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
@@ -192,44 +194,246 @@ function ReminderChecker() {
       const now = Date.now()
       remindersRef.current.forEach(r => {
         if (!r.isActive) return
-        // Once reminders: localFiredAt persists to localStorage and prevents re-firing
-        // across page refreshes. firedRef handles the current session only.
         if (r.repeatFrequency === 'once' && r.localFiredAt !== null) return
         if (r.nextRunAt > now) return
         const key = `${r.id}:${r.nextRunAt}`
         if (firedRef.current.has(key)) return
         firedRef.current.add(key)
-
-        // In-app purple toast
         toastRef.current(`~🔔 Reminder: ${r.taskText}\nTime to start your task.`)
-
-        // Browser notification (only if permission already granted)
-        if (
-          r.browserNotificationEnabled &&
-          typeof Notification !== 'undefined' &&
-          Notification.permission === 'granted'
-        ) {
-          new Notification(`🔔 ${r.taskText}`, {
-            body: 'Time to start your task.',
-            icon: '/favicon.ico',
-          })
+        if (r.browserNotificationEnabled && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          new Notification(`🔔 ${r.taskText}`, { body: 'Time to start your task.', icon: '/favicon.ico' })
         }
-
-        // Sound alert
         if (r.soundEnabled) playReminderSound()
-
-        // Advance nextRunAt or deactivate (once)
         fireRef.current(r.id)
       })
     }
-
-    // Check immediately on mount (catches overdue reminders from while app was closed)
     check()
     const id = setInterval(check, 30_000)
     return () => clearInterval(id)
-  }, []) // empty deps — interval is stable for the lifetime of this component
+  }, [])
 
   return null
+}
+
+// ─── Mobile Tasks View ────────────────────────────────────────────────────────
+
+function MobileTasksView({ onOpenDay }: { onOpenDay: (key: string, month: number, day: number) => void }) {
+  const { calData, updateDay } = useApp()
+  const today = new Date()
+  const key = dateKey(today.getFullYear(), today.getMonth(), today.getDate())
+  const dayData = calData[key]
+  const tasks = dayData?.tasks ?? []
+  const done = tasks.filter(t => t.done).length
+
+  function toggleTask(taskId: string) {
+    updateDay(key, prev => ({
+      ...prev,
+      tasks: prev.tasks.map(t => t.id === taskId ? { ...t, done: !t.done } : t),
+    }))
+  }
+
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+  return (
+    <div className="flex flex-col flex-1" style={{ minHeight: 0 }}>
+      {/* Header */}
+      <div className="px-4 pt-4 pb-3 flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold" style={{ color: 'var(--xp-txt)' }}>Today&apos;s Tasks</h2>
+          <p className="text-[11px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>
+            {today.getDate()} {months[today.getMonth()]} · {done}/{tasks.length} complete
+          </p>
+        </div>
+        <button
+          onClick={() => onOpenDay(key, today.getMonth(), today.getDate())}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white transition-opacity hover:opacity-85"
+          style={{ background: '#7c3aed' }}
+        >
+          + Add Task
+        </button>
+      </div>
+
+      {/* Progress bar */}
+      {tasks.length > 0 && (
+        <div className="px-4 mb-3">
+          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--xp-bg3)' }}>
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{ width: `${Math.round((done / tasks.length) * 100)}%`, background: 'linear-gradient(90deg, #7c3aed, #a78bfa)' }}
+            />
+          </div>
+          <p className="text-[10px] mt-1 text-right" style={{ color: 'var(--xp-txt3)' }}>
+            {Math.round((done / tasks.length) * 100)}% complete
+          </p>
+        </div>
+      )}
+
+      {/* Task list */}
+      <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
+        {tasks.length === 0 ? (
+          <div
+            className="flex flex-col items-center justify-center py-16 text-center"
+          >
+            <div className="text-4xl mb-3">✅</div>
+            <p className="text-sm font-medium" style={{ color: 'var(--xp-txt)' }}>No tasks for today</p>
+            <p className="text-[11px] mt-1" style={{ color: 'var(--xp-txt3)' }}>Tap &ldquo;Add Task&rdquo; to get started</p>
+            <button
+              onClick={() => onOpenDay(key, today.getMonth(), today.getDate())}
+              className="mt-4 px-5 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-85"
+              style={{ background: '#7c3aed' }}
+            >
+              Open Day
+            </button>
+          </div>
+        ) : (
+          tasks.map((task, i) => (
+            <div
+              key={task.id}
+              className="flex items-center gap-3 px-3.5 py-3 rounded-xl transition-all duration-150"
+              style={{
+                background: task.done ? 'rgba(22,163,74,0.06)' : 'var(--xp-bg3)',
+                border: `0.5px solid ${task.done ? 'rgba(22,163,74,0.2)' : 'var(--xp-bdr)'}`,
+              }}
+            >
+              {/* Checkbox */}
+              <button
+                onClick={() => toggleTask(task.id)}
+                className="w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center transition-all duration-150"
+                style={{
+                  background: task.done ? '#16a34a' : 'transparent',
+                  border: `1.5px solid ${task.done ? '#16a34a' : 'rgba(124,58,237,0.4)'}`,
+                }}
+              >
+                {task.done && <span className="text-white text-[10px] font-bold">✓</span>}
+              </button>
+
+              {/* Task text */}
+              <span
+                className="flex-1 text-sm leading-snug"
+                style={{
+                  color: task.done ? 'var(--xp-txt3)' : 'var(--xp-txt)',
+                  textDecoration: task.done ? 'line-through' : 'none',
+                  opacity: task.done ? 0.6 : 1,
+                }}
+              >
+                {i + 1}. {task.text}
+              </span>
+
+              {/* Milestone badge */}
+              {task.milestone && (
+                <span className="text-xs flex-shrink-0">🏆</span>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Footer: open full day */}
+      {tasks.length > 0 && (
+        <div className="px-4 pb-4 pt-1">
+          <button
+            onClick={() => onOpenDay(key, today.getMonth(), today.getDate())}
+            className="w-full py-2.5 rounded-xl text-sm font-medium transition-opacity hover:opacity-75"
+            style={{ background: 'var(--xp-bg3)', color: 'var(--xp-txt2)', border: '0.5px solid var(--xp-bdr2)' }}
+          >
+            Open Full Day View →
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Mobile AI Coach View ─────────────────────────────────────────────────────
+
+function MobileAICoachView() {
+  return (
+    <div className="flex flex-col items-center justify-center flex-1 px-6 py-12 text-center">
+      <div
+        className="w-20 h-20 rounded-2xl flex items-center justify-center mb-5 mx-auto"
+        style={{ background: 'linear-gradient(135deg, #4c1d95, #7c3aed)', boxShadow: '0 8px 32px rgba(124,58,237,0.35)' }}
+      >
+        <span className="text-4xl">🤖</span>
+      </div>
+      <h2 className="text-lg font-bold mb-2" style={{ color: 'var(--xp-txt)' }}>AI Coach</h2>
+      <p className="text-sm leading-relaxed mb-6" style={{ color: 'var(--xp-txt2)', maxWidth: 280 }}>
+        Your personal AI productivity coach. Get insights, build habits, and crush your goals with personalized guidance.
+      </p>
+
+      <div className="w-full max-w-[320px] space-y-3 mb-8">
+        {[
+          { icon: '🎯', label: 'Goal Setting with AI',      soon: false },
+          { icon: '📅', label: 'AI Weekly Plans',            soon: true  },
+          { icon: '📊', label: 'Personalized Insights',      soon: true  },
+          { icon: '💡', label: 'Habit Recommendations',      soon: true  },
+          { icon: '🏆', label: 'Accountability Reviews',     soon: true  },
+        ].map(f => (
+          <div
+            key={f.label}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl text-left"
+            style={{
+              background: 'var(--xp-bg3)',
+              border: '0.5px solid var(--xp-bdr)',
+              opacity: f.soon ? 0.65 : 1,
+            }}
+          >
+            <span className="text-lg w-6 text-center">{f.icon}</span>
+            <span className="flex-1 text-sm" style={{ color: 'var(--xp-txt)' }}>{f.label}</span>
+            {f.soon ? (
+              <span
+                className="text-[9px] font-bold px-2 py-0.5 rounded-full"
+                style={{ background: 'rgba(124,58,237,0.12)', color: '#a78bfa', letterSpacing: '0.06em' }}
+              >
+                SOON
+              </span>
+            ) : (
+              <span
+                className="text-[9px] font-bold px-2 py-0.5 rounded-full"
+                style={{ background: 'rgba(22,163,74,0.12)', color: '#22c55e', letterSpacing: '0.06em' }}
+              >
+                FREE
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <p className="text-[11px]" style={{ color: 'var(--xp-txt3)' }}>
+        🔒 Premium unlocks full AI Coach experience
+      </p>
+    </div>
+  )
+}
+
+// ─── Mobile More View ─────────────────────────────────────────────────────────
+
+function MobileMoreView({ onGallery, onSettings }: { onGallery: () => void; onSettings: () => void }) {
+  const items = [
+    { icon: '🖼️', label: 'Gallery',        subtitle: 'Your shared progress cards',  action: onGallery  },
+    { icon: '⚙️', label: 'Settings',       subtitle: 'App preferences & color',      action: onSettings },
+    { icon: '❓', label: 'Help & Feedback', subtitle: 'Get support or share ideas',   action: undefined  },
+  ]
+
+  return (
+    <div className="px-4 py-4 space-y-2">
+      <h2 className="text-sm font-semibold mb-3" style={{ color: 'var(--xp-txt)' }}>More</h2>
+      {items.map(item => (
+        <button
+          key={item.label}
+          onClick={item.action}
+          className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-left transition-all duration-150 hover:opacity-80"
+          style={{ background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}
+        >
+          <span className="text-xl w-7 text-center">{item.icon}</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium" style={{ color: 'var(--xp-txt)' }}>{item.label}</p>
+            <p className="text-[11px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>{item.subtitle}</p>
+          </div>
+          <span style={{ color: 'var(--xp-txt3)', fontSize: 12 }}>›</span>
+        </button>
+      ))}
+    </div>
+  )
 }
 
 // ─── ThemedApp ────────────────────────────────────────────────────────────────
@@ -238,23 +442,52 @@ interface ModalDay { key: string; month: number; day: number }
 
 function ThemedApp(_props: XpaditeAppProps) {
   const { isDark, toast, setToast } = useApp()
-  const [toastExiting, setToastExiting] = useState(false)
-  const [modalDay, setModalDay] = useState<ModalDay | null>(null)
-  const [dashboardDay, setDashboardDay] = useState<ModalDay | null>(null)
-  const [zoomedMonth, setZoomedMonth] = useState<number | null>(null)
-  const [fullPageMonth, setFullPageMonth] = useState<number | null>(null)
-  const [motivationOpen, setMotivationOpen] = useState(false)
-  const [yearlyOpen, setYearlyOpen] = useState(false)
-  const [galleryOpen, setGalleryOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
 
-  // ── QOTD banner ──────────────────────────────────────────────────────────────
+  const [toastExiting, setToastExiting]             = useState(false)
+  const [modalDay, setModalDay]                     = useState<ModalDay | null>(null)
+  const [dashboardDay, setDashboardDay]             = useState<ModalDay | null>(null)
+  const [zoomedMonth, setZoomedMonth]               = useState<number | null>(null)
+  const [fullPageMonth, setFullPageMonth]           = useState<number | null>(null)
+  const [motivationOpen, setMotivationOpen]         = useState(false)
+  const [yearlyOpen, setYearlyOpen]                 = useState(false)
+  const [galleryOpen, setGalleryOpen]               = useState(false)
+  const [settingsOpen, setSettingsOpen]             = useState(false)
+  const [profileOpen, setProfileOpen]               = useState(false)
+  const [activityManagerOpen, setActivityManagerOpen] = useState(false)
+
+  // ── Mobile tab ────────────────────────────────────────────────────────────────
+  const [mobileTab, setMobileTab] = useState<MobileTab>('overview')
+
+  // When Analytics tab selected → auto-open yearly modal
+  useEffect(() => {
+    if (mobileTab === 'analytics') setYearlyOpen(true)
+  }, [mobileTab])
+
+  function handleYearlyClose() {
+    setYearlyOpen(false)
+    if (mobileTab === 'analytics') setMobileTab('overview')
+  }
+
+  // ── Mobile collapsible stats ──────────────────────────────────────────────────
+  const [statsCollapsed, setStatsCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    return localStorage.getItem('xp-stats-collapsed') === 'true'
+  })
+
+  function toggleStats() {
+    const next = !statsCollapsed
+    setStatsCollapsed(next)
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('xp-stats-collapsed', String(next))
+    }
+  }
+
+  // ── QOTD banner ───────────────────────────────────────────────────────────────
   const [qotdIn, setQotdIn] = useState(false)
   const qotdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => () => { if (qotdTimerRef.current) clearTimeout(qotdTimerRef.current) }, [])
 
-  // Click-outside dismisses banner while it's visible
   useEffect(() => {
     if (!qotdIn) return
     function onDocClick() {
@@ -266,14 +499,12 @@ function ThemedApp(_props: XpaditeAppProps) {
   }, [qotdIn])
 
   function triggerQotd() {
-    // Cancel any running auto-dismiss; show (or keep visible) and restart timer
     if (qotdTimerRef.current) { clearTimeout(qotdTimerRef.current); qotdTimerRef.current = null }
     setQotdIn(true)
     qotdTimerRef.current = setTimeout(() => setQotdIn(false), 7000)
   }
-  // ─────────────────────────────────────────────────────────────────────────────
 
-  // Auto-dismiss toast with fade-out
+  // ── Auto-dismiss toast with fade-out ──────────────────────────────────────────
   useEffect(() => {
     if (!toast) { setToastExiting(false); return }
     setToastExiting(false)
@@ -281,6 +512,12 @@ function ThemedApp(_props: XpaditeAppProps) {
     const t2 = setTimeout(() => setToast(null), 3000)
     return () => { clearTimeout(t1); clearTimeout(t2) }
   }, [toast, setToast])
+
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+  function openDayModal(key: string, month: number, day: number) {
+    setModalDay({ key, month, day })
+    if (mobileTab === 'tasks') setMobileTab('overview')
+  }
 
   return (
     <div
@@ -294,9 +531,17 @@ function ThemedApp(_props: XpaditeAppProps) {
       }}
     >
       <ReminderChecker />
-      <AppSidebar onGallery={() => setGalleryOpen(true)} onSettings={() => setSettingsOpen(true)} />
+      <AppSidebar
+        onGallery={() => setGalleryOpen(true)}
+        onSettings={() => setSettingsOpen(true)}
+        onAnalytics={() => setYearlyOpen(true)}
+        onMotivate={() => setMotivationOpen(true)}
+        onQotd={triggerQotd}
+        onProfile={() => setProfileOpen(true)}
+        onActivities={() => setActivityManagerOpen(true)}
+      />
 
-      {/* QOTD banner — in-flow, max-height collapse so header shifts down gracefully */}
+      {/* QOTD banner */}
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
@@ -330,27 +575,110 @@ function ThemedApp(_props: XpaditeAppProps) {
         </div>
       </div>
 
-      {/* Header (two-row: logo + controls) */}
+      {/* Header */}
       <AppHeader
         onYearDash={() => setYearlyOpen(true)}
         onMotivate={() => setMotivationOpen(true)}
       />
 
-      {/* Centered content */}
-      <div style={{ maxWidth: 1360, width: '100%', margin: '0 auto', padding: '0 16px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+      {/* ── MAIN CONTENT ─────────────────────────────────────────────────── */}
+      <div
+        className="xp-main-content"
+        style={{ maxWidth: 1360, width: '100%', margin: '0 auto', paddingLeft: 16, paddingRight: 16, flex: 1, display: 'flex', flexDirection: 'column' }}
+      >
+        {/* ActivityBar — always shown (add/edit/remove hidden on mobile via CSS) */}
         <ActivityBar onQotdTrigger={triggerQotd} />
-        <main style={{ flex: 1 }}>
-          <StatsRow />
-          <LegendRow />
+
+        {/* ── Overview / Calendar view (always shown on desktop; shown on 'overview' tab on mobile) */}
+        <main
+          className={mobileTab === 'overview' || mobileTab === 'analytics' ? '' : 'hidden sm:flex'}
+          style={{ flex: 1, display: mobileTab === 'overview' || mobileTab === 'analytics' ? 'flex' : undefined, flexDirection: 'column' }}
+        >
+          {/* Mobile collapsible stats toggle */}
+          <div className="sm:hidden flex items-center gap-2 py-2 px-1">
+            <button
+              onClick={toggleStats}
+              className="flex items-center gap-2 transition-opacity hover:opacity-70"
+              aria-label={statsCollapsed ? 'Expand statistics' : 'Collapse statistics'}
+            >
+              <span
+                style={{
+                  display: 'inline-block',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: 'var(--xp-acc)',
+                  transform: statsCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+                  transition: 'transform 220ms ease',
+                  lineHeight: 1,
+                }}
+              >
+                ▶
+              </span>
+              <span className="text-[11px] font-medium" style={{ color: 'var(--xp-txt3)' }}>
+                Statistics
+              </span>
+            </button>
+          </div>
+
+          {/* Stats + Legend — collapsible on mobile, always visible on desktop */}
+          <div
+            className="xp-stats-collapse"
+            style={{
+              overflow: 'hidden',
+              maxHeight: statsCollapsed ? 0 : 480,
+              opacity: statsCollapsed ? 0 : 1,
+              transition: 'max-height 260ms ease-in-out, opacity 200ms ease',
+            }}
+          >
+            <StatsRow />
+            <LegendRow />
+          </div>
+
+          {/* Calendar */}
           <CalendarSection
             onDayDoubleClick={(key, month, day) => setModalDay({ key, month, day })}
             onMonthZoom={month => setFullPageMonth(month)}
             activeMonth={fullPageMonth}
           />
         </main>
+
+        {/* ── Tasks tab (mobile only) */}
+        {mobileTab === 'tasks' && (
+          <div className="flex flex-col flex-1 sm:hidden" style={{ minHeight: 0 }}>
+            <MobileTasksView onOpenDay={openDayModal} />
+          </div>
+        )}
+
+        {/* ── AI Coach tab (mobile only) */}
+        {mobileTab === 'ai-coach' && (
+          <div className="flex flex-col flex-1 sm:hidden">
+            <MobileAICoachView />
+          </div>
+        )}
+
+        {/* ── More tab (mobile only) */}
+        {mobileTab === 'more' && (
+          <div className="flex flex-col flex-1 sm:hidden">
+            <MobileMoreView
+              onGallery={() => setGalleryOpen(true)}
+              onSettings={() => setSettingsOpen(true)}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Month Full Page — rendered before DayModal so DayModal appears on top when opened from within */}
+      {/* ── Bottom nav (mobile only) */}
+      <MobileBottomNav
+        activeTab={mobileTab}
+        onTabChange={tab => {
+          setMobileTab(tab)
+          // Analytics tab immediately opens the yearly modal
+          if (tab === 'analytics') setYearlyOpen(true)
+        }}
+      />
+
+      {/* ── Overlays / Modals ─────────────────────────────────────────────── */}
+
       {fullPageMonth !== null && (
         <MonthFullPage
           month={fullPageMonth}
@@ -360,7 +688,6 @@ function ThemedApp(_props: XpaditeAppProps) {
         />
       )}
 
-      {/* DayModal */}
       {modalDay && (
         <DayModal
           dateKey={modalDay.key}
@@ -371,7 +698,6 @@ function ThemedApp(_props: XpaditeAppProps) {
         />
       )}
 
-      {/* Day Dashboard Modal */}
       {dashboardDay && (
         <DayDashboardModal
           dateKey={dashboardDay.key}
@@ -382,7 +708,6 @@ function ThemedApp(_props: XpaditeAppProps) {
         />
       )}
 
-      {/* Month Zoom Modal (opened from 📊 Monthly Dashboard button) */}
       {zoomedMonth !== null && (
         <MonthZoomModal
           month={zoomedMonth}
@@ -391,21 +716,21 @@ function ThemedApp(_props: XpaditeAppProps) {
         />
       )}
 
-      {/* Yearly Dashboard Modal */}
-      {yearlyOpen && <YearlyDashboardModal onClose={() => setYearlyOpen(false)} />}
+      {yearlyOpen && <YearlyDashboardModal onClose={handleYearlyClose} />}
 
-      {/* Motivation modal */}
       {motivationOpen && <MotivationModal onClose={() => setMotivationOpen(false)} />}
 
-      {/* Gallery modal */}
       {galleryOpen && <GalleryModal onClose={() => setGalleryOpen(false)} />}
 
-      {/* Settings modal */}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
 
-      {/* Toast */}
+      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
+
+      {activityManagerOpen && <ActivityManagerModal onClose={() => setActivityManagerOpen(false)} />}
+
+      {/* Toast — above bottom nav on mobile */}
       {toast && (
-        <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 200 }}>
+        <div className="xp-toast-wrapper" style={{ position: 'fixed', right: 16, zIndex: 200 }}>
           <Toast
             message={toast}
             exiting={toastExiting}

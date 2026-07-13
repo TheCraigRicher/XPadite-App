@@ -667,8 +667,8 @@ export function ActivityBar({ onQotdTrigger }: ActivityBarProps) {
         {/* Activity selector dropdown */}
         <ActivityDropdown />
 
-        {/* Icon buttons: Add · Remove · Edit — equal w/h/gap for visual cohesion */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+        {/* Icon buttons: Add · Remove · Edit — hidden on mobile (managed via Activities in burger menu) */}
+        <div className="hidden sm:flex items-center gap-1.5 flex-shrink-0">
           <button
             onClick={() => setShowAddModal(true)}
             title="Add activity"

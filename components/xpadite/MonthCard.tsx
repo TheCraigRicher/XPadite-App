@@ -404,7 +404,7 @@ export function MonthCard({
     <>
       {/* ── Card ────────────────────────────────────────────────────────────── */}
       <div
-        className="rounded-xl p-2 transition-all duration-200 flex flex-col h-full"
+        className="rounded-xl p-1 sm:p-2 transition-all duration-200 flex flex-col h-full"
         style={{
           background: isCurrentMonth ? "#eff6ff" : "var(--xp-card)",
           border: isCurrentMonth
@@ -416,7 +416,7 @@ export function MonthCard({
         }}
       >
         {/* Month header */}
-        <div className="flex items-center justify-center px-2 mb-3">
+        <div className="flex items-center justify-center px-0.5 sm:px-2 mb-1 sm:mb-3">
           <button
             onClick={() => onMonthZoom?.(month)}
             onMouseEnter={() => setTitleHovered(true)}
@@ -455,12 +455,13 @@ export function MonthCard({
               transition: 'background 170ms ease, color 170ms ease, border-color 170ms ease, box-shadow 170ms ease',
             }}
           >
-            {MONTHS[month]}
+            <span className="hidden sm:inline">{MONTHS[month]}</span>
+            <span className="sm:hidden">{MONTHS[month].slice(0, 3)}</span>
           </button>
         </div>
 
         {/* Day headers */}
-        <div className="grid grid-cols-7 mb-1">
+        <div className="grid grid-cols-7 mb-0.5 sm:mb-1">
           {DAY_HEADERS.map((d, i) => (
             <div
               key={d}
@@ -520,6 +521,7 @@ export function MonthCard({
             const connEdge = hyper || milestone || goal ? "50%" : "85%";
             const connL = connectLeft && (
               <div
+                className="xp-streak-conn"
                 style={{
                   position: "absolute",
                   left: 0,
@@ -536,6 +538,7 @@ export function MonthCard({
             );
             const connR = connectRight && (
               <div
+                className="xp-streak-conn"
                 style={{
                   position: "absolute",
                   left: connEdge,
@@ -566,6 +569,7 @@ export function MonthCard({
                     style={{ zIndex: 1 }}
                   >
                     <span
+                      className="xp-emoji-fire"
                       style={{
                         position: "absolute",
                         top: "50%",
@@ -612,6 +616,7 @@ export function MonthCard({
                     style={{ zIndex: 1 }}
                   >
                     <span
+                      className="xp-emoji-star"
                       style={{
                         position: "absolute",
                         top: "50%",
@@ -628,6 +633,7 @@ export function MonthCard({
                       ★
                     </span>
                     <span
+                      className="xp-emoji-trophy"
                       style={{
                         position: "absolute",
                         top: "50%",
@@ -676,6 +682,7 @@ export function MonthCard({
                     style={{ zIndex: 1 }}
                   >
                     <span
+                      className="xp-emoji-goal"
                       style={{
                         position: "absolute",
                         top: "44%",
@@ -739,7 +746,7 @@ export function MonthCard({
                 {connL}
                 {connR}
                 <div
-                  className="absolute inset-[23%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-110"
+                  className="absolute inset-[26%] sm:inset-[23%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-110"
                   style={{ zIndex: 1, ...circleStyle }}
                 >
                   {cell.day}
@@ -777,12 +784,12 @@ export function MonthCard({
         <div className="flex-1" />
 
         {/* Share button — pinned to bottom of card via flex-col layout */}
-        <div className="flex justify-center pt-3 pb-2">
+        <div className="flex justify-center pt-1 pb-1 sm:pt-3 sm:pb-2">
           <button
             onClick={openPanel}
             onMouseEnter={() => setShareHov(true)}
             onMouseLeave={() => setShareHov(false)}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-semibold active:scale-95"
+            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[9px] font-semibold active:scale-95"
             style={{
               background: shareHov ? "#7c3aed" : "rgba(124,58,237,0.08)",
               color:      shareHov ? "white"   : "#7c3aed",

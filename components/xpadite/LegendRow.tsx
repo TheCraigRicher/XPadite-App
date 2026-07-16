@@ -2,7 +2,7 @@
 
 import { ReactNode } from 'react'
 import { useApp } from './AppContext'
-import { hexToRgba } from './utils'
+import { hexToRgba, resolveProgressColor } from './utils'
 
 function Tip({ content, children }: { content: string; children: ReactNode }) {
   return (
@@ -20,7 +20,8 @@ function Tip({ content, children }: { content: string; children: ReactNode }) {
 }
 
 export function LegendRow() {
-  const { progressColor } = useApp()
+  const { progressColor: _rawColor, isDark } = useApp()
+  const progressColor = resolveProgressColor(_rawColor, isDark)
   return (
     <div
       className="flex items-center justify-center gap-5 px-4 pb-3 flex-wrap"

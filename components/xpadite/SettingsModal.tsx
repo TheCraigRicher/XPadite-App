@@ -2,24 +2,31 @@
 
 import { useState, useEffect } from 'react'
 import { useApp } from './AppContext'
-import { hexToRgba } from './utils'
+import { hexToRgba, resolveProgressColor } from './utils'
 
-const PROGRESS_COLORS = [
-  { name: 'Green',  value: '#16a34a' },
-  { name: 'Blue',   value: '#2563eb' },
-  { name: 'Purple', value: '#7c3aed' },
-  { name: 'Orange', value: '#ea580c' },
-  { name: 'Pink',   value: '#db2777' },
-  { name: 'Gold',   value: '#d97706' },
-  { name: 'Red',    value: '#dc2626' },
-  { name: 'Teal',   value: '#0d9488' },
+const PROGRESS_COLORS: { name: string; value: string; darkCheck?: boolean }[] = [
+  { name: 'Green',            value: '#16a34a' },
+  { name: 'Blue',             value: '#2563eb' },
+  { name: 'Purple (Default)', value: '#7c3aed' },
+  { name: 'Orange',           value: '#ea580c' },
+  { name: 'Pink',             value: '#db2777' },
+  { name: 'Gold',             value: '#d97706' },
+  { name: 'Red',              value: '#dc2626' },
+  { name: 'Dark Teal',        value: '#0d9488' },
+  { name: 'Teal',             value: '#00A2B0' },
+  { name: 'Neon Pink',        value: '#FF00FB' },
+  { name: 'Lime',             value: '#A6FF00', darkCheck: true },
+  { name: 'Cyan',             value: '#00FFF2', darkCheck: true },
+  { name: 'Black & White',    value: 'bw'      },
 ]
 
-const DEFAULT_COLOR = '#16a34a'
+const DEFAULT_COLOR = '#7c3aed'
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const { isDark, progressColor, setProgressColor } = useApp()
   const [hoverClose, setHoverClose] = useState(false)
+  // Resolved color for preview — converts 'bw' sentinel to a real hex value
+  const pc = resolveProgressColor(progressColor, isDark)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
@@ -124,8 +131,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
             {/* Color swatches */}
             <div className="flex items-center gap-2.5 flex-wrap">
-              {PROGRESS_COLORS.map(({ name, value }) => {
+              {PROGRESS_COLORS.map(({ name, value, darkCheck }) => {
                 const active = progressColor === value
+                const isBW = value === 'bw'
+                const swatchBg = isBW
+                  ? 'linear-gradient(to right, #000000 50%, #ffffff 50%)'
+                  : value
+                const ringColor = isBW ? '#7c3aed' : value
+                const checkStroke = isBW ? '#7c3aed' : darkCheck ? '#1a1a1a' : 'white'
                 return (
                   <button
                     key={value}
@@ -135,11 +148,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       width: 32,
                       height: 32,
                       borderRadius: '50%',
-                      background: value,
-                      border: 'none',
+                      background: swatchBg,
+                      border: isBW
+                        ? `0.5px solid ${isDark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.15)'}`
+                        : 'none',
                       cursor: 'pointer',
                       position: 'relative',
-                      outline: active ? `2.5px solid ${value}` : '2.5px solid transparent',
+                      overflow: 'hidden',
+                      outline: active ? `2.5px solid ${ringColor}` : '2.5px solid transparent',
                       outlineOffset: active ? 2 : 0,
                       boxShadow: active
                         ? `0 0 0 4px ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}, 0 4px 12px rgba(0,0,0,0.25)`
@@ -153,7 +169,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       <svg
                         viewBox="0 0 24 24"
                         fill="none"
-                        stroke="white"
+                        stroke={checkStroke}
                         strokeWidth="3"
                         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', padding: '7px' }}
                       >
@@ -177,11 +193,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               <div
                 style={{
                   width: 28, height: 28, borderRadius: '50%',
-                  background: progressColor,
-                  boxShadow: `0 0 0 2px ${isDark ? '#15102a' : '#ffffff'}, 0 0 0 4.5px ${hexToRgba(progressColor, 0.65)}`,
+                  background: pc,
+                  boxShadow: `0 0 0 2px ${isDark ? '#15102a' : '#ffffff'}, 0 0 0 4.5px ${hexToRgba(pc, 0.65)}`,
                   flexShrink: 0,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 9, fontWeight: 700, color: 'white',
+                  fontSize: 9, fontWeight: 700, color: pc === '#ffffff' ? '#000000' : 'white',
                 }}
               >
                 12
@@ -192,11 +208,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   <div key={i} className="flex items-center">
                     <div style={{
                       width: 12, height: 12, borderRadius: '50%',
-                      background: progressColor,
-                      boxShadow: `0 0 0 1.5px ${hexToRgba(progressColor, 0.35)}`,
+                      background: pc,
+                      boxShadow: `0 0 0 1.5px ${hexToRgba(pc, 0.35)}`,
                       flexShrink: 0,
                     }} />
-                    {i < 2 && <div style={{ width: 14, height: 2, background: progressColor, flexShrink: 0 }} />}
+                    {i < 2 && <div style={{ width: 14, height: 2, background: pc, flexShrink: 0 }} />}
                   </div>
                 ))}
               </div>

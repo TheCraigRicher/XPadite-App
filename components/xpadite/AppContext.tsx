@@ -102,7 +102,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const [removingMode, setRemovingMode] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
-  const [progressColor, setProgressColorRaw] = useState<string>('#16a34a')
+  const [progressColor, setProgressColorRaw] = useState<string>('#7c3aed')
   const [hydrated, setHydrated] = useState(false)
 
   const [reminders, setReminders] = useState<Reminder[]>([])

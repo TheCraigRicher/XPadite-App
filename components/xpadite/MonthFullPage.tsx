@@ -8,8 +8,8 @@ import { addGalleryItem } from './GalleryModal'
 import type { GalleryItem } from './GalleryModal'
 import {
   dateKey, isToday, DAY_HEADERS, MONTHS, APP_YEAR, getMonthStats, formatMs,
+  hexToRgba, resolveProgressColor,
 } from './utils'
-import { hexToRgba } from './utils'
 
 // ─── Injected styles (keyframes + premium button hover rules) ─────────────────
 
@@ -185,7 +185,8 @@ function MonthCalendarLarge({
   calData: Record<string, unknown>
   onDayDoubleClick?: (key: string, month: number, day: number) => void
 }) {
-  const { progressColor, isDark, updateDay, setToast } = useApp()
+  const { progressColor: _rawColor, isDark, updateDay, setToast } = useApp()
+  const progressColor = resolveProgressColor(_rawColor, isDark)
   const gapColor = isDark ? '#1a1a28' : '#ffffff'
 
   const clickRef = useRef<{ key: string | null; count: number; timer: ReturnType<typeof setTimeout> | null }>(
@@ -319,7 +320,7 @@ function MonthCalendarLarge({
             fontSize: 14,
           }
           if (productive) circleStyle = {
-            background: progressColor, color: 'white', fontWeight: 700, fontSize: 14,
+            background: progressColor, color: progressColor === '#ffffff' ? '#000000' : 'white', fontWeight: 700, fontSize: 14,
             boxShadow: `0 0 0 2.5px ${gapColor}, 0 0 0 5.5px ${hexToRgba(progressColor, 0.7)}`,
           }
           else if (todayCell) circleStyle = {
@@ -487,7 +488,8 @@ interface MonthFullPageProps {
 }
 
 export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPageProps) {
-  const { calData, sessions, activities, isDark, progressColor, setToast } = useApp()
+  const { calData, sessions, activities, isDark, progressColor: _rawColor2, setToast } = useApp()
+  const progressColor = resolveProgressColor(_rawColor2, isDark)
   const [view, setView]               = useState<'calendar' | 'dashboard'>('calendar')
   const [currentMonth, setCurrentMonth] = useState(month)
   const [animType, setAnimType]        = useState<'fade' | 'right' | 'left'>('fade')

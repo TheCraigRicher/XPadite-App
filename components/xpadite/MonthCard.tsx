@@ -10,6 +10,7 @@ import {
   APP_YEAR,
   getMonthStats,
   hexToRgba,
+  resolveProgressColor,
 } from "./utils";
 import { generateShareCardDataUri } from "./ShareCardModal";
 import { addGalleryItem } from "./GalleryModal";
@@ -191,7 +192,8 @@ export function MonthCard({
   onDayDoubleClick,
   onMonthZoom,
 }: MonthCardProps) {
-  const { calData, updateDay, setToast, isDark, progressColor } = useApp();
+  const { calData, updateDay, setToast, isDark, progressColor: _rawColor } = useApp();
+  const progressColor = resolveProgressColor(_rawColor, isDark);
   // Match the actual card surface so the productive-circle inner ring blends in
   const gapColor = isCurrentMonth ? "#eff6ff" : (isDark ? "#1a1a28" : "#ffffff");
 
@@ -431,7 +433,7 @@ export function MonthCard({
               background: isZoomed
                 ? '#7c3aed'
                 : titleHovered
-                  ? '#111111'
+                  ? (isDark ? '#7c3aed' : '#111111')
                   : isCurrentMonth
                     ? '#ffffff'
                     : (isDark ? 'rgba(255,255,255,0.06)' : '#f3f4f6'),
@@ -445,7 +447,7 @@ export function MonthCard({
               border: isZoomed
                 ? '1px solid rgba(167,139,250,0.50)'
                 : titleHovered
-                  ? '1px solid #111111'
+                  ? (isDark ? '1px solid rgba(167,139,250,0.60)' : '1px solid #111111')
                   : isCurrentMonth
                     ? '1px solid #c4cdd6'
                     : (isDark ? '1px solid rgba(255,255,255,0.16)' : '1px solid #d1d5db'),
@@ -723,7 +725,7 @@ export function MonthCard({
             if (productive)
               circleStyle = {
                 background: progressColor,
-                color: "white",
+                color: progressColor === '#ffffff' ? '#000000' : 'white',
                 fontSize: "9px",
                 fontWeight: 600,
                 boxShadow: `0 0 0 2px ${gapColor}, 0 0 0 4.5px ${hexToRgba(progressColor, 0.7)}`,

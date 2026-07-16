@@ -124,3 +124,8 @@ export function hexToRgba(hex: string, alpha: number): string {
   const b = parseInt(hex.slice(5, 7), 16)
   return `rgba(${r},${g},${b},${alpha})`
 }
+
+/** Resolves the 'bw' sentinel to a real hex color based on the current theme. */
+export function resolveProgressColor(color: string, isDark: boolean): string {
+  return color === 'bw' ? (isDark ? '#ffffff' : '#000000') : color
+}

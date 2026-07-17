@@ -10,6 +10,7 @@ import {
   dateKey, isToday, DAY_HEADERS, MONTHS, APP_YEAR, getMonthStats, formatMs,
   hexToRgba, resolveProgressColor,
 } from './utils'
+import { useUpcomingReminderDates } from './useUpcomingReminderDates'
 
 // ─── Injected styles (keyframes + premium button hover rules) ─────────────────
 
@@ -174,6 +175,44 @@ function ShareCardPreview({ month, stats, totalMs, currentStreak, longestStreak 
   )
 }
 
+// ─── Reminder ring overlay ────────────────────────────────────────────────────
+
+function ReminderRing({ count }: { count: number }) {
+  if (count === 0) return null
+  return (
+    <>
+      <div
+        aria-label={count === 1 ? 'Has 1 upcoming reminder' : `Has ${count} upcoming reminders`}
+        className="absolute inset-[14%] rounded-full pointer-events-none"
+        style={{
+          border: '2px solid rgba(239,68,68,0.55)',
+          boxShadow: '0 0 0 2px rgba(239,68,68,0.08)',
+          zIndex: 2,
+          transition: 'opacity 200ms ease',
+        }}
+      />
+      {count > 1 && (
+        <span
+          aria-hidden="true"
+          className="absolute flex items-center justify-center pointer-events-none"
+          style={{
+            top: '6%', right: '6%',
+            minWidth: 10, height: 10,
+            padding: '0 2px',
+            borderRadius: 6,
+            background: 'rgba(239,68,68,0.90)',
+            fontSize: 6, fontWeight: 800, color: 'white',
+            lineHeight: '10px',
+            zIndex: 5,
+          }}
+        >
+          {count > 9 ? '9+' : count}
+        </span>
+      )}
+    </>
+  )
+}
+
 // ─── Large interactive calendar ───────────────────────────────────────────────
 
 function MonthCalendarLarge({
@@ -185,9 +224,10 @@ function MonthCalendarLarge({
   calData: Record<string, unknown>
   onDayDoubleClick?: (key: string, month: number, day: number) => void
 }) {
-  const { progressColor: _rawColor, isDark, updateDay, setToast } = useApp()
+  const { progressColor: _rawColor, isDark, updateDay, setToast, reminders, calData: appCalData } = useApp()
   const progressColor = resolveProgressColor(_rawColor, isDark)
   const gapColor = isDark ? '#1a1a28' : '#ffffff'
+  const reminderDates = useUpcomingReminderDates(reminders, appCalData)
 
   const clickRef = useRef<{ key: string | null; count: number; timer: ReturnType<typeof setTimeout> | null }>(
     { key: null, count: 0, timer: null }
@@ -265,6 +305,7 @@ function MonthCalendarLarge({
           const goal       = !!data?.goal
           const streak     = productive || hyper || milestone || goal
           const todayCell  = isToday(APP_YEAR, month, cell.day)
+          const reminderCount = reminderDates.get(cell.key) ?? 0
 
           const prevKey = cell.day > 1 ? dateKey(APP_YEAR, month, cell.day - 1) : null
           const nextKey = cell.day < totalDays ? dateKey(APP_YEAR, month, cell.day + 1) : null
@@ -283,6 +324,7 @@ function MonthCalendarLarge({
           if (hyper) return (
             <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)} title="Hyper Productive">
               {connLeft}{connRight}
+              <ReminderRing count={reminderCount} />
               <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
                 <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 46, lineHeight: 1, userSelect: 'none' }}>🔥</span>
                 <span style={{ position: 'absolute', top: '66%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 2, pointerEvents: 'none' }}>{cell.day}</span>
@@ -294,6 +336,7 @@ function MonthCalendarLarge({
           if (milestone) return (
             <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)} title="Milestone">
               {connLeft}{connRight}
+              <ReminderRing count={reminderCount} />
               <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
                 <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 38, color: 'rgba(167,139,250,0.20)', filter: 'drop-shadow(0 0 6px rgba(167,139,250,0.55))', lineHeight: 1, userSelect: 'none', zIndex: 0 }}>★</span>
                 <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 42, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🏆</span>
@@ -306,6 +349,7 @@ function MonthCalendarLarge({
           if (goal) return (
             <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)} title="Goal Achieved">
               {connLeft}{connRight}
+              <ReminderRing count={reminderCount} />
               <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
                 <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 48, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🎯</span>
                 <span style={{ position: 'absolute', top: '54%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 2, pointerEvents: 'none' }}>{cell.day}</span>
@@ -331,6 +375,7 @@ function MonthCalendarLarge({
           return (
             <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)}>
               {connLeft}{connRight}
+              <ReminderRing count={reminderCount} />
               <div className="absolute inset-[14%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-105" style={{ zIndex: 1, ...circleStyle }}>
                 {cell.day}
               </div>

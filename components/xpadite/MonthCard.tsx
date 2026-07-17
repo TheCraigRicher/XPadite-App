@@ -14,6 +14,7 @@ import {
 } from "./utils";
 import { generateShareCardDataUri } from "./ShareCardModal";
 import { addGalleryItem } from "./GalleryModal";
+import { useUpcomingReminderDates } from "./useUpcomingReminderDates";
 import type { DayData } from "./types";
 import type { GalleryItem } from "./GalleryModal";
 
@@ -168,6 +169,44 @@ function isStreakDay(data: DayData | undefined): boolean {
   return !!(data.productive || data.hyper || data.milestone || data.goal);
 }
 
+// ─── Reminder ring overlay ────────────────────────────────────────────────────
+
+function ReminderRing({ count }: { count: number }) {
+  if (count === 0) return null
+  return (
+    <>
+      <div
+        aria-label={count === 1 ? 'Has 1 upcoming reminder' : `Has ${count} upcoming reminders`}
+        className="absolute inset-[26%] sm:inset-[23%] rounded-full pointer-events-none"
+        style={{
+          border: '2px solid rgba(239,68,68,0.55)',
+          boxShadow: '0 0 0 2px rgba(239,68,68,0.08)',
+          zIndex: 2,
+          transition: 'opacity 200ms ease',
+        }}
+      />
+      {count > 1 && (
+        <span
+          aria-hidden="true"
+          className="absolute flex items-center justify-center pointer-events-none"
+          style={{
+            top: '14%', right: '14%',
+            minWidth: 9, height: 9,
+            padding: '0 1.5px',
+            borderRadius: 5,
+            background: 'rgba(239,68,68,0.90)',
+            fontSize: 5, fontWeight: 800, color: 'white',
+            lineHeight: '9px',
+            zIndex: 5,
+          }}
+        >
+          {count > 9 ? '9+' : count}
+        </span>
+      )}
+    </>
+  )
+}
+
 // ─── MonthCard ────────────────────────────────────────────────────────────────
 
 interface MonthCardProps {
@@ -192,8 +231,9 @@ export function MonthCard({
   onDayDoubleClick,
   onMonthZoom,
 }: MonthCardProps) {
-  const { calData, updateDay, setToast, isDark, progressColor: _rawColor } = useApp();
+  const { calData, updateDay, setToast, isDark, progressColor: _rawColor, reminders } = useApp();
   const progressColor = resolveProgressColor(_rawColor, isDark);
+  const reminderDates = useUpcomingReminderDates(reminders, calData);
   // Match the actual card surface so the productive-circle inner ring blends in
   const gapColor = isCurrentMonth ? "#eff6ff" : (isDark ? "#1a1a28" : "#ffffff");
 
@@ -502,6 +542,7 @@ export function MonthCard({
             const goal = !!dayData?.goal;
             const todayCell = isToday(APP_YEAR, month, cell.day);
             const isSun = cell.dayOfWeek === 0;
+            const reminderCount = reminderDates.get(cell.key) ?? 0;
 
             const prevKey =
               cell.day > 1 ? dateKey(APP_YEAR, month, cell.day - 1) : null;
@@ -566,6 +607,7 @@ export function MonthCard({
                 >
                   {connL}
                   {connR}
+                  <ReminderRing count={reminderCount} />
                   <div
                     className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110"
                     style={{ zIndex: 1 }}
@@ -613,6 +655,7 @@ export function MonthCard({
                 >
                   {connL}
                   {connR}
+                  <ReminderRing count={reminderCount} />
                   <div
                     className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110"
                     style={{ zIndex: 1 }}
@@ -679,6 +722,7 @@ export function MonthCard({
                 >
                   {connL}
                   {connR}
+                  <ReminderRing count={reminderCount} />
                   <div
                     className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110"
                     style={{ zIndex: 1 }}
@@ -747,6 +791,7 @@ export function MonthCard({
               >
                 {connL}
                 {connR}
+                <ReminderRing count={reminderCount} />
                 <div
                   className="absolute inset-[26%] sm:inset-[23%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-110"
                   style={{ zIndex: 1, ...circleStyle }}

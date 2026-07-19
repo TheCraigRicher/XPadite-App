@@ -9,11 +9,20 @@ import { createClient } from '@/lib/supabase/client'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Handles midnight-crossing sessions (endTs stored as the start of the same calendar
+// day when the user set end time while viewing the dashboard on the same day).
+function getSessionDurationMs(startTs: number, endTs: number): number {
+  let d = endTs - startTs
+  if (d < 0) d += 86_400_000   // end crossed midnight into the next day
+  return Math.max(d, 0)
+}
+
 function getTaskTotalMs(task: Task): number {
   const sessions = task.sessions ?? []
-  const fromSessions = sessions.filter(s => s.endTs !== null).reduce((a, s) => a + (s.endTs! - s.startTs), 0)
+  const fromSessions = sessions.filter(s => s.endTs !== null)
+    .reduce((a, s) => a + getSessionDurationMs(s.startTs, s.endTs!), 0)
   if (fromSessions > 0) return fromSessions
-  if (task.timerStart && task.timerEnd) return task.timerEnd - task.timerStart
+  if (task.timerStart && task.timerEnd) return getSessionDurationMs(task.timerStart, task.timerEnd)
   return 0
 }
 
@@ -409,14 +418,13 @@ function TodayOverviewBars({ data, totalMs }: { data: { label: string; ms: numbe
                 x={x.toFixed(1)} y={y.toFixed(1)}
                 width={barW.toFixed(1)} height={(barH + Math.abs(yShift)).toFixed(1)}
                 rx="5" fill={`url(#tob${i})`}
-                opacity={hovIdx !== null && !isHov ? 0.55 : 1}
-                style={{ transition: 'opacity 200ms ease, transform 200ms ease' }}
+                style={{ transition: 'transform 220ms cubic-bezier(0.22,1,0.36,1)', filter: isHov ? `drop-shadow(0 0 9px ${d.color}55)` : 'none' }}
               />
             )}
             {lbl && barH > 14 && (
               <text x={bcx.toFixed(1)} y={(y - 5).toFixed(1)} textAnchor="middle"
-                fontSize={isHov ? '9' : '8'} fontWeight="700"
-                fill={d.color} opacity={hovIdx !== null && !isHov ? 0.45 : 1}>
+                fontSize={isHov ? '9' : '8'} fontWeight={isHov ? '800' : '700'}
+                fill={d.color}>
                 {lbl}
               </text>
             )}
@@ -648,6 +656,13 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames }: { s
   )
 }
 
+// ─── Badge asset map — add new entries as artwork is supplied ─────────────────
+// Key = PerformanceLevel. Extend this object; no other code changes needed.
+const BADGE_ASSETS: Partial<Record<PerformanceLevel, string>> = {
+  4: '/badges/xpadite-advanced-badge.png',
+  5: '/badges/xpadite-elite-badge.png',
+}
+
 // ─── Top-right achievement banner — driven by FinalPerformanceLevel ───────────
 
 function AchievementBanner({
@@ -656,14 +671,21 @@ function AchievementBanner({
   tier: PerformanceTier; level: PerformanceLevel; isDark: boolean;
   firstName?: string; dateLabel?: string
 }) {
-  const isNoBadge = level === 0
-  const isElite   = level === 5
+  const isNoBadge    = level === 0
+  const isElite      = level === 5
+  const badgeAsset   = BADGE_ASSETS[level] ?? null
   const { color, glow, title, message, secondaryMessage } = tier
-  const greeting  = firstName ? `Congratulations, ${firstName}!` : 'Congratulations!'
+  const greeting     = firstName ? `Congratulations, ${firstName}!` : 'Congratulations!'
+  const [shineKey, setShineKey] = useState(0)
+
+  // Trigger shine once whenever a custom-asset badge is first displayed
+  useEffect(() => {
+    if (BADGE_ASSETS[level]) setShineKey(k => k + 1)
+  }, [level])
 
   return (
     <div
-      className="rounded-2xl p-4 flex flex-col h-full xp-lift relative overflow-hidden"
+      className="rounded-2xl p-4 flex flex-col h-full relative overflow-hidden"
       style={{
         background: isDark
           ? 'linear-gradient(145deg, rgba(15,6,38,0.99) 0%, rgba(8,3,18,0.99) 100%)'
@@ -687,6 +709,7 @@ function AchievementBanner({
       {/* Badge artwork */}
       <div className="flex justify-center items-center mb-2 relative z-10">
         {isNoBadge ? (
+          /* Level 0 — no badge earned yet */
           <div style={{
             width: 72, height: 72, borderRadius: 18,
             background: isDark ? 'rgba(148,163,184,0.08)' : 'rgba(148,163,184,0.1)',
@@ -699,14 +722,42 @@ function AchievementBanner({
               <path d="M 13 20 L 20 13 L 27 20" fill="none" stroke="rgba(148,163,184,0.5)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
-        ) : isElite ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src="/badges/xpadite-elite-badge.png"
-            alt="XPadite Elite Badge"
-            style={{ width: 156, height: 130, objectFit: 'contain', display: 'block' }}
-          />
+        ) : badgeAsset ? (
+          /* Custom artwork — resolves via BADGE_ASSETS map (Advanced, Elite, future levels) */
+          <div
+            style={{ position: 'relative', display: 'inline-block', overflow: 'hidden', borderRadius: 8 }}
+            onMouseEnter={() => setShineKey(k => k + 1)}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={badgeAsset}
+              alt={`XPadite ${title} Badge`}
+              style={{ width: 156, height: 130, objectFit: 'contain', display: 'block' }}
+            />
+            {/* Metallic shine — only rendered when shineKey > 0 so there is no static stain at rest.
+                mask-image clips the beam to the badge artwork silhouette. */}
+            {shineKey > 0 && (
+              <div
+                key={shineKey}
+                style={{
+                  position: 'absolute', inset: 0,
+                  WebkitMaskImage: `url(${badgeAsset})`,
+                  WebkitMaskSize: 'contain',
+                  WebkitMaskPosition: 'center',
+                  WebkitMaskRepeat: 'no-repeat',
+                  maskImage: `url(${badgeAsset})`,
+                  maskSize: 'contain',
+                  maskPosition: 'center',
+                  maskRepeat: 'no-repeat',
+                  background: 'linear-gradient(110deg, transparent 15%, rgba(255,255,255,0) 36%, rgba(255,248,210,0.75) 48%, rgba(255,255,255,0.92) 52%, rgba(255,224,140,0.50) 64%, transparent 85%)',
+                  animation: 'xp-badge-shine 920ms cubic-bezier(0.4, 0, 0.2, 1) forwards',
+                  pointerEvents: 'none',
+                }}
+              />
+            )}
+          </div>
         ) : (
+          /* SVG placeholder — levels 1–3 until custom artwork is supplied */
           <svg viewBox="0 0 100 110" width="80" height="88" style={{ display: 'block', overflow: 'visible' }}>
             <defs>
               <linearGradient id="xp-shield-bg" x1="0" y1="0" x2="0" y2="1">
@@ -718,9 +769,7 @@ function AchievementBanner({
               fill="url(#xp-shield-bg)" stroke={color} strokeWidth="2.5" strokeOpacity="0.6" />
             <path d="M 50 13 C 50 13, 86 25 86 57 C 86 78 50 93 50 93 C 50 93 14 78 14 57 C 14 25 50 13 50 13 Z"
               fill="none" stroke={color} strokeWidth="0.8" strokeOpacity="0.28" />
-            {level === 4 ? (
-              <path d="M 50 70 Q 32 60 32 47 Q 32 34 43 28 Q 40 41 50 41 Q 60 41 57 28 Q 68 34 68 47 Q 68 60 50 70 Z" fill={color} fillOpacity="0.74" />
-            ) : level === 3 ? (
+            {level === 3 ? (
               <g>
                 <circle cx="50" cy="53" r="22" fill="none" stroke={color} strokeWidth="3.5" strokeOpacity="0.65" />
                 <circle cx="50" cy="53" r="13" fill="none" stroke={color} strokeWidth="2.8" strokeOpacity="0.6" />
@@ -752,7 +801,7 @@ function AchievementBanner({
             {secondaryMessage}
           </p>
         )}
-        {isElite && dateLabel && (
+        {badgeAsset && dateLabel && (
           <p className="text-[8px] mt-2 opacity-50" style={{ color: isDark ? 'rgba(203,213,225,0.7)' : 'var(--xp-txt3)' }}>
             ◎ Earned on {dateLabel}
           </p>
@@ -897,12 +946,20 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // Fetch the signed-in user's display name from Supabase auth metadata
+  // Fetch display name: auth metadata first, then profiles table as fallback
   useEffect(() => {
     const supabase = createClient()
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(async ({ data }) => {
       const meta = data.user?.user_metadata as Record<string, string> | undefined
-      const full = (meta?.full_name ?? meta?.name ?? '').trim()
+      let full = (meta?.full_name ?? meta?.name ?? meta?.display_name ?? '').trim()
+      if (!full && data.user?.id) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name')
+          .eq('id', data.user.id)
+          .single()
+        full = ((profile as { full_name?: string } | null)?.full_name ?? '').trim()
+      }
       if (full) setFirstName(full.split(/\s+/)[0])
     }).catch(() => {})
   }, [])
@@ -918,14 +975,14 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
       }))
     ).sort((a, b) => a.startTs - b.startTs)
 
-    const totalMs        = allSessions.reduce((s, x) => s + (x.endTs! - x.startTs), 0)
-    const longestMs      = allSessions.reduce((mx, s) => Math.max(mx, s.endTs! - s.startTs), 0)
+    const totalMs        = allSessions.reduce((s, x) => s + getSessionDurationMs(x.startTs, x.endTs!), 0)
+    const longestMs      = allSessions.reduce((mx, s) => Math.max(mx, getSessionDurationMs(s.startTs, s.endTs!)), 0)
     const sessionCount   = allSessions.length
     const completedTasks = dayData.tasks.filter(t => t.done).length
     const totalTasks     = dayData.tasks.length
     const deepWorkMs     = allSessions
-      .filter(s => (s.endTs! - s.startTs) >= 45 * 60_000)
-      .reduce((s, x) => s + (x.endTs! - x.startTs), 0)
+      .filter(s => getSessionDurationMs(s.startTs, s.endTs!) >= 45 * 60_000)
+      .reduce((s, x) => s + getSessionDurationMs(x.startTs, x.endTs!), 0)
 
     let score = 0
     if (completedTasks > 0) score += 20
@@ -937,7 +994,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
     score = Math.min(100, score)
 
     const actMs = new Map<string, number>()
-    allSessions.forEach(s => { if (s.actId) actMs.set(s.actId, (actMs.get(s.actId) ?? 0) + (s.endTs! - s.startTs)) })
+    allSessions.forEach(s => { if (s.actId) actMs.set(s.actId, (actMs.get(s.actId) ?? 0) + getSessionDurationMs(s.startTs, s.endTs!)) })
     const actBreakdown = Array.from(actMs.entries()).map(([actId, ms]) => {
       const act = activities.find(a => a.id === actId)
       return { actId, name: act?.name ?? 'Other', color: act?.color ?? '#94a3b8', ms, pct: totalMs > 0 ? ms / totalMs : 0 }
@@ -1000,61 +1057,43 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
   const card1 = { background: S1, border: `0.5px solid ${BDR}`, boxShadow: isDark ? '0 2px 16px rgba(0,0,0,0.35)' : '0 1px 6px rgba(0,0,0,0.05)' }
   const card2 = { background: S2, border: `0.5px solid ${BDR}`, boxShadow: isDark ? '0 2px 16px rgba(0,0,0,0.35)' : '0 1px 6px rgba(0,0,0,0.05)' }
 
-  // ── KPI card definitions — exact ITR4 gradients ───────────────────────────
+  // ── KPI card definitions — bold saturated premium gradients ─────────────
   const kpiCards = [
     {
       label: 'Total Worked', value: stats ? formatMs(stats.totalMs) : '—', sub: null, icon: '⏱',
-      accent:  isDark ? '#C8A8FF' : '#7038E8',
-      iconClr: isDark ? '#C4A4FF' : '#7C3AED',
-      bg:      isDark ? 'linear-gradient(135deg, #24124A 0%, #332066 50%, #3D1B58 100%)'
-                      : 'linear-gradient(135deg, #F1E9FF 0%, #DDD0FF 46%, #E8D8FF 72%, #F6DDF5 100%)',
-      border:  isDark ? 'rgba(139,92,246,0.48)' : '#C9B4FF',
-      iconBg:  isDark ? 'rgba(139,92,246,0.22)' : 'rgba(124,58,237,0.12)',
+      bg:     isDark ? 'linear-gradient(135deg, #5B21B6 0%, #7E22CE 50%, #A21CAF 100%)'
+                     : 'linear-gradient(135deg, #7C3AED 0%, #A855F7 50%, #D946EF 100%)',
+      border: isDark ? 'rgba(162,28,175,0.46)' : 'rgba(126,34,206,0.45)',
     },
     {
       label: 'Longest Session', value: stats ? formatMs(stats.longestMs) : '—', sub: stats?.isPersonalBest ? '🔥 Best' : null, icon: '⚡',
-      accent:  isDark ? '#9CABFF' : '#4A45E6',
-      iconClr: isDark ? '#9FB1FF' : '#4F46E5',
-      bg:      isDark ? 'linear-gradient(135deg, #171C48 0%, #20275D 48%, #142B4E 100%)'
-                      : 'linear-gradient(135deg, #E9F0FF 0%, #CDDFFF 48%, #D8E8FF 74%, #E3F6FF 100%)',
-      border:  isDark ? 'rgba(99,132,255,0.48)' : '#AACBFF',
-      iconBg:  isDark ? 'rgba(79,110,255,0.22)' : 'rgba(79,70,229,0.11)',
+      bg:     isDark ? 'linear-gradient(135deg, #1D4ED8 0%, #0369A1 52%, #0891B2 100%)'
+                     : 'linear-gradient(135deg, #2563EB 0%, #0EA5E9 52%, #22D3EE 100%)',
+      border: isDark ? 'rgba(8,145,178,0.46)' : 'rgba(14,165,233,0.45)',
     },
     {
       label: 'Sessions', value: stats ? String(stats.sessionCount) : '—', sub: null, icon: '📋',
-      accent:  isDark ? '#6CE7F3' : '#0596A6',
-      iconClr: isDark ? '#67E8F9' : '#0891B2',
-      bg:      isDark ? 'linear-gradient(135deg, #092D36 0%, #0B3A43 50%, #0A3442 100%)'
-                      : 'linear-gradient(135deg, #E5FAF7 0%, #C9F4E9 42%, #C6F5F0 72%, #DDFBE8 100%)',
-      border:  isDark ? 'rgba(34,211,238,0.42)' : '#91E8D2',
-      iconBg:  isDark ? 'rgba(6,182,212,0.20)' : 'rgba(6,182,212,0.11)',
+      bg:     isDark ? 'linear-gradient(135deg, #0E7490 0%, #0F766E 54%, #0D9488 100%)'
+                     : 'linear-gradient(135deg, #06B6D4 0%, #14B8A6 54%, #2DD4BF 100%)',
+      border: isDark ? 'rgba(13,148,136,0.46)' : 'rgba(20,184,166,0.44)',
     },
     {
       label: 'Tasks Done', value: stats ? `${stats.completedTasks}/${stats.totalTasks}` : '—', sub: stats && stats.totalTasks > 0 ? `${Math.round((stats.completedTasks / stats.totalTasks) * 100)}% complete` : null, icon: '✓',
-      accent:  isDark ? '#6EE7B7' : '#079669',
-      iconClr: isDark ? '#6EE7B7' : '#059669',
-      bg:      isDark ? 'linear-gradient(135deg, #09372E 0%, #0B4335 48%, #153A2D 72%, #303617 100%)'
-                      : 'linear-gradient(135deg, #E4F9ED 0%, #C9F4D7 45%, #E3F7C9 76%, #FFF2B8 100%)',
-      border:  isDark ? 'rgba(52,211,153,0.42)' : '#A8E7BE',
-      iconBg:  isDark ? 'rgba(16,185,129,0.20)' : 'rgba(16,185,129,0.13)',
+      bg:     isDark ? 'linear-gradient(135deg, #047857 0%, #15803D 52%, #4D7C0F 100%)'
+                     : 'linear-gradient(135deg, #059669 0%, #22C55E 52%, #84CC16 100%)',
+      border: isDark ? 'rgba(21,128,61,0.46)' : 'rgba(34,197,94,0.44)',
     },
     {
       label: 'Deep Work', value: stats ? formatMs(stats.deepWorkMs) : '—', sub: null, icon: '🧠',
-      accent:  isDark ? '#FF94C4' : '#DB2777',
-      iconClr: isDark ? '#F9A8D4' : '#DB2777',
-      bg:      isDark ? 'linear-gradient(135deg, #49132D 0%, #561534 48%, #461536 75%, #351943 100%)'
-                      : 'linear-gradient(135deg, #FFF0F7 0%, #FAD3E7 44%, #F6C8E1 72%, #F2D8F4 100%)',
-      border:  isDark ? 'rgba(244,114,182,0.44)' : '#F4B4D4',
-      iconBg:  isDark ? 'rgba(236,72,153,0.21)' : 'rgba(219,39,119,0.11)',
+      bg:     isDark ? 'linear-gradient(135deg, #9D174D 0%, #BE185D 48%, #86198F 100%)'
+                     : 'linear-gradient(135deg, #DB2777 0%, #EC4899 48%, #C026D3 100%)',
+      border: isDark ? 'rgba(190,24,93,0.46)' : 'rgba(219,39,119,0.46)',
     },
     {
       label: 'Focus Score', value: stats ? `${stats.score}%` : '—', sub: stats ? (stats.score >= 80 ? 'Excellent' : stats.score >= 60 ? 'Good' : stats.score >= 40 ? 'Average' : 'Building') : null, icon: '🎯',
-      accent:  isDark ? '#FF677C' : '#F03B54',
-      iconClr: isDark ? '#C4B5FD' : '#7C3AED',
-      bg:      isDark ? 'linear-gradient(135deg, #2B174E 0%, #351A5C 48%, #251D58 72%, #163A49 100%)'
-                      : 'linear-gradient(135deg, #F0EBFF 0%, #DDD3FF 44%, #D7D9FF 70%, #D7F5F2 100%)',
-      border:  isDark ? 'rgba(167,139,250,0.46)' : '#C7B8FF',
-      iconBg:  isDark ? 'rgba(139,92,246,0.20)' : 'rgba(124,58,237,0.11)',
+      bg:     isDark ? 'linear-gradient(135deg, #5B21B6 0%, #4338CA 52%, #1D4ED8 100%)'
+                     : 'linear-gradient(135deg, #7C3AED 0%, #6366F1 52%, #3B82F6 100%)',
+      border: isDark ? 'rgba(99,102,241,0.46)' : 'rgba(99,102,241,0.46)',
     },
   ]
 
@@ -1224,12 +1263,58 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
         <div ref={captureRef} className="p-4 sm:p-5 lg:p-6 space-y-4 lg:space-y-5">
 
           {/* ══════════════════════════════════════════════════════════════════
-              ROW 1 — [Gauge ~26%] | [KPI Cards 3×2 ~48%] | [Achievement Badge ~26%]
-              Matches Dashboard Design ITR 2 approved top row exactly.
+              ROW 1 — [KPI Cards 3×2] | [Gauge — CENTER focal point] | [Achievement Badge]
               ══════════════════════════════════════════════════════════════════ */}
-          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.9fr)_minmax(0,0.77fr)] gap-4 lg:gap-5 items-stretch">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(0,0.82fr)] gap-4 lg:gap-5 items-stretch">
 
-            {/* LEFT — Performance Analytics Gauge (large, fills column) */}
+            {/* LEFT — KPI Metric Cards: 3 columns × 2 rows */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 content-start">
+              {kpiCards.map(m => (
+                <div
+                  key={m.label}
+                  className="rounded-[13px] p-3 flex flex-col relative overflow-hidden xp-kpi-card"
+                  style={{
+                    background: m.bg,
+                    border: `1px solid ${m.border}`,
+                    minHeight: 84,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.10)',
+                  }}
+                >
+                  {/* Highlight overlay — glass sheen */}
+                  <div style={{
+                    position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none',
+                    background: 'linear-gradient(180deg, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.06) 42%, rgba(255,255,255,0) 100%)',
+                  }} />
+                  {/* Icon tile */}
+                  <div style={{
+                    width: 26, height: 26, borderRadius: 7, marginBottom: 6, flexShrink: 0,
+                    background: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.16)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 13, color: '#FFFFFF',
+                  }}>
+                    {m.icon}
+                  </div>
+                  {/* Value */}
+                  <p className="text-lg sm:text-xl font-bold leading-none tabular-nums mb-0.5"
+                    style={{ color: '#FFFFFF' }}>
+                    {m.value}
+                  </p>
+                  {/* Label */}
+                  <p className="text-[8.5px] font-medium mt-auto leading-tight"
+                    style={{ color: 'rgba(255,255,255,0.72)' }}>
+                    {m.label}
+                  </p>
+                  {/* Sub */}
+                  {m.sub && (
+                    <p className="text-[8px] mt-0.5 font-semibold" style={{ color: 'rgba(255,255,255,0.84)' }}>
+                      {m.sub}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* CENTER — Performance Analytics Gauge (largest focal point) */}
             <div
               className="rounded-2xl overflow-hidden flex flex-col"
               style={{
@@ -1242,47 +1327,6 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
               }}
             >
               <GaugeMeter score={gaugeScore} />
-            </div>
-
-            {/* MIDDLE — KPI Metric Cards: 3 columns × 2 rows */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 content-start">
-              {kpiCards.map(m => (
-                <div
-                  key={m.label}
-                  className="rounded-[13px] p-3 flex flex-col relative overflow-hidden xp-kpi-card"
-                  style={{
-                    background: m.bg,
-                    border: `1px solid ${m.border}`,
-                    minHeight: 84,
-                  }}
-                >
-                  {/* Icon tile */}
-                  <div style={{
-                    width: 26, height: 26, borderRadius: 7, marginBottom: 6, flexShrink: 0,
-                    background: m.iconBg,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 13, color: m.iconClr,
-                  }}>
-                    {m.icon}
-                  </div>
-                  {/* Value */}
-                  <p className="text-lg sm:text-xl font-bold leading-none tabular-nums mb-0.5"
-                    style={{ color: m.accent }}>
-                    {m.value}
-                  </p>
-                  {/* Label */}
-                  <p className="text-[8.5px] font-medium mt-auto leading-tight"
-                    style={{ color: isDark ? 'rgba(148,163,184,0.58)' : 'rgba(71,85,105,0.65)' }}>
-                    {m.label}
-                  </p>
-                  {/* Sub */}
-                  {m.sub && (
-                    <p className="text-[8px] mt-0.5 font-semibold" style={{ color: isDark ? `${m.accent}bb` : m.accent }}>
-                      {m.sub}
-                    </p>
-                  )}
-                </div>
-              ))}
             </div>
 
             {/* RIGHT — Congratulations / Achievement badge */}
@@ -1521,10 +1565,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
               {hasTasks ? (
                 <div className="space-y-3">
                   {stats!.taskTotals.map((t, taskIdx) => {
-                    const act      = activities.find(a => a.id === t.actId)
-                    const gradStr  = act?.color
-                      ? `linear-gradient(90deg, ${lightenHex(act.color, 0.30)} 0%, ${act.color} 100%)`
-                      : TASK_GRAD_STRINGS[taskIdx % TASK_GRAD_STRINGS.length]
+                    const gradStr  = TASK_GRAD_STRINGS[taskIdx % TASK_GRAD_STRINGS.length]
                     const barPct   = Math.round((t.ms / (stats!.taskTotals[0]?.ms ?? 1)) * 100)
                     const totalPct = stats!.totalMs > 0 ? Math.round((t.ms / stats!.totalMs) * 100) : 0
                     return (
@@ -1532,7 +1573,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                         <div className="flex items-start justify-between gap-2 mb-1.5">
                           <span className="text-[9px] flex-1 min-w-0 leading-snug font-medium"
                             style={{
-                              color: t.done ? isDark ? 'rgba(148,163,184,0.38)' : 'var(--xp-txt3)' : isDark ? 'rgba(203,213,225,0.88)' : 'var(--xp-txt)',
+                              color: t.done ? isDark ? 'rgba(148,163,184,0.55)' : 'var(--xp-txt3)' : isDark ? 'rgba(203,213,225,0.88)' : 'var(--xp-txt)',
                               textDecoration: t.done ? 'line-through' : 'none',
                             }}>
                             {t.text}
@@ -1548,16 +1589,15 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                             </span>
                           </div>
                         </div>
-                        {/* Thicker progress bar with full 3-stop gradient */}
+                        {/* Thicker progress bar — full opacity always, deterministic palette gradient */}
                         <div className="h-2.5 rounded-full overflow-hidden"
                           style={{ background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)' }}>
                           <div className="h-full rounded-full"
                             style={{
                               width: `${barPct > 0 ? Math.max(barPct, 4) : 0}%`,
                               background: gradStr,
-                              opacity: t.done ? 0.5 : 1,
-                              boxShadow: isDark && !t.done ? `0 0 8px ${act?.color ?? 'rgba(124,58,237,0.4)'}33` : 'none',
-                              transition: 'box-shadow 200ms ease',
+                              opacity: 1,
+                              boxShadow: isDark ? `0 0 8px rgba(124,58,237,0.28)` : 'none',
                             }} />
                         </div>
                       </div>

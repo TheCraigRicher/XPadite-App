@@ -450,7 +450,10 @@ function TaskRow({
               {formatHMS(now - runningSession.startTs)}
             </span>
           ) : totalMs > 0 ? (
-            <span className="text-[10px] font-mono flex-shrink-0" style={{ color: 'var(--xp-txt3)' }}>
+            <span className="text-[10px] font-mono flex-shrink-0 flex items-center gap-1" style={{ color: 'var(--xp-txt3)' }}>
+              {(task.sessions?.filter(s => s.endTs !== null).length ?? 0) > 1 && (
+                <span className="text-[8px]" style={{ color: 'var(--xp-txt3)', opacity: 0.55 }}>Total</span>
+              )}
               {formatMs(totalMs)}
             </span>
           ) : null}

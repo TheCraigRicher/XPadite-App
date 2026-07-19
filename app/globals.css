@@ -197,6 +197,15 @@ body {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.28);
 }
 
+/* Elite badge left-to-right shine */
+@keyframes xp-elite-shine {
+  0%   { transform: translateX(-220%) skewX(-18deg); }
+  100% { transform: translateX(480%) skewX(-18deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .xp-elite-shine { animation: none !important; }
+}
+
 /* KPI card premium interactions */
 .xp-kpi-card {
   transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1),

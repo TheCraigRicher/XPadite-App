@@ -197,13 +197,19 @@ body {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.28);
 }
 
-/* Elite badge left-to-right shine */
+/* Elite badge left-to-right shine (legacy narrow-strip variant) */
 @keyframes xp-elite-shine {
   0%   { transform: translateX(-220%) skewX(-18deg); }
   100% { transform: translateX(480%) skewX(-18deg); }
 }
 @media (prefers-reduced-motion: reduce) {
   .xp-elite-shine { animation: none !important; }
+}
+
+/* Badge shine — full-width masked overlay variant (works with mask-image silhouette) */
+@keyframes xp-badge-shine {
+  0%   { transform: translateX(-100%) skewX(-18deg); }
+  100% { transform: translateX(100%) skewX(-18deg); }
 }
 
 /* KPI card premium interactions */

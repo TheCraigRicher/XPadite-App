@@ -141,9 +141,11 @@ function AdjustTimeModal({ task, onClose, onSave }: AdjustTimeProps) {
     return `${h}:${m}`
   }
 
-  function inputToTs(val: string): number {
+  // Uses the session's actual date (baseTs) so editing a past-day session
+  // doesn't produce wrong-date timestamps. Handles midnight-crossing (end < start).
+  function inputToTs(val: string, baseTs: number): number {
     const [h, m] = val.split(':').map(Number)
-    const d = new Date()
+    const d = new Date(baseTs)
     d.setHours(h, m, 0, 0)
     return d.getTime()
   }
@@ -188,11 +190,16 @@ function AdjustTimeModal({ task, onClose, onSave }: AdjustTimeProps) {
           </div>
         </div>
 
-        {startVal && endVal && (
-          <p className="text-[10px] mb-3" style={{ color: 'var(--xp-txt3)' }}>
-            Duration: {formatMs(Math.max(0, inputToTs(endVal) - inputToTs(startVal)))}
-          </p>
-        )}
+        {startVal && endVal && refStart !== null && (() => {
+          const sTs = inputToTs(startVal, refStart)
+          let eTs = inputToTs(endVal, refStart)
+          if (eTs <= sTs) eTs += 86_400_000  // midnight crossing
+          return (
+            <p className="text-[10px] mb-3" style={{ color: 'var(--xp-txt3)' }}>
+              Duration: {formatMs(Math.max(0, eTs - sTs))}
+            </p>
+          )
+        })()}
 
         <div className="mb-4">
           <label className="block text-[10px] font-medium mb-1" style={{ color: 'var(--xp-txt3)' }}>Reason (optional)</label>
@@ -216,8 +223,11 @@ function AdjustTimeModal({ task, onClose, onSave }: AdjustTimeProps) {
           </button>
           <button
             onClick={() => {
-              if (startVal && endVal) {
-                onSave(inputToTs(startVal), inputToTs(endVal), noteVal)
+              if (startVal && endVal && refStart !== null) {
+                const sTs = inputToTs(startVal, refStart)
+                let eTs = inputToTs(endVal, refStart)
+                if (eTs <= sTs) eTs += 86_400_000  // midnight crossing
+                onSave(sTs, eTs, noteVal)
               }
               onClose()
             }}

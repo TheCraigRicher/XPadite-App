@@ -23,6 +23,7 @@ interface ReminderModalProps {
   taskText: string
   existingReminder: Reminder | null
   onClose: () => void
+  onSaved?: () => void
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -33,6 +34,7 @@ export function ReminderModal({
   taskText,
   existingReminder,
   onClose,
+  onSaved,
 }: ReminderModalProps) {
   const { upsertReminderCtx, removeReminderCtx, userEmail, isDark } = useApp()
 
@@ -93,6 +95,7 @@ export function ReminderModal({
       timezone,
     })
     setSaving(false)
+    onSaved?.()
     onClose()
   }
 

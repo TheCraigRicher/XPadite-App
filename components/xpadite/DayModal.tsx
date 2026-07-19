@@ -303,13 +303,14 @@ interface TaskRowProps {
   onDragStart: () => void
   onDragOver: (e: React.DragEvent) => void
   onDrop: () => void
+  bellTriggerKey: number
 }
 
 function TaskRow({
   task, index, isActive, now, editMode, dateKey,
   onToggle, onDelete, onDuplicate, onStartTimer, onStopTimer,
   onJournalChange, onTextChange, onActChange, onAdjustTime, onSetReminder,
-  onDragStart, onDragOver, onDrop,
+  onDragStart, onDragOver, onDrop, bellTriggerKey,
 }: TaskRowProps) {
   const { activities, reminders } = useApp()
   const hasReminder = reminders.some(r => r.taskId === task.id && r.dateKey === dateKey && r.isActive)
@@ -317,6 +318,29 @@ function TaskRow({
   const [menuOpen, setMenuOpen] = useState(false)
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
+
+  // ── Bell animation ──────────────────────────────────────────────────────────
+  const [isBellAnimating, setIsBellAnimating] = useState(false)
+  const mountedRef = useRef(false)
+  const prevTriggerRef = useRef(bellTriggerKey)
+
+  // Fire once on mount when popup opens with an existing reminder
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true
+      if (hasReminder) setIsBellAnimating(true)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Fire when a reminder save completes (bellTriggerKey increments)
+  useEffect(() => {
+    if (bellTriggerKey !== prevTriggerRef.current) {
+      prevTriggerRef.current = bellTriggerKey
+      setIsBellAnimating(true)
+    }
+  }, [bellTriggerKey])
+  // ───────────────────────────────────────────────────────────────────────────
 
   const totalMs = getTaskTotalMs(task, isActive, now)
   const runningSession = getRunningSession(task)
@@ -370,9 +394,14 @@ function TaskRow({
               onClick={onSetReminder}
               title="Edit reminder"
               className="flex-shrink-0 transition-transform hover:scale-110"
-              style={{ fontSize: 13, lineHeight: 1, color: '#a78bfa' }}
+              style={{ fontSize: 13, lineHeight: 1, color: '#a78bfa', overflow: 'visible' }}
             >
-              🔔
+              <span
+                className={isBellAnimating ? 'xp-bell-ring' : ''}
+                onAnimationEnd={() => setIsBellAnimating(false)}
+              >
+                🔔
+              </span>
             </button>
           )}
 
@@ -762,6 +791,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   const [dragItemId, setDragItemId] = useState<string | null>(null)
   const [showConfetti, setShowConfetti] = useState(false)
   const [reminderTaskId, setReminderTaskId] = useState<string | null>(null)
+  const [reminderSavedKey, setReminderSavedKey] = useState<Record<string, number>>({})
   const onConfettiDone = useCallback(() => setShowConfetti(false), [])
 
   const dateLabel = useMemo(() => {
@@ -1121,6 +1151,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
                   onDragStart={() => setDragItemId(task.id)}
                   onDragOver={e => e.preventDefault()}
                   onDrop={() => handleDrop(task.id)}
+                  bellTriggerKey={reminderSavedKey[task.id] ?? 0}
                 />
               ))}
 
@@ -1231,6 +1262,10 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
             taskText={reminderTask.text}
             existingReminder={existingReminder}
             onClose={() => setReminderTaskId(null)}
+            onSaved={() => setReminderSavedKey(prev => ({
+              ...prev,
+              [reminderTaskId]: (prev[reminderTaskId] ?? 0) + 1,
+            }))}
           />
         ) : null
       })()}

@@ -25,6 +25,54 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* ─── Premium card hover lift ───────────────────────────── */
+
+.xp-lift {
+  transition: transform 180ms cubic-bezier(0.2, 0, 0.2, 1),
+              box-shadow 180ms cubic-bezier(0.2, 0, 0.2, 1);
+  will-change: transform;
+}
+.xp-lift:hover {
+  transform: translateY(-2px);
+}
+
+/* ─── Session log row hover ──────────────────────────────── */
+
+.xp-row {
+  transition: background 120ms ease;
+}
+.xp-row:hover {
+  background: rgba(124, 58, 237, 0.04);
+}
+
+/* ─── Bell ring animation ────────────────────────────────── */
+
+@keyframes xp-bell-ring {
+  0%   { transform: rotate(0deg)    scale(1);    }
+  10%  { transform: rotate(-11deg)  scale(1.04); }
+  20%  { transform: rotate(11deg)   scale(1.05); }
+  30%  { transform: rotate(-9deg)   scale(1.05); }
+  40%  { transform: rotate(9deg)    scale(1.04); }
+  50%  { transform: rotate(-7deg)   scale(1.03); }
+  60%  { transform: rotate(7deg)    scale(1.03); }
+  70%  { transform: rotate(-4deg)   scale(1.02); }
+  80%  { transform: rotate(4deg)    scale(1.01); }
+  92%  { transform: rotate(-1deg)   scale(1);    }
+  100% { transform: rotate(0deg)    scale(1);    }
+}
+
+.xp-bell-ring {
+  animation: xp-bell-ring 760ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  transform-origin: 50% 15%;
+  display: inline-block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xp-bell-ring {
+    animation: none;
+  }
+}
+
 /* ─── Auth page keyframe animations ──────────────────────── */
 
 @keyframes float-slow {

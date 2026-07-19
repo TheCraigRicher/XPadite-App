@@ -503,7 +503,7 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames }: { s
     const endTx   = s.endTs! - first
     if (endTx <= startTx) continue
     pts.push({ tx: startTx, ms: cum })
-    cum += s.endTs! - s.startTs
+    cum += getSessionDurationMs(s.startTs, s.endTs!)
     pts.push({ tx: endTx, ms: cum })
     prevEndTx = endTx
   }
@@ -523,7 +523,7 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames }: { s
   let dotCum = 0
   const dotPts: { sx: number; sy: number; cumMs: number; actId?: string }[] = []
   for (const s of sorted) {
-    dotCum += s.endTs! - s.startTs
+    dotCum += getSessionDurationMs(s.startTs, s.endTs!)
     dotPts.push({ sx: toX(s.endTs! - first), sy: toY(dotCum), cumMs: dotCum, actId: s.actId })
   }
 
@@ -689,25 +689,25 @@ function AchievementBanner({
       style={{
         background: isDark
           ? 'linear-gradient(145deg, rgba(15,6,38,0.99) 0%, rgba(8,3,18,0.99) 100%)'
-          : 'var(--xp-bg3)',
-        border: isDark ? `0.5px solid ${color}35` : `0.5px solid ${color}30`,
-        boxShadow: isDark ? `0 4px 30px ${glow}` : `0 2px 12px ${color}10`,
+          : '#ffffff',
+        border: isDark ? `0.5px solid ${color}38` : `0.5px solid ${color}28`,
+        boxShadow: isDark ? `0 4px 32px ${glow}, 0 2px 16px rgba(0,0,0,0.45)` : `0 2px 14px ${color}12`,
       }}
     >
       {isDark && (
-        <div style={{ position: 'absolute', top: -30, right: -30, width: 160, height: 160, borderRadius: '50%', background: `radial-gradient(circle, ${color}10 0%, transparent 70%)`, pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', top: -24, right: -24, width: 140, height: 140, borderRadius: '50%', background: `radial-gradient(circle, ${color}12 0%, transparent 70%)`, pointerEvents: 'none' }} />
       )}
-      <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none', background: 'linear-gradient(120deg, transparent 28%, rgba(255,255,255,0.03) 50%, transparent 72%)' }} />
+      <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none', background: 'linear-gradient(130deg, transparent 30%, rgba(255,255,255,0.025) 52%, transparent 74%)' }} />
 
-      {/* Heading */}
-      <div className="text-center mb-2 relative z-10">
+      {/* Greeting */}
+      <div className="text-center mb-1.5 relative z-10">
         <p className="text-[11px] font-bold leading-snug" style={{ color }}>
           {isNoBadge ? 'Your Daily Badge' : greeting}
         </p>
       </div>
 
       {/* Badge artwork */}
-      <div className="flex justify-center items-center mb-2 relative z-10">
+      <div className="flex justify-center items-center mb-1.5 relative z-10">
         {isNoBadge ? (
           /* Level 0 — no badge earned yet */
           <div style={{
@@ -789,20 +789,21 @@ function AchievementBanner({
       </div>
 
       {/* Rank title + messages */}
-      <div className="text-center relative z-10 flex-1 flex flex-col justify-center gap-0.5">
-        <p className="text-[13px] font-bold leading-tight" style={{ color }}>{title}</p>
-        <p className="text-[10px] leading-relaxed mt-1"
-          style={{ color: isDark ? 'rgba(148,163,184,0.62)' : 'var(--xp-txt3)' }}>
+      <div className="text-center relative z-10 flex-1 flex flex-col justify-center">
+        <p className="text-[13px] font-bold leading-tight mb-1.5" style={{ color }}>{title}</p>
+        <p className="text-[9.5px] leading-relaxed"
+          style={{ color: isDark ? 'rgba(148,163,184,0.65)' : 'var(--xp-txt3)' }}>
           {message}
         </p>
         {secondaryMessage && (
-          <p className="text-[10px] leading-relaxed font-semibold mt-0.5"
-            style={{ color: isDark ? `${color}cc` : color, opacity: 0.85 }}>
+          <p className="text-[9.5px] leading-relaxed font-semibold mt-1"
+            style={{ color: isDark ? `${color}cc` : color, opacity: 0.88 }}>
             {secondaryMessage}
           </p>
         )}
         {badgeAsset && dateLabel && (
-          <p className="text-[8px] mt-2 opacity-50" style={{ color: isDark ? 'rgba(203,213,225,0.7)' : 'var(--xp-txt3)' }}>
+          <p className="text-[7.5px] mt-2.5"
+            style={{ color: isDark ? 'rgba(148,163,184,0.42)' : 'var(--xp-txt3)', opacity: 0.8 }}>
             ◎ Earned on {dateLabel}
           </p>
         )}
@@ -946,8 +947,19 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  // Fetch display name: auth metadata first, then profiles table as fallback
+  // Load display name: localStorage profile first (highest priority), then Supabase fallback
   useEffect(() => {
+    // Priority 1: Profile page data stored in localStorage['xp9-profile']
+    try {
+      const raw = localStorage.getItem('xp9-profile')
+      if (raw) {
+        const p = JSON.parse(raw) as { firstName?: string; displayName?: string }
+        const name = (p.firstName || p.displayName || '').trim()
+        if (name) { setFirstName(name.split(/\s+/)[0]); return }
+      }
+    } catch {}
+
+    // Priority 2: Supabase auth metadata (OAuth sign-in) → profiles table
     const supabase = createClient()
     supabase.auth.getUser().then(async ({ data }) => {
       const meta = data.user?.user_metadata as Record<string, string> | undefined
@@ -1049,13 +1061,22 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
   const gaugeScore = performanceLevelToGaugeScore(finalLevel)
 
   // ── Shared surface tokens ──────────────────────────────────────────────────
-  const S0  = isDark ? 'rgba(10,5,24,0.99)'  : 'var(--xp-bg3)'   // modal bg
-  const S1  = isDark ? 'rgba(14,7,34,0.98)'  : 'var(--xp-bg3)'   // card level 1
-  const S2  = isDark ? 'rgba(18,9,42,0.97)'  : 'var(--xp-bg3)'   // card level 2
-  const BDR = isDark ? 'rgba(124,58,237,0.2)': 'var(--xp-bdr)'
+  // Dark: 3-level depth stack. Light: white cards on warm-gray modal bg.
+  const S0  = isDark ? 'rgba(9,4,22,0.99)'   : 'var(--xp-bg3)'   // modal bg
+  const S1  = isDark ? 'rgba(15,8,36,0.99)'  : '#ffffff'          // card level 1 (elevated)
+  const S2  = isDark ? 'rgba(20,11,46,0.98)' : 'var(--xp-card)'   // card level 2
+  const BDR = isDark ? 'rgba(124,58,237,0.22)': 'rgba(0,0,0,0.09)'
 
-  const card1 = { background: S1, border: `0.5px solid ${BDR}`, boxShadow: isDark ? '0 2px 16px rgba(0,0,0,0.35)' : '0 1px 6px rgba(0,0,0,0.05)' }
-  const card2 = { background: S2, border: `0.5px solid ${BDR}`, boxShadow: isDark ? '0 2px 16px rgba(0,0,0,0.35)' : '0 1px 6px rgba(0,0,0,0.05)' }
+  const card1 = {
+    background: S1,
+    border: `0.5px solid ${BDR}`,
+    boxShadow: isDark ? '0 2px 20px rgba(0,0,0,0.42)' : '0 1px 10px rgba(0,0,0,0.07)',
+  }
+  const card2 = {
+    background: S2,
+    border: `0.5px solid ${BDR}`,
+    boxShadow: isDark ? '0 2px 18px rgba(0,0,0,0.38)' : '0 1px 6px rgba(0,0,0,0.05)',
+  }
 
   // ── KPI card definitions — bold saturated premium gradients ─────────────
   const kpiCards = [
@@ -1265,48 +1286,48 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
           {/* ══════════════════════════════════════════════════════════════════
               ROW 1 — [KPI Cards 3×2] | [Gauge — CENTER focal point] | [Achievement Badge]
               ══════════════════════════════════════════════════════════════════ */}
-          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(0,0.82fr)] gap-4 lg:gap-5 items-stretch">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.48fr)_minmax(0,1.22fr)_minmax(0,0.84fr)] gap-4 lg:gap-5 items-stretch">
 
             {/* LEFT — KPI Metric Cards: 3 columns × 2 rows */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 content-start">
               {kpiCards.map(m => (
                 <div
                   key={m.label}
-                  className="rounded-[13px] p-3 flex flex-col relative overflow-hidden xp-kpi-card"
+                  className="rounded-2xl p-2.5 flex flex-col relative overflow-hidden xp-kpi-card"
                   style={{
                     background: m.bg,
-                    border: `1px solid ${m.border}`,
-                    minHeight: 84,
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.10)',
+                    border: `0.5px solid ${m.border}`,
+                    minHeight: 74,
+                    boxShadow: '0 6px 20px rgba(0,0,0,0.20), inset 0 1px 0 rgba(255,255,255,0.12)',
                   }}
                 >
-                  {/* Highlight overlay — glass sheen */}
+                  {/* Glass sheen — smooth top highlight */}
                   <div style={{
                     position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none',
-                    background: 'linear-gradient(180deg, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.06) 42%, rgba(255,255,255,0) 100%)',
+                    background: 'linear-gradient(165deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 38%, rgba(255,255,255,0) 100%)',
                   }} />
                   {/* Icon tile */}
                   <div style={{
-                    width: 26, height: 26, borderRadius: 7, marginBottom: 6, flexShrink: 0,
-                    background: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.16)',
+                    width: 24, height: 24, borderRadius: 6, marginBottom: 5, flexShrink: 0,
+                    background: 'rgba(255,255,255,0.14)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 13, color: '#FFFFFF',
+                    fontSize: 12, color: '#FFFFFF',
                   }}>
                     {m.icon}
                   </div>
                   {/* Value */}
-                  <p className="text-lg sm:text-xl font-bold leading-none tabular-nums mb-0.5"
+                  <p className="text-base sm:text-lg font-bold leading-none tabular-nums mb-0.5"
                     style={{ color: '#FFFFFF' }}>
                     {m.value}
                   </p>
                   {/* Label */}
-                  <p className="text-[8.5px] font-medium mt-auto leading-tight"
-                    style={{ color: 'rgba(255,255,255,0.72)' }}>
+                  <p className="text-[8px] font-medium mt-auto leading-tight"
+                    style={{ color: 'rgba(255,255,255,0.70)' }}>
                     {m.label}
                   </p>
                   {/* Sub */}
                   {m.sub && (
-                    <p className="text-[8px] mt-0.5 font-semibold" style={{ color: 'rgba(255,255,255,0.84)' }}>
+                    <p className="text-[7.5px] mt-0.5 font-semibold" style={{ color: 'rgba(255,255,255,0.84)' }}>
                       {m.sub}
                     </p>
                   )}
@@ -1322,8 +1343,8 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                   ? 'linear-gradient(145deg, rgba(16,7,44,0.99) 0%, rgba(7,3,18,0.99) 100%)'
                   : 'var(--xp-card)',
                 border: isDark ? '0.5px solid rgba(124,58,237,0.35)' : '0.5px solid var(--xp-bdr2)',
-                boxShadow: isDark ? '0 4px 32px rgba(80,0,220,0.18), 0 2px 12px rgba(0,0,0,0.5)' : '0 1px 8px rgba(0,0,0,0.06)',
-                minHeight: 270,
+                boxShadow: isDark ? '0 4px 36px rgba(80,0,220,0.22), 0 2px 16px rgba(0,0,0,0.55)' : '0 2px 12px rgba(0,0,0,0.08)',
+                minHeight: 280,
               }}
             >
               <GaugeMeter score={gaugeScore} />
@@ -1339,7 +1360,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)] gap-4 lg:gap-5">
 
             {/* Today's Progress — wide, full graph area */}
-            <div className="rounded-2xl p-4 sm:p-5 flex flex-col" style={card1}>
+            <div className="rounded-2xl p-4 sm:p-5 flex flex-col xp-hover-card" style={card1}>
               <div className="flex items-start justify-between mb-3 flex-shrink-0">
                 <div>
                   <p className="text-[11px] font-semibold tracking-wide"
@@ -1371,7 +1392,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
             </div>
 
             {/* Today's Overview — activity breakdown bars */}
-            <div className="rounded-2xl p-4 sm:p-5" style={card2}>
+            <div className="rounded-2xl p-4 sm:p-5 xp-hover-card" style={card2}>
               <p className="text-[11px] font-semibold mb-2 tracking-wide"
                 style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>
                 Today's Overview
@@ -1392,13 +1413,13 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
 
             {/* Activity Distribution — donut left, legend right (horizontal) */}
-            <div className="rounded-2xl p-4" style={card1}>
+            <div className="rounded-2xl p-4 xp-hover-card" style={card1}>
               <p className="text-[11px] font-semibold mb-3 tracking-wide"
                 style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>
                 Activity Distribution
               </p>
               {hasActivity ? (
-                <div className="flex items-start gap-4">
+                <div className="flex items-start gap-2.5">
                   <DonutChart
                     segments={stats!.actBreakdown.map(a => ({ color: a.color, pct: a.pct, name: a.name, ms: a.ms }))}
                     size="lg"
@@ -1415,10 +1436,10 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                           onMouseLeave={() => setActHovIdx(null)}
                           style={{
                             display: 'grid',
-                            gridTemplateColumns: 'minmax(100px,1fr) 58px 36px',
+                            gridTemplateColumns: 'minmax(80px,1fr) 52px 32px',
                             alignItems: 'center',
                             gap: 4,
-                            marginBottom: 6,
+                            marginBottom: 5,
                             cursor: 'default',
                             opacity: actHovIdx !== null && !isHov ? 0.5 : 1,
                             transition: 'opacity 180ms ease',
@@ -1444,7 +1465,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                       )
                     })}
                     <div style={{
-                      display: 'grid', gridTemplateColumns: 'minmax(100px,1fr) 58px 36px',
+                      display: 'grid', gridTemplateColumns: 'minmax(80px,1fr) 52px 32px',
                       alignItems: 'center', gap: 4, paddingTop: 6,
                       borderTop: isDark ? '0.5px solid rgba(255,255,255,0.07)' : '0.5px solid var(--xp-bdr)',
                     }}>
@@ -1470,8 +1491,8 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
 
             {/* Session Log */}
             <div className="rounded-2xl overflow-hidden" style={card2}>
-              <div className="px-4 py-3"
-                style={{ borderBottom: isDark ? '0.5px solid rgba(124,58,237,0.1)' : '0.5px solid var(--xp-bdr)' }}>
+              <div className="px-4 py-3.5"
+                style={{ borderBottom: isDark ? '0.5px solid rgba(124,58,237,0.12)' : '0.5px solid rgba(0,0,0,0.08)' }}>
                 <p className="text-[11px] font-semibold tracking-wide"
                   style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>
                   Session Log
@@ -1481,7 +1502,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                 <>
                   {stats!.allSessions.map((s, i) => {
                     const act  = activities.find(a => a.id === s.actId)
-                    const dur  = s.endTs! - s.startTs
+                    const dur  = getSessionDurationMs(s.startTs, s.endTs!)
                     const deep = dur >= 45 * 60_000
                     return (
                       <div
@@ -1543,7 +1564,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
             </div>
 
             {/* Task Breakdown */}
-            <div className="rounded-2xl p-4" style={card1}>
+            <div className="rounded-2xl p-4 xp-hover-card" style={card1}>
               <div className="flex items-center justify-between mb-3">
                 <p className="text-[11px] font-semibold tracking-wide"
                   style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>
@@ -1589,15 +1610,16 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                             </span>
                           </div>
                         </div>
-                        {/* Thicker progress bar — full opacity always, deterministic palette gradient */}
-                        <div className="h-2.5 rounded-full overflow-hidden"
-                          style={{ background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)' }}>
+                        {/* Progress bar — premium gradient, rounded ends, glow on dark */}
+                        <div className="h-3 rounded-full overflow-hidden"
+                          style={{ background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }}>
                           <div className="h-full rounded-full"
                             style={{
                               width: `${barPct > 0 ? Math.max(barPct, 4) : 0}%`,
                               background: gradStr,
                               opacity: 1,
-                              boxShadow: isDark ? `0 0 8px rgba(124,58,237,0.28)` : 'none',
+                              boxShadow: isDark ? `0 0 10px rgba(124,58,237,0.32)` : 'none',
+                              transition: 'width 400ms cubic-bezier(0.22,1,0.36,1)',
                             }} />
                         </div>
                       </div>
@@ -1614,19 +1636,27 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
           </div>
 
           {/* ── Daily Summary ─────────────────────────────────────────────── */}
-          <div className="rounded-2xl px-4 py-3.5"
+          <div className="rounded-2xl px-5 py-4"
             style={{
-              background: isDark ? 'linear-gradient(135deg, rgba(124,58,237,0.09) 0%, rgba(99,102,241,0.05) 100%)' : 'linear-gradient(135deg, rgba(124,58,237,0.05), rgba(99,102,241,0.03))',
-              border: isDark ? '0.5px solid rgba(124,58,237,0.2)' : '0.5px solid rgba(124,58,237,0.14)',
+              background: isDark
+                ? 'linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(99,102,241,0.05) 100%)'
+                : 'linear-gradient(135deg, rgba(124,58,237,0.05) 0%, rgba(99,102,241,0.03) 100%)',
+              border: isDark ? '0.5px solid rgba(124,58,237,0.22)' : '0.5px solid rgba(124,58,237,0.15)',
+              boxShadow: isDark ? '0 1px 12px rgba(124,58,237,0.10)' : 'none',
             }}>
-            <div className="flex items-start gap-3">
-              <span className="text-base flex-shrink-0 mt-0.5">🤖</span>
+            <div className="flex items-start gap-3.5">
+              <span className="text-[18px] flex-shrink-0 mt-0.5">🤖</span>
               <div>
-                <p className="text-[10px] font-bold mb-1 tracking-wide" style={{ color: '#a78bfa' }}>Daily Summary</p>
-                <p className="text-[11px] leading-relaxed" style={{ color: isDark ? 'rgba(203,213,225,0.75)' : 'var(--xp-txt2)' }}>
+                <p className="text-[10px] font-bold mb-1.5 tracking-widest uppercase"
+                  style={{ color: '#a78bfa', letterSpacing: '0.08em' }}>
+                  Daily Summary
+                </p>
+                <p className="text-[11.5px] leading-relaxed"
+                  style={{ color: isDark ? 'rgba(203,213,225,0.80)' : 'var(--xp-txt2)' }}>
                   {summary}
                 </p>
-                <p className="text-[9px] mt-1.5 italic" style={{ color: isDark ? 'rgba(148,163,184,0.35)' : 'var(--xp-txt3)' }}>
+                <p className="text-[9px] mt-2 italic"
+                  style={{ color: isDark ? 'rgba(148,163,184,0.38)' : 'var(--xp-txt3)' }}>
                   AI-powered insights coming soon
                 </p>
               </div>

@@ -85,6 +85,29 @@ const GENERATED_TASKS = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Removes sessions completely contained within a longer sibling (stale historical versions
+// produced by repeated adjustTime edits before ID-based updating was in place).
+function deduplicateTaskSessions(sessions: TaskSession[]): TaskSession[] {
+  const completed = sessions.filter(s => s.endTs !== null)
+  const running   = sessions.filter(s => s.endTs === null)
+  if (completed.length <= 1) return sessions
+
+  // Sort broadest first so smaller contained sessions can be identified
+  const sorted = [...completed].sort((a, b) =>
+    (b.endTs! - b.startTs) - (a.endTs! - a.startTs)
+  )
+
+  const kept: TaskSession[] = []
+  for (const s of sorted) {
+    const isContained = kept.some(k =>
+      k.startTs <= s.startTs && s.endTs! <= k.endTs!
+    )
+    if (!isContained) kept.push(s)
+  }
+
+  return [...kept.sort((a, b) => a.startTs - b.startTs), ...running]
+}
+
 function getTaskTotalMs(task: Task, isActive: boolean, now: number): number {
   const sessions = task.sessions ?? []
   let total = sessions.reduce((acc, s) => {
@@ -126,12 +149,13 @@ function TogglePill({ active, color, label, onClick }: { active: boolean; color:
 interface AdjustTimeProps {
   task: Task
   onClose: () => void
-  onSave: (startTs: number, endTs: number, note: string) => void
+  onSave: (sessionId: string | null, startTs: number, endTs: number, note: string) => void
 }
 
 function AdjustTimeModal({ task, onClose, onSave }: AdjustTimeProps) {
   const runningSession = getRunningSession(task)
   const lastSession = task.sessions?.findLast?.(s => s.endTs !== null) ?? null
+  const editingSession = runningSession ?? lastSession
 
   function tsToInput(ts: number | null): string {
     if (!ts) return ''
@@ -150,8 +174,9 @@ function AdjustTimeModal({ task, onClose, onSave }: AdjustTimeProps) {
     return d.getTime()
   }
 
-  const refStart = runningSession?.startTs ?? lastSession?.startTs ?? null
-  const refEnd = runningSession?.endTs ?? lastSession?.endTs ?? null
+  const refStart = editingSession?.startTs ?? null
+  const refEnd   = editingSession?.endTs   ?? null
+  const sessionId = editingSession?.id ?? null
 
   const [startVal, setStartVal] = useState(tsToInput(refStart))
   const [endVal, setEndVal] = useState(tsToInput(refEnd))
@@ -227,7 +252,7 @@ function AdjustTimeModal({ task, onClose, onSave }: AdjustTimeProps) {
                 const sTs = inputToTs(startVal, refStart)
                 let eTs = inputToTs(endVal, refStart)
                 if (eTs <= sTs) eTs += 86_400_000  // midnight crossing
-                onSave(sTs, eTs, noteVal)
+                onSave(sessionId, sTs, eTs, noteVal)
               }
               onClose()
             }}
@@ -308,7 +333,7 @@ interface TaskRowProps {
   onJournalChange: (text: string) => void
   onTextChange: (text: string) => void
   onActChange: (actId: string) => void
-  onAdjustTime: (startTs: number, endTs: number, note: string) => void
+  onAdjustTime: (sessionId: string | null, startTs: number, endTs: number, note: string) => void
   onSetReminder: () => void
   onDragStart: () => void
   onDragOver: (e: React.DragEvent) => void
@@ -593,8 +618,8 @@ function TaskRow({
         <AdjustTimeModal
           task={task}
           onClose={() => setAdjustOpen(false)}
-          onSave={(startTs, endTs, note) => {
-            onAdjustTime(startTs, endTs, note)
+          onSave={(sessionId, startTs, endTs, note) => {
+            onAdjustTime(sessionId, startTs, endTs, note)
             setAdjustOpen(false)
           }}
         />
@@ -827,6 +852,22 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  // One-time dedup on modal open: remove sessions that are fully contained
+  // within a longer sibling (left-over stale records from pre-ID adjustTime edits).
+  useEffect(() => {
+    updateDay(dateKey, prev => {
+      const nextTasks = prev.tasks.map(t => {
+        const sessions = t.sessions ?? []
+        const cleaned = deduplicateTaskSessions(sessions)
+        return cleaned.length !== sessions.length ? { ...t, sessions: cleaned } : t
+      })
+      return nextTasks.some((t, i) => t !== prev.tasks[i])
+        ? { ...prev, tasks: nextTasks }
+        : prev
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ── Toggles ──────────────────────────────────────────────────────────────
 
   function toggleProductive() {
@@ -965,30 +1006,40 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
     setActiveTaskTimer(null)
   }
 
-  function adjustTime(taskId: string, startTs: number, endTs: number, note: string) {
-    // Track whether a running session was closed so we can clear the active timer state
+  function adjustTime(taskId: string, sessionId: string | null, startTs: number, endTs: number, note: string) {
     let closedRunningSession = false
     updateDay(dateKey, prev => ({
       ...prev,
       tasks: prev.tasks.map(t => {
         if (t.id !== taskId) return t
         const sessions = t.sessions ?? []
-        // Prefer updating the running session; fall back to last completed; else create new
-        const runningIdx  = sessions.findIndex(s => s.endTs === null)
-        const lastDoneIdx = sessions.reduce((idx, s, i) => (s.endTs !== null ? i : idx), -1)
         let updatedSessions: TaskSession[]
-        if (runningIdx >= 0) {
-          closedRunningSession = true
-          updatedSessions = sessions.map((s, i) =>
-            i === runningIdx ? { ...s, startTs, endTs, note } : s
-          )
-        } else if (lastDoneIdx >= 0) {
-          updatedSessions = sessions.map((s, i) =>
-            i === lastDoneIdx ? { ...s, startTs, endTs, note } : s
+
+        if (sessionId) {
+          // ID-based update — correct path; avoids touching sibling sessions
+          const target = sessions.find(s => s.id === sessionId)
+          if (target?.endTs === null) closedRunningSession = true
+          updatedSessions = sessions.map(s =>
+            s.id === sessionId ? { ...s, startTs, endTs, note } : s
           )
         } else {
-          updatedSessions = [{ id: 'manual-' + Date.now(), startTs, endTs, note, tags: [] }]
+          // Positional fallback for sessions without a stable ID (legacy data)
+          const runningIdx  = sessions.findIndex(s => s.endTs === null)
+          const lastDoneIdx = sessions.reduce((idx, s, i) => (s.endTs !== null ? i : idx), -1)
+          if (runningIdx >= 0) {
+            closedRunningSession = true
+            updatedSessions = sessions.map((s, i) =>
+              i === runningIdx ? { ...s, startTs, endTs, note } : s
+            )
+          } else if (lastDoneIdx >= 0) {
+            updatedSessions = sessions.map((s, i) =>
+              i === lastDoneIdx ? { ...s, startTs, endTs, note } : s
+            )
+          } else {
+            updatedSessions = [{ id: 'manual-' + Date.now(), startTs, endTs, note, tags: [] }]
+          }
         }
+
         return { ...t, timerStart: startTs, timerEnd: endTs, sessions: updatedSessions }
       }),
     }))
@@ -1179,7 +1230,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
                   onJournalChange={text => updateTaskJournal(task.id, text)}
                   onTextChange={text => updateTaskText(task.id, text)}
                   onActChange={actId => updateTaskAct(task.id, actId)}
-                  onAdjustTime={(s, e, n) => adjustTime(task.id, s, e, n)}
+                  onAdjustTime={(sid, s, e, n) => adjustTime(task.id, sid, s, e, n)}
                   onSetReminder={() => setReminderTaskId(task.id)}
                   onDragStart={() => setDragItemId(task.id)}
                   onDragOver={e => e.preventDefault()}

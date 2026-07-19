@@ -70,7 +70,7 @@ export function GaugeMeter({ score }: { score: number }) {
 
   return (
     <div className="flex flex-col items-center w-full h-full justify-center">
-      <svg viewBox="0 0 440 295" className="w-full">
+      <svg viewBox="0 0 440 305" className="w-full">
         <defs>
           <filter id="gm-glow" x="-80%" y="-80%" width="260%" height="260%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/>
@@ -90,7 +90,7 @@ export function GaugeMeter({ score }: { score: number }) {
           </radialGradient>
         </defs>
 
-        <rect x={0} y={0} width={440} height={295} rx={14} fill={isDark ? 'url(#gm-panel)' : 'var(--xp-bg2)'}/>
+        <rect x={0} y={0} width={440} height={305} rx={14} fill={isDark ? 'url(#gm-panel)' : 'var(--xp-bg2)'}/>
 
         <g stroke={circuitStk} strokeWidth="0.8" fill="none">
           <line x1="60" y1="130" x2="160" y2="130"/><line x1="280" y1="130" x2="380" y2="130"/>
@@ -153,15 +153,15 @@ export function GaugeMeter({ score }: { score: number }) {
         <circle cx={cx} cy={cy} r={4}  fill={segs[li].color} opacity={0.85}/>
         <circle cx={cx} cy={cy} r={2}  fill="white" opacity={0.4}/>
 
-        <text x={cx - 6} y={cy + 44} textAnchor="end" fontSize="38" fontWeight="900" fill={scoreFill} fontFamily="-apple-system,BlinkMacSystemFont,sans-serif">
+        <text x={cx - 6} y={cy + 48} textAnchor="end" fontSize="40" fontWeight="900" fill={scoreFill} fontFamily="-apple-system,BlinkMacSystemFont,sans-serif">
           {Math.round(animScore)}
         </text>
-        <text x={cx} y={cy + 38} textAnchor="start" fontSize="16" fill={scoreSubFl} fontFamily="-apple-system,BlinkMacSystemFont,sans-serif">
+        <text x={cx} y={cy + 41} textAnchor="start" fontSize="17" fill={scoreSubFl} fontFamily="-apple-system,BlinkMacSystemFont,sans-serif">
           /100
         </text>
 
-        <foreignObject x={cx - 100} y={cy + 50} width="200" height="28">
-          <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 700, color: segs[li].color, letterSpacing: 0.5 }}>
+        <foreignObject x={cx - 104} y={cy + 56} width="208" height="34">
+          <div style={{ textAlign: 'center', fontSize: 14, fontWeight: 700, color: segs[li].color, letterSpacing: 0.5 }}>
             {segs[li].emoji ? `${segs[li].emoji} ${segs[li].label}` : segs[li].label}
           </div>
         </foreignObject>

@@ -1,10 +1,11 @@
 'use client'
 
-import { useMemo, useEffect } from 'react'
+import { useMemo, useEffect, useState } from 'react'
 import { useApp } from './AppContext'
 import { formatMs, formatTime, APP_YEAR, dateKey as makeDateKey } from './utils'
 import type { Task } from './types'
 import { GaugeMeter } from './GaugeMeter'
+import { createClient } from '@/lib/supabase/client'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -59,17 +60,18 @@ interface PerformanceTier {
   level: PerformanceLevel
   title: string
   message: string
+  secondaryMessage?: string
   color: string
   glow: string
 }
 
 const PERFORMANCE_TIERS: PerformanceTier[] = [
-  { level: 0, title: 'Time to Get Into Action', message: 'Start your first productive session today and begin earning your daily badges.',  color: '#94a3b8', glow: 'rgba(148,163,184,0.35)' },
-  { level: 1, title: 'Getting Started',         message: "You've started building momentum. Keep going to unlock In Action.",               color: '#eab308', glow: 'rgba(234,179,8,0.35)'    },
-  { level: 2, title: 'In Action',               message: 'Great progress. Stay consistent to reach Average, Advanced and Elite.',           color: '#22c55e', glow: 'rgba(34,197,94,0.35)'    },
-  { level: 3, title: 'Average Performer',       message: 'Strong work today. Keep pushing toward Advanced.',                                color: '#a855f7', glow: 'rgba(168,85,247,0.35)'   },
-  { level: 4, title: 'Advanced Performer',      message: 'Excellent consistency. Elite is within reach.',                                   color: '#6366f1', glow: 'rgba(99,102,241,0.35)'   },
-  { level: 5, title: 'Elite Performer',         message: "Outstanding consistency and discipline. You earned today's Elite Badge.",         color: '#ef4444', glow: 'rgba(239,68,68,0.35)'    },
+  { level: 0, title: 'Time to Get Into Action', message: 'Every great achievement begins with a focused session. Start today and earn your first performance badge.',             color: '#94a3b8', glow: 'rgba(148,163,184,0.35)' },
+  { level: 1, title: 'Getting Started',         message: "You've taken the first step. Keep building momentum and unlock the next level.",                                         color: '#eab308', glow: 'rgba(234,179,8,0.35)'    },
+  { level: 2, title: 'In Action',               message: "You're making solid progress. Stay consistent and keep moving forward.",                                                  color: '#22c55e', glow: 'rgba(34,197,94,0.35)'    },
+  { level: 3, title: 'Consistent',              message: "Excellent consistency. You're building habits that compound into long-term success.",                                      color: '#a855f7', glow: 'rgba(168,85,247,0.35)'   },
+  { level: 4, title: 'Advanced',                message: 'Outstanding performance today. Elite status is within reach.',                                                            color: '#6366f1', glow: 'rgba(99,102,241,0.35)'   },
+  { level: 5, title: 'Elite',                   message: "You have earned today's Elite Badge.", secondaryMessage: 'Exceptional discipline and consistency.',                       color: '#ef4444', glow: 'rgba(239,68,68,0.35)'    },
 ]
 
 // Task performance: maps the existing 0-100 score to a level.
@@ -107,6 +109,46 @@ function getFinalPerformanceLevel(taskScore: number, totalMs: number): Performan
 function performanceLevelToGaugeScore(level: PerformanceLevel): number {
   return ([0, 10, 30, 50, 70, 90] as const)[level]
 }
+
+// ─── Activity icon SVG paths for milestone markers (Lucide-compatible, 24×24 vb) ─
+
+function getActivityIconPath(name: string): string {
+  const n = name.toLowerCase()
+  // Code brackets: </>
+  if (n.includes('cod') || n.includes('dev') || n.includes('prog') || n.includes('xpadite'))
+    return 'M6 9l-4 3 4 3M18 9l4 3-4 3M14 6l-4 12'
+  // Open book / learning
+  if (n.includes('learn') || n.includes('study') || n.includes('book'))
+    return 'M2 4h7a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H2zM22 4h-7a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h7z'
+  // Dumbbell
+  if (n.includes('workout') || n.includes('gym') || n.includes('exercise'))
+    return 'M6 5v14M18 5v14M6 12h12M3 8h3M18 8h3M3 16h3M18 16h3'
+  // Coffee cup
+  if (n.includes('break') || n.includes('coffee') || n.includes('☕'))
+    return 'M17 8h1a4 4 0 0 1 0 8h-1M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4zM6 2v2M10 2v2M14 2v2'
+  // Rocket
+  if (n.includes('project') || n.includes('launch') || n.includes('rocket'))
+    return 'M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09zM12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z'
+  // Briefcase
+  if (n.includes('work'))
+    return 'M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2'
+  // Personal / user
+  if (n.includes('personal'))
+    return 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z'
+  // Default: activity pulse
+  return 'M22 12h-4l-3 9L9 3l-3 9H2'
+}
+
+// ─── Deterministic task progress-bar gradient palette ─────────────────────────
+
+const TASK_GRAD_PALETTE: [string, string][] = [
+  ['#93c5fd', '#3b82f6'],
+  ['#86efac', '#22c55e'],
+  ['#c4b5fd', '#8b5cf6'],
+  ['#fdba74', '#f97316'],
+  ['#f9a8d4', '#ec4899'],
+  ['#67e8f9', '#06b6d4'],
+]
 
 // ─── Decorative mini-trend SVG (purely aesthetic) ─────────────────────────────
 
@@ -341,7 +383,10 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames }: { s
   const plotW = VW - PL - PR
   const plotH = VH - PT - PB
 
-  const sorted = [...sessions].filter(s => s.endTs !== null).sort((a, b) => a.startTs - b.startTs)
+  // Filter valid sessions and sort chronologically — critical for non-crossing path
+  const sorted = [...sessions]
+    .filter(s => s.endTs !== null && s.endTs > s.startTs)
+    .sort((a, b) => a.startTs - b.startTs)
 
   if (sorted.length === 0) {
     return (
@@ -361,17 +406,26 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames }: { s
     )
   }
 
-  const first     = sorted[0].startTs
-  const last      = sorted[sorted.length - 1].endTs!
-  const timeSpan  = Math.max(last - first, 60_000)
-  const yMax      = niceYMax(totalMs)
+  const first    = sorted[0].startTs
+  const last     = Math.max(...sorted.map(s => s.endTs!))
+  const timeSpan = Math.max(last - first, 60_000)
+  const yMax     = niceYMax(totalMs)
 
+  // Build strictly monotonic step-function: each segment is horizontal (gap) or
+  // diagonal upward (active session). We clamp startTx to prevEndTx so overlapping
+  // sessions never produce a backward x movement.
   const pts: { tx: number; ms: number }[] = [{ tx: 0, ms: 0 }]
   let cum = 0
+  let prevEndTx = 0
+
   for (const s of sorted) {
-    pts.push({ tx: s.startTs - first, ms: cum })
+    const startTx = Math.max(s.startTs - first, prevEndTx)
+    const endTx   = s.endTs! - first
+    if (endTx <= startTx) continue
+    pts.push({ tx: startTx, ms: cum })
     cum += s.endTs! - s.startTs
-    pts.push({ tx: s.endTs! - first, ms: cum })
+    pts.push({ tx: endTx, ms: cum })
+    prevEndTx = endTx
   }
   if (pts[pts.length - 1].tx < timeSpan) pts.push({ tx: timeSpan, ms: cum })
 
@@ -385,6 +439,7 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames }: { s
   const baseY   = (PT + plotH).toFixed(1)
   const fp      = `${lp} L ${lastPt.sx.toFixed(1)} ${baseY} L ${firstPt.sx.toFixed(1)} ${baseY} Z`
 
+  // Milestone dot positions: one per original session end
   let dotCum = 0
   const dotPts: { sx: number; sy: number; cumMs: number; actId?: string }[] = []
   for (const s of sorted) {
@@ -401,12 +456,14 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames }: { s
     return m === 0 ? `${h12}${ap}` : `${h12}:${m.toString().padStart(2, '0')}`
   }
 
+  const MARKER_R = 10
+
   return (
     <svg viewBox={`0 0 ${VW} ${VH}`} style={{ width: '100%', height: '100%', display: 'block' }}>
       <defs>
         <linearGradient id="pg-area" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#7c3aed" stopOpacity="0.3" />
-          <stop offset="70%" stopColor="#7c3aed" stopOpacity="0.06" />
+          <stop offset="0%" stopColor="#7c3aed" stopOpacity="0.28" />
+          <stop offset="70%" stopColor="#7c3aed" stopOpacity="0.05" />
           <stop offset="100%" stopColor="#7c3aed" stopOpacity="0" />
         </linearGradient>
         <linearGradient id="pg-line" x1="0" y1="0" x2="1" y2="0">
@@ -459,35 +516,56 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames }: { s
       <path d={lp} fill="none" stroke="url(#pg-line)" strokeWidth="2.5"
         strokeLinecap="round" strokeLinejoin="round" clipPath="url(#pg-clip)" />
 
+      {/* Milestone markers — rendered as separate overlay, never part of line data */}
       {dotPts.map((p, i) => {
-        const actColor = (p.actId && activityColors?.get(p.actId)) ?? '#7c3aed'
-        const actLetter = (p.actId && activityNames?.get(p.actId)?.slice(0, 1).toUpperCase()) ?? ''
-        const timeLabel = p.cumMs >= 3_600_000
+        const actColor   = (p.actId && activityColors?.get(p.actId)) ?? '#7c3aed'
+        const actName    = (p.actId && activityNames?.get(p.actId)) ?? ''
+        const iconPath   = getActivityIconPath(actName)
+        const timeLabel  = p.cumMs >= 3_600_000
           ? `${(p.cumMs / 3_600_000).toFixed(1)}h`
           : `${Math.round(p.cumMs / 60_000)}m`
-        const markerCy = Math.max(p.sy - 38, PT + 18)
-        const lineStartY = p.sy - 9
+
+        // Position marker above the dot; clamp so it stays inside plot
+        const markerCy   = Math.max(p.sy - 48, PT + MARKER_R + 6)
+        const markerBotY = markerCy + MARKER_R
+        const dotTopY    = p.sy - 6
+        // Guide line only when marker and dot are clearly separated
+        const hasLine    = dotTopY > markerBotY + 4
+        // Scale 24×24 icon path down to 14×14 centered on (p.sx, markerCy)
+        const iconS      = 14 / 24
+        const iconTx     = p.sx - 7
+        const iconTy     = markerCy - 7
+
         return (
           <g key={`mk${i}`}>
-            <line x1={p.sx.toFixed(1)} y1={lineStartY.toFixed(1)} x2={p.sx.toFixed(1)} y2={(markerCy + 11).toFixed(1)}
-              stroke={actColor} strokeWidth="0.75" strokeDasharray="2,2" opacity="0.4" />
-            <circle cx={p.sx.toFixed(1)} cy={markerCy.toFixed(1)} r="10"
-              fill={actColor} fillOpacity="0.14" stroke={actColor} strokeWidth="1" strokeOpacity="0.5" />
-            {actLetter && (
-              <text x={p.sx.toFixed(1)} y={(markerCy + 3.5).toFixed(1)} textAnchor="middle"
-                fontSize="8" fontWeight="700" fill={actColor} fillOpacity="0.85">
-                {actLetter}
-              </text>
+            {hasLine && (
+              <line
+                x1={p.sx.toFixed(1)} y1={markerBotY.toFixed(1)}
+                x2={p.sx.toFixed(1)} y2={dotTopY.toFixed(1)}
+                stroke={actColor} strokeWidth="0.75" strokeDasharray="2,2" opacity="0.38"
+              />
             )}
-            <text x={p.sx.toFixed(1)} y={(markerCy - 15).toFixed(1)} textAnchor="middle"
-              fontSize="7.5" fontWeight="600" fill={actColor} fillOpacity="0.7">
-              {timeLabel}
-            </text>
+            <text x={p.sx.toFixed(1)} y={(markerCy - MARKER_R - 4).toFixed(1)}
+              textAnchor="middle" fontSize="7.5" fontWeight="600"
+              fill={actColor} fillOpacity="0.72">{timeLabel}</text>
+            <circle cx={p.sx.toFixed(1)} cy={markerCy.toFixed(1)} r={MARKER_R}
+              fill={actColor} fillOpacity="0.13"
+              stroke={actColor} strokeWidth="1" strokeOpacity="0.5" />
+            {/* Activity icon as pure SVG path — no external dependencies */}
+            <path
+              d={iconPath}
+              fill="none"
+              stroke={actColor}
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              transform={`translate(${iconTx.toFixed(2)},${iconTy.toFixed(2)}) scale(${iconS.toFixed(4)})`}
+            />
           </g>
         )
       })}
       {dotPts.map((p, i) => (
-        <g key={i}>
+        <g key={`dot${i}`}>
           <circle cx={p.sx.toFixed(1)} cy={p.sy.toFixed(1)} r="6" fill="rgba(124,58,237,0.18)" />
           <circle cx={p.sx.toFixed(1)} cy={p.sy.toFixed(1)} r="4"
             fill="#7c3aed" stroke="rgba(221,214,254,0.5)" strokeWidth="1.5" />
@@ -500,14 +578,20 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames }: { s
 
 // ─── Top-right achievement banner — driven by FinalPerformanceLevel ───────────
 
-function AchievementBanner({ tier, level, isDark }: { tier: PerformanceTier; level: PerformanceLevel; isDark: boolean }) {
+function AchievementBanner({
+  tier, level, isDark, firstName, dateLabel,
+}: {
+  tier: PerformanceTier; level: PerformanceLevel; isDark: boolean;
+  firstName?: string; dateLabel?: string
+}) {
   const isNoBadge = level === 0
   const isElite   = level === 5
-  const { color, glow, title, message } = tier
+  const { color, glow, title, message, secondaryMessage } = tier
+  const greeting  = firstName ? `Congratulations, ${firstName}!` : 'Congratulations!'
 
   return (
     <div
-      className="rounded-2xl p-4 sm:p-5 flex flex-col h-full xp-lift relative overflow-hidden"
+      className="rounded-2xl p-4 flex flex-col h-full xp-lift relative overflow-hidden"
       style={{
         background: isDark
           ? 'linear-gradient(145deg, rgba(15,6,38,0.99) 0%, rgba(8,3,18,0.99) 100%)'
@@ -517,21 +601,20 @@ function AchievementBanner({ tier, level, isDark }: { tier: PerformanceTier; lev
       }}
     >
       {isDark && (
-        <div style={{ position: 'absolute', top: -30, right: -30, width: 180, height: 180, borderRadius: '50%', background: `radial-gradient(circle, ${color}10 0%, transparent 70%)`, pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', top: -30, right: -30, width: 160, height: 160, borderRadius: '50%', background: `radial-gradient(circle, ${color}10 0%, transparent 70%)`, pointerEvents: 'none' }} />
       )}
       <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none', background: 'linear-gradient(120deg, transparent 28%, rgba(255,255,255,0.03) 50%, transparent 72%)' }} />
 
-      {/* Header label */}
-      <div className="text-center mb-3 relative z-10">
-        <p className="text-[11px] font-bold" style={{ color }}>
-          {isNoBadge ? 'Daily Badge' : 'Congratulations!'}
+      {/* Heading */}
+      <div className="text-center mb-2 relative z-10">
+        <p className="text-[11px] font-bold leading-snug" style={{ color }}>
+          {isNoBadge ? 'Your Daily Badge' : greeting}
         </p>
       </div>
 
-      {/* Badge emblem area */}
-      <div className="flex justify-center mb-3 relative z-10">
+      {/* Badge artwork */}
+      <div className="flex justify-center items-center mb-2 relative z-10">
         {isNoBadge ? (
-          /* No Badge — motivational icon */
           <div style={{
             width: 72, height: 72, borderRadius: 18,
             background: isDark ? 'rgba(148,163,184,0.08)' : 'rgba(148,163,184,0.1)',
@@ -544,9 +627,15 @@ function AchievementBanner({ tier, level, isDark }: { tier: PerformanceTier; lev
               <path d="M 13 20 L 20 13 L 27 20" fill="none" stroke="rgba(148,163,184,0.5)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
+        ) : isElite ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src="/badges/xpadite-elite-badge.png"
+            alt="XPadite Elite Badge"
+            style={{ width: 156, height: 130, objectFit: 'contain', display: 'block' }}
+          />
         ) : (
-          /* Badge levels 1–5: SVG shield with rank icon */
-          <svg viewBox="0 0 100 110" width="72" height="80" style={{ display: 'block', overflow: 'visible' }}>
+          <svg viewBox="0 0 100 110" width="80" height="88" style={{ display: 'block', overflow: 'visible' }}>
             <defs>
               <linearGradient id="xp-shield-bg" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={color} stopOpacity={isDark ? 0.32 : 0.18} />
@@ -557,27 +646,17 @@ function AchievementBanner({ tier, level, isDark }: { tier: PerformanceTier; lev
               fill="url(#xp-shield-bg)" stroke={color} strokeWidth="2.5" strokeOpacity="0.6" />
             <path d="M 50 13 C 50 13, 86 25 86 57 C 86 78 50 93 50 93 C 50 93 14 78 14 57 C 14 25 50 13 50 13 Z"
               fill="none" stroke={color} strokeWidth="0.8" strokeOpacity="0.28" />
-
-            {level === 5 /* Elite — trophy + ELITE banner */ ? (
-              <g>
-                <path d="M 33 26 L 67 26 L 67 50 Q 67 65 50 68 Q 33 65 33 50 Z" fill={color} fillOpacity="0.78" />
-                <path d="M 33 32 Q 21 32 21 43 Q 21 53 33 51" fill="none" stroke={color} strokeWidth="4" strokeOpacity="0.65" strokeLinecap="round" />
-                <path d="M 67 32 Q 79 32 79 43 Q 79 53 67 51" fill="none" stroke={color} strokeWidth="4" strokeOpacity="0.65" strokeLinecap="round" />
-                <rect x="45" y="68" width="10" height="10" rx="2" fill={color} fillOpacity="0.65" />
-                <rect x="35" y="78" width="30" height="5" rx="2.5" fill={color} fillOpacity="0.7" />
-                <text x="50" y="97" textAnchor="middle" fontSize="9" fontWeight="800" fill={color} fillOpacity="0.85" letterSpacing="2.5">ELITE</text>
-              </g>
-            ) : level === 4 /* Advanced — flame */ ? (
+            {level === 4 ? (
               <path d="M 50 70 Q 32 60 32 47 Q 32 34 43 28 Q 40 41 50 41 Q 60 41 57 28 Q 68 34 68 47 Q 68 60 50 70 Z" fill={color} fillOpacity="0.74" />
-            ) : level === 3 /* Average — bullseye */ ? (
+            ) : level === 3 ? (
               <g>
                 <circle cx="50" cy="53" r="22" fill="none" stroke={color} strokeWidth="3.5" strokeOpacity="0.65" />
                 <circle cx="50" cy="53" r="13" fill="none" stroke={color} strokeWidth="2.8" strokeOpacity="0.6" />
                 <circle cx="50" cy="53" r="5" fill={color} fillOpacity="0.75" />
               </g>
-            ) : level === 2 /* In Action — lightning bolt */ ? (
+            ) : level === 2 ? (
               <path d="M 55 25 L 42 52 L 52 52 L 45 78 L 62 46 L 51 46 Z" fill={color} fillOpacity="0.78" />
-            ) : /* Getting Started (level 1) — upward arrow + leaf */ (
+            ) : (
               <g>
                 <line x1="50" y1="72" x2="50" y2="38" stroke={color} strokeWidth="3.5" strokeOpacity="0.7" strokeLinecap="round" />
                 <path d="M 50 46 Q 37 38 32 26 Q 46 22 50 46" fill={color} fillOpacity="0.65" />
@@ -588,15 +667,24 @@ function AchievementBanner({ tier, level, isDark }: { tier: PerformanceTier; lev
         )}
       </div>
 
-      {/* Title + message */}
-      <div className="text-center relative z-10">
-        <p className="text-[13px] font-bold mb-1 leading-tight" style={{ color }}>
-          {title}
-        </p>
-        <p className="text-[10px] leading-relaxed"
+      {/* Rank title + messages */}
+      <div className="text-center relative z-10 flex-1 flex flex-col justify-center gap-0.5">
+        <p className="text-[13px] font-bold leading-tight" style={{ color }}>{title}</p>
+        <p className="text-[10px] leading-relaxed mt-1"
           style={{ color: isDark ? 'rgba(148,163,184,0.62)' : 'var(--xp-txt3)' }}>
           {message}
         </p>
+        {secondaryMessage && (
+          <p className="text-[10px] leading-relaxed font-semibold mt-0.5"
+            style={{ color: isDark ? `${color}cc` : color, opacity: 0.85 }}>
+            {secondaryMessage}
+          </p>
+        )}
+        {isElite && dateLabel && (
+          <p className="text-[8px] mt-2 opacity-50" style={{ color: isDark ? 'rgba(203,213,225,0.7)' : 'var(--xp-txt3)' }}>
+            ◎ Earned on {dateLabel}
+          </p>
+        )}
       </div>
     </div>
   )
@@ -720,12 +808,23 @@ interface DayDashboardModalProps {
 
 export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayDashboardModalProps) {
   const { calData, activities, isDark } = useApp()
+  const [firstName, setFirstName] = useState<string>('')
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // Fetch the signed-in user's display name from Supabase auth metadata
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data }) => {
+      const meta = data.user?.user_metadata as Record<string, string> | undefined
+      const full = (meta?.full_name ?? meta?.name ?? '').trim()
+      if (full) setFirstName(full.split(/\s+/)[0])
+    }).catch(() => {})
+  }, [])
 
   const dayData = calData[dateKey]
 
@@ -936,7 +1035,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
               ROW 1 — [Gauge ~26%] | [KPI Cards 3×2 ~48%] | [Achievement Badge ~26%]
               Matches Dashboard Design ITR 2 approved top row exactly.
               ══════════════════════════════════════════════════════════════════ */}
-          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)_minmax(0,0.75fr)] gap-4 lg:gap-5 items-stretch">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.9fr)_minmax(0,0.77fr)] gap-4 lg:gap-5 items-stretch">
 
             {/* LEFT — Performance Analytics Gauge (large, not compressed) */}
             <div
@@ -994,7 +1093,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
             </div>
 
             {/* RIGHT — Congratulations / Achievement badge */}
-            <AchievementBanner tier={finalTier} level={finalLevel} isDark={isDark} />
+            <AchievementBanner tier={finalTier} level={finalLevel} isDark={isDark} firstName={firstName} dateLabel={dateLabel} />
           </div>
 
           {/* ══════════════════════════════════════════════════════════════════
@@ -1188,10 +1287,11 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
               </div>
               {hasTasks ? (
                 <div className="space-y-3.5">
-                  {stats!.taskTotals.map(t => {
+                  {stats!.taskTotals.map((t, taskIdx) => {
                     const act      = activities.find(a => a.id === t.actId)
-                    const barC     = act?.color ?? '#7c3aed'
-                    const barCL    = lightenHex(barC, 0.55)
+                    const [palL, palD] = TASK_GRAD_PALETTE[taskIdx % TASK_GRAD_PALETTE.length]
+                    const barC     = act?.color ?? palD
+                    const barCL    = act?.color ? lightenHex(act.color, 0.55) : palL
                     const barPct   = Math.round((t.ms / (stats!.taskTotals[0]?.ms ?? 1)) * 100)
                     const totalPct = stats!.totalMs > 0 ? Math.round((t.ms / stats!.totalMs) * 100) : 0
                     return (

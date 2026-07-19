@@ -35,11 +35,11 @@ export function GaugeMeter({ score }: { score: number }) {
   const segLen = arcLen / 5
 
   const segs = [
-    { offset: 0,           color: '#94a3b8', glow: 'rgba(148,163,184,0.3)',  label: 'Not Serious', emoji: '' },
-    { offset: segLen,      color: '#eab308', glow: 'rgba(234,179,8,0.35)',   label: 'Normal',      emoji: '' },
-    { offset: segLen * 2,  color: '#22c55e', glow: 'rgba(34,197,94,0.35)',   label: 'Average',     emoji: '' },
-    { offset: segLen * 3,  color: '#a855f7', glow: 'rgba(168,85,247,0.35)',  label: 'Advanced',    emoji: '🔥' },
-    { offset: segLen * 4,  color: '#ef4444', glow: 'rgba(239,68,68,0.35)',   label: 'Elite Mode',  emoji: '🚀' },
+    { offset: 0,           color: '#94a3b8', glow: 'rgba(148,163,184,0.3)',  label: 'Getting Started', emoji: '' },
+    { offset: segLen,      color: '#eab308', glow: 'rgba(234,179,8,0.35)',   label: 'In Action',       emoji: '' },
+    { offset: segLen * 2,  color: '#22c55e', glow: 'rgba(34,197,94,0.35)',   label: 'Consistent',      emoji: '' },
+    { offset: segLen * 3,  color: '#a855f7', glow: 'rgba(168,85,247,0.35)',  label: 'Advanced',        emoji: '🔥' },
+    { offset: segLen * 4,  color: '#ef4444', glow: 'rgba(239,68,68,0.35)',   label: 'Elite Mode',      emoji: '🚀' },
   ]
 
   const li = score < 20 ? 0 : score < 40 ? 1 : score < 60 ? 2 : score < 80 ? 3 : 4

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useEffect, useState } from 'react'
+import { useMemo, useEffect, useState, useRef, useCallback } from 'react'
 import { useApp } from './AppContext'
 import { formatMs, formatTime, APP_YEAR, dateKey as makeDateKey } from './utils'
 import type { Task } from './types'
@@ -141,13 +141,13 @@ function getActivityIconPath(name: string): string {
 
 // ─── Deterministic task progress-bar gradient palette ─────────────────────────
 
-const TASK_GRAD_PALETTE: [string, string][] = [
-  ['#93c5fd', '#3b82f6'],
-  ['#86efac', '#22c55e'],
-  ['#c4b5fd', '#8b5cf6'],
-  ['#fdba74', '#f97316'],
-  ['#f9a8d4', '#ec4899'],
-  ['#67e8f9', '#06b6d4'],
+const TASK_GRAD_STRINGS: string[] = [
+  'linear-gradient(90deg, #2563EB 0%, #0EA5E9 52%, #22D3EE 100%)',
+  'linear-gradient(90deg, #16A34A 0%, #4ADE80 48%, #A3E635 100%)',
+  'linear-gradient(90deg, #7C3AED 0%, #A855F7 50%, #D946EF 100%)',
+  'linear-gradient(90deg, #F97316 0%, #F59E0B 50%, #FACC15 100%)',
+  'linear-gradient(90deg, #EC4899 0%, #D946EF 48%, #8B5CF6 100%)',
+  'linear-gradient(90deg, #06B6D4 0%, #0EA5E9 50%, #3B82F6 100%)',
 ]
 
 // ─── Decorative mini-trend SVG (purely aesthetic) ─────────────────────────────
@@ -163,20 +163,32 @@ function MiniTrend({ color }: { color: string }) {
 
 // ─── SVG Donut ────────────────────────────────────────────────────────────────
 
-interface DonutSegment { color: string; pct: number }
+interface DonutSegment { color: string; pct: number; name?: string; ms?: number; sessions?: number }
 
-function DonutChart({ segments, size = 'md' }: { segments: DonutSegment[]; size?: 'sm' | 'md' }) {
-  const sz  = size === 'sm' ? { cx: 72, cy: 72, r: 56, inner: 34, vb: 144 }
-                            : { cx: 90, cy: 90, r: 70, inner: 44, vb: 180 }
+function DonutChart({
+  segments, size = 'md', hoveredIdx = null, onHoverIdx,
+}: {
+  segments: DonutSegment[]
+  size?: 'sm' | 'md' | 'lg'
+  hoveredIdx?: number | null
+  onHoverIdx?: (idx: number | null) => void
+}) {
+  const sz  = size === 'lg' ? { cx: 104, cy: 104, r: 82, inner: 50, vb: 208 }
+            : size === 'sm' ? { cx: 72,  cy: 72,  r: 56, inner: 34, vb: 144 }
+                            : { cx: 90,  cy: 90,  r: 70, inner: 44, vb: 180 }
   const { cx, cy, r, inner, vb } = sz
-  const cls = size === 'sm' ? 'w-24 h-24 flex-shrink-0' : 'w-32 h-32 sm:w-36 sm:h-36 flex-shrink-0'
+  const cls = size === 'lg' ? 'flex-shrink-0'
+            : size === 'sm' ? 'w-24 h-24 flex-shrink-0'
+                            : 'w-32 h-32 sm:w-36 sm:h-36 flex-shrink-0'
   const toRad = (d: number) => (d * Math.PI) / 180
   const pt = (a: number, rad: number) => ({ x: cx + rad * Math.cos(toRad(a)), y: cy + rad * Math.sin(toRad(a)) })
   const total = segments.reduce((s, x) => s + x.pct, 0)
 
+  const svgSize = size === 'lg' ? 200 : size === 'sm' ? 144 : 180
+
   if (total === 0) {
     return (
-      <svg viewBox={`0 0 ${vb} ${vb}`} className={cls}>
+      <svg viewBox={`0 0 ${vb} ${vb}`} className={cls} style={{ width: svgSize, height: svgSize }}>
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(148,163,184,0.12)" strokeWidth={r - inner} />
         <text x={cx} y={cy + 4} textAnchor="middle" fontSize="9" fill="rgba(148,163,184,0.4)">No data</text>
       </svg>
@@ -187,21 +199,41 @@ function DonutChart({ segments, size = 'md' }: { segments: DonutSegment[]; size?
   const paths: React.ReactNode[] = []
   segments.forEach((seg, i) => {
     const sweep = (seg.pct / total) * 360
+    const isHov = hoveredIdx === i
     const end = angle + sweep - 0.8
-    const s = pt(angle, r), e = pt(end, r), si = pt(angle, inner), ei = pt(end, inner)
+    const expand = isHov ? r + 5 : r
+    const s = pt(angle, expand), e = pt(end, expand), si = pt(angle, inner), ei = pt(end, inner)
     const large = sweep > 180 ? 1 : 0
     paths.push(
-      <path key={i} fill={seg.color}
-        d={`M ${s.x} ${s.y} A ${r} ${r} 0 ${large} 1 ${e.x} ${e.y} L ${ei.x} ${ei.y} A ${inner} ${inner} 0 ${large} 0 ${si.x} ${si.y} Z`}
+      <path key={i} fill={seg.color} opacity={hoveredIdx !== null && !isHov ? 0.45 : 1}
+        style={{ transition: 'opacity 200ms ease, filter 200ms ease', cursor: onHoverIdx ? 'pointer' : 'default', filter: isHov ? `drop-shadow(0 0 6px ${seg.color}88)` : 'none' }}
+        d={`M ${s.x} ${s.y} A ${expand} ${expand} 0 ${large} 1 ${e.x} ${e.y} L ${ei.x} ${ei.y} A ${inner} ${inner} 0 ${large} 0 ${si.x} ${si.y} Z`}
+        onMouseEnter={() => onHoverIdx?.(i)}
+        onMouseLeave={() => onHoverIdx?.(null)}
       />
     )
     angle += sweep
   })
 
+  const hovSeg = hoveredIdx !== null ? segments[hoveredIdx] : null
+
   return (
-    <svg viewBox={`0 0 ${vb} ${vb}`} className={cls}>
+    <svg viewBox={`0 0 ${vb} ${vb}`} className={cls} style={{ width: svgSize, height: svgSize }}>
       {paths}
       <circle cx={cx} cy={cy} r={inner} fill="var(--xp-card)" />
+      {hovSeg && hovSeg.name && (
+        <>
+          <text x={cx} y={cy - 6} textAnchor="middle" fontSize={size === 'lg' ? 8 : 7} fill={hovSeg.color} fontWeight="700">
+            {hovSeg.name.length > 10 ? hovSeg.name.slice(0, 9) + '…' : hovSeg.name}
+          </text>
+          <text x={cx} y={cy + 8} textAnchor="middle" fontSize={size === 'lg' ? 11 : 9} fill={hovSeg.color} fontWeight="900">
+            {hovSeg.ms !== undefined ? formatMs(hovSeg.ms) : `${Math.round(hovSeg.pct * 100)}%`}
+          </text>
+          <text x={cx} y={cy + 19} textAnchor="middle" fontSize={size === 'lg' ? 8 : 7} fill={hovSeg.color} fillOpacity="0.7">
+            {Math.round(hovSeg.pct * 100)}% of day
+          </text>
+        </>
+      )}
     </svg>
   )
 }
@@ -295,9 +327,10 @@ function WeeklyBars({ data }: { data: { label: string; ms: number; isToday: bool
 
 // ─── Today Overview Bars (activity breakdown for today) ───────────────────────
 
-function TodayOverviewBars({ data }: { data: { label: string; ms: number; color: string }[] }) {
-  const VW = 440, VH = 200
-  const PL = 34, PB = 30, PT = 28, PR = 8
+function TodayOverviewBars({ data, totalMs }: { data: { label: string; ms: number; color: string }[]; totalMs: number }) {
+  const [hovIdx, setHovIdx] = useState<number | null>(null)
+  const VW = 440, VH = 210
+  const PL = 34, PB = 36, PT = 22, PR = 8
   const plotW = VW - PL - PR
   const plotH = VH - PT - PB
   const display = data.slice(0, 6)
@@ -313,16 +346,22 @@ function TodayOverviewBars({ data }: { data: { label: string; ms: number; color:
   const maxMs = Math.max(...display.map(d => d.ms), 1)
   const yMax  = niceYMax(maxMs)
   const slotW = plotW / display.length
-  const barW  = Math.min(Math.max(slotW * 0.62, 14), 50)
+  const barW  = Math.min(Math.max(slotW * 0.68, 18), 58)
 
   return (
-    <svg viewBox={`0 0 ${VW} ${VH}`} style={{ width: '100%', height: '100%', display: 'block' }}>
+    <svg viewBox={`0 0 ${VW} ${VH}`} style={{ width: '100%', height: '100%', display: 'block', overflow: 'visible' }}>
       <defs>
         {display.map((d, i) => (
           <linearGradient key={i} id={`tob${i}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={lightenHex(d.color, 0.38)} />
+            <stop offset="0%" stopColor={lightenHex(d.color, 0.28)} />
             <stop offset="100%" stopColor={d.color} />
           </linearGradient>
+        ))}
+        {display.map((d, i) => (
+          <filter key={`gf${i}`} id={`tobglow${i}`} x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="b"/>
+            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
         ))}
       </defs>
 
@@ -332,40 +371,73 @@ function TodayOverviewBars({ data }: { data: { label: string; ms: number; color:
         return (
           <g key={i}>
             <line x1={PL} y1={y} x2={PL + plotW} y2={y}
-              stroke="rgba(148,163,184,0.1)" strokeWidth="0.5" strokeDasharray="2,4" />
-            <text x={PL - 5} y={y + 3.5} textAnchor="end" fontSize="8" fill="rgba(148,163,184,0.45)">
+              stroke="rgba(148,163,184,0.08)" strokeWidth="0.5" strokeDasharray="2,4" />
+            <text x={PL - 5} y={y + 3.5} textAnchor="end" fontSize="8" fill="rgba(148,163,184,0.4)">
               {fmtHrTick(frac * yMax)}
             </text>
           </g>
         )
       })}
       <line x1={PL} y1={PT + plotH} x2={PL + plotW} y2={PT + plotH}
-        stroke="rgba(148,163,184,0.2)" strokeWidth="0.75" />
+        stroke="rgba(148,163,184,0.16)" strokeWidth="0.75" />
 
       {display.map((d, i) => {
-        const barH = d.ms > 0 ? Math.max((d.ms / yMax) * plotH, 4) : 0
-        const cx   = PL + i * slotW + slotW / 2
-        const x    = cx - barW / 2
-        const y    = PT + plotH - barH
-        const hrs  = d.ms / 3_600_000
-        const lbl  = d.ms > 0 ? (hrs >= 1 ? `${hrs.toFixed(1)}h` : `${Math.round(d.ms / 60_000)}m`) : ''
+        const barH  = d.ms > 0 ? Math.max((d.ms / yMax) * plotH, 4) : 0
+        const bcx   = PL + i * slotW + slotW / 2
+        const x     = bcx - barW / 2
+        const baseY = PT + plotH
+        const isHov = hovIdx === i
+        const yShift = isHov ? -2 : 0
+        const y     = baseY - barH + yShift
+        const hrs   = d.ms / 3_600_000
+        const lbl   = d.ms > 0 ? (hrs >= 1 ? `${hrs.toFixed(1)}h` : `${Math.round(d.ms / 60_000)}m`) : ''
         const short = d.label.length > 7 ? d.label.slice(0, 6) + '…' : d.label
+        const pct   = totalMs > 0 ? Math.round((d.ms / totalMs) * 100) : 0
+
         return (
-          <g key={`tob-${i}`}>
+          <g key={`tob-${i}`}
+            onMouseEnter={() => setHovIdx(i)}
+            onMouseLeave={() => setHovIdx(null)}
+            style={{ cursor: 'pointer' }}>
+            {d.ms > 0 && isHov && (
+              <rect x={(x - 2).toFixed(1)} y={(y - 1).toFixed(1)}
+                width={(barW + 4).toFixed(1)} height={(barH + 1 + Math.abs(yShift)).toFixed(1)}
+                rx="6" fill={d.color} opacity="0.12" filter={`url(#tobglow${i})`} />
+            )}
             {d.ms > 0 && (
-              <rect x={x.toFixed(1)} y={y.toFixed(1)} width={barW.toFixed(1)} height={barH.toFixed(1)}
-                rx="4" fill={`url(#tob${i})`} />
+              <rect
+                x={x.toFixed(1)} y={y.toFixed(1)}
+                width={barW.toFixed(1)} height={(barH + Math.abs(yShift)).toFixed(1)}
+                rx="5" fill={`url(#tob${i})`}
+                opacity={hovIdx !== null && !isHov ? 0.55 : 1}
+                style={{ transition: 'opacity 200ms ease, transform 200ms ease' }}
+              />
             )}
             {lbl && barH > 14 && (
-              <text x={cx.toFixed(1)} y={(y - 6).toFixed(1)} textAnchor="middle"
-                fontSize="8" fontWeight="700" fill={d.color}>
+              <text x={bcx.toFixed(1)} y={(y - 5).toFixed(1)} textAnchor="middle"
+                fontSize={isHov ? '9' : '8'} fontWeight="700"
+                fill={d.color} opacity={hovIdx !== null && !isHov ? 0.45 : 1}>
                 {lbl}
               </text>
             )}
-            <text x={cx.toFixed(1)} y={(PT + plotH + 15).toFixed(1)} textAnchor="middle"
-              fontSize="8.5" fontWeight="500" fill="rgba(148,163,184,0.65)">
+            <text x={bcx.toFixed(1)} y={(PT + plotH + 16).toFixed(1)} textAnchor="middle"
+              fontSize="8.5" fontWeight={isHov ? '700' : '500'}
+              fill={isHov ? d.color : 'rgba(148,163,184,0.65)'}>
               {short}
             </text>
+            {/* Tooltip on hover */}
+            {isHov && d.ms > 0 && (
+              <g>
+                <rect x={(bcx - 54).toFixed(1)} y={(y - 42).toFixed(1)}
+                  width="108" height="34" rx="6"
+                  fill="var(--xp-card)" stroke={d.color} strokeWidth="0.75" strokeOpacity="0.4"
+                  style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.25))' }} />
+                <text x={bcx.toFixed(1)} y={(y - 26).toFixed(1)} textAnchor="middle"
+                  fontSize="8.5" fontWeight="700" fill={d.color}>{d.label}</text>
+                <text x={bcx.toFixed(1)} y={(y - 15).toFixed(1)} textAnchor="middle"
+                  fontSize="8" fill="rgba(148,163,184,0.8)">{lbl} · {pct}% of day</text>
+              </g>
+            )}
           </g>
         )
       })}
@@ -806,9 +878,18 @@ interface DayDashboardModalProps {
   onBack?: () => void
 }
 
+type ExportState = 'idle' | 'preparing' | 'ready' | 'downloading' | 'emailing' | 'sharing' | 'success' | 'error'
+
 export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayDashboardModalProps) {
   const { calData, activities, isDark } = useApp()
-  const [firstName, setFirstName] = useState<string>('')
+  const [firstName, setFirstName]     = useState<string>('')
+  const [actHovIdx, setActHovIdx]     = useState<number | null>(null)
+  const [showExport, setShowExport]   = useState(false)
+  const [exportState, setExportState] = useState<ExportState>('idle')
+  const [exportError, setExportError] = useState<string>('')
+  const captureRef   = useRef<HTMLDivElement>(null)
+  const captureBlobRef = useRef<Blob | null>(null)
+  const previewUrlRef  = useRef<string>('')
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
@@ -919,66 +1000,166 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
   const card1 = { background: S1, border: `0.5px solid ${BDR}`, boxShadow: isDark ? '0 2px 16px rgba(0,0,0,0.35)' : '0 1px 6px rgba(0,0,0,0.05)' }
   const card2 = { background: S2, border: `0.5px solid ${BDR}`, boxShadow: isDark ? '0 2px 16px rgba(0,0,0,0.35)' : '0 1px 6px rgba(0,0,0,0.05)' }
 
-  // ── KPI card definitions ───────────────────────────────────────────────────
-  const focusAccent = stats && stats.score >= 80 ? '#ef4444' : stats && stats.score >= 60 ? '#a855f7' : stats && stats.score >= 40 ? '#22c55e' : '#94a3b8'
+  // ── KPI card definitions — exact ITR4 gradients ───────────────────────────
   const kpiCards = [
     {
       label: 'Total Worked', value: stats ? formatMs(stats.totalMs) : '—', sub: null, icon: '⏱',
-      accent: isDark ? '#c4b5fd' : '#7c3aed',
-      bg: isDark
-        ? 'linear-gradient(140deg, rgba(109,40,217,0.32) 0%, rgba(139,92,246,0.2) 55%, rgba(167,139,250,0.08) 100%)'
-        : 'linear-gradient(140deg, #ede9fe 0%, #ddd6fe 60%, #f5f3ff 100%)',
-      border: isDark ? 'rgba(139,92,246,0.38)' : 'rgba(139,92,246,0.22)',
-      iconBg: isDark ? 'rgba(139,92,246,0.25)' : 'rgba(139,92,246,0.14)',
+      accent:  isDark ? '#C8A8FF' : '#7038E8',
+      iconClr: isDark ? '#C4A4FF' : '#7C3AED',
+      bg:      isDark ? 'linear-gradient(135deg, #24124A 0%, #332066 50%, #3D1B58 100%)'
+                      : 'linear-gradient(135deg, #F1E9FF 0%, #DDD0FF 46%, #E8D8FF 72%, #F6DDF5 100%)',
+      border:  isDark ? 'rgba(139,92,246,0.48)' : '#C9B4FF',
+      iconBg:  isDark ? 'rgba(139,92,246,0.22)' : 'rgba(124,58,237,0.12)',
     },
     {
       label: 'Longest Session', value: stats ? formatMs(stats.longestMs) : '—', sub: stats?.isPersonalBest ? '🔥 Best' : null, icon: '⚡',
-      accent: isDark ? '#a5b4fc' : '#4f46e5',
-      bg: isDark
-        ? 'linear-gradient(140deg, rgba(55,48,163,0.32) 0%, rgba(99,102,241,0.2) 55%, rgba(129,140,248,0.08) 100%)'
-        : 'linear-gradient(140deg, #eff6ff 0%, #dbeafe 60%, #e0e7ff 100%)',
-      border: isDark ? 'rgba(99,102,241,0.38)' : 'rgba(99,102,241,0.22)',
-      iconBg: isDark ? 'rgba(99,102,241,0.25)' : 'rgba(99,102,241,0.14)',
+      accent:  isDark ? '#9CABFF' : '#4A45E6',
+      iconClr: isDark ? '#9FB1FF' : '#4F46E5',
+      bg:      isDark ? 'linear-gradient(135deg, #171C48 0%, #20275D 48%, #142B4E 100%)'
+                      : 'linear-gradient(135deg, #E9F0FF 0%, #CDDFFF 48%, #D8E8FF 74%, #E3F6FF 100%)',
+      border:  isDark ? 'rgba(99,132,255,0.48)' : '#AACBFF',
+      iconBg:  isDark ? 'rgba(79,110,255,0.22)' : 'rgba(79,70,229,0.11)',
     },
     {
       label: 'Sessions', value: stats ? String(stats.sessionCount) : '—', sub: null, icon: '📋',
-      accent: isDark ? '#67e8f9' : '#0891b2',
-      bg: isDark
-        ? 'linear-gradient(140deg, rgba(14,116,144,0.32) 0%, rgba(8,145,178,0.2) 55%, rgba(34,211,238,0.08) 100%)'
-        : 'linear-gradient(140deg, #ecfeff 0%, #cffafe 60%, #d1fae5 100%)',
-      border: isDark ? 'rgba(8,145,178,0.38)' : 'rgba(8,145,178,0.22)',
-      iconBg: isDark ? 'rgba(8,145,178,0.25)' : 'rgba(8,145,178,0.14)',
+      accent:  isDark ? '#6CE7F3' : '#0596A6',
+      iconClr: isDark ? '#67E8F9' : '#0891B2',
+      bg:      isDark ? 'linear-gradient(135deg, #092D36 0%, #0B3A43 50%, #0A3442 100%)'
+                      : 'linear-gradient(135deg, #E5FAF7 0%, #C9F4E9 42%, #C6F5F0 72%, #DDFBE8 100%)',
+      border:  isDark ? 'rgba(34,211,238,0.42)' : '#91E8D2',
+      iconBg:  isDark ? 'rgba(6,182,212,0.20)' : 'rgba(6,182,212,0.11)',
     },
     {
       label: 'Tasks Done', value: stats ? `${stats.completedTasks}/${stats.totalTasks}` : '—', sub: stats && stats.totalTasks > 0 ? `${Math.round((stats.completedTasks / stats.totalTasks) * 100)}% complete` : null, icon: '✓',
-      accent: isDark ? '#86efac' : '#059669',
-      bg: isDark
-        ? 'linear-gradient(140deg, rgba(4,120,87,0.32) 0%, rgba(5,150,105,0.2) 55%, rgba(52,211,153,0.08) 100%)'
-        : 'linear-gradient(140deg, #ecfdf5 0%, #d1fae5 60%, #fef9c3 100%)',
-      border: isDark ? 'rgba(5,150,105,0.38)' : 'rgba(5,150,105,0.22)',
-      iconBg: isDark ? 'rgba(5,150,105,0.25)' : 'rgba(5,150,105,0.14)',
+      accent:  isDark ? '#6EE7B7' : '#079669',
+      iconClr: isDark ? '#6EE7B7' : '#059669',
+      bg:      isDark ? 'linear-gradient(135deg, #09372E 0%, #0B4335 48%, #153A2D 72%, #303617 100%)'
+                      : 'linear-gradient(135deg, #E4F9ED 0%, #C9F4D7 45%, #E3F7C9 76%, #FFF2B8 100%)',
+      border:  isDark ? 'rgba(52,211,153,0.42)' : '#A8E7BE',
+      iconBg:  isDark ? 'rgba(16,185,129,0.20)' : 'rgba(16,185,129,0.13)',
     },
     {
       label: 'Deep Work', value: stats ? formatMs(stats.deepWorkMs) : '—', sub: null, icon: '🧠',
-      accent: isDark ? '#f9a8d4' : '#db2777',
-      bg: isDark
-        ? 'linear-gradient(140deg, rgba(157,23,77,0.32) 0%, rgba(219,39,119,0.2) 55%, rgba(249,168,212,0.08) 100%)'
-        : 'linear-gradient(140deg, #fdf2f8 0%, #fce7f3 60%, #ffe4e6 100%)',
-      border: isDark ? 'rgba(219,39,119,0.38)' : 'rgba(219,39,119,0.22)',
-      iconBg: isDark ? 'rgba(219,39,119,0.22)' : 'rgba(219,39,119,0.12)',
+      accent:  isDark ? '#FF94C4' : '#DB2777',
+      iconClr: isDark ? '#F9A8D4' : '#DB2777',
+      bg:      isDark ? 'linear-gradient(135deg, #49132D 0%, #561534 48%, #461536 75%, #351943 100%)'
+                      : 'linear-gradient(135deg, #FFF0F7 0%, #FAD3E7 44%, #F6C8E1 72%, #F2D8F4 100%)',
+      border:  isDark ? 'rgba(244,114,182,0.44)' : '#F4B4D4',
+      iconBg:  isDark ? 'rgba(236,72,153,0.21)' : 'rgba(219,39,119,0.11)',
     },
     {
       label: 'Focus Score', value: stats ? `${stats.score}%` : '—', sub: stats ? (stats.score >= 80 ? 'Excellent' : stats.score >= 60 ? 'Good' : stats.score >= 40 ? 'Average' : 'Building') : null, icon: '🎯',
-      accent: isDark ? (focusAccent === '#ef4444' ? '#f87171' : focusAccent === '#a855f7' ? '#c084fc' : focusAccent === '#22c55e' ? '#4ade80' : '#94a3b8') : focusAccent,
-      bg: isDark
-        ? 'linear-gradient(140deg, rgba(88,28,135,0.32) 0%, rgba(124,58,237,0.2) 55%, rgba(6,182,212,0.08) 100%)'
-        : 'linear-gradient(140deg, #f5f3ff 0%, #ede9fe 60%, #ecfeff 100%)',
-      border: isDark ? 'rgba(124,58,237,0.35)' : 'rgba(124,58,237,0.2)',
-      iconBg: isDark ? 'rgba(124,58,237,0.22)' : 'rgba(124,58,237,0.12)',
+      accent:  isDark ? '#FF677C' : '#F03B54',
+      iconClr: isDark ? '#C4B5FD' : '#7C3AED',
+      bg:      isDark ? 'linear-gradient(135deg, #2B174E 0%, #351A5C 48%, #251D58 72%, #163A49 100%)'
+                      : 'linear-gradient(135deg, #F0EBFF 0%, #DDD3FF 44%, #D7D9FF 70%, #D7F5F2 100%)',
+      border:  isDark ? 'rgba(167,139,250,0.46)' : '#C7B8FF',
+      iconBg:  isDark ? 'rgba(139,92,246,0.20)' : 'rgba(124,58,237,0.11)',
     },
   ]
 
+  // ── Export helpers ─────────────────────────────────────────────────────────
+
+  const openExport = useCallback(async () => {
+    setShowExport(true)
+    setExportState('preparing')
+    setExportError('')
+    try {
+      const { toPng } = await import('html-to-image')
+      const node = captureRef.current
+      if (!node) throw new Error('Capture element not ready')
+      const dataUrl = await toPng(node, {
+        pixelRatio: 2,
+        cacheBust: true,
+        filter: (el) => {
+          if (el instanceof Element && el.getAttribute('data-export-exclude') === 'true') return false
+          return true
+        },
+      })
+      const res  = await fetch(dataUrl)
+      const blob = await res.blob()
+      captureBlobRef.current = blob
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+      previewUrlRef.current = URL.createObjectURL(blob)
+      setExportState('ready')
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'Capture failed')
+      setExportState('error')
+    }
+  }, [])
+
+  const closeExport = useCallback(() => {
+    setShowExport(false)
+    setExportState('idle')
+    setExportError('')
+    if (previewUrlRef.current) { URL.revokeObjectURL(previewUrlRef.current); previewUrlRef.current = '' }
+    captureBlobRef.current = null
+  }, [])
+
+  const downloadPng = useCallback(async () => {
+    const blob = captureBlobRef.current
+    if (!blob) return
+    setExportState('downloading')
+    try {
+      const url = URL.createObjectURL(blob)
+      const a   = document.createElement('a')
+      a.href    = url
+      a.download = `xpadite-dashboard-${dateKey}.png`
+      a.click()
+      URL.revokeObjectURL(url)
+      setExportState('ready')
+    } catch {
+      setExportState('error')
+      setExportError('Download failed')
+    }
+  }, [dateKey])
+
+  const emailToMe = useCallback(async () => {
+    const blob = captureBlobRef.current
+    if (!blob) return
+    setExportState('emailing')
+    try {
+      const reader = new FileReader()
+      const base64: string = await new Promise((res, rej) => {
+        reader.onload = () => res((reader.result as string).split(',')[1])
+        reader.onerror = rej
+        reader.readAsDataURL(blob)
+      })
+      const resp = await fetch('/api/dashboard-export-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64, dateLabel, stats: stats ? { totalMs: stats.totalMs, completedTasks: stats.completedTasks, totalTasks: stats.totalTasks, score: stats.score } : null }),
+      })
+      const json = await resp.json() as { ok?: boolean; error?: string }
+      if (!json.ok) throw new Error(json.error ?? 'Email failed')
+      setExportState('success')
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'Email failed')
+      setExportState('error')
+    }
+  }, [dateLabel, stats])
+
+  const nativeShare = useCallback(async () => {
+    const blob = captureBlobRef.current
+    if (!blob) return
+    setExportState('sharing')
+    try {
+      const file = new File([blob], `xpadite-dashboard-${dateKey}.png`, { type: 'image/png' })
+      if (typeof navigator.share === 'function' && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ title: 'My XPadite Progress', text: 'Building momentum with XPadite.', files: [file] })
+      } else {
+        await downloadPng()
+      }
+      setExportState('ready')
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') { setExportState('ready'); return }
+      setExportError(err instanceof Error ? err.message : 'Share failed')
+      setExportState('error')
+    }
+  }, [dateKey, downloadPng])
+
   return (
+    <>
     <div
       className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-4 pt-4 sm:pt-6 overflow-y-auto"
       style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
@@ -1011,7 +1192,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
           style={{ background: 'linear-gradient(135deg, #0f052e 0%, #2d1b69 55%, #18355a 100%)', borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}
         >
           {onBack && (
-            <button onClick={onBack}
+            <button onClick={onBack} data-export-exclude="true"
               className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0"
               style={{ background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.8)' }}>
               ← Back
@@ -1021,15 +1202,26 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
             <h2 className="text-sm font-bold text-white tracking-wide">Today's Dashboard</h2>
             <p className="text-[10px] mt-0.5 truncate" style={{ color: 'rgba(167,139,250,0.62)' }}>{dateLabel}</p>
           </div>
-          <button onClick={onClose}
+          {/* Export button */}
+          <button onClick={openExport} data-export-exclude="true"
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-90 transition-opacity flex-shrink-0"
+            style={{ background: 'rgba(167,139,250,0.16)', border: '0.5px solid rgba(167,139,250,0.3)', color: '#c4b5fd' }}
+            title="Export dashboard as PNG"
+            aria-label="Export dashboard">
+            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 2v8M5 7l3 3 3-3M2 12v1a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-1"/>
+            </svg>
+            Export
+          </button>
+          <button onClick={onClose} data-export-exclude="true"
             className="text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
             style={{ background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}>
             × Close
           </button>
         </div>
 
-        {/* ── Dashboard body ───────────────────────────────────────────────── */}
-        <div className="p-4 sm:p-5 lg:p-6 space-y-4 lg:space-y-5">
+        {/* ── Dashboard body (capture target) ──────────────────────────────── */}
+        <div ref={captureRef} className="p-4 sm:p-5 lg:p-6 space-y-4 lg:space-y-5">
 
           {/* ══════════════════════════════════════════════════════════════════
               ROW 1 — [Gauge ~26%] | [KPI Cards 3×2 ~48%] | [Achievement Badge ~26%]
@@ -1037,54 +1229,55 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
               ══════════════════════════════════════════════════════════════════ */}
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.9fr)_minmax(0,0.77fr)] gap-4 lg:gap-5 items-stretch">
 
-            {/* LEFT — Performance Analytics Gauge (large, not compressed) */}
+            {/* LEFT — Performance Analytics Gauge (large, fills column) */}
             <div
-              className="rounded-2xl overflow-hidden"
+              className="rounded-2xl overflow-hidden flex flex-col"
               style={{
                 background: isDark
                   ? 'linear-gradient(145deg, rgba(16,7,44,0.99) 0%, rgba(7,3,18,0.99) 100%)'
                   : 'var(--xp-card)',
-                border: isDark ? '0.5px solid rgba(124,58,237,0.28)' : '0.5px solid var(--xp-bdr2)',
-                boxShadow: isDark ? '0 4px 24px rgba(0,0,0,0.5)' : '0 1px 8px rgba(0,0,0,0.06)',
+                border: isDark ? '0.5px solid rgba(124,58,237,0.35)' : '0.5px solid var(--xp-bdr2)',
+                boxShadow: isDark ? '0 4px 32px rgba(80,0,220,0.18), 0 2px 12px rgba(0,0,0,0.5)' : '0 1px 8px rgba(0,0,0,0.06)',
+                minHeight: 270,
               }}
             >
               <GaugeMeter score={gaugeScore} />
             </div>
 
             {/* MIDDLE — KPI Metric Cards: 3 columns × 2 rows */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 content-start">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 content-start">
               {kpiCards.map(m => (
                 <div
                   key={m.label}
-                  className="rounded-xl p-3.5 flex flex-col relative overflow-hidden"
+                  className="rounded-[13px] p-3 flex flex-col relative overflow-hidden xp-kpi-card"
                   style={{
                     background: m.bg,
                     border: `1px solid ${m.border}`,
-                    minHeight: 96,
+                    minHeight: 84,
                   }}
                 >
                   {/* Icon tile */}
                   <div style={{
-                    width: 30, height: 30, borderRadius: 8, marginBottom: 8, flexShrink: 0,
+                    width: 26, height: 26, borderRadius: 7, marginBottom: 6, flexShrink: 0,
                     background: m.iconBg,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 14,
+                    fontSize: 13, color: m.iconClr,
                   }}>
                     {m.icon}
                   </div>
                   {/* Value */}
-                  <p className="text-xl sm:text-2xl font-bold leading-none tabular-nums mb-1"
+                  <p className="text-lg sm:text-xl font-bold leading-none tabular-nums mb-0.5"
                     style={{ color: m.accent }}>
                     {m.value}
                   </p>
                   {/* Label */}
-                  <p className="text-[9px] font-medium mt-auto"
-                    style={{ color: isDark ? 'rgba(148,163,184,0.6)' : 'rgba(71,85,105,0.65)' }}>
+                  <p className="text-[8.5px] font-medium mt-auto leading-tight"
+                    style={{ color: isDark ? 'rgba(148,163,184,0.58)' : 'rgba(71,85,105,0.65)' }}>
                     {m.label}
                   </p>
                   {/* Sub */}
                   {m.sub && (
-                    <p className="text-[8px] mt-0.5 font-semibold" style={{ color: isDark ? `${m.accent}cc` : m.accent }}>
+                    <p className="text-[8px] mt-0.5 font-semibold" style={{ color: isDark ? `${m.accent}bb` : m.accent }}>
                       {m.sub}
                     </p>
                   )}
@@ -1142,6 +1335,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
               <div className="min-h-[240px] lg:min-h-[280px]">
                 <TodayOverviewBars
                   data={stats?.actBreakdown.map(a => ({ label: a.name, ms: a.ms, color: a.color })) ?? []}
+                  totalMs={stats?.totalMs ?? 0}
                 />
               </div>
             </div>
@@ -1160,39 +1354,63 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                 Activity Distribution
               </p>
               {hasActivity ? (
-                <div className="flex items-start gap-3">
-                  <DonutChart segments={stats!.actBreakdown.map(a => ({ color: a.color, pct: a.pct }))} size="sm" />
-                  <div className="flex-1 min-w-0 space-y-2 pt-1">
-                    {stats!.actBreakdown.map(a => (
-                      <div key={a.actId} className="flex items-center gap-1.5">
-                        <div className="w-2 h-2 rounded-full flex-shrink-0"
-                          style={{ background: a.color }} />
-                        <span className="text-[9px] flex-1 min-w-0 truncate"
-                          style={{ color: isDark ? 'rgba(203,213,225,0.78)' : 'var(--xp-txt2)' }}>
-                          {a.name}
-                        </span>
-                        <span className="text-[9px] flex-shrink-0 tabular-nums font-semibold"
-                          style={{ color: isDark ? 'rgba(255,255,255,0.85)' : 'var(--xp-txt)' }}>
-                          {formatMs(a.ms)}
-                        </span>
-                        <span className="text-[8px] flex-shrink-0 tabular-nums"
-                          style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>
-                          {Math.round(a.pct * 100)}%
-                        </span>
-                      </div>
-                    ))}
-                    <div className="flex items-center gap-1.5 pt-1.5"
-                      style={{ borderTop: isDark ? '0.5px solid rgba(255,255,255,0.07)' : '0.5px solid var(--xp-bdr)' }}>
-                      <div className="w-2 h-2 flex-shrink-0" />
-                      <span className="text-[9px] flex-1 font-semibold"
-                        style={{ color: isDark ? 'rgba(255,255,255,0.55)' : 'var(--xp-txt3)' }}>
-                        Total
-                      </span>
-                      <span className="text-[9px] font-bold tabular-nums flex-shrink-0"
+                <div className="flex items-start gap-4">
+                  <DonutChart
+                    segments={stats!.actBreakdown.map(a => ({ color: a.color, pct: a.pct, name: a.name, ms: a.ms }))}
+                    size="lg"
+                    hoveredIdx={actHovIdx}
+                    onHoverIdx={setActHovIdx}
+                  />
+                  <div className="flex-1 min-w-0 pt-1">
+                    {stats!.actBreakdown.map((a, i) => {
+                      const isHov = actHovIdx === i
+                      return (
+                        <div
+                          key={a.actId}
+                          onMouseEnter={() => setActHovIdx(i)}
+                          onMouseLeave={() => setActHovIdx(null)}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'minmax(100px,1fr) 58px 36px',
+                            alignItems: 'center',
+                            gap: 4,
+                            marginBottom: 6,
+                            cursor: 'default',
+                            opacity: actHovIdx !== null && !isHov ? 0.5 : 1,
+                            transition: 'opacity 180ms ease',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+                            <div className="w-2 h-2 rounded-full flex-shrink-0"
+                              style={{ background: a.color, boxShadow: isHov ? `0 0 5px ${a.color}88` : 'none' }} />
+                            <span className="text-[9px] truncate"
+                              style={{ color: isHov ? (isDark ? 'rgba(255,255,255,0.95)' : 'var(--xp-txt)') : isDark ? 'rgba(203,213,225,0.78)' : 'var(--xp-txt2)', fontWeight: isHov ? 600 : 400 }}>
+                              {a.name}
+                            </span>
+                          </div>
+                          <span className="text-[9px] tabular-nums font-semibold text-right"
+                            style={{ color: isHov ? (isDark ? 'rgba(255,255,255,0.95)' : 'var(--xp-txt)') : isDark ? 'rgba(255,255,255,0.72)' : 'var(--xp-txt)' }}>
+                            {formatMs(a.ms)}
+                          </span>
+                          <span className="text-[8px] tabular-nums text-right"
+                            style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>
+                            {Math.round(a.pct * 100)}%
+                          </span>
+                        </div>
+                      )
+                    })}
+                    <div style={{
+                      display: 'grid', gridTemplateColumns: 'minmax(100px,1fr) 58px 36px',
+                      alignItems: 'center', gap: 4, paddingTop: 6,
+                      borderTop: isDark ? '0.5px solid rgba(255,255,255,0.07)' : '0.5px solid var(--xp-bdr)',
+                    }}>
+                      <span className="text-[9px] font-semibold"
+                        style={{ color: isDark ? 'rgba(255,255,255,0.55)' : 'var(--xp-txt3)' }}>Total</span>
+                      <span className="text-[9px] font-bold tabular-nums text-right"
                         style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>
                         {formatMs(stats!.totalMs)}
                       </span>
-                      <span className="text-[8px] flex-shrink-0"
+                      <span className="text-[8px] tabular-nums text-right"
                         style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>
                         100%
                       </span>
@@ -1224,26 +1442,41 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                     return (
                       <div
                         key={s.id ?? i}
-                        className="xp-row flex items-center gap-2 px-4 py-2.5"
-                        style={{ borderBottom: i < stats!.allSessions.length - 1 ? isDark ? '0.5px solid rgba(124,58,237,0.08)' : '0.5px solid var(--xp-bdr)' : 'none' }}
+                        className="xp-row"
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'minmax(86px,1fr) minmax(110px,auto) 52px 54px',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '9px 16px',
+                          borderBottom: i < stats!.allSessions.length - 1 ? isDark ? '0.5px solid rgba(124,58,237,0.08)' : '0.5px solid var(--xp-bdr)' : 'none',
+                        }}
                       >
-                        <div className="w-2 h-2 rounded-full flex-shrink-0"
-                          style={{ background: act?.color ?? '#94a3b8' }} />
-                        <span className="text-[10px] font-semibold truncate flex-shrink-0"
-                          style={{ width: 54, color: isDark ? 'rgba(255,255,255,0.85)' : 'var(--xp-txt)' }}>
-                          {act?.name ?? 'Other'}
-                        </span>
-                        <span className="text-[9px] flex-1 tabular-nums"
-                          style={{ color: isDark ? 'rgba(148,163,184,0.55)' : 'var(--xp-txt3)' }}>
-                          {formatTime(s.startTs)} → {formatTime(s.endTs!)}
-                        </span>
-                        {deep && (
-                          <span className="text-[7px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0"
-                            style={{ background: 'rgba(124,58,237,0.15)', color: '#a78bfa', border: '0.5px solid rgba(124,58,237,0.22)' }}>
-                            Deep
+                        {/* Activity name with dot */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                          <div className="w-2 h-2 rounded-full flex-shrink-0"
+                            style={{ background: act?.color ?? '#94a3b8' }} />
+                          <span className="text-[10px] font-semibold truncate"
+                            style={{ color: isDark ? 'rgba(255,255,255,0.85)' : 'var(--xp-txt)' }}>
+                            {act?.name ?? 'Other'}
                           </span>
-                        )}
-                        <span className="text-[10px] font-bold flex-shrink-0 tabular-nums"
+                        </div>
+                        {/* Time range */}
+                        <span className="text-[9px] tabular-nums"
+                          style={{ color: isDark ? 'rgba(148,163,184,0.55)' : 'var(--xp-txt3)', whiteSpace: 'nowrap' }}>
+                          {formatTime(s.startTs)} – {formatTime(s.endTs!)}
+                        </span>
+                        {/* Pill column — preserves space even when no pill */}
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>
+                          {deep && (
+                            <span className="text-[7px] font-bold px-1.5 py-0.5 rounded-full"
+                              style={{ background: 'rgba(124,58,237,0.15)', color: '#a78bfa', border: '0.5px solid rgba(124,58,237,0.22)', whiteSpace: 'nowrap' }}>
+                              Deep
+                            </span>
+                          )}
+                        </div>
+                        {/* Duration — right-aligned, always same column */}
+                        <span className="text-[10px] font-bold tabular-nums text-right"
                           style={{ color: deep ? '#a78bfa' : isDark ? 'rgba(203,213,225,0.72)' : 'var(--xp-txt2)' }}>
                           {formatMs(dur)}
                         </span>
@@ -1286,17 +1519,16 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                 )}
               </div>
               {hasTasks ? (
-                <div className="space-y-3.5">
+                <div className="space-y-3">
                   {stats!.taskTotals.map((t, taskIdx) => {
                     const act      = activities.find(a => a.id === t.actId)
-                    const [palL, palD] = TASK_GRAD_PALETTE[taskIdx % TASK_GRAD_PALETTE.length]
-                    const barC     = act?.color ?? palD
-                    const barCL    = act?.color ? lightenHex(act.color, 0.55) : palL
+                    const gradStr  = act?.color
+                      ? `linear-gradient(90deg, ${lightenHex(act.color, 0.30)} 0%, ${act.color} 100%)`
+                      : TASK_GRAD_STRINGS[taskIdx % TASK_GRAD_STRINGS.length]
                     const barPct   = Math.round((t.ms / (stats!.taskTotals[0]?.ms ?? 1)) * 100)
                     const totalPct = stats!.totalMs > 0 ? Math.round((t.ms / stats!.totalMs) * 100) : 0
                     return (
-                      <div key={t.id}>
-                        {/* Title row + right-aligned stats */}
+                      <div key={t.id} className="group">
                         <div className="flex items-start justify-between gap-2 mb-1.5">
                           <span className="text-[9px] flex-1 min-w-0 leading-snug font-medium"
                             style={{
@@ -1316,14 +1548,16 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                             </span>
                           </div>
                         </div>
-                        {/* Gradient progress bar — colorful even when done; done shown via text only */}
-                        <div className="h-2 rounded-full overflow-hidden"
-                          style={{ background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }}>
+                        {/* Thicker progress bar with full 3-stop gradient */}
+                        <div className="h-2.5 rounded-full overflow-hidden"
+                          style={{ background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)' }}>
                           <div className="h-full rounded-full"
                             style={{
-                              width: `${barPct > 0 ? Math.max(barPct, 3) : 0}%`,
-                              background: `linear-gradient(90deg, ${barCL} 0%, ${barC} 100%)`,
-                              opacity: t.done ? 0.55 : 1,
+                              width: `${barPct > 0 ? Math.max(barPct, 4) : 0}%`,
+                              background: gradStr,
+                              opacity: t.done ? 0.5 : 1,
+                              boxShadow: isDark && !t.done ? `0 0 8px ${act?.color ?? 'rgba(124,58,237,0.4)'}33` : 'none',
+                              transition: 'box-shadow 200ms ease',
                             }} />
                         </div>
                       </div>
@@ -1362,5 +1596,99 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
         </div>
       </div>
     </div>
+
+    {/* ── Export Modal ─────────────────────────────────────────────────────── */}
+    {showExport && (
+      <div
+        className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+        style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(6px)' }}
+        onClick={closeExport}
+      >
+        <div
+          className="w-full max-w-[520px] rounded-2xl overflow-hidden shadow-2xl"
+          style={{
+            background: isDark ? 'linear-gradient(145deg,#0f082a,#12103a)' : '#ffffff',
+            border: isDark ? '0.5px solid rgba(139,92,246,0.35)' : '0.5px solid rgba(124,58,237,0.2)',
+            boxShadow: isDark ? '0 24px 64px rgba(0,0,0,0.7)' : '0 20px 50px rgba(0,0,0,0.14)',
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="px-5 py-4" style={{ borderBottom: isDark ? '0.5px solid rgba(255,255,255,0.07)' : '0.5px solid rgba(0,0,0,0.08)' }}>
+            <p className="text-[15px] font-bold" style={{ color: isDark ? '#e2e8f0' : '#1e1e2e' }}>Export Today&#39;s Dashboard</p>
+            <p className="text-[11px] mt-0.5" style={{ color: isDark ? 'rgba(148,163,184,0.65)' : '#6b7280' }}>
+              Save or share a snapshot of your progress for {dateLabel}
+            </p>
+          </div>
+
+          {/* Privacy notice */}
+          <div className="mx-5 mt-4 px-3 py-2 rounded-lg text-[9.5px] leading-relaxed"
+            style={{ background: isDark ? 'rgba(234,179,8,0.08)' : 'rgba(234,179,8,0.06)', border: '0.5px solid rgba(234,179,8,0.22)', color: isDark ? 'rgba(253,224,71,0.72)' : '#92400e' }}>
+            Your dashboard may contain personal task and productivity information. Review the preview before sharing.
+          </div>
+
+          {/* Preview */}
+          <div className="mx-5 mt-4 rounded-xl overflow-hidden"
+            style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', border: isDark ? '0.5px solid rgba(255,255,255,0.08)' : '0.5px solid rgba(0,0,0,0.08)', minHeight: 120, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {exportState === 'preparing' && (
+              <div className="text-center py-8">
+                <div className="text-2xl mb-2">⏳</div>
+                <p className="text-[11px]" style={{ color: isDark ? 'rgba(148,163,184,0.6)' : '#9ca3af' }}>Generating preview…</p>
+              </div>
+            )}
+            {exportState === 'error' && (
+              <div className="text-center py-8">
+                <div className="text-2xl mb-2">⚠️</div>
+                <p className="text-[11px]" style={{ color: '#ef4444' }}>{exportError || 'Something went wrong'}</p>
+              </div>
+            )}
+            {(exportState === 'ready' || exportState === 'downloading' || exportState === 'emailing' || exportState === 'sharing' || exportState === 'success') && previewUrlRef.current && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={previewUrlRef.current} alt="Dashboard preview" style={{ width: '100%', height: 'auto', maxHeight: 280, objectFit: 'contain', display: 'block' }} />
+            )}
+          </div>
+
+          {/* Success banner */}
+          {exportState === 'success' && (
+            <div className="mx-5 mt-3 px-3 py-2 rounded-lg text-[10px] font-semibold text-center"
+              style={{ background: 'rgba(34,197,94,0.1)', border: '0.5px solid rgba(34,197,94,0.3)', color: '#4ade80' }}>
+              ✓ Email sent successfully
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="p-5 flex flex-col gap-2.5">
+            <button
+              onClick={downloadPng}
+              disabled={exportState !== 'ready' && exportState !== 'success'}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-40"
+              style={{ background: 'linear-gradient(135deg,#6d28d9,#7c3aed)', color: 'white', border: '0.5px solid rgba(167,139,250,0.35)' }}>
+              {exportState === 'downloading' ? '⏳ Downloading…' : '⬇ Download PNG'}
+            </button>
+            <button
+              onClick={emailToMe}
+              disabled={exportState !== 'ready' && exportState !== 'success'}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-40"
+              style={{ background: isDark ? 'rgba(99,102,241,0.18)' : 'rgba(99,102,241,0.08)', color: isDark ? '#a5b4fc' : '#4f46e5', border: `0.5px solid ${isDark ? 'rgba(99,102,241,0.35)' : 'rgba(99,102,241,0.22)'}` }}>
+              {exportState === 'emailing' ? '⏳ Sending…' : '✉ Email to Me'}
+            </button>
+            <button
+              onClick={nativeShare}
+              disabled={exportState !== 'ready' && exportState !== 'success'}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-40"
+              style={{ background: isDark ? 'rgba(34,211,238,0.1)' : 'rgba(8,145,178,0.06)', color: isDark ? '#67e8f9' : '#0891b2', border: `0.5px solid ${isDark ? 'rgba(34,211,238,0.25)' : 'rgba(8,145,178,0.2)'}` }}>
+              {exportState === 'sharing' ? '⏳ Sharing…' : '↗ Share'}
+            </button>
+            <button
+              onClick={closeExport}
+              className="w-full py-2 text-sm transition-opacity hover:opacity-70"
+              style={{ color: isDark ? 'rgba(148,163,184,0.6)' : '#9ca3af' }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   )
 }

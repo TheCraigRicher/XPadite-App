@@ -197,6 +197,30 @@ body {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.28);
 }
 
+/* KPI card premium interactions */
+.xp-kpi-card {
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 240ms cubic-bezier(0.22, 1, 0.36, 1),
+              border-color 240ms ease;
+  will-change: transform;
+}
+.xp-kpi-card:hover {
+  transform: translateY(-2px) scale(1.012);
+}
+.xp-kpi-card:active {
+  transform: translateY(0) scale(0.995) !important;
+  transition-duration: 80ms !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .xp-kpi-card {
+    transition: border-color 200ms ease !important;
+  }
+  .xp-kpi-card:hover,
+  .xp-kpi-card:active {
+    transform: none !important;
+  }
+}
+
 /* Button press scale */
 .xp-light button:active,
 .xp-dark button:active {

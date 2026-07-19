@@ -69,8 +69,8 @@ export function GaugeMeter({ score }: { score: number }) {
   const glowOpacity = isDark ? 1 : 0.4
 
   return (
-    <div className="flex flex-col items-center w-full">
-      <svg viewBox="0 0 440 295" className="w-full max-w-[500px]">
+    <div className="flex flex-col items-center w-full h-full justify-center">
+      <svg viewBox="0 0 440 295" className="w-full">
         <defs>
           <filter id="gm-glow" x="-80%" y="-80%" width="260%" height="260%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/>

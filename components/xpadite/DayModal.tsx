@@ -953,15 +953,35 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   }
 
   function adjustTime(taskId: string, startTs: number, endTs: number, note: string) {
+    // Track whether a running session was closed so we can clear the active timer state
+    let closedRunningSession = false
     updateDay(dateKey, prev => ({
       ...prev,
       tasks: prev.tasks.map(t => {
         if (t.id !== taskId) return t
-        const sessionId = 'manual' + Date.now()
-        const session: TaskSession = { id: sessionId, startTs, endTs, note, tags: [] }
-        return { ...t, timerStart: startTs, timerEnd: endTs, sessions: [...(t.sessions ?? []), session] }
+        const sessions = t.sessions ?? []
+        // Prefer updating the running session; fall back to last completed; else create new
+        const runningIdx  = sessions.findIndex(s => s.endTs === null)
+        const lastDoneIdx = sessions.reduce((idx, s, i) => (s.endTs !== null ? i : idx), -1)
+        let updatedSessions: TaskSession[]
+        if (runningIdx >= 0) {
+          closedRunningSession = true
+          updatedSessions = sessions.map((s, i) =>
+            i === runningIdx ? { ...s, startTs, endTs, note } : s
+          )
+        } else if (lastDoneIdx >= 0) {
+          updatedSessions = sessions.map((s, i) =>
+            i === lastDoneIdx ? { ...s, startTs, endTs, note } : s
+          )
+        } else {
+          updatedSessions = [{ id: 'manual-' + Date.now(), startTs, endTs, note, tags: [] }]
+        }
+        return { ...t, timerStart: startTs, timerEnd: endTs, sessions: updatedSessions }
       }),
     }))
+    if (closedRunningSession && activeTaskTimer?.taskId === taskId) {
+      setActiveTaskTimer(null)
+    }
   }
 
   // ── Drag Reorder ──────────────────────────────────────────────────────────

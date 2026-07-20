@@ -416,6 +416,12 @@ export function MonthCard({
       if (clickRef.current.count === 1) {
         clickRef.current.timer = setTimeout(() => {
           clickRef.current = { key: null, count: 0, timer: null };
+          if (wasStreak) {
+            // Status already set — locked on the calendar.
+            // Direct the user to the Task Manager to change it.
+            setToast('Change this status from the Task Manager.');
+            return;
+          }
           const wasProductive = !!calDataRef.current[key]?.productive;
           updateDay(key, (prev) => ({
             ...prev,
@@ -430,8 +436,7 @@ export function MonthCard({
               600,
             );
           }
-          if (!wasStreak)
-            setToast("Day Complete ✅  Great work. See you tomorrow.");
+          setToast("Day Complete ✅  Great work. See you tomorrow.");
         }, 260);
       } else if (clickRef.current.count === 2) {
         if (clickRef.current.timer) clearTimeout(clickRef.current.timer);
@@ -603,7 +608,7 @@ export function MonthCard({
                   key={cell.key}
                   className="aspect-square relative cursor-pointer select-none group"
                   onClick={() => handleCellClick(cell.key, cell.day, streak)}
-                  title="Fire Day!"
+                  title="Change this status from the Task Manager."
                 >
                   {connL}
                   {connR}
@@ -651,7 +656,7 @@ export function MonthCard({
                   key={cell.key}
                   className="aspect-square relative cursor-pointer select-none group"
                   onClick={() => handleCellClick(cell.key, cell.day, streak)}
-                  title="Milestone!"
+                  title="Change this status from the Task Manager."
                 >
                   {connL}
                   {connR}
@@ -718,7 +723,7 @@ export function MonthCard({
                   key={cell.key}
                   className="aspect-square relative cursor-pointer select-none group"
                   onClick={() => handleCellClick(cell.key, cell.day, streak)}
-                  title="Goal Achieved!"
+                  title="Change this status from the Task Manager."
                 >
                   {connL}
                   {connR}
@@ -788,6 +793,7 @@ export function MonthCard({
                 key={cell.key}
                 className="aspect-square relative cursor-pointer select-none group"
                 onClick={() => handleCellClick(cell.key, cell.day, streak)}
+                title={productive ? 'Change this status from the Task Manager.' : undefined}
               >
                 {connL}
                 {connR}

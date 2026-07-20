@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useApp, EMPTY_DAY } from './AppContext'
-import type { Task, TaskSession } from './types'
+import type { Task, TaskSession, Activity } from './types'
 import { formatMs, formatHMS, formatTime, APP_YEAR } from './utils'
 import { ReminderModal } from './ReminderModal'
 
@@ -21,35 +21,44 @@ function pushRecentEmoji(emoji: string): string[] {
   return next
 }
 
-// ─── Expanded emoji dataset ───────────────────────────────────────────────────
+// ─── Expanded emoji dataset (12 categories) ──────────────────────────────────
 
 const EMOJI_CATS = [
-  { key: 'recent',     icon: '🕐', name: 'Recent',     emojis: [] as string[] },
-  { key: 'smileys',   icon: '😊', name: 'Smileys',
-    emojis: ['😊','😄','😂','🤣','😍','🥰','😎','🤩','😅','🥺','😱','🤔','😢','😡','🥳','😮','🤯','😤','🙄','😪','🤗','😇','😆','😁','😀','😏','😌','😋','😛','🤑','😞','😔','😟','😕','🤨','🧐','🥸','😒','😑','😶'],
+  { key: 'recent',   icon: '🕐', name: 'Recent',                  emojis: [] as string[] },
+  { key: 'smileys',  icon: '😊', name: 'Smileys & People',
+    emojis: ['😊','😄','😂','🤣','😍','🥰','😎','🤩','😅','🥺','😱','🤔','😢','😡','🥳','😮','🤯','😤','🙄','😪','🤗','😇','😆','😁','😀','🫠','🥹','😭','🤭','🫢','😌','😋','😛','🤑','😏','😒','😑','😶','🧐','🥸'],
   },
-  { key: 'hands',     icon: '👍', name: 'Hands',
-    emojis: ['👍','👎','👋','✌️','🤞','💪','🙏','🤝','✋','☝️','👆','👇','👌','🤙','💅','✍️','🫶','🤜','👊','✊','👏','🙌','👐','🤲','🤘','🖖','🫵','🤛','🫸','🫷','🖐️','🤏','🫂','🧑','👶','🧒','👦','👧','🧑‍💻','👩‍💼'],
+  { key: 'people',   icon: '👋', name: 'Gestures & People',
+    emojis: ['👍','👎','👋','✌️','🤞','💪','🙏','🤝','✋','☝️','👆','👇','👌','🤙','💅','✍️','🫶','🤜','👊','✊','👏','🙌','👐','🤲','🤘','🖖','🫵','🤛','🫸','🫷','🖐️','🤏','🫂','🙋','🤷','🤦','💁','🙅','🙆','🧏'],
   },
-  { key: 'animals',   icon: '🐶', name: 'Animals',
-    emojis: ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🙈','🙉','🙊','🦋','🐝','🐛','🦎','🐢','🐍','🦅','🦆','🦉','🦚','🦜','🐬','🐳','🐋','🦈','🐙','🦑','🦀','🦞','🐠','🐟','🐡'],
+  { key: 'animals',  icon: '🐶', name: 'Animals & Nature',
+    emojis: ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🙈','🙉','🙊','🦋','🐝','🐛','🦎','🐢','🐍','🦅','🦆','🦉','🦚','🦜','🐬','🐳','🦈','🐙','🦀','🐠','🌸','🌺','🌻','🌿','🌱'],
   },
-  { key: 'food',      icon: '🍎', name: 'Food',
+  { key: 'food',     icon: '🍎', name: 'Food & Drink',
     emojis: ['🍎','🍊','🍋','🍇','🍓','🍑','🍒','🍌','🍉','🥝','🍅','🥑','🥦','🥕','🌽','🍕','🍔','🌮','🌯','🥗','🍜','🍣','🍱','🍿','🍰','🎂','🍩','🍪','🧁','☕','🍵','🧃','🥤','🍺','🥂','🍾','🧊','🥞','🥓','🍳'],
   },
-  { key: 'activities',icon: '🎯', name: 'Activities',
-    emojis: ['🎯','🚀','💡','⚡','✅','🔥','🏆','💼','📝','📊','📈','💻','📱','📅','🔑','⚙️','🛠️','📌','🎉','💯','🎵','🎮','⚽','🏀','🎸','🎨','✏️','📚','🔬','🏋️','🧘','🎭','🎪','⛷️','🏊','🚴','🧗','🎲','🃏','🎰'],
+  { key: 'activities', icon: '⚽', name: 'Activities & Sports',
+    emojis: ['⚽','🏀','🏈','⚾','🎾','🏐','🏉','🎱','🏓','🏸','🥊','🤸','🏋️','🧘','⛷️','🏊','🚴','🧗','🤾','🤺','🏇','🎿','🏒','🎣','🤿','🎯','🎮','🕹️','🎲','🃏','♟️','🎳','🎪','🎭','🎬','🎤','🎧','🎵','🎶','💯'],
   },
-  { key: 'travel',    icon: '✈️', name: 'Travel',
-    emojis: ['✈️','🚀','🏠','🏡','🏢','🌍','🌎','🌏','🗺️','🏔️','⛰️','🌋','🏖️','🏝️','🌊','🌅','🌄','🌠','⛺','🏕️','🚗','🚕','🚌','🚢','⛵','🏍️','🚁','🛶','🗽','🗼','🏯','🎡','🎢','🎠','🚦','🚧','⛽','🛣️','🌃','🌆'],
+  { key: 'travel',   icon: '✈️', name: 'Travel & Places',
+    emojis: ['✈️','🚀','🛸','🚗','🚕','🚌','🚢','⛵','🏍️','🚁','🛶','🚂','🏠','🏡','🏢','🏯','🗼','🗽','🗺️','🌍','🌎','🌏','🏔️','⛰️','🌋','🏖️','🏝️','🌊','🌅','🌄','🌠','⛺','🏕️','🚦','🚧','🌃','🌆','🌇','🌉','🎠'],
   },
-  { key: 'objects',   icon: '💡', name: 'Objects',
-    emojis: ['💡','🔦','📱','💻','🖥️','⌨️','🖱️','📷','📸','📹','🎥','📺','📻','🎙️','🔋','🔌','💾','💿','📀','🗂️','📁','📂','📋','📌','📍','🔒','🔓','🔑','🗝️','🔨','⚙️','🔧','🛠️','🔩','💊','🩺','🔭','🧪','🧬','🧲'],
+  { key: 'tech',     icon: '💻', name: 'Technology & Digital',
+    emojis: ['💻','🖥️','📱','⌨️','🖱️','🖨️','💾','💿','📀','🔋','🔌','📡','🛰️','🔭','🧬','🧪','🧲','🤖','👾','📺','📻','📷','📸','📹','🎥','🎙️','🎚️','🎛️','📞','☎️','⌚','🖲️','💡','🔦','🔬','🧫','🦾','🧠','🪐','⚛️'],
   },
-  { key: 'symbols',   icon: '❤️', name: 'Symbols',
-    emojis: ['❤️','💛','💚','💙','💜','🖤','🤍','💔','✨','🌟','⭐','💫','🎆','🎇','🔮','🔔','💐','🎊','♾️','⚡','🔴','🟢','🔵','🟣','🟡','🟠','⚪','⚫','♻️','🆘','⚠️','🔱','☮️','✡️','☯️','🔯','✝️','☪️','🕉️','☮️'],
+  { key: 'business', icon: '💼', name: 'Business & Work',
+    emojis: ['💼','📊','📈','📉','🏆','🥇','🎯','💡','🔑','🗝️','📋','📌','📍','✅','📅','🗓️','💰','💵','💸','💳','🤝','🏦','📣','📢','🔔','⚡','💥','🎉','📝','✍️','🗂️','📁','📂','🏢','🏬','💹','📤','📥','✉️','📨'],
   },
-  { key: 'flags',     icon: '🏳️', name: 'Flags',
+  { key: 'hobbies',  icon: '🎨', name: 'Hobbies & Creativity',
+    emojis: ['🎨','🖌️','✏️','📝','🎵','🎶','🎸','🎹','🥁','🎻','🎺','🎷','🎤','🎭','🎬','♟️','🧩','🪄','🎪','🎡','🎢','🎗️','🎀','✂️','🪡','🧶','🧵','🪆','🖼️','📚','📖','📕','📗','📘','📙','🗞️','📓','📔','🔖','🪬'],
+  },
+  { key: 'objects',  icon: '🔧', name: 'Objects & Tools',
+    emojis: ['🔧','🛠️','🔨','⚙️','🔩','🪛','🪚','🔑','🗝️','🔒','🔓','💊','🩺','🩹','🌡️','🧯','🪜','🧰','🔮','🧿','💎','💍','👑','🏅','🎖️','🏷️','🪙','💰','💸','🪞','🛋️','🪑','🚪','🛏️','🪟','🧹','🧺','🧻','🪣','🧴'],
+  },
+  { key: 'symbols',  icon: '❤️', name: 'Symbols',
+    emojis: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','💔','❣️','💕','💞','💓','💗','💖','💘','💝','✨','🌟','⭐','💫','🎆','🎇','🔮','🔔','💐','🎊','♾️','⚡','🔴','🟢','🔵','🟣','🟡','🟠','⚪','⚫','♻️','⚠️','🔱'],
+  },
+  { key: 'flags',    icon: '🏳️', name: 'Flags',
     emojis: ['🏳️','🏴','🚩','🏁','🎌','🏳️‍🌈','🏳️‍⚧️','🇺🇸','🇬🇧','🇨🇦','🇦🇺','🇩🇪','🇫🇷','🇯🇵','🇰🇷','🇨🇳','🇮🇳','🇧🇷','🇲🇽','🇮🇹','🇪🇸','🇳🇱','🇷🇺','🇸🇪','🇳🇴','🇩🇰','🇫🇮','🇮🇪','🇵🇹','🇵🇱','🇺🇦','🇹🇷','🇦🇷','🇿🇦','🇳🇿','🇸🇬','🇦🇪','🇮🇱','🇸🇦','🇨🇭'],
   },
 ]
@@ -108,8 +117,8 @@ function ConfettiPop({ onDone }: { onDone: () => void }) {
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
-const PlayIcon = () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3"><polygon points="5 3 19 12 5 21 5 3" /></svg>
-const StopIcon = () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>
+const PlayIcon = () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+const StopIcon = () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>
 const DotsIcon = () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg>
 
 const GENERATED_TASKS = [
@@ -182,9 +191,9 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
 
 // ─── Task 3-dot Menu ──────────────────────────────────────────────────────────
 
-interface TaskMenuProps { onAdjustTime: () => void; onDuplicate: () => void; onDelete: () => void; onSetReminder: () => void; onClose: () => void }
+interface TaskMenuProps { onEdit: () => void; onAdjustTime: () => void; onDuplicate: () => void; onDelete: () => void; onSetReminder: () => void; onClose: () => void }
 
-function TaskMenu({ onAdjustTime, onDuplicate, onDelete, onSetReminder, onClose }: TaskMenuProps) {
+function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, onClose }: TaskMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     function onClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
@@ -193,6 +202,7 @@ function TaskMenu({ onAdjustTime, onDuplicate, onDelete, onSetReminder, onClose 
   }, [onClose])
 
   const items = [
+    { icon: '✏️', label: 'Edit Task',      action: onEdit        },
     { icon: '🔔', label: 'Set Reminder',   action: onSetReminder },
     { icon: '🕒', label: 'Adjust Time',    action: onAdjustTime  },
     { icon: '📄', label: 'Duplicate Task', action: onDuplicate   },
@@ -296,7 +306,9 @@ interface TaskRowProps {
   index: number
   isActive: boolean
   now: number
-  editMode: boolean
+  isEditing: boolean
+  onEditStart: () => void
+  onEditEnd: () => void
   dateKey: string
   expanded: boolean
   onExpandToggle: () => void
@@ -305,7 +317,9 @@ interface TaskRowProps {
   onDuplicate: () => void
   onStartTimer: () => void
   onStopTimer: () => void
-  onJournalChange: (text: string) => void
+  draftJournal: string | null
+  onNotesDraftChange: (text: string) => void
+  onNotesSave: () => void
   onTextChange: (text: string) => void
   onActChange: (actId: string) => void
   onAdjustTime: (sessionId: string | null, startTs: number, endTs: number, note: string) => void
@@ -317,10 +331,11 @@ interface TaskRowProps {
 }
 
 function TaskRow({
-  task, index, isActive, now, editMode, dateKey,
+  task, index, isActive, now, isEditing, onEditStart, onEditEnd, dateKey,
   expanded, onExpandToggle,
   onToggle, onDelete, onDuplicate, onStartTimer, onStopTimer,
-  onJournalChange, onTextChange, onActChange, onAdjustTime, onSetReminder,
+  draftJournal, onNotesDraftChange, onNotesSave,
+  onTextChange, onActChange, onAdjustTime, onSetReminder,
   onDragStart, onDragOver, onDrop, bellTriggerKey,
 }: TaskRowProps) {
   const { activities, reminders, isDark } = useApp()
@@ -331,6 +346,11 @@ function TaskRow({
   const [emojiOpen,      setEmojiOpen]      = useState(false)
   const [isDragOver,     setIsDragOver]     = useState(false)
   const [notesViewMode,  setNotesViewMode]  = useState<'preview' | 'edit'>('preview')
+  const [isCardHovered,  setIsCardHovered]  = useState(false)
+
+  // Session lock: once a task has a completed session it cannot be restarted
+  const hasCompletedSession = (task.sessions?.some(s => s.endTs !== null) ?? false) || !!task.timerEnd
+  const sessionLocked = hasCompletedSession && !isActive
 
   // Reset notes view when task collapses
   useEffect(() => { if (!expanded) setNotesViewMode('preview') }, [expanded])
@@ -347,54 +367,59 @@ function TaskRow({
     if (bellTriggerKey !== prevTriggerRef.current) { prevTriggerRef.current = bellTriggerKey; setIsBellAnimating(true) }
   }, [bellTriggerKey])
 
-  const notesRef = useRef<HTMLTextAreaElement>(null)
+  const notesRef        = useRef<HTMLTextAreaElement>(null)
+  const titleContainerRef = useRef<HTMLDivElement>(null)
+  const tooltipTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [showTooltip, setShowTooltip] = useState(false)
+  const [tooltipPos,  setTooltipPos]  = useState<{ top: number; left: number; width: number } | null>(null)
+  const [showPopover, setShowPopover] = useState(false)
+
+  useEffect(() => () => { if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current) }, [])
+
+  function handleTitleMouseEnter() {
+    if (isEditing) return
+    tooltipTimerRef.current = setTimeout(() => {
+      const rect = titleContainerRef.current?.getBoundingClientRect()
+      if (rect && task.text) { setTooltipPos({ top: rect.bottom + 6, left: rect.left, width: rect.width }); setShowTooltip(true) }
+    }, 300)
+  }
+  function handleTitleMouseLeave() {
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current)
+    setShowTooltip(false); setTooltipPos(null)
+  }
+  function handleTitleClick() {
+    if (isEditing || !task.text) return
+    setShowTooltip(false); setTooltipPos(null)
+    setShowPopover(true)
+  }
 
   // Checklist helpers
   function toggleChecklistLine(lineIndex: number) {
-    const lines = (task.journal || '').split('\n')
+    const current = draftJournal ?? task.journal
+    const lines = (current || '').split('\n')
     const line  = lines[lineIndex]
     if (line.startsWith('☐ '))      lines[lineIndex] = '☑ ' + line.slice(2)
     else if (line.startsWith('☑ ')) lines[lineIndex] = '☐ ' + line.slice(2)
-    onJournalChange(lines.join('\n'))
-  }
-
-  function insertChecklistItem() {
-    if (notesViewMode === 'preview') {
-      const next = task.journal + (task.journal ? '\n' : '') + '☐ '
-      onJournalChange(next)
-      setNotesViewMode('edit')
-      return
-    }
-    const ta   = notesRef.current
-    const item = '☐ '
-    if (ta) {
-      const start  = ta.selectionStart ?? task.journal.length
-      const value  = task.journal
-      const prefix = start > 0 && value[start - 1] !== '\n' ? '\n' : ''
-      const next   = value.slice(0, start) + prefix + item + value.slice(start)
-      onJournalChange(next)
-      requestAnimationFrame(() => { ta.setSelectionRange(start + prefix.length + item.length, start + prefix.length + item.length); ta.focus() })
-    } else {
-      onJournalChange(task.journal + (task.journal ? '\n' : '') + item)
-    }
+    onNotesDraftChange(lines.join('\n'))
   }
 
   function handleEmojiSelect(emoji: string) {
+    const current = draftJournal ?? task.journal
     if (notesViewMode === 'edit' && notesRef.current) {
       const ta     = notesRef.current
-      const start  = ta.selectionStart ?? task.journal.length
-      const next   = task.journal.slice(0, start) + emoji + task.journal.slice(start)
-      onJournalChange(next)
+      const start  = ta.selectionStart ?? current.length
+      const next   = current.slice(0, start) + emoji + current.slice(start)
+      onNotesDraftChange(next)
       requestAnimationFrame(() => { ta.setSelectionRange(start + emoji.length, start + emoji.length); ta.focus() })
     } else {
-      onJournalChange(task.journal + emoji)
+      onNotesDraftChange(current + emoji)
     }
   }
 
+  const notesDirty     = draftJournal !== null
   const totalMs        = getTaskTotalMs(task, isActive, now)
   const runningSession = getRunningSession(task)
   const latestSession  = task.sessions?.findLast?.(s => s.endTs !== null)
-  const activity       = activities.find(a => a.id === task.actId)
   const multiSession   = (task.sessions?.filter(s => s.endTs !== null).length ?? 0) > 1
 
   // ── Card visuals: purple accent for active (not green) ─────────────────────
@@ -404,19 +429,22 @@ function TaskRow({
     ? (isDark ? 'rgba(255,255,255,0.035)' : '#ffffff')
     : isActive
     ? (isDark ? 'rgba(124,58,237,0.07)' : 'rgba(124,58,237,0.04)')
+    : isCardHovered
+    ? (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(124,58,237,0.018)')
     : 'var(--xp-bg3)'
 
   // Build box-shadow array
   const shadows: string[] = []
-  if (isActive)  shadows.push('inset 3px 0 0 rgba(124,58,237,0.80)')          // purple left accent bar
-  if (isActive)  shadows.push('0 0 30px rgba(124,58,237,0.09), 0 2px 10px rgba(0,0,0,0.06)')  // ambient glow
-  if (expanded)  shadows.push(isDark
+  if (isActive)      shadows.push('inset 3px 0 0 rgba(124,58,237,0.80)')
+  if (isActive)      shadows.push('0 0 30px rgba(124,58,237,0.09), 0 2px 10px rgba(0,0,0,0.06)')
+  if (expanded)      shadows.push(isDark
     ? '0 4px 20px rgba(0,0,0,0.28),0 0 0 0.5px rgba(124,58,237,0.16)'
     : '0 2px 14px rgba(0,0,0,0.07),0 0 0 0.5px rgba(124,58,237,0.10)')
+  if (isCardHovered && !isActive) shadows.push('0 2px 14px rgba(0,0,0,0.08), 0 0 26px rgba(124,58,237,0.12)')
   const cardShadow = shadows.length ? shadows.join(',') : 'none'
 
-  const titleBg     = editMode ? (isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)') : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)')
-  const titleBorder = editMode ? 'var(--xp-acc)' : 'var(--xp-bdr)'
+  const titleBg     = isEditing ? (isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)') : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)')
+  const titleBorder = isEditing ? 'var(--xp-acc)' : 'var(--xp-bdr)'
 
   return (
     <>
@@ -424,6 +452,8 @@ function TaskRow({
       <div
         className={`rounded-xl overflow-visible relative transition-all duration-200 ${isDragOver ? 'ring-2 ring-violet-400 ring-offset-1' : ''}`}
         style={{ border: `0.5px solid ${cardBorder}`, background: cardBg, boxShadow: cardShadow }}
+        onMouseEnter={() => setIsCardHovered(true)}
+        onMouseLeave={() => setIsCardHovered(false)}
         onDragOver={e => { e.preventDefault(); setIsDragOver(true); onDragOver(e) }}
         onDragLeave={() => setIsDragOver(false)}
         onDrop={() => { setIsDragOver(false); onDrop() }}
@@ -447,71 +477,100 @@ function TaskRow({
             <span className={`flex-shrink-0 leading-none text-[13px] ${isBellAnimating ? 'xp-bell-ring' : ''}`} onAnimationEnd={() => setIsBellAnimating(false)} title="Reminder set">🔔</span>
           )}
 
-          {/* Title — always in subtle rounded container */}
-          <div className="flex-1 min-w-0 rounded-lg px-2.5 py-1 transition-all" style={{ background: titleBg, border: `0.5px solid ${titleBorder}` }}>
-            {editMode ? (
-              <input type="text" value={task.text} onChange={e => onTextChange(e.target.value)} className="w-full bg-transparent outline-none text-xs leading-snug" style={{ color: 'var(--xp-txt)' }} placeholder="Task title..." />
+          {/* Title — always in subtle rounded container, fixed width via flex-1 */}
+          <div
+            ref={titleContainerRef}
+            className="flex-1 min-w-0 rounded-lg px-2.5 py-1 transition-all relative"
+            style={{ background: titleBg, border: `0.5px solid ${titleBorder}` }}
+            onMouseEnter={handleTitleMouseEnter}
+            onMouseLeave={handleTitleMouseLeave}
+          >
+            {isEditing ? (
+              <input
+                type="text"
+                autoFocus
+                value={task.text}
+                onChange={e => onTextChange(e.target.value)}
+                onFocus={e => { const len = e.target.value.length; e.target.setSelectionRange(len, len) }}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onEditEnd() } if (e.key === 'Escape') onEditEnd() }}
+                onBlur={onEditEnd}
+                className="w-full bg-transparent outline-none text-xs leading-snug"
+                style={{ color: 'var(--xp-txt)' }}
+                placeholder="Task title..."
+              />
             ) : (
-              <span className="text-xs leading-snug block truncate" style={{ color: task.done ? 'var(--xp-txt3)' : 'var(--xp-txt)', textDecoration: task.done ? 'line-through' : 'none' }}>
+              <span
+                className="text-xs leading-snug block truncate cursor-default"
+                style={{ color: task.done ? 'var(--xp-txt3)' : 'var(--xp-txt)', textDecoration: task.done ? 'line-through' : 'none' }}
+                onClick={handleTitleClick}
+              >
                 {task.text || <span style={{ opacity: 0.4 }}>Untitled</span>}
               </span>
             )}
           </div>
 
-          {/* Category pill — fixed width, arrow always visible */}
-          <div className="relative flex-shrink-0" style={{ width: PILL_W }}>
-            <div className="flex items-center gap-1 px-2 py-0.5 rounded-md pointer-events-none w-full" style={{ background: activity ? `${activity.color}18` : 'var(--xp-bg2)', border: `0.5px solid ${activity ? activity.color + '55' : 'var(--xp-bdr2)'}` }}>
-              <span className="text-[10px] font-medium truncate flex-1 min-w-0" style={{ color: activity ? activity.color : 'var(--xp-txt3)' }}>
-                {activity?.name ?? 'Category'}
-              </span>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 9, height: 9, flexShrink: 0, color: activity ? activity.color : 'var(--xp-txt3)', opacity: 0.7 }}>
-                <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <select value={task.actId} onChange={e => onActChange(e.target.value)} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', fontSize: 0 }}>
-              <option value="">Category</option>
-              {activities.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-          </div>
+          {/* Category pill — custom dropdown */}
+          <ActivityDropdown
+            value={task.actId}
+            onChange={onActChange}
+            activities={activities}
+            isDark={isDark}
+          />
 
           {/* 3-dot */}
           <div className="relative flex-shrink-0">
             <button onClick={() => setMenuOpen(o => !o)} className="p-1.5 rounded-lg hover:bg-black/5 transition-colors" style={{ color: 'var(--xp-txt3)' }}><DotsIcon /></button>
-            {menuOpen && <TaskMenu onSetReminder={onSetReminder} onAdjustTime={() => setAdjustOpen(true)} onDuplicate={onDuplicate} onDelete={onDelete} onClose={() => setMenuOpen(false)} />}
+            {menuOpen && <TaskMenu onEdit={() => { onEditStart(); setMenuOpen(false) }} onSetReminder={onSetReminder} onAdjustTime={() => setAdjustOpen(true)} onDuplicate={onDuplicate} onDelete={onDelete} onClose={() => setMenuOpen(false)} />}
           </div>
         </div>
 
-        {/* ── DETAILS ROW ────────────────────────────────────────────────────── */}
-        <div className="flex items-center gap-2 px-3 pb-2">
+        {/* ── DETAILS ROW — fixed layout across all timer states ── */}
+        <div className="flex items-center gap-1.5 px-3 pb-2">
 
-          {/* Total: duration */}
-          {totalMs > 0 && (
-            <span className="text-[10px] flex-shrink-0 flex items-center gap-1">
-              <span style={{ color: 'var(--xp-txt3)', opacity: 0.6 }}>Total:</span>
-              <span className="font-mono font-semibold" style={{ color: isActive ? '#7c3aed' : 'var(--xp-txt2)' }}>
-                {isActive && runningSession ? formatHMS(now - runningSession.startTs) : formatMs(totalMs)}
-              </span>
-              {multiSession && !isActive && <span style={{ fontSize: 8, color: 'var(--xp-txt3)', opacity: 0.45 }}>all</span>}
+          {/* Total — always shown; placeholder when task not yet started */}
+          <span className="text-[10px] flex-shrink-0 flex items-center gap-1 mr-0.5">
+            <span style={{ color: 'var(--xp-txt3)', opacity: 0.6 }}>Total:</span>
+            <span className="font-mono font-semibold" style={{ color: isActive ? '#7c3aed' : totalMs > 0 ? 'var(--xp-txt2)' : 'var(--xp-txt3)', opacity: !isActive && totalMs === 0 ? 0.38 : 1 }}>
+              {isActive && runningSession ? formatHMS(now - runningSession.startTs) : totalMs > 0 ? formatMs(totalMs) : '00h 00m'}
             </span>
-          )}
+            {multiSession && !isActive && totalMs > 0 && <span style={{ fontSize: 8, color: 'var(--xp-txt3)', opacity: 0.45 }}>all</span>}
+          </span>
 
-          {/* Play / Stop */}
-          {!isActive ? (
-            <button onClick={onStartTimer} className="p-1 rounded-md hover:bg-violet-500/15 transition-colors flex-shrink-0" style={{ color: totalMs > 0 ? '#7c3aed' : 'var(--xp-txt3)' }} title="Start timer"><PlayIcon /></button>
-          ) : (
-            <button onClick={onStopTimer} className="p-1 rounded-md hover:bg-red-500/15 transition-colors flex-shrink-0" style={{ color: '#ef4444' }} title="Stop timer"><StopIcon /></button>
-          )}
+          {/* Play — green; disabled when active or session is locked */}
+          <button
+            onClick={onStartTimer}
+            disabled={isActive || sessionLocked}
+            className={`p-1 rounded-md flex-shrink-0 transition-colors ${!isActive && !sessionLocked ? 'hover:bg-green-500/15 cursor-pointer' : 'cursor-not-allowed'}`}
+            style={{ color: '#16a34a', opacity: isActive || sessionLocked ? 0.25 : 1 }}
+            title={isActive ? 'Timer is running' : sessionLocked ? 'Session completed. Duplicate this task to continue working.' : 'Start timer'}
+          >
+            <PlayIcon />
+          </button>
 
-          {/* Time range */}
-          {latestSession && !isActive && (
-            <span className="text-[9px] flex-shrink-0 tabular-nums" style={{ color: 'var(--xp-txt3)' }}>
-              {formatTime(latestSession.startTs)}–{formatTime(latestSession.endTs!)}
-            </span>
-          )}
+          {/* Stop — red; disabled when not active */}
+          <button
+            onClick={onStopTimer}
+            disabled={!isActive}
+            className={`p-1 rounded-md flex-shrink-0 transition-colors ${isActive ? 'hover:bg-red-500/15 cursor-pointer' : 'cursor-not-allowed'}`}
+            style={{ color: '#ef4444', opacity: !isActive ? 0.25 : 1 }}
+            title={isActive ? 'Stop timer' : sessionLocked ? 'Session completed. Duplicate this task to continue working.' : 'No active session'}
+          >
+            <StopIcon />
+          </button>
+
+          {/* Time range — always shown; placeholder when no session yet */}
+          <span className="text-[9px] flex-shrink-0 tabular-nums" style={{ color: 'var(--xp-txt3)', opacity: (latestSession || (isActive && runningSession)) ? 1 : 0.32 }}>
+            {isActive && runningSession
+              ? `${formatTime(runningSession.startTs)} → …`
+              : latestSession
+              ? `${formatTime(latestSession.startTs)} – ${latestSession.endTs ? formatTime(latestSession.endTs) : '…'}`
+              : '--:-- – --:--'
+            }
+          </span>
 
           <div className="flex-1" />
 
-          {/* Green active indicator — pulsing dot */}
+          {/* Active indicator — pulsing green dot */}
           {isActive && (
             <span className="flex items-center gap-1.5 flex-shrink-0">
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#16a34a', display: 'inline-block', flexShrink: 0, animation: 'xp-active-pulse 1.4s ease-in-out infinite' }} />
@@ -524,9 +583,6 @@ function TaskRow({
             <span style={{ display: 'inline-block', fontSize: 10, lineHeight: 1, transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 220ms cubic-bezier(0.4,0,0.2,1)' }}>▶</span>
           </button>
         </div>
-
-        {/* Running gradient bar (green — "live" signal) */}
-        {isActive && <div style={{ height: 2, background: 'linear-gradient(90deg,#7c3aed,#a78bfa)', animation: 'xp-blink 2s ease-in-out infinite' }} />}
 
         {/* ── EXPANDABLE NOTES ───────────────────────────────────────────────── */}
         <div aria-hidden={!expanded} style={{ maxHeight: expanded ? 440 : 0, overflow: 'hidden', opacity: expanded ? 1 : 0, transition: expanded ? 'max-height 250ms ease,opacity 200ms ease' : 'max-height 220ms ease,opacity 150ms ease' }}>
@@ -549,11 +605,11 @@ function TaskRow({
                 <div
                   className="text-xs rounded-lg px-2.5 py-2"
                   style={{ minHeight: 68, border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg2)', color: 'var(--xp-txt)', cursor: 'text' }}
-                  onClick={() => { if (!task.journal) setNotesViewMode('edit') }}
+                  onClick={() => { if (!(draftJournal ?? task.journal)) setNotesViewMode('edit') }}
                 >
-                  {task.journal ? (
+                  {(draftJournal ?? task.journal) ? (
                     <div>
-                      {(task.journal).split('\n').map((line, i) => {
+                      {(draftJournal ?? task.journal).split('\n').map((line, i) => {
                         const isCheck = line.startsWith('☐ ') || line.startsWith('☑ ')
                         if (isCheck) {
                           const checked = line.startsWith('☑ ')
@@ -578,7 +634,7 @@ function TaskRow({
                     </div>
                   ) : (
                     <span style={{ color: 'var(--xp-txt3)', opacity: 0.4, fontSize: 11 }}>
-                      Click ✏️ to add notes, or ☐ to add a checklist item...
+                      Click ✏️ to add notes, or type ☐ for a checklist item...
                     </span>
                   )}
                 </div>
@@ -587,13 +643,13 @@ function TaskRow({
                 <textarea
                   ref={notesRef}
                   autoFocus
-                  value={task.journal}
-                  onChange={e => onJournalChange(e.target.value)}
-                  placeholder="Add notes, or use ☐ to insert checklist items..."
+                  value={draftJournal ?? task.journal}
+                  onChange={e => onNotesDraftChange(e.target.value)}
+                  placeholder="Add notes, or type ☐ to start a checklist item..."
                   rows={3}
                   tabIndex={expanded ? 0 : -1}
                   className="w-full text-xs px-2.5 py-2 rounded-lg outline-none resize-none leading-relaxed"
-                  style={{ border: '1px solid var(--xp-acc)', background: 'var(--xp-bg2)', color: 'var(--xp-txt)' }}
+                  style={{ border: `1px solid ${notesDirty ? 'rgba(124,58,237,0.55)' : 'var(--xp-acc)'}`, background: 'var(--xp-bg2)', color: 'var(--xp-txt)' }}
                 />
               )}
 
@@ -609,14 +665,27 @@ function TaskRow({
                 </button>
 
                 <div className="flex items-center gap-1.5">
-                  {/* Checklist insert */}
+                  {/* Notes save — active when unsaved changes exist */}
                   <button
-                    onClick={insertChecklistItem}
+                    onClick={onNotesSave}
+                    disabled={!notesDirty}
                     tabIndex={expanded ? 0 : -1}
-                    className="flex items-center justify-center transition-all hover:scale-105"
-                    style={{ width: 22, height: 22, border: '1.5px solid var(--xp-bdr2)', background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.04)', borderRadius: 5, fontSize: 13, color: 'var(--xp-txt3)' }}
-                    title="Insert checklist item"
-                  >☐</button>
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 3,
+                      padding: '2px 8px', height: 22, borderRadius: 5,
+                      border: `1.5px solid ${notesDirty ? 'rgba(124,58,237,0.50)' : 'var(--xp-bdr2)'}`,
+                      background: notesDirty ? 'rgba(124,58,237,0.09)' : isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.04)',
+                      fontSize: 10, fontWeight: 600,
+                      cursor: notesDirty ? 'pointer' : 'default',
+                      color: notesDirty ? '#7c3aed' : 'var(--xp-txt3)',
+                      opacity: notesDirty ? 1 : 0.4,
+                      transition: 'all 180ms ease',
+                      flexShrink: 0, whiteSpace: 'nowrap',
+                    }}
+                    title={notesDirty ? 'Save notes' : 'No unsaved changes'}
+                  >
+                    ✓ Save
+                  </button>
 
                   {/* Emoji picker */}
                   <div className="relative flex-shrink-0">
@@ -632,6 +701,23 @@ function TaskRow({
 
       {adjustOpen && (
         <AdjustTimeModal task={task} dateKey={dateKey} onClose={() => setAdjustOpen(false)} onSave={(sid, s, e, n) => { onAdjustTime(sid, s, e, n); setAdjustOpen(false) }} />
+      )}
+
+      {/* Desktop hover tooltip — fixed position, 300ms delay */}
+      {showTooltip && tooltipPos && task.text && (
+        <div style={{ position: 'fixed', top: tooltipPos.top, left: tooltipPos.left, maxWidth: Math.max(tooltipPos.width, 240), zIndex: 9999, background: isDark ? '#1e1830' : '#ffffff', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.28)' : 'rgba(0,0,0,0.10)'}`, borderRadius: 10, padding: '6px 10px', boxShadow: '0 8px 28px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08)', fontSize: 11, fontWeight: 500, color: isDark ? 'rgba(255,255,255,0.88)' : '#111827', lineHeight: 1.55, pointerEvents: 'none', wordBreak: 'break-word' }}>
+          {task.text}
+        </div>
+      )}
+
+      {/* Mobile/tap popover — centered, with backdrop dismiss */}
+      {showPopover && task.text && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, background: 'rgba(0,0,0,0.25)' }} onClick={() => setShowPopover(false)}>
+          <div style={{ background: isDark ? '#1e1830' : '#ffffff', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.10)'}`, borderRadius: 14, padding: '14px 16px', maxWidth: 320, width: '100%', boxShadow: '0 16px 48px rgba(0,0,0,0.22), 0 4px 16px rgba(0,0,0,0.10)' }} onClick={e => e.stopPropagation()}>
+            <p style={{ fontSize: 13, color: isDark ? 'rgba(255,255,255,0.88)' : '#111827', lineHeight: 1.55, wordBreak: 'break-word', fontWeight: 500, margin: 0 }}>{task.text}</p>
+            <button onClick={() => setShowPopover(false)} style={{ marginTop: 10, fontSize: 11, color: 'var(--xp-txt3)', padding: '3px 12px', borderRadius: 6, border: '0.5px solid var(--xp-bdr2)', background: 'var(--xp-bg2)', cursor: 'pointer' }}>Dismiss</button>
+          </div>
+        </div>
       )}
     </>
   )
@@ -649,40 +735,222 @@ const STATUS_OPTIONS: { value: StatusValue; icon: string; label: string }[] = [
 ]
 
 function TodayStatusDropdown({ value, onChange, isDark }: { value: StatusValue | null; onChange: (v: StatusValue | null) => void; isDark: boolean }) {
-  const [open,    setOpen]    = useState(false)
-  const [hovered, setHovered] = useState<StatusValue | null>(null)
-  const containerRef          = useRef<HTMLDivElement>(null)
+  const [open,       setOpen]       = useState(false)
+  const [focusedIdx, setFocusedIdx] = useState(-1)
+  const containerRef                = useRef<HTMLDivElement>(null)
+
+  // Option order: index 0 = None, indices 1–4 = STATUS_OPTIONS
+  const allOptValues: (StatusValue | null)[] = [null, ...STATUS_OPTIONS.map(o => o.value)]
 
   useEffect(() => {
     if (!open) return
-    function onOutside(e: MouseEvent) { if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false) }
+    function onOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) { setOpen(false); setFocusedIdx(-1) }
+    }
     setTimeout(() => document.addEventListener('mousedown', onOutside), 10)
     return () => document.removeEventListener('mousedown', onOutside)
   }, [open])
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(true); setFocusedIdx(0) }
+      return
+    }
+    if (e.key === 'Escape') { e.preventDefault(); setOpen(false); setFocusedIdx(-1) }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setFocusedIdx(i => Math.min(i < 0 ? 0 : i + 1, allOptValues.length - 1)) }
+    else if (e.key === 'ArrowUp')   { e.preventDefault(); setFocusedIdx(i => Math.max(i - 1, 0)) }
+    else if (e.key === 'Enter' && focusedIdx >= 0) {
+      e.preventDefault()
+      const opt = allOptValues[focusedIdx]
+      onChange(opt === null ? null : value === opt ? null : opt)
+      setOpen(false); setFocusedIdx(-1)
+    }
+  }
 
   const selected = STATUS_OPTIONS.find(o => o.value === value)
 
   return (
     <>
       <style>{`@keyframes xp-status-drop-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}`}</style>
-      <div ref={containerRef} style={{ position: 'relative' }}>
-        <button onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 20, fontSize: 11, fontWeight: 500, border: `1px solid ${value ? 'rgba(124,58,237,0.35)' : 'var(--xp-bdr2)'}`, background: value ? 'rgba(124,58,237,0.07)' : isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', color: value ? '#7c3aed' : 'var(--xp-txt3)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-          {selected ? `${selected.icon} ${selected.label}` : 'Not Selected'}
+      <div ref={containerRef} style={{ position: 'relative' }} onKeyDown={handleKeyDown}>
+        <button
+          onClick={() => { setOpen(o => !o); setFocusedIdx(-1) }}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 20, fontSize: 11, fontWeight: 500, border: `1px solid ${value ? 'rgba(124,58,237,0.35)' : 'var(--xp-bdr2)'}`, background: value ? 'rgba(124,58,237,0.07)' : isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', color: value ? '#7c3aed' : 'var(--xp-txt3)', cursor: 'pointer', whiteSpace: 'nowrap', outline: 'none' }}
+        >
+          {value === null ? '🤷‍♂️ None' : `${selected!.icon} ${selected!.label}`}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 12, height: 12, flexShrink: 0, transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 200ms ease' }}>
             <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
         {open && (
-          <div style={{ position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 30, minWidth: 210, borderRadius: 14, overflow: 'hidden', background: isDark ? '#1a1530' : '#ffffff', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(124,58,237,0.18)'}`, boxShadow: isDark ? '0 16px 48px rgba(0,0,0,0.40)' : '0 12px 40px rgba(0,0,0,0.14)', animation: 'xp-status-drop-in 160ms cubic-bezier(0.16,1,0.3,1) forwards' }}>
-            {STATUS_OPTIONS.map(opt => {
+          <div
+            role="listbox"
+            aria-label="Productivity status"
+            style={{ position: 'absolute', left: 0, top: 'calc(100% + 6px)', zIndex: 30, minWidth: 220, borderRadius: 14, overflow: 'hidden', background: isDark ? '#1a1530' : '#ffffff', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(124,58,237,0.18)'}`, boxShadow: isDark ? '0 16px 48px rgba(0,0,0,0.40)' : '0 12px 40px rgba(0,0,0,0.14)', animation: 'xp-status-drop-in 160ms cubic-bezier(0.16,1,0.3,1) forwards' }}
+          >
+            {/* None — clears productivity status */}
+            <button
+              role="option"
+              aria-selected={value === null}
+              onMouseEnter={() => setFocusedIdx(0)}
+              onMouseLeave={() => setFocusedIdx(-1)}
+              onClick={() => { onChange(null); setOpen(false); setFocusedIdx(-1) }}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', textAlign: 'left', cursor: 'pointer', border: 'none', outline: 'none', borderLeft: `2.5px solid ${value === null ? '#7c3aed' : 'transparent'}`, background: value === null ? 'rgba(124,58,237,0.09)' : focusedIdx === 0 ? 'rgba(124,58,237,0.05)' : 'transparent' }}
+            >
+              <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>🤷‍♂️</span>
+              <span style={{ fontSize: 12, fontWeight: value === null ? 600 : 500, color: value === null ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.85)' : '#111827', flex: 1 }}>None</span>
+              {value === null && <svg viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5" style={{ width: 13, height: 13, flexShrink: 0 }}><polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+            </button>
+            <div style={{ height: '0.5px', background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', margin: '0 14px' }} />
+            {STATUS_OPTIONS.map((opt, i) => {
               const isAct = value === opt.value
-              const isHov = hovered === opt.value
+              const isFoc = focusedIdx === i + 1
               return (
-                <button key={opt.value} onMouseEnter={() => setHovered(opt.value)} onMouseLeave={() => setHovered(null)} onClick={() => { onChange(isAct ? null : opt.value); setOpen(false); setHovered(null) }}
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', textAlign: 'left', cursor: 'pointer', border: 'none', borderLeft: `2.5px solid ${isAct ? '#7c3aed' : 'transparent'}`, background: isAct ? 'rgba(124,58,237,0.09)' : isHov ? 'rgba(124,58,237,0.05)' : 'transparent' }}>
+                <button
+                  key={opt.value}
+                  role="option"
+                  aria-selected={isAct}
+                  onMouseEnter={() => setFocusedIdx(i + 1)}
+                  onMouseLeave={() => setFocusedIdx(-1)}
+                  onClick={() => { onChange(isAct ? null : opt.value); setOpen(false); setFocusedIdx(-1) }}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', textAlign: 'left', cursor: 'pointer', border: 'none', outline: 'none', borderLeft: `2.5px solid ${isAct ? '#7c3aed' : 'transparent'}`, background: isAct ? 'rgba(124,58,237,0.09)' : isFoc ? 'rgba(124,58,237,0.05)' : 'transparent' }}
+                >
                   <span style={{ fontSize: 17, lineHeight: 1, flexShrink: 0 }}>{opt.icon}</span>
                   <span style={{ fontSize: 12, fontWeight: isAct ? 600 : 500, color: isAct ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.85)' : '#111827', flex: 1 }}>{opt.label}</span>
                   {isAct && <svg viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5" style={{ width: 13, height: 13, flexShrink: 0 }}><polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
+// ─── Activity / Category Dropdown ────────────────────────────────────────────
+
+interface ActivityDropdownProps {
+  value: string
+  onChange: (actId: string) => void
+  activities: Activity[]
+  isDark: boolean
+}
+
+function ActivityDropdown({ value, onChange, activities, isDark }: ActivityDropdownProps) {
+  const [open,       setOpen]       = useState(false)
+  const [focusedIdx, setFocusedIdx] = useState(-1)
+  const [openUp,     setOpenUp]     = useState(false)
+  const containerRef                = useRef<HTMLDivElement>(null)
+
+  const selected  = activities.find(a => a.id === value)
+  // Option order: index 0 = "Category" (no selection), indices 1+ = activities
+  const allOpts   = [{ id: '', name: 'Category', color: '' } as { id: string; name: string; color: string }, ...activities]
+
+  useEffect(() => {
+    if (!open) return
+    function onOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) { setOpen(false); setFocusedIdx(-1) }
+    }
+    setTimeout(() => document.addEventListener('mousedown', onOutside), 10)
+    return () => document.removeEventListener('mousedown', onOutside)
+  }, [open])
+
+  function handleOpen() {
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect()
+      setOpenUp(window.innerHeight - rect.bottom < 240)
+    }
+    setOpen(o => !o)
+    setFocusedIdx(-1)
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (!open) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpen(); setFocusedIdx(0) }
+      return
+    }
+    if (e.key === 'Escape')     { e.preventDefault(); setOpen(false); setFocusedIdx(-1) }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setFocusedIdx(i => Math.min(i < 0 ? 0 : i + 1, allOpts.length - 1)) }
+    else if (e.key === 'ArrowUp')   { e.preventDefault(); setFocusedIdx(i => Math.max(i - 1, 0)) }
+    else if (e.key === 'Enter' && focusedIdx >= 0) {
+      e.preventDefault()
+      onChange(allOpts[focusedIdx]?.id ?? '')
+      setOpen(false); setFocusedIdx(-1)
+    }
+  }
+
+  const dropdownStyle: React.CSSProperties = {
+    position: 'absolute',
+    right: 0,
+    zIndex: 50,
+    minWidth: 180,
+    borderRadius: 12,
+    overflow: 'hidden',
+    background: isDark ? '#1a1530' : '#ffffff',
+    border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(124,58,237,0.18)'}`,
+    boxShadow: isDark ? '0 12px 36px rgba(0,0,0,0.40)' : '0 8px 28px rgba(0,0,0,0.12)',
+    animation: `${openUp ? 'xp-act-drop-up' : 'xp-act-drop-in'} 180ms cubic-bezier(0.16,1,0.3,1) forwards`,
+  }
+  if (openUp) { dropdownStyle.bottom = 'calc(100% + 4px)' } else { dropdownStyle.top = 'calc(100% + 4px)' }
+
+  return (
+    <>
+      <style>{`@keyframes xp-act-drop-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}@keyframes xp-act-drop-up{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}`}</style>
+      <div ref={containerRef} style={{ position: 'relative', width: PILL_W, flexShrink: 0 }} onKeyDown={handleKeyDown}>
+        {/* Trigger pill */}
+        <button
+          onClick={handleOpen}
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 4, padding: '3px 6px 3px 7px', borderRadius: 7, cursor: 'pointer', outline: 'none', border: `0.5px solid ${selected ? selected.color + '55' : 'var(--xp-bdr2)'}`, background: selected ? `${selected.color}18` : 'var(--xp-bg2)' }}
+        >
+          {selected && <span style={{ width: 6, height: 6, borderRadius: '50%', background: selected.color, flexShrink: 0, display: 'inline-block' }} />}
+          <span style={{ fontSize: 10, fontWeight: 500, color: selected ? selected.color : 'var(--xp-txt3)', flex: 1, minWidth: 0, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {selected?.name ?? 'Category'}
+          </span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 9, height: 9, flexShrink: 0, color: selected ? selected.color : 'var(--xp-txt3)', opacity: 0.7, transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 200ms ease' }}>
+            <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+
+        {/* Dropdown list */}
+        {open && (
+          <div role="listbox" aria-label="Task category" style={dropdownStyle}>
+            {/* No-category option */}
+            <button
+              role="option"
+              aria-selected={!value}
+              onMouseEnter={() => setFocusedIdx(0)}
+              onMouseLeave={() => setFocusedIdx(-1)}
+              onClick={() => { onChange(''); setOpen(false); setFocusedIdx(-1) }}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', textAlign: 'left', cursor: 'pointer', border: 'none', outline: 'none', borderLeft: `2.5px solid ${!value ? '#7c3aed' : 'transparent'}`, background: !value ? 'rgba(124,58,237,0.09)' : focusedIdx === 0 ? 'rgba(124,58,237,0.05)' : 'transparent' }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.14)', flexShrink: 0 }} />
+              <span style={{ fontSize: 11, fontWeight: !value ? 600 : 400, color: !value ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.50)' : '#9ca3af', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Category</span>
+              {!value && <svg viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5" style={{ width: 12, height: 12, flexShrink: 0 }}><polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+            </button>
+
+            {activities.length > 0 && <div style={{ height: '0.5px', background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', margin: '0 12px' }} />}
+
+            {activities.map((act, i) => {
+              const isSelected = value === act.id
+              const isFocused  = focusedIdx === i + 1
+              return (
+                <button
+                  key={act.id}
+                  role="option"
+                  aria-selected={isSelected}
+                  onMouseEnter={() => setFocusedIdx(i + 1)}
+                  onMouseLeave={() => setFocusedIdx(-1)}
+                  onClick={() => { onChange(act.id); setOpen(false); setFocusedIdx(-1) }}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', textAlign: 'left', cursor: 'pointer', border: 'none', outline: 'none', borderLeft: `2.5px solid ${isSelected ? '#7c3aed' : 'transparent'}`, background: isSelected ? 'rgba(124,58,237,0.09)' : isFocused ? 'rgba(124,58,237,0.05)' : 'transparent' }}
+                >
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: act.color, flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, fontWeight: isSelected ? 600 : 500, color: isSelected ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.85)' : '#111827', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{act.name}</span>
+                  {isSelected && <svg viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5" style={{ width: 12, height: 12, flexShrink: 0 }}><polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                 </button>
               )
             })}
@@ -729,7 +997,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
 
   const [addingTask,       setAddingTask]       = useState(false)
   const [newTaskText,      setNewTaskText]       = useState('')
-  const [editMode,         setEditMode]          = useState(false)
+  const [editingTaskId,    setEditingTaskId]     = useState<string | null>(null)
   const [notesOpen,        setNotesOpen]         = useState(false)
   const [now,              setNow]               = useState(Date.now())
   const [dragItemId,       setDragItemId]        = useState<string | null>(null)
@@ -737,7 +1005,11 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   const [reminderTaskId,   setReminderTaskId]    = useState<string | null>(null)
   const [reminderSavedKey, setReminderSavedKey]  = useState<Record<string, number>>({})
   const [expandedTaskId,   setExpandedTaskId]    = useState<string | null>(null)
+  const [dirtyNotesMap,    setDirtyNotesMap]     = useState<Record<string, string>>({})
+  const [showCloseDialog,  setShowCloseDialog]   = useState(false)
   const onConfettiDone = useCallback(() => setShowConfetti(false), [])
+
+  const hasDirtyChanges = Object.keys(dirtyNotesMap).length > 0
 
   const dateLabel = useMemo(() => {
     const d = new Date(APP_YEAR, month, day)
@@ -754,10 +1026,15 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   }, [isActiveHere, isSessionHere])
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        if (hasDirtyChanges) { setShowCloseDialog(true) } else { onClose() }
+      }
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasDirtyChanges, onClose])
 
   // Total Focus Time Today — shared source of truth with Dashboard / StatsRow
   const totalFocusMsToday = useMemo(() => {
@@ -807,6 +1084,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
     if (activeTaskTimer?.taskId === id) setActiveTaskTimer(null)
     updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.filter(t => t.id !== id) }))
     if (expandedTaskId === id) setExpandedTaskId(null)
+    setDirtyNotesMap(prev => { const { [id]: _, ...rest } = prev; return rest })
   }
 
   function duplicateTask(id: string) {
@@ -827,6 +1105,40 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   }
   function updateTaskJournal(id: string, journal: string) {
     updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === id ? { ...t, journal } : t) }))
+  }
+
+  // ── Notes dirty-state helpers ─────────────────────────────────────────────
+
+  function handleNotesDraftChange(taskId: string, text: string) {
+    const savedJournal = (calData[dateKey]?.tasks ?? []).find(t => t.id === taskId)?.journal ?? ''
+    setDirtyNotesMap(prev => {
+      if (text === savedJournal) { const { [taskId]: _, ...rest } = prev; return rest }
+      return { ...prev, [taskId]: text }
+    })
+  }
+
+  function saveTaskNotes(taskId: string) {
+    const draft = dirtyNotesMap[taskId]
+    if (draft === undefined) return
+    updateTaskJournal(taskId, draft)
+    setDirtyNotesMap(prev => { const { [taskId]: _, ...rest } = prev; return rest })
+    setToast('Notes saved ✓')
+  }
+
+  function flushDirtyNotes() {
+    for (const [taskId, draft] of Object.entries(dirtyNotesMap)) {
+      updateTaskJournal(taskId, draft)
+    }
+    setDirtyNotesMap({})
+  }
+
+  function attemptClose() {
+    if (hasDirtyChanges) { setShowCloseDialog(true) } else { onClose() }
+  }
+
+  function handleMainSave() {
+    flushDirtyNotes()
+    onClose()
   }
 
   // ── Timers ────────────────────────────────────────────────────────────────
@@ -890,7 +1202,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   const doneCount = dayData.tasks.filter(t => t.done).length
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={attemptClose}>
       <div
         className="w-full max-w-[520px] rounded-2xl flex flex-col overflow-hidden"
         style={{
@@ -904,12 +1216,12 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
       >
         {/* Modal header */}
         <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: '0.5px solid var(--xp-bdr)', background: 'var(--xp-bg3)' }}>
-          <button onClick={onClose} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)', color: 'var(--xp-acc)' }}>← Back</button>
+          <button onClick={attemptClose} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)', color: 'var(--xp-acc)' }}>← Back</button>
           <div className="text-center px-3">
             <p className="text-sm font-semibold" style={{ color: 'var(--xp-txt)' }}>{dateLabel}</p>
             <p className="text-[9px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>Single click = toggle productive · Double click = notes</p>
           </div>
-          <button onClick={onClose} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444' }}>× Close</button>
+          <button onClick={attemptClose} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444' }}>× Close</button>
         </div>
 
         {/* Today's Status row */}
@@ -939,7 +1251,6 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
                 </p>
               </div>
               <div className="flex items-center gap-1.5 flex-shrink-0">
-                <button onClick={() => setEditMode(o => !o)} className="text-[10px] px-2.5 py-1 rounded-lg font-medium transition-all" style={{ background: editMode ? '#7c3aed11' : 'var(--xp-bg2)', border: `1px solid ${editMode ? '#7c3aed' : 'var(--xp-bdr2)'}`, color: editMode ? '#7c3aed' : 'var(--xp-txt3)' }}>✏️ {editMode ? 'Done' : 'Edit'}</button>
                 <button onClick={generateTasks} className="text-[10px] px-2.5 py-1 rounded-lg border transition-colors hover:border-violet-400 hover:text-violet-500" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt3)' }}>✨ Generate 3</button>
                 <button onClick={() => setAddingTask(true)} className="text-[10px] px-2.5 py-1 rounded-lg text-white font-medium transition-opacity hover:opacity-85 flex-shrink-0" style={{ background: '#16a34a' }}>+ Add Task</button>
               </div>
@@ -964,7 +1275,9 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
                   index={index}
                   isActive={activeTaskTimer?.taskId === task.id && activeTaskTimer.dateKey === dateKey}
                   now={now}
-                  editMode={editMode}
+                  isEditing={editingTaskId === task.id}
+                  onEditStart={() => setEditingTaskId(task.id)}
+                  onEditEnd={() => setEditingTaskId(null)}
                   dateKey={dateKey}
                   expanded={expandedTaskId === task.id}
                   onExpandToggle={() => setExpandedTaskId(prev => prev === task.id ? null : task.id)}
@@ -973,7 +1286,9 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
                   onDuplicate={() => duplicateTask(task.id)}
                   onStartTimer={() => startTimer(task.id, index)}
                   onStopTimer={() => stopTimer(task.id)}
-                  onJournalChange={text => updateTaskJournal(task.id, text)}
+                  draftJournal={dirtyNotesMap[task.id] ?? null}
+                  onNotesDraftChange={text => handleNotesDraftChange(task.id, text)}
+                  onNotesSave={() => saveTaskNotes(task.id)}
                   onTextChange={text => updateTaskText(task.id, text)}
                   onActChange={actId => updateTaskAct(task.id, actId)}
                   onAdjustTime={(sid, s, e, n) => adjustTime(task.id, sid, s, e, n)}
@@ -1004,7 +1319,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
           {/* Journal notes */}
           <div className="px-4 py-3">
             <button onClick={() => setNotesOpen(o => !o)} className="flex items-center gap-2 text-xs font-medium w-full text-left transition-colors hover:text-violet-500 mb-1" style={{ color: 'var(--xp-txt2)' }}>
-              <span>{notesOpen ? '▾' : '▸'} Journal notes</span>
+              <span style={{ display: 'inline-block', fontSize: 10, lineHeight: 1, flexShrink: 0, transform: notesOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 220ms cubic-bezier(0.4,0,0.2,1)' }}>▶</span>
+              <span>Journal notes</span>
             </button>
             {notesOpen && (
               <textarea value={dayData.notes ?? ''} onChange={e => updateDay(dateKey, prev => ({ ...prev, notes: e.target.value }))} placeholder="What made today great? Reflections, insights, gratitude..." rows={4} className="w-full text-xs px-3 py-2.5 rounded-xl outline-none resize-none leading-relaxed" style={{ border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }} />
@@ -1014,10 +1330,40 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 px-4 py-3 flex-shrink-0" style={{ borderTop: '0.5px solid var(--xp-bdr)' }}>
-          <button onClick={onClose} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
-          <button onClick={onClose} className="text-xs px-5 py-1.5 rounded-full text-white font-medium transition-opacity hover:opacity-80" style={{ background: '#7c3aed' }}>✓ Save</button>
+          <button onClick={attemptClose} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
+          <button onClick={handleMainSave} className="text-xs px-5 py-1.5 rounded-full text-white font-medium transition-opacity hover:opacity-80" style={{ background: '#7c3aed' }}>✓ Save</button>
         </div>
       </div>
+
+      {/* Unsaved-changes confirmation dialog */}
+      {showCloseDialog && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9995, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, background: 'rgba(0,0,0,0.55)' }} onClick={() => setShowCloseDialog(false)}>
+          <div style={{ background: isDark ? '#1a1530' : '#ffffff', borderRadius: 18, padding: '22px 22px 18px', maxWidth: 320, width: '100%', boxShadow: '0 24px 60px rgba(0,0,0,0.35), 0 4px 16px rgba(0,0,0,0.12)', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.25)' : 'rgba(0,0,0,0.08)'}` }} onClick={e => e.stopPropagation()}>
+            <p style={{ fontWeight: 700, fontSize: 14, color: isDark ? '#ffffff' : '#111827', margin: '0 0 6px' }}>Unsaved changes</p>
+            <p style={{ fontSize: 12, color: 'var(--xp-txt3)', margin: '0 0 20px', lineHeight: 1.55 }}>You have changes that haven&apos;t been saved. What would you like to do?</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button
+                onClick={() => { flushDirtyNotes(); setShowCloseDialog(false); onClose() }}
+                style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: '#7c3aed', color: '#ffffff', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+              >
+                Save Changes
+              </button>
+              <button
+                onClick={() => { setDirtyNotesMap({}); setShowCloseDialog(false); onClose() }}
+                style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: isDark ? 'rgba(239,68,68,0.10)' : 'rgba(239,68,68,0.06)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.22)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}
+              >
+                Close Without Saving
+              </button>
+              <button
+                onClick={() => setShowCloseDialog(false)}
+                style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: 'transparent', color: 'var(--xp-txt3)', border: '1px solid var(--xp-bdr2)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showConfetti && <ConfettiPop onDone={onConfettiDone} />}
 

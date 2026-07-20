@@ -973,10 +973,10 @@ function ActivityDropdown({ value, onChange, activities, isDark }: ActivityDropd
               onMouseEnter={() => setFocusedIdx(0)}
               onMouseLeave={() => setFocusedIdx(-1)}
               onClick={() => { onChange(''); setOpen(false); setFocusedIdx(-1) }}
-              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', textAlign: 'left', cursor: 'pointer', border: 'none', outline: 'none', borderLeft: `2.5px solid ${!value ? '#7c3aed' : 'transparent'}`, background: !value ? 'rgba(124,58,237,0.09)' : focusedIdx === 0 ? 'rgba(124,58,237,0.05)' : 'transparent' }}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', textAlign: 'left', cursor: 'pointer', border: 'none', outline: 'none', borderLeft: `2.5px solid ${!value ? '#7c3aed' : 'transparent'}`, background: !value ? 'rgba(124,58,237,0.09)' : focusedIdx === 0 ? (isDark ? 'rgba(124,58,237,0.07)' : 'rgba(124,58,237,0.10)') : 'transparent', transition: 'background 160ms ease' }}
             >
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.14)', flexShrink: 0 }} />
-              <span style={{ fontSize: 11, fontWeight: !value ? 600 : 400, color: !value ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.50)' : '#9ca3af', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Category</span>
+              <span style={{ fontSize: 11, fontWeight: !value ? 600 : (focusedIdx === 0 && !isDark) ? 500 : 400, color: !value ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.50)' : (focusedIdx === 0 ? '#6b7280' : '#9ca3af'), flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Category</span>
               {!value && <svg viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5" style={{ width: 12, height: 12, flexShrink: 0 }}><polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" /></svg>}
             </button>
 
@@ -993,10 +993,10 @@ function ActivityDropdown({ value, onChange, activities, isDark }: ActivityDropd
                   onMouseEnter={() => setFocusedIdx(i + 1)}
                   onMouseLeave={() => setFocusedIdx(-1)}
                   onClick={() => { onChange(act.id); setOpen(false); setFocusedIdx(-1) }}
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', textAlign: 'left', cursor: 'pointer', border: 'none', outline: 'none', borderLeft: `2.5px solid ${isSelected ? '#7c3aed' : 'transparent'}`, background: isSelected ? 'rgba(124,58,237,0.09)' : isFocused ? `${act.color}14` : 'transparent' }}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', textAlign: 'left', cursor: 'pointer', border: 'none', outline: 'none', borderLeft: `2.5px solid ${isSelected ? '#7c3aed' : 'transparent'}`, background: isSelected ? 'rgba(124,58,237,0.09)' : isFocused ? (isDark ? `${act.color}14` : 'rgba(124,58,237,0.10)') : 'transparent', transition: 'background 160ms ease' }}
                 >
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: act.color, flexShrink: 0 }} />
-                  <span style={{ fontSize: 11, fontWeight: isSelected ? 600 : 500, color: isSelected ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.85)' : '#111827', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{act.name}</span>
+                  <span style={{ fontSize: 11, fontWeight: isSelected ? 600 : (isFocused && !isDark) ? 600 : 500, color: isSelected ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.85)' : '#111827', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{act.name}</span>
                   {isSelected && <svg viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5" style={{ width: 12, height: 12, flexShrink: 0 }}><polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                 </button>
               )
@@ -1113,6 +1113,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   const [journalAnimKey,   setJournalAnimKey]    = useState(0)
   const [journalSaved,     setJournalSaved]      = useState(false)
   const [mainSaving,       setMainSaving]        = useState(false)
+  const [isMounted, setIsMounted] = useState(false)
+  const [isClosing, setIsClosing] = useState(false)
   const journalTextareaRef  = useRef<HTMLTextAreaElement>(null)
   const journalSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevNotesOpenRef    = useRef(false)
@@ -1137,7 +1139,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
-        if (hasDirtyChanges) { setShowCloseDialog(true) } else { onClose() }
+        if (hasDirtyChanges) { setShowCloseDialog(true) } else { doClose() }
       }
     }
     window.addEventListener('keydown', onKey)
@@ -1172,6 +1174,12 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
       return nextTasks.some((t, i) => t !== prev.tasks[i]) ? { ...prev, tasks: nextTasks } : prev
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Mount/unmount animation
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setIsMounted(true))
+    return () => cancelAnimationFrame(raf)
   }, [])
 
   // ── Task CRUD ─────────────────────────────────────────────────────────────
@@ -1256,14 +1264,19 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
     setDirtyNotesMap({})
   }
 
+  function doClose() {
+    setIsClosing(true)
+    setTimeout(onClose, 210)
+  }
+
   function attemptClose() {
-    if (hasDirtyChanges) { setShowCloseDialog(true) } else { onClose() }
+    if (hasDirtyChanges) { setShowCloseDialog(true) } else { doClose() }
   }
 
   function handleMainSave() {
     flushDirtyNotes()
     setMainSaving(true)
-    setTimeout(onClose, 650)
+    setTimeout(doClose, 620)
   }
 
   // ── Timers ────────────────────────────────────────────────────────────────
@@ -1326,16 +1339,48 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
 
   const doneCount = dayData.tasks.filter(t => t.done).length
 
+  const visible = isMounted && !isClosing
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{
+        background: isDark
+          ? `rgba(4,0,14,${visible ? 0.72 : 0})`
+          : `rgba(0,0,0,${visible ? 0.55 : 0})`,
+        backdropFilter: isDark ? `blur(${visible ? 9 : 0}px)` : undefined,
+        WebkitBackdropFilter: isDark ? `blur(${visible ? 9 : 0}px)` : undefined,
+        transition: 'background 220ms ease-out, backdrop-filter 220ms ease-out',
+        willChange: isDark ? 'backdrop-filter' : undefined,
+      }}
+    >
+      {/* Purple ambient glow — dark mode only */}
+      {isDark && (
+        <div aria-hidden="true" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+          <div style={{
+            width: 680, height: 480, borderRadius: '50%',
+            background: 'radial-gradient(ellipse at center, rgba(124,58,237,0.20) 0%, rgba(109,40,217,0.09) 45%, transparent 72%)',
+            filter: 'blur(55px)',
+            opacity: visible ? 1 : 0,
+            transition: 'opacity 220ms ease-out',
+            transform: 'translateZ(0)',
+            pointerEvents: 'none',
+          }} />
+        </div>
+      )}
       <div
         className="w-full max-w-[520px] rounded-2xl flex flex-col overflow-hidden"
         style={{
           background: 'var(--xp-card)',
           border: '0.5px solid var(--xp-bdr2)',
           maxHeight: '93vh',
-          // ── Layer 1: depth shadow (restrained) + Layer 2: purple ambient glow ──
           boxShadow: '0 20px 48px rgba(0,0,0,0.18), 0 6px 16px rgba(0,0,0,0.08), 0 0 80px rgba(124,58,237,0.13), 0 0 140px rgba(139,92,246,0.07)',
+          opacity: visible ? 1 : 0,
+          transform: visible ? 'scale(1)' : 'scale(0.98)',
+          transition: 'opacity 220ms ease-out, transform 220ms ease-out',
+          willChange: 'opacity, transform',
+          position: 'relative',
+          zIndex: 1,
         }}
         onClick={e => e.stopPropagation()}
       >
@@ -1495,13 +1540,13 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
             <p style={{ fontSize: 12, color: 'var(--xp-txt3)', margin: '0 0 20px', lineHeight: 1.55 }}>You have changes that haven&apos;t been saved. What would you like to do?</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <button
-                onClick={() => { flushDirtyNotes(); setShowCloseDialog(false); onClose() }}
+                onClick={() => { flushDirtyNotes(); setShowCloseDialog(false); doClose() }}
                 style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: '#7c3aed', color: '#ffffff', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
               >
                 Save Changes
               </button>
               <button
-                onClick={() => { setDirtyNotesMap({}); setShowCloseDialog(false); onClose() }}
+                onClick={() => { setDirtyNotesMap({}); setShowCloseDialog(false); doClose() }}
                 style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: isDark ? 'rgba(239,68,68,0.10)' : 'rgba(239,68,68,0.06)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.22)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}
               >
                 Close Without Saving

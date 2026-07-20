@@ -16,6 +16,7 @@ export interface Task {
   actId: string
   milestone?: boolean
   sessions: TaskSession[]
+  noteDone?: boolean
 }
 
 export interface DayData {

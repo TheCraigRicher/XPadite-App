@@ -49,12 +49,17 @@ export function calculateDayScore(
     .filter(s => s.dateKey === key && s.endTs !== null)
     .reduce((sum, s) => sum + (s.endTs! - s.startTs), 0)
 
+  const taskMs = (day?.tasks ?? []).reduce((tsum, task) =>
+    tsum + task.sessions
+      .filter(s => s.endTs !== null)
+      .reduce((ssum, s) => ssum + (s.endTs! - s.startTs), 0), 0)
+
   const activeMs =
     activeSession?.dateKey === key
       ? Math.max(0, now.getTime() - activeSession.startTs)
       : 0
 
-  const totalFocusMs = sessionMs + activeMs
+  const totalFocusMs = sessionMs + taskMs + activeMs
   const fScore = focusTimeScore(totalFocusMs)
 
   return {
@@ -190,6 +195,7 @@ export function calculateTotalMs(
   keySet: Set<string>,
   activeSession: ActiveSession | null = null,
   now: Date = new Date(),
+  calData: CalendarData | null = null,
 ): number {
   const completed = sessions
     .filter(s => s.endTs !== null && keySet.has(s.dateKey))
@@ -198,7 +204,19 @@ export function calculateTotalMs(
     activeSession && keySet.has(activeSession.dateKey)
       ? Math.max(0, now.getTime() - activeSession.startTs)
       : 0
-  return completed + active
+  let taskMs = 0
+  if (calData) {
+    for (const key of keySet) {
+      const tasks = calData[key]?.tasks
+      if (!tasks) continue
+      for (const task of tasks) {
+        for (const s of task.sessions) {
+          if (s.endTs !== null) taskMs += s.endTs - s.startTs
+        }
+      }
+    }
+  }
+  return completed + active + taskMs
 }
 
 // ─── Productive day counts ────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useEffect, useState, useRef, useCallback } from 'react'
+import { useMemo, useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react'
 import { useApp } from './AppContext'
 import { formatMs, formatTime, APP_YEAR, dateKey as makeDateKey } from './utils'
 import type { Task } from './types'
@@ -182,7 +182,7 @@ function DonutChart({
   hoveredIdx?: number | null
   onHoverIdx?: (idx: number | null) => void
 }) {
-  const sz  = size === 'lg' ? { cx: 104, cy: 104, r: 82, inner: 50, vb: 208 }
+  const sz  = size === 'lg' ? { cx: 114, cy: 114, r: 91, inner: 56, vb: 228 }
             : size === 'sm' ? { cx: 72,  cy: 72,  r: 56, inner: 34, vb: 144 }
                             : { cx: 90,  cy: 90,  r: 70, inner: 44, vb: 180 }
   const { cx, cy, r, inner, vb } = sz
@@ -193,7 +193,7 @@ function DonutChart({
   const pt = (a: number, rad: number) => ({ x: cx + rad * Math.cos(toRad(a)), y: cy + rad * Math.sin(toRad(a)) })
   const total = segments.reduce((s, x) => s + x.pct, 0)
 
-  const svgSize = size === 'lg' ? 200 : size === 'sm' ? 144 : 180
+  const svgSize = size === 'lg' ? 244 : size === 'sm' ? 144 : 180
 
   if (total === 0) {
     return (
@@ -671,21 +671,47 @@ function AchievementBanner({
   tier: PerformanceTier; level: PerformanceLevel; isDark: boolean;
   firstName?: string; dateLabel?: string
 }) {
-  const isNoBadge    = level === 0
-  const isElite      = level === 5
-  const badgeAsset   = BADGE_ASSETS[level] ?? null
+  const isNoBadge  = level === 0
+  const badgeAsset = BADGE_ASSETS[level] ?? null
   const { color, glow, title, message, secondaryMessage } = tier
   const greeting     = firstName ? `Congratulations, ${firstName}!` : 'Congratulations!'
   const [shineKey, setShineKey] = useState(0)
+  const [showConfetti, setShowConfetti] = useState(false)
+  const confettiFiredRef = useRef(false)
 
-  // Trigger shine once whenever a custom-asset badge is first displayed
+  const confettiParticles = useMemo(() => {
+    const cols = [color, '#a78bfa', '#38bdf8', '#f472b6', '#34d399', '#fb923c', '#facc15']
+    return Array.from({ length: 14 }, (_, i) => ({
+      left: `${22 + ((i * 37) % 56)}%`,
+      bottom: `${35 + ((i * 23) % 24)}%`,
+      delay: `${i * 45}ms`,
+      tx: `${(((i % 5) - 2) * 30) + ((i % 2) * 12 - 6)}px`,
+      ty: `${-(26 + (i % 4) * 16)}px`,
+      rot: `${(i * 59) % 360}deg`,
+      col: cols[i % cols.length],
+      size: i % 3 === 0 ? 4 : 5,
+      br: i % 2 === 0 ? '50%' : '1px',
+    }))
+  }, [color])
+
+  // Entrance pop → confetti fires once after badge settles (750 ms)
   useEffect(() => {
-    if (BADGE_ASSETS[level]) setShineKey(k => k + 1)
+    if (level === 0 || confettiFiredRef.current) return
+    confettiFiredRef.current = true
+    const id = setTimeout(() => setShowConfetti(true), 750)
+    return () => clearTimeout(id)
+  }, [level])
+
+  // After 4 s delay, run a single shine sweep across the badge artwork
+  useEffect(() => {
+    if (!BADGE_ASSETS[level]) return
+    const id = setTimeout(() => setShineKey(k => k + 1), 4000)
+    return () => clearTimeout(id)
   }, [level])
 
   return (
     <div
-      className="rounded-2xl p-4 flex flex-col h-full relative overflow-hidden"
+      className="rounded-2xl flex flex-col h-full relative overflow-hidden p-3"
       style={{
         background: isDark
           ? 'linear-gradient(145deg, rgba(15,6,38,0.99) 0%, rgba(8,3,18,0.99) 100%)'
@@ -700,45 +726,50 @@ function AchievementBanner({
       <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none', background: 'linear-gradient(130deg, transparent 30%, rgba(255,255,255,0.025) 52%, transparent 74%)' }} />
 
       {/* Greeting */}
-      <div className="text-center mb-1.5 relative z-10">
-        <p className="text-[11px] font-bold leading-snug" style={{ color }}>
+      <div className="text-center mb-1 relative z-10">
+        <p className="text-[11.5px] font-bold leading-snug" style={{ color }}>
           {isNoBadge ? 'Your Daily Badge' : greeting}
         </p>
       </div>
 
-      {/* Badge artwork */}
-      <div className="flex justify-center items-center mb-1.5 relative z-10">
+      {/* Badge artwork — entrance pop applied to the entire artwork row */}
+      <div className="flex justify-center items-center mb-1 relative z-10"
+        style={{ animation: 'xp-badge-pop 700ms cubic-bezier(0.22, 1, 0.36, 1) both' }}>
         {isNoBadge ? (
           /* Level 0 — no badge earned yet */
           <div style={{
-            width: 72, height: 72, borderRadius: 18,
+            width: 80, height: 80, borderRadius: 20,
             background: isDark ? 'rgba(148,163,184,0.08)' : 'rgba(148,163,184,0.1)',
             border: '1.5px solid rgba(148,163,184,0.25)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <svg viewBox="0 0 40 40" width="36" height="36">
+            <svg viewBox="0 0 40 40" width="38" height="38">
               <circle cx="20" cy="20" r="16" fill="none" stroke="rgba(148,163,184,0.35)" strokeWidth="2" strokeDasharray="4,3" />
               <line x1="20" y1="28" x2="20" y2="14" stroke="rgba(148,163,184,0.5)" strokeWidth="2.5" strokeLinecap="round" />
               <path d="M 13 20 L 20 13 L 27 20" fill="none" stroke="rgba(148,163,184,0.5)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
         ) : badgeAsset ? (
-          /* Custom artwork — resolves via BADGE_ASSETS map (Advanced, Elite, future levels) */
+          /* Custom artwork — explicit size + clipPath ensures shine never leaks outside badge */
           <div
-            style={{ position: 'relative', display: 'inline-block', overflow: 'hidden', borderRadius: 8 }}
+            style={{
+              position: 'relative', width: 174, height: 145,
+              overflow: 'hidden', borderRadius: 8,
+              clipPath: 'inset(0 round 8px)',
+            }}
             onMouseEnter={() => setShineKey(k => k + 1)}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={badgeAsset}
               alt={`XPadite ${title} Badge`}
-              style={{ width: 156, height: 130, objectFit: 'contain', display: 'block' }}
+              style={{ width: 174, height: 145, objectFit: 'contain', display: 'block' }}
             />
-            {/* Metallic shine — only rendered when shineKey > 0 so there is no static stain at rest.
-                mask-image clips the beam to the badge artwork silhouette. */}
+            {/* Shine sweep — background-position animation keeps element stationary inside container */}
             {shineKey > 0 && (
               <div
                 key={shineKey}
+                className="xp-badge-shine-overlay"
                 style={{
                   position: 'absolute', inset: 0,
                   WebkitMaskImage: `url(${badgeAsset})`,
@@ -749,8 +780,10 @@ function AchievementBanner({
                   maskSize: 'contain',
                   maskPosition: 'center',
                   maskRepeat: 'no-repeat',
-                  background: 'linear-gradient(110deg, transparent 15%, rgba(255,255,255,0) 36%, rgba(255,248,210,0.75) 48%, rgba(255,255,255,0.92) 52%, rgba(255,224,140,0.50) 64%, transparent 85%)',
-                  animation: 'xp-badge-shine 920ms cubic-bezier(0.4, 0, 0.2, 1) forwards',
+                  background: 'linear-gradient(105deg, transparent 25%, rgba(255,255,255,0.04) 38%, rgba(255,255,255,0.88) 50%, rgba(255,255,255,0.04) 62%, transparent 75%)',
+                  backgroundSize: '400% 100%',
+                  backgroundRepeat: 'no-repeat',
+                  animation: 'xp-badge-shine 1600ms ease-in-out forwards',
                   pointerEvents: 'none',
                 }}
               />
@@ -758,7 +791,7 @@ function AchievementBanner({
           </div>
         ) : (
           /* SVG placeholder — levels 1–3 until custom artwork is supplied */
-          <svg viewBox="0 0 100 110" width="80" height="88" style={{ display: 'block', overflow: 'visible' }}>
+          <svg viewBox="0 0 100 110" width="92" height="101" style={{ display: 'block', overflow: 'visible' }}>
             <defs>
               <linearGradient id="xp-shield-bg" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={color} stopOpacity={isDark ? 0.32 : 0.18} />
@@ -791,23 +824,43 @@ function AchievementBanner({
       {/* Rank title + messages */}
       <div className="text-center relative z-10 flex-1 flex flex-col justify-center">
         <p className="text-[13px] font-bold leading-tight mb-1.5" style={{ color }}>{title}</p>
-        <p className="text-[9.5px] leading-relaxed"
-          style={{ color: isDark ? 'rgba(148,163,184,0.65)' : 'var(--xp-txt3)' }}>
+        <p className="text-[10px] leading-relaxed"
+          style={{ color: isDark ? 'rgba(148,163,184,0.72)' : 'var(--xp-txt3)' }}>
           {message}
         </p>
         {secondaryMessage && (
           <p className="text-[9.5px] leading-relaxed font-semibold mt-1"
-            style={{ color: isDark ? `${color}cc` : color, opacity: 0.88 }}>
+            style={{ color: isDark ? `${color}cc` : color, opacity: 0.92 }}>
             {secondaryMessage}
           </p>
         )}
         {badgeAsset && dateLabel && (
-          <p className="text-[7.5px] mt-2.5"
+          <p className="text-[8px] mt-2"
             style={{ color: isDark ? 'rgba(148,163,184,0.42)' : 'var(--xp-txt3)', opacity: 0.8 }}>
             ◎ Earned on {dateLabel}
           </p>
         )}
       </div>
+
+      {/* Confetti burst — fires once after badge entrance animation settles */}
+      {showConfetti && confettiParticles.map((p, i) => (
+        <div key={`cf${i}`} style={{
+          position: 'absolute',
+          bottom: p.bottom,
+          left: p.left,
+          width: p.size,
+          height: p.size,
+          borderRadius: p.br,
+          background: p.col,
+          animation: 'xp-confetti 900ms ease-out both',
+          animationDelay: p.delay,
+          '--tx': p.tx,
+          '--ty': p.ty,
+          '--rot': p.rot,
+          pointerEvents: 'none',
+          zIndex: 30,
+        } as React.CSSProperties} />
+      ))}
     </div>
   )
 }
@@ -932,12 +985,17 @@ type ExportState = 'idle' | 'preparing' | 'ready' | 'downloading' | 'emailing' |
 
 export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayDashboardModalProps) {
   const { calData, activities, isDark } = useApp()
-  const [firstName, setFirstName]     = useState<string>('')
-  const [actHovIdx, setActHovIdx]     = useState<number | null>(null)
-  const [showExport, setShowExport]   = useState(false)
+  const [firstName, setFirstName]   = useState<string>('')
+  const [actHovIdx, setActHovIdx]   = useState<number | null>(null)
+  const [fitMode, setFitMode]       = useState(false)
+  const isMaximized                 = false  // body layout is always normal; Fit to Screen uses CSS transform
+  const [fitScale, setFitScale]     = useState(1)
+  const [showExport, setShowExport] = useState(false)
+  const [showAiCoach, setShowAiCoach] = useState(false)
   const [exportState, setExportState] = useState<ExportState>('idle')
   const [exportError, setExportError] = useState<string>('')
   const captureRef   = useRef<HTMLDivElement>(null)
+  const headerRef    = useRef<HTMLDivElement>(null)
   const captureBlobRef = useRef<Blob | null>(null)
   const previewUrlRef  = useRef<string>('')
 
@@ -946,6 +1004,45 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // Compute scale factor so body CONTENT fits inside the full-screen shell without scrolling.
+  // The shell is always full-width (absolute inset-0 in fit mode); only the body content scales.
+  useLayoutEffect(() => {
+    if (!fitMode) { setFitScale(1); return }
+    const body   = captureRef.current
+    const header = headerRef.current
+    if (!body || !header) return
+    // Temporarily remove transform to read natural dimensions
+    const prev = body.style.transform
+    body.style.transform = 'none'
+    void body.offsetHeight
+    const naturalW = body.scrollWidth
+    const naturalH = body.scrollHeight
+    body.style.transform = prev
+    const availH = window.innerHeight - header.offsetHeight
+    const availW = window.innerWidth
+    setFitScale(Math.min(availW / naturalW, availH / naturalH, 1))
+  }, [fitMode])
+
+  useEffect(() => {
+    if (!fitMode) return
+    const measure = () => {
+      const body   = captureRef.current
+      const header = headerRef.current
+      if (!body || !header) return
+      const prev = body.style.transform
+      body.style.transform = 'none'
+      void body.offsetHeight
+      const naturalW = body.scrollWidth
+      const naturalH = body.scrollHeight
+      body.style.transform = prev
+      const availH = window.innerHeight - header.offsetHeight
+      const availW = window.innerWidth
+      setFitScale(Math.min(availW / naturalW, availH / naturalH, 1))
+    }
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [fitMode])
 
   // Load display name: localStorage profile first (highest priority), then Supabase fallback
   useEffect(() => {
@@ -1052,6 +1149,56 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
   const hasActivity = stats !== null && stats.actBreakdown.length > 0
   const hasSessions = stats !== null && stats.allSessions.length > 0
   const hasTasks    = stats !== null && stats.taskTotals.length > 0
+
+  // ── Yesterday comparison data ────────────────────────────────────────────────
+  const yesterdayKey = useMemo(() => {
+    const d = new Date(APP_YEAR, month, day)
+    d.setDate(d.getDate() - 1)
+    return makeDateKey(d.getFullYear(), d.getMonth(), d.getDate())
+  }, [month, day])
+
+  const yesterdayMetrics = useMemo(() => {
+    const dd = calData[yesterdayKey]
+    if (!dd) return null
+    const sessions = dd.tasks.flatMap(t =>
+      (t.sessions ?? []).filter(s => s.endTs !== null)
+    )
+    const totalMs        = sessions.reduce((s, x) => s + getSessionDurationMs(x.startTs, x.endTs!), 0)
+    const longestMs      = sessions.reduce((mx, s) => Math.max(mx, getSessionDurationMs(s.startTs, s.endTs!)), 0)
+    const sessionCount   = sessions.length
+    const completedTasks = dd.tasks.filter(t => t.done).length
+    const totalTasks     = dd.tasks.length
+    const deepWorkMs     = sessions
+      .filter(s => getSessionDurationMs(s.startTs, s.endTs!) >= 45 * 60_000)
+      .reduce((s, x) => s + getSessionDurationMs(x.startTs, x.endTs!), 0)
+    let score = 0
+    if (completedTasks > 0) score += 20
+    if (totalTasks > 0) score += Math.round((completedTasks / totalTasks) * 20)
+    const hrs = totalMs / 3_600_000
+    if (hrs >= 1) score += 15; if (hrs >= 3) score += 15; if (hrs >= 6) score += 10
+    if (longestMs >= 45 * 60_000) score += 10; if (longestMs >= 90 * 60_000) score += 5
+    if (dd.hyper) score += 5
+    score = Math.min(100, score)
+    return { totalMs, longestMs, sessionCount, completedTasks, deepWorkMs, score }
+  }, [calData, yesterdayKey])
+
+  const comparisons = useMemo(() => {
+    if (!stats || !yesterdayMetrics) return null
+    const periodLabel = 'vs yesterday'
+    const entry = (delta: number, fmt: (v: number) => string) => ({
+      delta,
+      label: delta === 0 ? '—' : fmt(Math.abs(delta)),
+      unit: periodLabel,
+    })
+    return [
+      entry(stats.totalMs        - yesterdayMetrics.totalMs,        formatMs),
+      entry(stats.longestMs      - yesterdayMetrics.longestMs,       formatMs),
+      entry(stats.sessionCount   - yesterdayMetrics.sessionCount,    v => `${v} session${v !== 1 ? 's' : ''}`),
+      entry(stats.completedTasks - yesterdayMetrics.completedTasks,  v => `${v} task${v !== 1 ? 's' : ''}`),
+      entry(stats.deepWorkMs     - yesterdayMetrics.deepWorkMs,      formatMs),
+      entry(stats.score          - yesterdayMetrics.score,           v => `${Math.round(v)}pts`),
+    ]
+  }, [stats, yesterdayMetrics])
 
   // ── Single final performance level — shared by gauge AND badge ───────────────
   const finalLevel: PerformanceLevel = stats
@@ -1221,34 +1368,42 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
   return (
     <>
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-4 pt-4 sm:pt-6 overflow-y-auto"
-      style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
+      className={fitMode
+        ? 'fixed inset-0 z-50 overflow-hidden'
+        : 'fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-4 sm:pt-6'}
+      style={fitMode ? undefined : { background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
       onClick={onClose}
     >
-      {/* Ambient glows */}
-      {isDark && (
+      {/* Ambient glows — normal mode only */}
+      {isDark && !fitMode && (
         <div className="fixed inset-0 pointer-events-none overflow-hidden" style={{ zIndex: -1 }}>
           <div style={{ position: 'absolute', top: '-12%', right: '-6%', width: 700, height: 700, borderRadius: '50%', background: 'radial-gradient(circle, rgba(124,58,237,0.06) 0%, transparent 65%)' }} />
           <div style={{ position: 'absolute', bottom: '0%', left: '-8%', width: 600, height: 600, borderRadius: '50%', background: 'radial-gradient(circle, rgba(8,145,178,0.04) 0%, transparent 65%)' }} />
         </div>
       )}
 
-      {/* ═══ Modal shell — matches approved design width ══════════════════════ */}
+      {/* ═══ Modal shell ═══════════════════════════════════════════════════════ */}
       <div
-        className="w-full max-w-[640px] lg:max-w-[1440px] rounded-2xl shadow-2xl overflow-hidden mb-6 sm:mb-8"
-        style={{
+        className={fitMode
+          ? 'absolute inset-0 flex flex-col overflow-hidden'
+          : 'w-full rounded-2xl shadow-2xl overflow-hidden max-w-[640px] lg:max-w-[1296px]'}
+        style={fitMode ? {
+          background: S0,
+        } : {
           background: S0,
           border: isDark ? '0.5px solid rgba(124,58,237,0.22)' : '0.5px solid var(--xp-bdr2)',
           boxShadow: isDark
             ? '0 30px 70px rgba(0,0,0,0.75), 0 0 0 0.5px rgba(124,58,237,0.16), inset 0 1px 0 rgba(255,255,255,0.04)'
             : '0 20px 50px rgba(0,0,0,0.12)',
+          marginBottom: 24,
         }}
         onClick={e => e.stopPropagation()}
       >
 
         {/* ── Header ──────────────────────────────────────────────────────── */}
         <div
-          className="flex items-center gap-3 px-4 sm:px-6 py-3.5 sm:py-4"
+          ref={headerRef}
+          className="flex items-center gap-3 px-4 sm:px-6 py-3.5 sm:py-4 flex-shrink-0"
           style={{ background: 'linear-gradient(135deg, #0f052e 0%, #2d1b69 55%, #18355a 100%)', borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}
         >
           {onBack && (
@@ -1273,6 +1428,29 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
             </svg>
             Export
           </button>
+          {/* Fit to Screen / Restore — desktop only */}
+          <button
+            onClick={() => setFitMode(m => !m)}
+            data-export-exclude="true"
+            className="hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-90 transition-opacity flex-shrink-0"
+            style={{
+              background: fitMode ? 'rgba(167,139,250,0.20)' : 'rgba(167,139,250,0.10)',
+              border: '0.5px solid rgba(167,139,250,0.26)',
+              color: '#c4b5fd',
+            }}
+            title={fitMode ? 'Restore normal layout' : 'Fit dashboard to viewport'}
+            aria-label={fitMode ? 'Restore layout' : 'Fit to Screen'}>
+            {fitMode ? (
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 15V9H2M14 9H8V3M2 15l5-5M14 3l-5 5"/>
+              </svg>
+            ) : (
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10 2h4v4M2 10v4h4M14 2l-5 5M2 14l5-5"/>
+              </svg>
+            )}
+            {fitMode ? 'Restore' : 'Fit to Screen'}
+          </button>
           <button onClick={onClose} data-export-exclude="true"
             className="text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
             style={{ background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}>
@@ -1280,24 +1458,34 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
           </button>
         </div>
 
-        {/* ── Dashboard body (capture target) ──────────────────────────────── */}
-        <div ref={captureRef} className="p-4 sm:p-5 lg:p-6 space-y-4 lg:space-y-5">
+        {/* ── Dashboard body — in fit mode: overflow-hidden wrapper + scale transform ── */}
+        <div className={fitMode ? 'flex-1 overflow-hidden' : ''}>
+        <div
+          ref={captureRef}
+          className="p-3 sm:p-4 lg:p-5 space-y-3 lg:space-y-4"
+          style={fitMode ? { transform: `scale(${fitScale})`, transformOrigin: 'top center' } : undefined}
+        >
 
           {/* ══════════════════════════════════════════════════════════════════
               ROW 1 — [KPI Cards 3×2] | [Gauge — CENTER focal point] | [Achievement Badge]
               ══════════════════════════════════════════════════════════════════ */}
-          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.48fr)_minmax(0,1.22fr)_minmax(0,0.84fr)] gap-4 lg:gap-5 items-stretch">
+          <div
+            className={`grid grid-cols-1 lg:grid-cols-[minmax(0,1.52fr)_minmax(0,1.36fr)_minmax(0,0.70fr)] items-stretch ${isMaximized ? 'gap-2 h-full' : 'gap-3 lg:gap-4'}`}
+            style={isMaximized ? { alignContent: 'stretch' } : undefined}
+          >
 
             {/* LEFT — KPI Metric Cards: 3 columns × 2 rows */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 content-start">
-              {kpiCards.map(m => (
+            <div
+              className={`grid grid-cols-2 sm:grid-cols-3 ${isMaximized ? 'gap-1.5 h-full content-between' : 'gap-2 content-start'}`}
+            >
+              {kpiCards.map((m, ki) => (
                 <div
                   key={m.label}
-                  className="rounded-2xl p-2.5 flex flex-col relative overflow-hidden xp-kpi-card"
+                  className={`rounded-2xl flex flex-col relative overflow-hidden xp-kpi-card ${isMaximized ? 'p-2' : 'p-2.5'}`}
                   style={{
                     background: m.bg,
                     border: `0.5px solid ${m.border}`,
-                    minHeight: 74,
+                    minHeight: isMaximized ? 56 : 80,
                     boxShadow: '0 6px 20px rgba(0,0,0,0.20), inset 0 1px 0 rgba(255,255,255,0.12)',
                   }}
                 >
@@ -1308,29 +1496,46 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                   }} />
                   {/* Icon tile */}
                   <div style={{
-                    width: 24, height: 24, borderRadius: 6, marginBottom: 5, flexShrink: 0,
-                    background: 'rgba(255,255,255,0.14)',
+                    width: isMaximized ? 18 : 20, height: isMaximized ? 18 : 20, borderRadius: 5, marginBottom: isMaximized ? 3 : 5, flexShrink: 0,
+                    background: 'rgba(255,255,255,0.16)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 12, color: '#FFFFFF',
+                    fontSize: isMaximized ? 10 : 11, color: '#FFFFFF',
                   }}>
                     {m.icon}
                   </div>
                   {/* Value */}
-                  <p className="text-base sm:text-lg font-bold leading-none tabular-nums mb-0.5"
+                  <p className="text-base sm:text-lg font-bold leading-none tabular-nums mb-1"
                     style={{ color: '#FFFFFF' }}>
                     {m.value}
                   </p>
                   {/* Label */}
-                  <p className="text-[8px] font-medium mt-auto leading-tight"
-                    style={{ color: 'rgba(255,255,255,0.70)' }}>
+                  <p className="text-[8.5px] font-medium mt-auto leading-tight tracking-wide"
+                    style={{ color: 'rgba(255,255,255,0.72)' }}>
                     {m.label}
                   </p>
                   {/* Sub */}
                   {m.sub && (
-                    <p className="text-[7.5px] mt-0.5 font-semibold" style={{ color: 'rgba(255,255,255,0.84)' }}>
+                    <p className="text-[8px] mt-0.5 font-semibold" style={{ color: 'rgba(255,255,255,0.86)' }}>
                       {m.sub}
                     </p>
                   )}
+                  {/* Comparison vs yesterday */}
+                  {(() => {
+                    const cmp = comparisons?.[ki]
+                    if (!cmp) return null
+                    const { delta, label, unit } = cmp
+                    const col = delta > 0 ? '#4ade80' : delta < 0 ? '#f87171' : 'rgba(255,255,255,0.42)'
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 5 }}>
+                        <span style={{ fontSize: 8.5, fontWeight: 700, lineHeight: 1, color: col, flexShrink: 0 }}>
+                          {delta > 0 ? '▲' : delta < 0 ? '▼' : '–'} {label}
+                        </span>
+                        <span style={{ fontSize: 7.5, color: 'rgba(255,255,255,0.28)', whiteSpace: 'nowrap' }}>
+                          {unit}
+                        </span>
+                      </div>
+                    )
+                  })()}
                 </div>
               ))}
             </div>
@@ -1344,7 +1549,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                   : 'var(--xp-card)',
                 border: isDark ? '0.5px solid rgba(124,58,237,0.35)' : '0.5px solid var(--xp-bdr2)',
                 boxShadow: isDark ? '0 4px 36px rgba(80,0,220,0.22), 0 2px 16px rgba(0,0,0,0.55)' : '0 2px 12px rgba(0,0,0,0.08)',
-                minHeight: 280,
+                ...(isMaximized ? {} : { minHeight: 280 }),
               }}
             >
               <GaugeMeter score={gaugeScore} />
@@ -1357,11 +1562,11 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
           {/* ══════════════════════════════════════════════════════════════════
               ROW 2 — [Today's Progress ~68%] | [Weekly Overview ~32%]
               ══════════════════════════════════════════════════════════════════ */}
-          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)] gap-4 lg:gap-5">
+          <div className={`grid grid-cols-1 lg:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)] items-stretch ${isMaximized ? 'gap-2 h-full' : 'gap-3 lg:gap-4'}`}>
 
             {/* Today's Progress — wide, full graph area */}
-            <div className="rounded-2xl p-4 sm:p-5 flex flex-col xp-hover-card" style={card1}>
-              <div className="flex items-start justify-between mb-3 flex-shrink-0">
+            <div className={`rounded-2xl flex flex-col xp-hover-card ${isMaximized ? 'p-3' : 'p-4 sm:p-5'}`} style={card1}>
+              <div className={`flex items-start justify-between flex-shrink-0 ${isMaximized ? 'mb-1.5' : 'mb-3'}`}>
                 <div>
                   <p className="text-[11px] font-semibold tracking-wide"
                     style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>
@@ -1381,7 +1586,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                   </div>
                 )}
               </div>
-              <div className="flex-1 min-h-[240px] lg:min-h-[280px]">
+              <div className={isMaximized ? 'flex-1 min-h-0' : 'flex-1 min-h-[220px] lg:min-h-[260px]'}>
                 <ProgressGraph
                   sessions={stats?.allSessions ?? []}
                   totalMs={stats?.totalMs ?? 0}
@@ -1392,12 +1597,12 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
             </div>
 
             {/* Today's Overview — activity breakdown bars */}
-            <div className="rounded-2xl p-4 sm:p-5 xp-hover-card" style={card2}>
-              <p className="text-[11px] font-semibold mb-2 tracking-wide"
+            <div className={`rounded-2xl xp-hover-card ${isMaximized ? 'p-3 flex flex-col' : 'p-4 sm:p-5'}`} style={card2}>
+              <p className={`text-[11px] font-semibold tracking-wide flex-shrink-0 ${isMaximized ? 'mb-1' : 'mb-2'}`}
                 style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>
                 Today's Overview
               </p>
-              <div className="min-h-[240px] lg:min-h-[280px]">
+              <div className={isMaximized ? 'flex-1 min-h-0' : 'min-h-[220px] lg:min-h-[260px]'}>
                 <TodayOverviewBars
                   data={stats?.actBreakdown.map(a => ({ label: a.name, ms: a.ms, color: a.color })) ?? []}
                   totalMs={stats?.totalMs ?? 0}
@@ -1410,23 +1615,25 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
               ROW 3 — Three columns
               Activity Distribution | Session Log | Task Breakdown
               ══════════════════════════════════════════════════════════════════ */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
+          <div
+            className={`grid grid-cols-1 sm:grid-cols-2 items-stretch ${isMaximized ? 'lg:grid-cols-3 gap-2 h-full overflow-hidden' : 'lg:grid-cols-[minmax(0,30fr)_minmax(0,31fr)_minmax(0,39fr)] gap-3 lg:gap-4'}`}
+          >
 
             {/* Activity Distribution — donut left, legend right (horizontal) */}
-            <div className="rounded-2xl p-4 xp-hover-card" style={card1}>
-              <p className="text-[11px] font-semibold mb-3 tracking-wide"
+            <div className={`rounded-2xl xp-hover-card ${isMaximized ? 'p-3 flex flex-col overflow-hidden' : 'p-3.5'}`} style={card1}>
+              <p className={`text-[11px] font-semibold tracking-wide flex-shrink-0 ${isMaximized ? 'mb-2' : 'mb-2.5'}`}
                 style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>
                 Activity Distribution
               </p>
               {hasActivity ? (
-                <div className="flex items-start gap-2.5">
+                <div className={`flex flex-col items-center ${isMaximized ? 'flex-1 min-h-0 overflow-hidden' : ''}`}>
                   <DonutChart
                     segments={stats!.actBreakdown.map(a => ({ color: a.color, pct: a.pct, name: a.name, ms: a.ms }))}
-                    size="lg"
+                    size={isMaximized ? 'sm' : 'lg'}
                     hoveredIdx={actHovIdx}
                     onHoverIdx={setActHovIdx}
                   />
-                  <div className="flex-1 min-w-0 pt-1">
+                  <div className={`w-full ${isMaximized ? 'mt-1 flex-1 min-h-0 overflow-y-auto' : 'mt-5'}`}>
                     {stats!.actBreakdown.map((a, i) => {
                       const isHov = actHovIdx === i
                       return (
@@ -1439,7 +1646,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                             gridTemplateColumns: 'minmax(80px,1fr) 52px 32px',
                             alignItems: 'center',
                             gap: 4,
-                            marginBottom: 5,
+                            marginBottom: isMaximized ? 3 : 5,
                             cursor: 'default',
                             opacity: actHovIdx !== null && !isHov ? 0.5 : 1,
                             transition: 'opacity 180ms ease',
@@ -1490,8 +1697,8 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
             </div>
 
             {/* Session Log */}
-            <div className="rounded-2xl overflow-hidden" style={card2}>
-              <div className="px-4 py-3.5"
+            <div className={`rounded-2xl overflow-hidden ${isMaximized ? 'flex flex-col' : ''}`} style={card2}>
+              <div className={`flex-shrink-0 ${isMaximized ? 'px-3 py-2' : 'px-4 py-2.5'}`}
                 style={{ borderBottom: isDark ? '0.5px solid rgba(124,58,237,0.12)' : '0.5px solid rgba(0,0,0,0.08)' }}>
                 <p className="text-[11px] font-semibold tracking-wide"
                   style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>
@@ -1500,6 +1707,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
               </div>
               {hasSessions ? (
                 <>
+                  <div className={isMaximized ? 'flex-1 min-h-0 overflow-y-auto' : ''}>
                   {stats!.allSessions.map((s, i) => {
                     const act  = activities.find(a => a.id === s.actId)
                     const dur  = getSessionDurationMs(s.startTs, s.endTs!)
@@ -1513,7 +1721,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                           gridTemplateColumns: 'minmax(86px,1fr) minmax(110px,auto) 52px 54px',
                           alignItems: 'center',
                           gap: 6,
-                          padding: '9px 16px',
+                          padding: isMaximized ? '4px 10px' : '5px 14px',
                           borderBottom: i < stats!.allSessions.length - 1 ? isDark ? '0.5px solid rgba(124,58,237,0.08)' : '0.5px solid var(--xp-bdr)' : 'none',
                         }}
                       >
@@ -1548,7 +1756,8 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                       </div>
                     )
                   })}
-                  <div className="px-4 py-2.5"
+                  </div>
+                  <div className={`flex-shrink-0 ${isMaximized ? 'px-3 py-1' : 'px-4 py-1.5'}`}
                     style={{ borderTop: isDark ? '0.5px solid rgba(124,58,237,0.08)' : '0.5px solid var(--xp-bdr)' }}>
                     <button className="text-[9px] font-semibold hover:opacity-80 transition-opacity"
                       style={{ color: '#a78bfa' }}>
@@ -1564,8 +1773,8 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
             </div>
 
             {/* Task Breakdown */}
-            <div className="rounded-2xl p-4 xp-hover-card" style={card1}>
-              <div className="flex items-center justify-between mb-3">
+            <div className={`rounded-2xl xp-hover-card ${isMaximized ? 'p-3 flex flex-col overflow-hidden' : 'p-3.5'}`} style={card1}>
+              <div className={`flex items-center justify-between flex-shrink-0 ${isMaximized ? 'mb-2' : 'mb-2.5'}`}>
                 <p className="text-[11px] font-semibold tracking-wide"
                   style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>
                   Task Breakdown
@@ -1584,14 +1793,26 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                 )}
               </div>
               {hasTasks ? (
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {stats!.taskTotals.map((t, taskIdx) => {
                     const gradStr  = TASK_GRAD_STRINGS[taskIdx % TASK_GRAD_STRINGS.length]
                     const barPct   = Math.round((t.ms / (stats!.taskTotals[0]?.ms ?? 1)) * 100)
                     const totalPct = stats!.totalMs > 0 ? Math.round((t.ms / stats!.totalMs) * 100) : 0
                     return (
                       <div key={t.id} className="group">
-                        <div className="flex items-start justify-between gap-2 mb-1.5">
+                        {/* Gradient pill first */}
+                        <div className="h-2.5 rounded-full overflow-hidden mb-1.5"
+                          style={{ background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }}>
+                          <div className="h-full rounded-full"
+                            style={{
+                              width: `${barPct > 0 ? Math.max(barPct, 4) : 0}%`,
+                              background: gradStr,
+                              boxShadow: isDark ? `0 0 12px rgba(124,58,237,0.44), 0 1px 0 rgba(255,255,255,0.12) inset` : '0 1px 0 rgba(255,255,255,0.35) inset',
+                              transition: 'width 400ms cubic-bezier(0.22,1,0.36,1)',
+                            }} />
+                        </div>
+                        {/* Task title + duration (pct) on one row */}
+                        <div className="flex items-baseline justify-between gap-2">
                           <span className="text-[9px] flex-1 min-w-0 leading-snug font-medium"
                             style={{
                               color: t.done ? isDark ? 'rgba(148,163,184,0.55)' : 'var(--xp-txt3)' : isDark ? 'rgba(203,213,225,0.88)' : 'var(--xp-txt)',
@@ -1599,28 +1820,16 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                             }}>
                             {t.text}
                           </span>
-                          <div className="flex-shrink-0 text-right" style={{ minWidth: 44 }}>
-                            <span className="text-[10px] font-bold block tabular-nums leading-tight"
+                          <div className="flex-shrink-0 flex items-baseline gap-0.5">
+                            <span className="text-[9.5px] font-bold tabular-nums leading-tight"
                               style={{ color: isDark ? 'rgba(203,213,225,0.9)' : 'var(--xp-txt)' }}>
                               {formatMs(t.ms)}
                             </span>
                             <span className="text-[8px] tabular-nums leading-tight"
                               style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>
-                              {totalPct}%
+                              ({totalPct}%)
                             </span>
                           </div>
-                        </div>
-                        {/* Progress bar — premium gradient, rounded ends, glow on dark */}
-                        <div className="h-3 rounded-full overflow-hidden"
-                          style={{ background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }}>
-                          <div className="h-full rounded-full"
-                            style={{
-                              width: `${barPct > 0 ? Math.max(barPct, 4) : 0}%`,
-                              background: gradStr,
-                              opacity: 1,
-                              boxShadow: isDark ? `0 0 10px rgba(124,58,237,0.32)` : 'none',
-                              transition: 'width 400ms cubic-bezier(0.22,1,0.36,1)',
-                            }} />
                         </div>
                       </div>
                     )
@@ -1636,7 +1845,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
           </div>
 
           {/* ── Daily Summary ─────────────────────────────────────────────── */}
-          <div className="rounded-2xl px-5 py-4"
+          <div className={`rounded-2xl ${isMaximized ? 'px-3 py-2' : 'px-4 py-3'}`}
             style={{
               background: isDark
                 ? 'linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(99,102,241,0.05) 100%)'
@@ -1646,24 +1855,36 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
             }}>
             <div className="flex items-start gap-3.5">
               <span className="text-[18px] flex-shrink-0 mt-0.5">🤖</span>
-              <div>
-                <p className="text-[10px] font-bold mb-1.5 tracking-widest uppercase"
-                  style={{ color: '#a78bfa', letterSpacing: '0.08em' }}>
-                  Daily Summary
-                </p>
+              <div className="flex-1 min-w-0">
+                <div className={`flex items-center justify-between gap-3 ${isMaximized ? 'mb-1' : 'mb-1.5'}`}>
+                  <p className="text-[10px] font-bold tracking-widest uppercase"
+                    style={{ color: '#a78bfa', letterSpacing: '0.08em' }}>
+                    Daily Summary
+                  </p>
+                  <button
+                    onClick={() => setShowAiCoach(true)}
+                    data-export-exclude="true"
+                    className="flex-shrink-0 flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-xl transition-opacity hover:opacity-90"
+                    style={{
+                      background: isDark
+                        ? 'linear-gradient(135deg, rgba(124,58,237,0.28) 0%, rgba(99,102,241,0.22) 100%)'
+                        : 'linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(99,102,241,0.07) 100%)',
+                      border: isDark ? '0.5px solid rgba(167,139,250,0.38)' : '0.5px solid rgba(124,58,237,0.25)',
+                      color: isDark ? '#c4b5fd' : '#7c3aed',
+                    }}>
+                    🧠 AI Coach
+                  </button>
+                </div>
                 <p className="text-[11.5px] leading-relaxed"
                   style={{ color: isDark ? 'rgba(203,213,225,0.80)' : 'var(--xp-txt2)' }}>
                   {summary}
-                </p>
-                <p className="text-[9px] mt-2 italic"
-                  style={{ color: isDark ? 'rgba(148,163,184,0.38)' : 'var(--xp-txt3)' }}>
-                  AI-powered insights coming soon
                 </p>
               </div>
             </div>
           </div>
 
         </div>
+        </div>{/* /body wrapper */}
       </div>
     </div>
 
@@ -1754,6 +1975,101 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
               className="w-full py-2 text-sm transition-opacity hover:opacity-70"
               style={{ color: isDark ? 'rgba(148,163,184,0.6)' : '#9ca3af' }}>
               Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── AI Coach Upgrade Modal ───────────────────────────────────────────── */}
+    {showAiCoach && (
+      <div
+        className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+        style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
+        onClick={() => setShowAiCoach(false)}
+      >
+        <div
+          className="relative w-full max-w-[420px] rounded-2xl overflow-hidden shadow-2xl"
+          style={{
+            background: isDark
+              ? 'linear-gradient(160deg, #0c0628 0%, #100838 55%, #14094a 100%)'
+              : '#ffffff',
+            border: isDark ? '0.5px solid rgba(167,139,250,0.42)' : '0.5px solid rgba(124,58,237,0.22)',
+            boxShadow: isDark
+              ? '0 32px 80px rgba(0,0,0,0.82), 0 0 0 0.5px rgba(167,139,250,0.18), 0 0 60px rgba(124,58,237,0.14)'
+              : '0 24px 60px rgba(0,0,0,0.16)',
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Ambient glow */}
+          {isDark && (
+            <div style={{ position: 'absolute', top: -50, left: '50%', transform: 'translateX(-50%)', width: 280, height: 180, borderRadius: '50%', background: 'radial-gradient(circle, rgba(124,58,237,0.20) 0%, transparent 70%)', pointerEvents: 'none', zIndex: 0 }} />
+          )}
+
+          {/* Header */}
+          <div className="relative z-10 px-6 pt-7 pb-4 text-center">
+            <div style={{
+              width: 54, height: 54, borderRadius: 16, margin: '0 auto 14px',
+              background: isDark
+                ? 'linear-gradient(135deg, rgba(124,58,237,0.32) 0%, rgba(99,102,241,0.28) 100%)'
+                : 'linear-gradient(135deg, rgba(124,58,237,0.12) 0%, rgba(99,102,241,0.08) 100%)',
+              border: isDark ? '1px solid rgba(167,139,250,0.42)' : '1px solid rgba(124,58,237,0.25)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24,
+              boxShadow: isDark ? '0 0 28px rgba(124,58,237,0.32)' : 'none',
+            }}>
+              🧠
+            </div>
+            <p className="text-[18px] font-bold mb-1.5"
+              style={{ color: isDark ? '#e2e8f0' : '#1e1e2e' }}>
+              Unlock AI Coach
+            </p>
+            <p className="text-[11.5px] leading-relaxed"
+              style={{ color: isDark ? 'rgba(148,163,184,0.68)' : '#6b7280' }}>
+              Receive personalized coaching after every productive day.
+            </p>
+          </div>
+
+          {/* Features */}
+          <div className="relative z-10 px-6 py-2">
+            {[
+              'Daily performance analysis',
+              'Productivity insights tailored to you',
+              'Personalized recommendations',
+              'Motivation based on your progress',
+              'Weekly AI coaching summaries',
+            ].map(feat => (
+              <div key={feat} className="flex items-center gap-3 py-2">
+                <div style={{
+                  width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                  background: 'linear-gradient(135deg, #7c3aed, #a855f7)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 9, color: '#fff', fontWeight: 800,
+                }}>✓</div>
+                <span className="text-[12px]"
+                  style={{ color: isDark ? 'rgba(203,213,225,0.88)' : '#374151' }}>
+                  {feat}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* CTA */}
+          <div className="relative z-10 px-6 pb-6 pt-4">
+            <button
+              className="w-full py-3.5 rounded-2xl text-[14px] font-bold tracking-wide transition-opacity hover:opacity-92"
+              style={{
+                background: 'linear-gradient(135deg, #6d28d9 0%, #7c3aed 50%, #a855f7 100%)',
+                color: '#ffffff',
+                boxShadow: isDark ? '0 6px 24px rgba(124,58,237,0.50)' : '0 4px 14px rgba(124,58,237,0.32)',
+                border: '0.5px solid rgba(167,139,250,0.30)',
+              }}>
+              Upgrade to Pro
+            </button>
+            <button
+              onClick={() => setShowAiCoach(false)}
+              className="w-full mt-2 py-2 text-[11px] transition-opacity hover:opacity-70"
+              style={{ color: isDark ? 'rgba(148,163,184,0.50)' : '#9ca3af' }}>
+              Maybe later
             </button>
           </div>
         </div>

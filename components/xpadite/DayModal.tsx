@@ -148,11 +148,12 @@ function TogglePill({ active, color, label, onClick }: { active: boolean; color:
 
 interface AdjustTimeProps {
   task: Task
+  dateKey: string
   onClose: () => void
   onSave: (sessionId: string | null, startTs: number, endTs: number, note: string) => void
 }
 
-function AdjustTimeModal({ task, onClose, onSave }: AdjustTimeProps) {
+function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   const runningSession = getRunningSession(task)
   const lastSession = task.sessions?.findLast?.(s => s.endTs !== null) ?? null
   const editingSession = runningSession ?? lastSession
@@ -174,12 +175,19 @@ function AdjustTimeModal({ task, onClose, onSave }: AdjustTimeProps) {
     return d.getTime()
   }
 
-  const refStart = editingSession?.startTs ?? null
-  const refEnd   = editingSession?.endTs   ?? null
+  // Reliable base date for inputToTs: session start → task timerStart → midnight of dateKey
+  const baseTs: number = editingSession?.startTs ?? task.timerStart ?? (() => {
+    const [y, mo, d] = dateKey.split('-').map(Number)
+    return new Date(y, mo, d).getTime()
+  })()
+
+  const refStart = baseTs
+  const refEnd   = editingSession?.endTs ?? null
   const sessionId = editingSession?.id ?? null
 
-  const [startVal, setStartVal] = useState(tsToInput(refStart))
-  const [endVal, setEndVal] = useState(tsToInput(refEnd))
+  const [startVal, setStartVal] = useState(tsToInput(editingSession?.startTs ?? null))
+  // For a running session (no endTs) pre-fill end with current time so the field is usable
+  const [endVal, setEndVal] = useState(refEnd !== null ? tsToInput(refEnd) : (runningSession ? tsToInput(Date.now()) : ''))
   const [noteVal, setNoteVal] = useState('')
 
   return (
@@ -215,7 +223,7 @@ function AdjustTimeModal({ task, onClose, onSave }: AdjustTimeProps) {
           </div>
         </div>
 
-        {startVal && endVal && refStart !== null && (() => {
+        {startVal && endVal && (() => {
           const sTs = inputToTs(startVal, refStart)
           let eTs = inputToTs(endVal, refStart)
           if (eTs <= sTs) eTs += 86_400_000  // midnight crossing
@@ -248,13 +256,13 @@ function AdjustTimeModal({ task, onClose, onSave }: AdjustTimeProps) {
           </button>
           <button
             onClick={() => {
-              if (startVal && endVal && refStart !== null) {
+              if (startVal && endVal) {
                 const sTs = inputToTs(startVal, refStart)
                 let eTs = inputToTs(endVal, refStart)
                 if (eTs <= sTs) eTs += 86_400_000  // midnight crossing
                 onSave(sessionId, sTs, eTs, noteVal)
+                onClose()
               }
-              onClose()
             }}
             className="text-xs px-5 py-1.5 rounded-full text-white transition-opacity hover:opacity-80"
             style={{ background: '#7c3aed' }}
@@ -617,6 +625,7 @@ function TaskRow({
       {adjustOpen && (
         <AdjustTimeModal
           task={task}
+          dateKey={dateKey}
           onClose={() => setAdjustOpen(false)}
           onSave={(sessionId, startTs, endTs, note) => {
             onAdjustTime(sessionId, startTs, endTs, note)
@@ -796,7 +805,7 @@ interface DayModalProps {
 }
 
 export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModalProps) {
-  const { calData, updateDay, activeTaskTimer, setActiveTaskTimer, activities, activeSession, setActiveSession, selectedActId, reminders, isDark } = useApp()
+  const { calData, updateDay, activeTaskTimer, setActiveTaskTimer, activities, activeSession, setActiveSession, selectedActId, reminders, isDark, setToast } = useApp()
   const dayData = calData[dateKey] ?? { ...EMPTY_DAY }
 
   const currentStatus: StatusValue | null =
@@ -1046,6 +1055,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
     if (closedRunningSession && activeTaskTimer?.taskId === taskId) {
       setActiveTaskTimer(null)
     }
+    setToast('Time adjusted')
   }
 
   // ── Drag Reorder ──────────────────────────────────────────────────────────

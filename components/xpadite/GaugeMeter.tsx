@@ -22,7 +22,7 @@ export function GaugeMeter({ score }: { score: number }) {
     return () => cancelAnimationFrame(rafId)
   }, [score])
 
-  const cx = 220, cy = 200, r = 120, sw = 28
+  const cx = 220, cy = 203, r = 120, sw = 28
   const toRad = (d: number) => (d * Math.PI) / 180
   const pt = (a: number, rr = r) => ({
     x: cx + rr * Math.cos(toRad(a)),
@@ -70,7 +70,7 @@ export function GaugeMeter({ score }: { score: number }) {
 
   return (
     <div className="flex flex-col items-center w-full h-full justify-center">
-      <svg viewBox="0 0 440 305" className="w-full">
+      <svg viewBox="0 0 440 318" className="w-full">
         <defs>
           <filter id="gm-glow" x="-80%" y="-80%" width="260%" height="260%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/>
@@ -90,7 +90,7 @@ export function GaugeMeter({ score }: { score: number }) {
           </radialGradient>
         </defs>
 
-        <rect x={0} y={0} width={440} height={305} rx={14} fill={isDark ? 'url(#gm-panel)' : 'var(--xp-bg2)'}/>
+        <rect x={0} y={0} width={440} height={318} rx={14} fill={isDark ? 'url(#gm-panel)' : 'var(--xp-bg2)'}/>
 
         <g stroke={circuitStk} strokeWidth="0.8" fill="none">
           <line x1="60" y1="130" x2="160" y2="130"/><line x1="280" y1="130" x2="380" y2="130"/>
@@ -160,7 +160,7 @@ export function GaugeMeter({ score }: { score: number }) {
           /100
         </text>
 
-        <foreignObject x={cx - 104} y={cy + 56} width="208" height="34">
+        <foreignObject x={cx - 104} y={cy + 56} width="208" height="38">
           <div style={{ textAlign: 'center', fontSize: 14, fontWeight: 700, color: segs[li].color, letterSpacing: 0.5 }}>
             {segs[li].emoji ? `${segs[li].emoji} ${segs[li].label}` : segs[li].label}
           </div>

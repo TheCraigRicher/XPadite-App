@@ -161,7 +161,7 @@ function computeStats(
     const tKey   = dateKey(year, month, day)
     const { score } = calculateDayScore(tKey, calData, sessions, isToday ? activeSession : null, today)
     const prod   = isProdDay(calData[tKey])
-    const ms     = calculateTotalMs(sessions, new Set([tKey]), isToday ? activeSession : null, today)
+    const ms     = calculateTotalMs(sessions, new Set([tKey]), isToday ? activeSession : null, today, calData)
     return {
       productiveDays: `${prod ? 1 : 0} / 1`,
       streak:         isToday ? calculateCurrentStreak(calData, today) : (prod ? 1 : 0),
@@ -183,7 +183,7 @@ function computeStats(
     const { count } = calculateProductiveDays(calData, keys)
     const isCurrentWeek = isCurrentMonth && week.start <= today.getDate() && today.getDate() <= week.end
     const progress = localAvgScore(keys, calData, sessions, isCurrentWeek ? activeSession : null, today)
-    const ms = calculateTotalMs(sessions, keySet, isCurrentWeek ? activeSession : null, today)
+    const ms = calculateTotalMs(sessions, keySet, isCurrentWeek ? activeSession : null, today, calData)
     return {
       productiveDays: `${count} / ${keys.length}`,
       streak:         isCurrentWeek ? calculateCurrentStreak(calData, today) : calculateBestStreak(calData, keys),
@@ -199,7 +199,7 @@ function computeStats(
     const { count } = calculateProductiveDays(calData, keys)
     const isCurrentMonth = year === today.getFullYear() && month === today.getMonth()
     const progress = calculateMonthProgress(calData, sessions, isCurrentMonth ? activeSession : null, month, year, today)
-    const ms = calculateTotalMs(sessions, keySet, isCurrentMonth ? activeSession : null, today)
+    const ms = calculateTotalMs(sessions, keySet, isCurrentMonth ? activeSession : null, today, calData)
     return {
       productiveDays: `${count} / ${keys.length}`,
       streak:         isCurrentMonth ? calculateCurrentStreak(calData, today) : calculateBestStreak(calData, keys),
@@ -215,7 +215,7 @@ function computeStats(
   const { count } = calculateProductiveDays(calData, keys)
   const isCurrentYear = year === today.getFullYear()
   const progress = calculateYearProgress(calData, sessions, isCurrentYear ? activeSession : null, year, today)
-  const ms = calculateTotalMs(sessions, keySet, isCurrentYear ? activeSession : null, today)
+  const ms = calculateTotalMs(sessions, keySet, isCurrentYear ? activeSession : null, today, calData)
   return {
     productiveDays: `${count} / ${keys.length}`,
     streak:         calculateBestStreak(calData, keys),

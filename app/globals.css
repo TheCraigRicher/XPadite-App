@@ -185,16 +185,15 @@ body {
 
 /* ─── Premium Micro-interactions ─────────────────────────────────────── */
 
-/* Card hover lift */
+/* Card hover — shadow only, no vertical movement */
 .xp-hover-card {
-  transition: transform 200ms cubic-bezier(0.34, 1.0, 0.64, 1), box-shadow 200ms ease;
+  transition: box-shadow 200ms ease;
 }
 .xp-hover-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.10), 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.07);
 }
 .xp-dark .xp-hover-card:hover {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.52), 0 2px 10px rgba(0, 0, 0, 0.32);
 }
 
 /* Elite badge left-to-right shine (legacy narrow-strip variant) */
@@ -206,10 +205,19 @@ body {
   .xp-elite-shine { animation: none !important; }
 }
 
-/* Badge shine — full-width masked overlay variant (works with mask-image silhouette) */
+/* Badge shine — sweeps via background-position so element stays inside overflow:hidden container */
 @keyframes xp-badge-shine {
-  0%   { transform: translateX(-100%) skewX(-18deg); }
-  100% { transform: translateX(100%) skewX(-18deg); }
+  0%   { background-position: -120% 0%; }
+  100% { background-position: 220% 0%; }
+}
+
+/* Badge entrance pop: scales in slightly larger, then springs to normal */
+@keyframes xp-badge-pop {
+  0%   { transform: scale(1.0); }
+  28%  { transform: scale(1.08); }
+  62%  { transform: scale(0.97); }
+  82%  { transform: scale(1.02); }
+  100% { transform: scale(1.0); }
 }
 
 /* KPI card premium interactions */
@@ -325,11 +333,13 @@ body {
 
 /* Respect prefers-reduced-motion */
 @media (prefers-reduced-motion: reduce) {
+  .xp-badge-shine-overlay {
+    display: none !important;
+  }
   .xp-hover-card {
     transition: none !important;
   }
   .xp-hover-card:hover {
-    transform: none !important;
     box-shadow: inherit !important;
   }
   .xp-fade-up {

@@ -69,24 +69,34 @@ function deduplicateTaskSessions(sessions: TaskSession[]): TaskSession[] {
   const completed = sessions.filter(s => s.endTs !== null)
   const running   = sessions.filter(s => s.endTs === null)
   if (completed.length <= 1) return sessions
-  const sorted = [...completed].sort((a, b) => (b.endTs! - b.startTs) - (a.endTs! - a.startTs))
-  const kept: TaskSession[] = []
-  for (const s of sorted) {
-    if (!kept.some(k => k.startTs <= s.startTs && s.endTs! <= k.endTs!)) kept.push(s)
+  // Sort by startTs, then merge overlapping/adjacent intervals so no time is double-counted
+  const sorted = [...completed].sort((a, b) => a.startTs - b.startTs)
+  const merged: TaskSession[] = [{ ...sorted[0] }]
+  for (let i = 1; i < sorted.length; i++) {
+    const last = merged[merged.length - 1]
+    const curr = sorted[i]
+    if (curr.startTs <= last.endTs!) {
+      merged[merged.length - 1] = { ...last, endTs: Math.max(last.endTs!, curr.endTs!) }
+    } else {
+      merged.push({ ...curr })
+    }
   }
-  return [...kept.sort((a, b) => a.startTs - b.startTs), ...running]
+  return [...merged, ...running]
 }
 
 function getTaskTotalMs(task: Task, isActive: boolean, now: number): number {
   const sessions = task.sessions ?? []
-  let total = sessions.reduce((acc, s) => {
-    if (s.endTs) return acc + (s.endTs - s.startTs)
-    if (isActive && s.endTs === null) return acc + (now - s.startTs)
-    return acc
-  }, 0)
-  if (total === 0 && task.timerStart) {
+  const completedMs = sessions
+    .filter(s => s.endTs !== null)
+    .reduce((acc, s) => acc + (s.endTs! - s.startTs), 0)
+  const runningMs = isActive
+    ? sessions.filter(s => s.endTs === null).reduce((acc, s) => acc + (now - s.startTs), 0)
+    : 0
+  const total = completedMs + runningMs
+  // Only fall back to legacy timerStart/timerEnd when no sessions exist at all
+  if (sessions.length === 0 && task.timerStart) {
     const end = task.timerEnd ?? (isActive ? now : null)
-    if (end) total = end - task.timerStart
+    if (end) return end - task.timerStart
   }
   return total
 }
@@ -338,7 +348,7 @@ function TaskRow({
   onTextChange, onActChange, onAdjustTime, onSetReminder,
   onDragStart, onDragOver, onDrop, bellTriggerKey,
 }: TaskRowProps) {
-  const { activities, reminders, isDark } = useApp()
+  const { activities, reminders, isDark, setToast } = useApp()
   const hasReminder = reminders.some(r => r.taskId === task.id && r.dateKey === dateKey && r.isActive)
 
   const [menuOpen,       setMenuOpen]       = useState(false)
@@ -530,7 +540,7 @@ function TaskRow({
           {/* Total — always shown; placeholder when task not yet started */}
           <span className="text-[10px] flex-shrink-0 flex items-center gap-1 mr-0.5">
             <span style={{ color: 'var(--xp-txt3)', opacity: 0.6 }}>Total:</span>
-            <span className="font-mono font-semibold" style={{ color: isActive ? '#7c3aed' : totalMs > 0 ? 'var(--xp-txt2)' : 'var(--xp-txt3)', opacity: !isActive && totalMs === 0 ? 0.38 : 1 }}>
+            <span className="font-mono font-semibold" style={{ minWidth: 52, color: isActive ? '#7c3aed' : totalMs > 0 ? 'var(--xp-txt2)' : 'var(--xp-txt3)', opacity: !isActive && totalMs === 0 ? 0.38 : 1 }}>
               {isActive && runningSession ? formatHMS(now - runningSession.startTs) : totalMs > 0 ? formatMs(totalMs) : '00h 00m'}
             </span>
             {multiSession && !isActive && totalMs > 0 && <span style={{ fontSize: 8, color: 'var(--xp-txt3)', opacity: 0.45 }}>all</span>}
@@ -559,7 +569,7 @@ function TaskRow({
           </button>
 
           {/* Time range — always shown; placeholder when no session yet */}
-          <span className="text-[9px] flex-shrink-0 tabular-nums" style={{ color: 'var(--xp-txt3)', opacity: (latestSession || (isActive && runningSession)) ? 1 : 0.32 }}>
+          <span className="text-[9px] flex-shrink-0 tabular-nums" style={{ minWidth: 110, color: 'var(--xp-txt3)', opacity: (latestSession || (isActive && runningSession)) ? 1 : 0.32 }}>
             {isActive && runningSession
               ? `${formatTime(runningSession.startTs)} → …`
               : latestSession
@@ -665,20 +675,18 @@ function TaskRow({
                 </button>
 
                 <div className="flex items-center gap-1.5">
-                  {/* Notes save — active when unsaved changes exist */}
+                  {/* Notes save — always visible, purple-themed */}
                   <button
-                    onClick={onNotesSave}
-                    disabled={!notesDirty}
+                    onClick={() => notesDirty ? onNotesSave() : setToast('No changes to save.')}
                     tabIndex={expanded ? 0 : -1}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 3,
                       padding: '2px 8px', height: 22, borderRadius: 5,
-                      border: `1.5px solid ${notesDirty ? 'rgba(124,58,237,0.50)' : 'var(--xp-bdr2)'}`,
-                      background: notesDirty ? 'rgba(124,58,237,0.09)' : isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.04)',
+                      border: '1.5px solid rgba(124,58,237,0.45)',
+                      background: notesDirty ? '#7c3aed' : 'rgba(124,58,237,0.10)',
                       fontSize: 10, fontWeight: 600,
-                      cursor: notesDirty ? 'pointer' : 'default',
-                      color: notesDirty ? '#7c3aed' : 'var(--xp-txt3)',
-                      opacity: notesDirty ? 1 : 0.4,
+                      cursor: 'pointer',
+                      color: notesDirty ? '#ffffff' : 'rgba(124,58,237,0.65)',
                       transition: 'all 180ms ease',
                       flexShrink: 0, whiteSpace: 'nowrap',
                     }}
@@ -946,7 +954,7 @@ function ActivityDropdown({ value, onChange, activities, isDark }: ActivityDropd
                   onMouseEnter={() => setFocusedIdx(i + 1)}
                   onMouseLeave={() => setFocusedIdx(-1)}
                   onClick={() => { onChange(act.id); setOpen(false); setFocusedIdx(-1) }}
-                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', textAlign: 'left', cursor: 'pointer', border: 'none', outline: 'none', borderLeft: `2.5px solid ${isSelected ? '#7c3aed' : 'transparent'}`, background: isSelected ? 'rgba(124,58,237,0.09)' : isFocused ? 'rgba(124,58,237,0.05)' : 'transparent' }}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', textAlign: 'left', cursor: 'pointer', border: 'none', outline: 'none', borderLeft: `2.5px solid ${isSelected ? '#7c3aed' : 'transparent'}`, background: isSelected ? 'rgba(124,58,237,0.09)' : isFocused ? `${act.color}14` : 'transparent' }}
                 >
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: act.color, flexShrink: 0 }} />
                   <span style={{ fontSize: 11, fontWeight: isSelected ? 600 : 500, color: isSelected ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.85)' : '#111827', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{act.name}</span>
@@ -1202,7 +1210,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   const doneCount = dayData.tasks.filter(t => t.done).length
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={attemptClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
       <div
         className="w-full max-w-[520px] rounded-2xl flex flex-col overflow-hidden"
         style={{
@@ -1215,13 +1223,13 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
         onClick={e => e.stopPropagation()}
       >
         {/* Modal header */}
-        <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: '0.5px solid var(--xp-bdr)', background: 'var(--xp-bg3)' }}>
-          <button onClick={attemptClose} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)', color: 'var(--xp-acc)' }}>← Back</button>
+        <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: '0.5px solid rgba(255,255,255,0.08)', background: 'linear-gradient(135deg, #3b0764 0%, #7c3aed 50%, #6d28d9 100%)' }}>
+          <button onClick={attemptClose} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)', color: 'rgba(255,255,255,0.92)' }}>← Back</button>
           <div className="text-center px-3">
-            <p className="text-sm font-semibold" style={{ color: 'var(--xp-txt)' }}>{dateLabel}</p>
-            <p className="text-[9px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>Single click = toggle productive · Double click = notes</p>
+            <p className="text-sm font-semibold" style={{ color: '#ffffff' }}>{dateLabel}</p>
+            <p className="text-[9px] mt-0.5" style={{ color: 'rgba(255,255,255,0.55)' }}>Single click = toggle productive · Double click = notes</p>
           </div>
-          <button onClick={attemptClose} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444' }}>× Close</button>
+          <button onClick={attemptClose} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(239,68,68,0.30)', border: '1px solid rgba(239,68,68,0.40)', color: 'rgba(255,255,255,0.92)' }}>× Close</button>
         </div>
 
         {/* Today's Status row */}

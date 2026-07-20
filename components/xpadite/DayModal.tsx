@@ -357,6 +357,14 @@ function TaskRow({
   const [isDragOver,     setIsDragOver]     = useState(false)
   const [notesViewMode,  setNotesViewMode]  = useState<'preview' | 'edit'>('preview')
   const [isCardHovered,  setIsCardHovered]  = useState(false)
+  const [notesJustSaved, setNotesJustSaved] = useState(false)
+  const [titleJustSaved, setTitleJustSaved] = useState(false)
+  const notesSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const titleSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (notesSavedTimerRef.current) clearTimeout(notesSavedTimerRef.current)
+    if (titleSavedTimerRef.current) clearTimeout(titleSavedTimerRef.current)
+  }, [])
 
   // Session lock: once a task has a completed session it cannot be restarted
   const hasCompletedSession = (task.sessions?.some(s => s.endTs !== null) ?? false) || !!task.timerEnd
@@ -413,6 +421,26 @@ function TaskRow({
     onNotesDraftChange(lines.join('\n'))
   }
 
+  function handleTitleEditEnd() {
+    onEditEnd()
+    if (task.text.trim()) {
+      if (titleSavedTimerRef.current) clearTimeout(titleSavedTimerRef.current)
+      setTitleJustSaved(true)
+      titleSavedTimerRef.current = setTimeout(() => setTitleJustSaved(false), 1100)
+    }
+  }
+
+  function handleNotesSaveClick() {
+    if (notesDirty) {
+      onNotesSave()
+      if (notesSavedTimerRef.current) clearTimeout(notesSavedTimerRef.current)
+      setNotesJustSaved(true)
+      notesSavedTimerRef.current = setTimeout(() => setNotesJustSaved(false), 1100)
+    } else {
+      setToast('No changes to save.')
+    }
+  }
+
   function handleEmojiSelect(emoji: string) {
     const current = draftJournal ?? task.journal
     if (notesViewMode === 'edit' && notesRef.current) {
@@ -458,8 +486,9 @@ function TaskRow({
 
   return (
     <>
-      <style>{`@keyframes xp-active-pulse{0%,100%{opacity:1}50%{opacity:0.25}}`}</style>
+      <style>{`@keyframes xp-active-pulse{0%,100%{opacity:1}50%{opacity:0.25}}@keyframes xp-saved-fade{0%{opacity:1}70%{opacity:1}100%{opacity:0}}`}</style>
       <div
+        id={`xp-task-${task.id}`}
         className={`rounded-xl overflow-visible relative transition-all duration-200 ${isDragOver ? 'ring-2 ring-violet-400 ring-offset-1' : ''}`}
         style={{ border: `0.5px solid ${cardBorder}`, background: cardBg, boxShadow: cardShadow }}
         onMouseEnter={() => setIsCardHovered(true)}
@@ -502,20 +531,30 @@ function TaskRow({
                 value={task.text}
                 onChange={e => onTextChange(e.target.value)}
                 onFocus={e => { const len = e.target.value.length; e.target.setSelectionRange(len, len) }}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onEditEnd() } if (e.key === 'Escape') onEditEnd() }}
-                onBlur={onEditEnd}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleTitleEditEnd() } if (e.key === 'Escape') handleTitleEditEnd() }}
+                onBlur={handleTitleEditEnd}
                 className="w-full bg-transparent outline-none text-xs leading-snug"
                 style={{ color: 'var(--xp-txt)' }}
                 placeholder="Task title..."
               />
             ) : (
-              <span
-                className="text-xs leading-snug block truncate cursor-default"
-                style={{ color: task.done ? 'var(--xp-txt3)' : 'var(--xp-txt)', textDecoration: task.done ? 'line-through' : 'none' }}
-                onClick={handleTitleClick}
-              >
-                {task.text || <span style={{ opacity: 0.4 }}>Untitled</span>}
-              </span>
+              <>
+                <span
+                  className="text-xs leading-snug block truncate cursor-default"
+                  style={{ color: task.done ? 'var(--xp-txt3)' : 'var(--xp-txt)', textDecoration: task.done ? 'line-through' : 'none' }}
+                  onClick={handleTitleClick}
+                >
+                  {task.text || <span style={{ opacity: 0.4 }}>Untitled</span>}
+                </span>
+                {titleJustSaved && (
+                  <span
+                    aria-live="polite"
+                    style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', fontSize: 9, fontWeight: 600, color: '#16a34a', pointerEvents: 'none', animation: 'xp-saved-fade 1100ms ease forwards', whiteSpace: 'nowrap' }}
+                  >
+                    ✓ Saved
+                  </span>
+                )}
+              </>
             )}
           </div>
 
@@ -677,22 +716,22 @@ function TaskRow({
                 <div className="flex items-center gap-1.5">
                   {/* Notes save — always visible, purple-themed */}
                   <button
-                    onClick={() => notesDirty ? onNotesSave() : setToast('No changes to save.')}
+                    onClick={handleNotesSaveClick}
                     tabIndex={expanded ? 0 : -1}
+                    aria-label={notesJustSaved ? 'Notes saved' : notesDirty ? 'Save notes' : 'No unsaved changes'}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 3,
                       padding: '2px 8px', height: 22, borderRadius: 5,
                       border: '1.5px solid rgba(124,58,237,0.45)',
-                      background: notesDirty ? '#7c3aed' : 'rgba(124,58,237,0.10)',
+                      background: notesJustSaved ? '#16a34a' : notesDirty ? '#7c3aed' : 'rgba(124,58,237,0.10)',
                       fontSize: 10, fontWeight: 600,
                       cursor: 'pointer',
-                      color: notesDirty ? '#ffffff' : 'rgba(124,58,237,0.65)',
-                      transition: 'all 180ms ease',
+                      color: notesJustSaved || notesDirty ? '#ffffff' : 'rgba(124,58,237,0.65)',
+                      transition: 'background 200ms ease, color 200ms ease',
                       flexShrink: 0, whiteSpace: 'nowrap',
                     }}
-                    title={notesDirty ? 'Save notes' : 'No unsaved changes'}
                   >
-                    ✓ Save
+                    {notesJustSaved ? '✓ Saved' : '✓ Save'}
                   </button>
 
                   {/* Emoji picker */}
@@ -969,6 +1008,62 @@ function ActivityDropdown({ value, onChange, activities, isDark }: ActivityDropd
   )
 }
 
+// ─── Journal border animation ─────────────────────────────────────────────────
+
+function JournalBorderAnim({ onDone }: { onDone: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 1000)
+    return () => clearTimeout(t)
+  }, [onDone])
+  return (
+    <>
+      <style>{`
+        @keyframes xp-jb-draw {
+          0%   { stroke-dashoffset: 2000; opacity: 1 }
+          80%  { stroke-dashoffset: 0;    opacity: 1 }
+          100% { stroke-dashoffset: 0;    opacity: 0 }
+        }
+        @keyframes xp-jb-nomotion {
+          0%   { opacity: 0.7; stroke-dashoffset: 0 }
+          100% { opacity: 0;   stroke-dashoffset: 0 }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .xp-jb-path { animation: xp-jb-nomotion 500ms ease forwards !important }
+        }
+      `}</style>
+      <svg
+        aria-hidden="true"
+        width="100%" height="100%"
+        style={{ position: 'absolute', inset: -1.5, width: 'calc(100% + 3px)', height: 'calc(100% + 3px)', pointerEvents: 'none', overflow: 'visible', zIndex: 1 }}
+      >
+        <defs>
+          <linearGradient id="xp-jb-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%"   stopColor="#a855f7" />
+            <stop offset="50%"  stopColor="#c084fc" />
+            <stop offset="100%" stopColor="#ec4899" />
+          </linearGradient>
+          <filter id="xp-jb-glow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="2.5" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <rect
+          x="0" y="0" width="100%" height="100%"
+          rx="12" ry="12"
+          fill="none"
+          stroke="url(#xp-jb-grad)"
+          strokeWidth="2"
+          filter="url(#xp-jb-glow)"
+          className="xp-jb-path"
+          strokeDasharray="2000 2000"
+          strokeDashoffset="2000"
+          style={{ animation: 'xp-jb-draw 900ms cubic-bezier(0.25,0.46,0.45,0.94) forwards' }}
+        />
+      </svg>
+    </>
+  )
+}
+
 // ─── DayModal ─────────────────────────────────────────────────────────────────
 
 interface DayModalProps {
@@ -1015,6 +1110,12 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   const [expandedTaskId,   setExpandedTaskId]    = useState<string | null>(null)
   const [dirtyNotesMap,    setDirtyNotesMap]     = useState<Record<string, string>>({})
   const [showCloseDialog,  setShowCloseDialog]   = useState(false)
+  const [journalAnimKey,   setJournalAnimKey]    = useState(0)
+  const [journalSaved,     setJournalSaved]      = useState(false)
+  const [mainSaving,       setMainSaving]        = useState(false)
+  const journalTextareaRef  = useRef<HTMLTextAreaElement>(null)
+  const journalSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const prevNotesOpenRef    = useRef(false)
   const onConfettiDone = useCallback(() => setShowConfetti(false), [])
 
   const hasDirtyChanges = Object.keys(dirtyNotesMap).length > 0
@@ -1043,6 +1144,15 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
     return () => window.removeEventListener('keydown', onKey)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasDirtyChanges, onClose])
+
+  // Detect journal opening: play border animation + auto-focus textarea
+  useEffect(() => {
+    if (notesOpen && !prevNotesOpenRef.current) {
+      setJournalAnimKey(k => k + 1)
+      setTimeout(() => journalTextareaRef.current?.focus(), 60)
+    }
+    prevNotesOpenRef.current = notesOpen
+  }, [notesOpen])
 
   // Total Focus Time Today — shared source of truth with Dashboard / StatsRow
   const totalFocusMsToday = useMemo(() => {
@@ -1073,8 +1183,14 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   function addTask(text?: string) {
     const t = (text ?? newTaskText).trim()
     if (!t) return
-    updateDay(dateKey, prev => ({ ...prev, tasks: [...prev.tasks, makeTask(t)] }))
-    setNewTaskText(''); setAddingTask(false)
+    const newTask = makeTask(t)
+    updateDay(dateKey, prev => ({ ...prev, tasks: [...prev.tasks, newTask] }))
+    setNewTaskText('')
+    setAddingTask(false)
+    setEditingTaskId(newTask.id)
+    setTimeout(() => {
+      document.getElementById(`xp-task-${newTask.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }, 60)
   }
 
   function generateTasks() {
@@ -1146,7 +1262,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
 
   function handleMainSave() {
     flushDirtyNotes()
-    onClose()
+    setMainSaving(true)
+    setTimeout(onClose, 650)
   }
 
   // ── Timers ────────────────────────────────────────────────────────────────
@@ -1217,8 +1334,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
           background: 'var(--xp-card)',
           border: '0.5px solid var(--xp-bdr2)',
           maxHeight: '93vh',
-          // ── Popup depth: primary shadow + subtle purple ambient (spec §11) ──
-          boxShadow: '0 24px 60px rgba(0,0,0,0.30), 0 8px 24px rgba(0,0,0,0.12), 0 0 0 0.5px rgba(124,58,237,0.06), 0 0 100px rgba(124,58,237,0.06)',
+          // ── Layer 1: depth shadow (restrained) + Layer 2: purple ambient glow ──
+          boxShadow: '0 20px 48px rgba(0,0,0,0.18), 0 6px 16px rgba(0,0,0,0.08), 0 0 80px rgba(124,58,237,0.13), 0 0 140px rgba(139,92,246,0.07)',
         }}
         onClick={e => e.stopPropagation()}
       >
@@ -1318,20 +1435,45 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
             </div>
 
             {dayData.tasks.length > 0 && !addingTask && (
-              <button onClick={() => setAddingTask(true)} className="mt-2 w-full text-xs py-2.5 rounded-xl text-white font-semibold transition-all hover:opacity-85" style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)', boxShadow: '0 2px 10px rgba(124,58,237,0.35)' }}>
-                + Add accomplishment
-              </button>
+              <div style={{ position: 'sticky', bottom: 0, paddingTop: 6, paddingBottom: 2, background: 'var(--xp-card)', zIndex: 4 }}>
+                <button onClick={() => setAddingTask(true)} className="w-full text-xs py-2.5 rounded-xl text-white font-semibold transition-all hover:opacity-85" style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)', boxShadow: '0 2px 10px rgba(124,58,237,0.35)' }}>
+                  + Add accomplishment
+                </button>
+              </div>
             )}
           </div>
 
           {/* Journal notes */}
           <div className="px-4 py-3">
-            <button onClick={() => setNotesOpen(o => !o)} className="flex items-center gap-2 text-xs font-medium w-full text-left transition-colors hover:text-violet-500 mb-1" style={{ color: 'var(--xp-txt2)' }}>
-              <span style={{ display: 'inline-block', fontSize: 10, lineHeight: 1, flexShrink: 0, transform: notesOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 220ms cubic-bezier(0.4,0,0.2,1)' }}>▶</span>
-              <span>Journal notes</span>
-            </button>
+            <div className="flex items-center justify-between mb-1">
+              <button onClick={() => setNotesOpen(o => !o)} className="flex items-center gap-2 text-xs font-medium text-left transition-colors hover:text-violet-500" style={{ color: 'var(--xp-txt2)' }}>
+                <span style={{ display: 'inline-block', fontSize: 10, lineHeight: 1, flexShrink: 0, transform: notesOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 220ms cubic-bezier(0.4,0,0.2,1)' }}>▶</span>
+                <span>Journal notes</span>
+              </button>
+              {notesOpen && journalSaved && (
+                <span aria-live="polite" style={{ fontSize: 9.5, fontWeight: 600, color: '#16a34a', transition: 'opacity 300ms ease', paddingRight: 2 }}>✓ Saved</span>
+              )}
+            </div>
             {notesOpen && (
-              <textarea value={dayData.notes ?? ''} onChange={e => updateDay(dateKey, prev => ({ ...prev, notes: e.target.value }))} placeholder="What made today great? Reflections, insights, gratitude..." rows={4} className="w-full text-xs px-3 py-2.5 rounded-xl outline-none resize-none leading-relaxed" style={{ border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }} />
+              <div style={{ position: 'relative' }}>
+                {journalAnimKey > 0 && <JournalBorderAnim key={journalAnimKey} onDone={() => {}} />}
+                <textarea
+                  ref={journalTextareaRef}
+                  value={dayData.notes ?? ''}
+                  onChange={e => {
+                    updateDay(dateKey, prev => ({ ...prev, notes: e.target.value }))
+                    if (journalSaveTimerRef.current) clearTimeout(journalSaveTimerRef.current)
+                    journalSaveTimerRef.current = setTimeout(() => {
+                      setJournalSaved(true)
+                      setTimeout(() => setJournalSaved(false), 1000)
+                    }, 600)
+                  }}
+                  placeholder="What made today great? Reflections, insights, gratitude..."
+                  rows={4}
+                  className="w-full text-xs px-3 py-2.5 rounded-xl outline-none resize-none leading-relaxed"
+                  style={{ border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)', position: 'relative', zIndex: 0 }}
+                />
+              </div>
             )}
           </div>
         </div>
@@ -1339,7 +1481,9 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 px-4 py-3 flex-shrink-0" style={{ borderTop: '0.5px solid var(--xp-bdr)' }}>
           <button onClick={attemptClose} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
-          <button onClick={handleMainSave} className="text-xs px-5 py-1.5 rounded-full text-white font-medium transition-opacity hover:opacity-80" style={{ background: '#7c3aed' }}>✓ Save</button>
+          <button onClick={handleMainSave} disabled={mainSaving} className="text-xs px-5 py-1.5 rounded-full text-white font-medium transition-all" style={{ background: mainSaving ? '#16a34a' : '#7c3aed', opacity: mainSaving ? 1 : undefined }}>
+            {mainSaving ? '✓ Saved' : '✓ Save'}
+          </button>
         </div>
       </div>
 

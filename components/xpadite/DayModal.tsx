@@ -406,7 +406,8 @@ function TaskRow({
     setShowTooltip(false); setTooltipPos(null)
   }
   function handleTitleClick() {
-    if (isEditing || !task.text) return
+    if (isEditing) return
+    if (!task.text) { onEditStart(); return }
     setShowTooltip(false); setTooltipPos(null)
     setShowPopover(true)
   }
@@ -535,7 +536,7 @@ function TaskRow({
                 onBlur={handleTitleEditEnd}
                 className="w-full bg-transparent outline-none text-xs leading-snug"
                 style={{ color: 'var(--xp-txt)' }}
-                placeholder="Task title..."
+                placeholder={task.linkedSessionId ? 'What did you work on?' : 'Task title...'}
               />
             ) : (
               <>
@@ -544,7 +545,7 @@ function TaskRow({
                   style={{ color: task.done ? 'var(--xp-txt3)' : 'var(--xp-txt)', textDecoration: task.done ? 'line-through' : 'none' }}
                   onClick={handleTitleClick}
                 >
-                  {task.text || <span style={{ opacity: 0.4 }}>Untitled</span>}
+                  {task.text || <span style={{ opacity: 0.38, fontStyle: 'italic' }}>{task.linkedSessionId ? 'Name this session…' : 'Untitled'}</span>}
                 </span>
                 {titleJustSaved && (
                   <span
@@ -1159,7 +1160,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   // Total Focus Time Today — shared source of truth with Dashboard / StatsRow
   const totalFocusMsToday = useMemo(() => {
     const workMs   = sessions.filter(s => s.dateKey === dateKey && s.endTs !== null).reduce((sum, s) => sum + (s.endTs! - s.startTs), 0)
-    const taskMs   = (dayData.tasks ?? []).reduce((t, task) => t + (task.sessions ?? []).filter(s => s.endTs !== null).reduce((sum, s) => sum + (s.endTs! - s.startTs), 0), 0)
+    // Clock-in-linked tasks are excluded: their time is already captured by the WorkSession in workMs
+    const taskMs   = (dayData.tasks ?? []).filter(task => !task.linkedSessionId).reduce((t, task) => t + (task.sessions ?? []).filter(s => s.endTs !== null).reduce((sum, s) => sum + (s.endTs! - s.startTs), 0), 0)
     const activeMs = isSessionHere ? Math.max(0, now - activeSession!.startTs) : 0
     return workMs + taskMs + activeMs
   }, [sessions, dayData.tasks, activeSession, isSessionHere, dateKey, now])

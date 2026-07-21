@@ -17,6 +17,7 @@ export interface Task {
   milestone?: boolean
   sessions: TaskSession[]
   noteDone?: boolean
+  linkedSessionId?: string  // set when auto-created by Clock In; matches the WorkSession id
 }
 
 export interface DayData {

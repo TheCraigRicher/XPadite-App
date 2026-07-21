@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useApp } from './AppContext'
 import { XpaditeLogo } from '@/components/auth/XpaditeLogo'
 import { formatHMS, todayKey } from './utils'
+import type { Task } from './types'
 
 const BurgerIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
@@ -76,13 +77,31 @@ export function AppHeader({ onYearDash, onMotivate }: AppHeaderProps) {
     }
     const act = activities.find(a => a.id === selectedActId) ?? activities[0]
     if (!act) return
+    const startTs    = Date.now()
+    const workSessId = 's' + startTs
+    const taskSessId = 'tsci-' + startTs
+    const taskId     = 'tci-' + startTs
+    const dk         = todayKey()
+    const newTask: Task = {
+      id: taskId,
+      text: '',
+      done: false,
+      journal: '',
+      timerStart: startTs,
+      timerEnd: null,
+      actId: act.id,
+      sessions: [{ id: taskSessId, startTs, endTs: null, note: '', tags: [] }],
+      linkedSessionId: workSessId,
+    }
+    updateDay(dk, prev => ({ ...prev, tasks: [...prev.tasks, newTask] }))
+    setActiveTaskTimer({ taskId, dateKey: dk, sessionId: taskSessId, startTs, taskText: '', taskIndex: 0 })
     setActiveSession({
-      id: 's' + Date.now(),
+      id: workSessId,
       actId: act.id,
       actName: (act.emoji ? act.emoji + ' ' : '') + act.name,
       actColor: act.color,
-      startTs: Date.now(),
-      dateKey: todayKey(),
+      startTs,
+      dateKey: dk,
     })
   }
 

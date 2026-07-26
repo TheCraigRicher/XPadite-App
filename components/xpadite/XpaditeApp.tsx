@@ -121,9 +121,11 @@ function Toast({ message, exiting, onDismiss }: { message: string; exiting: bool
         borderRadius: 14,
         minWidth: 240,
         maxWidth: 320,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.30)',
-        background: isInfo ? 'linear-gradient(135deg, #6d28d9 0%, #7c3aed 100%)' : '#1e1030',
-        border: `0.5px solid ${isInfo ? 'rgba(167,139,250,0.4)' : 'rgba(255,255,255,0.12)'}`,
+        background: isInfo ? 'rgba(124,58,237,0.86)' : 'rgba(109,40,217,0.85)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        border: '0.5px solid rgba(167,139,250,0.32)',
+        boxShadow: '3px 8px 14px rgba(109,40,217,0.28), 5px 14px 30px rgba(109,40,217,0.14), 2px 6px 48px rgba(88,28,135,0.07)',
         animation: exiting ? undefined : 'toast-in 0.25s ease-out',
       }}
     >

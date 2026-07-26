@@ -1119,9 +1119,15 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   const journalTextareaRef  = useRef<HTMLTextAreaElement>(null)
   const journalSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevNotesOpenRef    = useRef(false)
+  const openSnapshotRef     = useRef<typeof dayData | null>(null)
   const onConfettiDone = useCallback(() => setShowConfetti(false), [])
 
-  const hasDirtyChanges = Object.keys(dirtyNotesMap).length > 0
+  const hasDirtyChanges = useMemo(() => {
+    if (newTaskText.trim().length > 0) return true
+    if (Object.keys(dirtyNotesMap).length > 0) return true
+    if (!openSnapshotRef.current) return false
+    return JSON.stringify(calData[dateKey] ?? EMPTY_DAY) !== JSON.stringify(openSnapshotRef.current)
+  }, [newTaskText, dirtyNotesMap, calData, dateKey])
 
   const dateLabel = useMemo(() => {
     const d = new Date(APP_YEAR, month, day)
@@ -1165,6 +1171,12 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
     const activeMs = isSessionHere ? Math.max(0, now - activeSession!.startTs) : 0
     return workMs + taskMs + activeMs
   }, [sessions, dayData.tasks, activeSession, isSessionHere, dateKey, now])
+
+  // Snapshot calData on open — baseline for unsaved-changes detection
+  useEffect(() => {
+    openSnapshotRef.current = JSON.parse(JSON.stringify(calData[dateKey] ?? EMPTY_DAY))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // One-time dedup on open
   useEffect(() => {
@@ -1277,8 +1289,22 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
 
   function handleMainSave() {
     flushDirtyNotes()
+    openSnapshotRef.current = null
+    setNewTaskText('')
+    setAddingTask(false)
     setMainSaving(true)
     setTimeout(doClose, 620)
+  }
+
+  function discardAndClose() {
+    if (openSnapshotRef.current) {
+      updateDay(dateKey, () => openSnapshotRef.current!)
+    }
+    setDirtyNotesMap({})
+    setNewTaskText('')
+    setAddingTask(false)
+    setShowCloseDialog(false)
+    doClose()
   }
 
   // ── Timers ────────────────────────────────────────────────────────────────
@@ -1538,26 +1564,26 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
       {showCloseDialog && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9995, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, background: 'rgba(0,0,0,0.55)' }} onClick={() => setShowCloseDialog(false)}>
           <div style={{ background: isDark ? '#1a1530' : '#ffffff', borderRadius: 18, padding: '22px 22px 18px', maxWidth: 320, width: '100%', boxShadow: '0 24px 60px rgba(0,0,0,0.35), 0 4px 16px rgba(0,0,0,0.12)', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.25)' : 'rgba(0,0,0,0.08)'}` }} onClick={e => e.stopPropagation()}>
-            <p style={{ fontWeight: 700, fontSize: 14, color: isDark ? '#ffffff' : '#111827', margin: '0 0 6px' }}>Unsaved changes</p>
-            <p style={{ fontSize: 12, color: 'var(--xp-txt3)', margin: '0 0 20px', lineHeight: 1.55 }}>You have changes that haven&apos;t been saved. What would you like to do?</p>
+            <p style={{ fontWeight: 700, fontSize: 14, color: isDark ? '#ffffff' : '#111827', margin: '0 0 6px' }}>Save your changes?</p>
+            <p style={{ fontSize: 12, color: 'var(--xp-txt3)', margin: '0 0 20px', lineHeight: 1.55 }}>You have unsaved changes. Would you like to save them before closing?</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <button
-                onClick={() => { flushDirtyNotes(); setShowCloseDialog(false); doClose() }}
-                style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: '#7c3aed', color: '#ffffff', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                onClick={() => setShowCloseDialog(false)}
+                style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: 'transparent', color: 'var(--xp-txt3)', border: '1px solid var(--xp-bdr2)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}
               >
-                Save Changes
+                Keep Editing
               </button>
               <button
-                onClick={() => { setDirtyNotesMap({}); setShowCloseDialog(false); doClose() }}
+                onClick={discardAndClose}
                 style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: isDark ? 'rgba(239,68,68,0.10)' : 'rgba(239,68,68,0.06)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.22)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}
               >
                 Close Without Saving
               </button>
               <button
-                onClick={() => setShowCloseDialog(false)}
-                style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: 'transparent', color: 'var(--xp-txt3)', border: '1px solid var(--xp-bdr2)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}
+                onClick={() => { setShowCloseDialog(false); handleMainSave() }}
+                style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: '#7c3aed', color: '#ffffff', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
               >
-                Cancel
+                Save and Close
               </button>
             </div>
           </div>

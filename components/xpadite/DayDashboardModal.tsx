@@ -170,18 +170,44 @@ function MiniTrend({ color }: { color: string }) {
   )
 }
 
+// ─── Animation helper: cubic ease-out, 0→1 once active flips to true ─────────
+
+function useEaseOut(active: boolean, durationMs: number): number {
+  const [frac, setFrac] = useState(active ? 1 : 0)
+  const startedRef = useRef(active)
+  const rafRef    = useRef(0)
+
+  useEffect(() => {
+    if (!active || startedRef.current) return
+    startedRef.current = true
+    const startTime = performance.now()
+    function tick(now: number) {
+      const t = Math.min((now - startTime) / durationMs, 1)
+      setFrac(t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+      if (t < 1) { rafRef.current = requestAnimationFrame(tick) }
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => { cancelAnimationFrame(rafRef.current) }
+  }, [active, durationMs])
+
+  return frac
+}
+
 // ─── SVG Donut ────────────────────────────────────────────────────────────────
 
 interface DonutSegment { color: string; pct: number; name?: string; ms?: number; sessions?: number }
 
 function DonutChart({
-  segments, size = 'md', hoveredIdx = null, onHoverIdx,
+  segments, size = 'md', hoveredIdx = null, onHoverIdx, animate = true,
 }: {
   segments: DonutSegment[]
   size?: 'sm' | 'md' | 'lg'
   hoveredIdx?: number | null
   onHoverIdx?: (idx: number | null) => void
+  animate?: boolean
 }) {
+  const revealFrac = useEaseOut(animate, 1300)
+  const revealDeg  = (revealFrac * 360).toFixed(1)
   const sz  = size === 'lg' ? { cx: 114, cy: 114, r: 91, inner: 56, vb: 228 }
             : size === 'sm' ? { cx: 72,  cy: 72,  r: 56, inner: 34, vb: 144 }
                             : { cx: 90,  cy: 90,  r: 70, inner: 44, vb: 180 }
@@ -226,9 +252,17 @@ function DonutChart({
 
   const hovSeg = hoveredIdx !== null ? segments[hoveredIdx] : null
 
+  const maskStyle = {
+    maskImage:       `conic-gradient(from -90deg, #000 ${revealDeg}deg, transparent ${revealDeg}deg)`,
+    WebkitMaskImage: `conic-gradient(from -90deg, #000 ${revealDeg}deg, transparent ${revealDeg}deg)`,
+  } as React.CSSProperties
+
   return (
     <svg viewBox={`0 0 ${vb} ${vb}`} className={cls} style={{ width: svgSize, height: svgSize }}>
-      {paths}
+      {/* Paths masked by conic sweep; center fill and hover text are always visible */}
+      <g style={maskStyle}>
+        {paths}
+      </g>
       <circle cx={cx} cy={cy} r={inner} fill="var(--xp-card)" />
       {hovSeg && hovSeg.name && (
         <>
@@ -336,13 +370,46 @@ function WeeklyBars({ data }: { data: { label: string; ms: number; isToday: bool
 
 // ─── Today Overview Bars (activity breakdown for today) ───────────────────────
 
-function TodayOverviewBars({ data, totalMs }: { data: { label: string; ms: number; color: string }[]; totalMs: number }) {
+function TodayOverviewBars({ data, totalMs, animate = true }: { data: { label: string; ms: number; color: string }[]; totalMs: number; animate?: boolean }) {
   const [hovIdx, setHovIdx] = useState<number | null>(null)
   const VW = 440, VH = 210
   const PL = 34, PB = 36, PT = 22, PR = 8
   const plotW = VW - PL - PR
   const plotH = VH - PT - PB
   const display = data.slice(0, 6)
+
+  // Per-bar staggered animation: single elapsed timer, per-bar cubic ease-out
+  const STAGGER_MS  = 25
+  const DURATION_MS = 1300
+  const barCount    = display.length
+  const totalDur    = DURATION_MS + STAGGER_MS * Math.max(0, barCount - 1)
+  const [elapsed, setElapsed] = useState(() => animate ? totalDur : 0)
+  // true if bars were already at full height on mount (reduced-motion path)
+  const barStartedRef = useRef(animate)
+
+  useEffect(() => {
+    if (!animate || barCount === 0) return
+    if (barStartedRef.current) return  // already complete (reduced-motion), skip rAF
+    barStartedRef.current = true
+    setElapsed(0)
+    const startTime = performance.now()
+    let rafId: number
+    function tick(now: number) {
+      const e = now - startTime
+      setElapsed(e)
+      if (e < totalDur) { rafId = requestAnimationFrame(tick) }
+    }
+    rafId = requestAnimationFrame(tick)
+    return () => { cancelAnimationFrame(rafId) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [animate])
+
+  function getBarFrac(i: number): number {
+    const barElapsed = elapsed - i * STAGGER_MS
+    if (barElapsed <= 0) return 0
+    const t = Math.min(barElapsed / DURATION_MS, 1)
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+  }
 
   if (display.length === 0) {
     return (
@@ -391,7 +458,8 @@ function TodayOverviewBars({ data, totalMs }: { data: { label: string; ms: numbe
         stroke="rgba(148,163,184,0.16)" strokeWidth="0.75" />
 
       {display.map((d, i) => {
-        const barH  = d.ms > 0 ? Math.max((d.ms / yMax) * plotH, 4) : 0
+        const fullBarH = d.ms > 0 ? Math.max((d.ms / yMax) * plotH, 4) : 0
+        const barH  = fullBarH * getBarFrac(i)
         const bcx   = PL + i * slotW + slotW / 2
         const x     = bcx - barW / 2
         const baseY = PT + plotH
@@ -457,7 +525,8 @@ function TodayOverviewBars({ data, totalMs }: { data: { label: string; ms: numbe
 
 type RawSession = { startTs: number; endTs: number | null; actId?: string; taskText?: string }
 
-function ProgressGraph({ sessions, totalMs, activityColors, activityNames }: { sessions: RawSession[]; totalMs: number; activityColors?: Map<string, string>; activityNames?: Map<string, string> }) {
+function ProgressGraph({ sessions, totalMs, activityColors, activityNames, animate = true }: { sessions: RawSession[]; totalMs: number; activityColors?: Map<string, string>; activityNames?: Map<string, string>; animate?: boolean }) {
+  const revealFrac = useEaseOut(animate, 1300)
   const VW = 600, VH = 200
   const PL = 40, PB = 26, PT = 14, PR = 12
   const plotW = VW - PL - PR
@@ -557,6 +626,9 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames }: { s
         <clipPath id="pg-clip">
           <rect x={PL} y={PT} width={plotW} height={plotH} />
         </clipPath>
+        <clipPath id="pg-reveal">
+          <rect x={PL} y={PT - 20} width={plotW * revealFrac} height={plotH + 40} />
+        </clipPath>
       </defs>
 
       {Array.from({ length: YTICKS + 1 }, (_, i) => {
@@ -590,14 +662,21 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames }: { s
       <line x1={PL} y1={PT} x2={PL} y2={PT + plotH} stroke="rgba(148,163,184,0.16)" strokeWidth="0.75" />
       <line x1={PL} y1={PT + plotH} x2={PL + plotW} y2={PT + plotH} stroke="rgba(148,163,184,0.16)" strokeWidth="0.75" />
 
-      <path d={fp} fill="url(#pg-area)" clipPath="url(#pg-clip)" />
-      <path d={lp} fill="none" stroke="#7c3aed" strokeWidth="4" strokeOpacity="0.15"
-        strokeLinecap="round" strokeLinejoin="round" clipPath="url(#pg-clip)" filter="url(#pg-glow)" />
-      <path d={lp} fill="none" stroke="url(#pg-line)" strokeWidth="2.5"
-        strokeLinecap="round" strokeLinejoin="round" clipPath="url(#pg-clip)" />
+      {/* Left-to-right reveal: pg-clip clips to plot bounds, pg-reveal grows from left */}
+      <g clipPath="url(#pg-clip)">
+        <g clipPath="url(#pg-reveal)">
+          <path d={fp} fill="url(#pg-area)" />
+          <path d={lp} fill="none" stroke="#7c3aed" strokeWidth="4" strokeOpacity="0.15"
+            strokeLinecap="round" strokeLinejoin="round" filter="url(#pg-glow)" />
+          <path d={lp} fill="none" stroke="url(#pg-line)" strokeWidth="2.5"
+            strokeLinecap="round" strokeLinejoin="round" />
+        </g>
+      </g>
 
-      {/* Milestone markers — rendered as separate overlay, never part of line data */}
+      {/* Milestone markers — outside clip groups; fade in as reveal passes their x position */}
       {dotPts.map((p, i) => {
+        const dotFrac = plotW > 0 ? (p.sx - PL) / plotW : 0
+        const op      = animate ? Math.max(0, Math.min(1, (revealFrac - dotFrac + 0.04) / 0.04)) : 0
         const actColor   = (p.actId && activityColors?.get(p.actId)) ?? '#7c3aed'
         const actName    = (p.actId && activityNames?.get(p.actId)) ?? ''
         const iconPath   = getActivityIconPath(actName)
@@ -617,7 +696,7 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames }: { s
         const iconTy     = markerCy - 7
 
         return (
-          <g key={`mk${i}`}>
+          <g key={`mk${i}`} opacity={op.toFixed(3)}>
             {hasLine && (
               <line
                 x1={p.sx.toFixed(1)} y1={markerBotY.toFixed(1)}
@@ -644,16 +723,78 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames }: { s
           </g>
         )
       })}
-      {dotPts.map((p, i) => (
-        <g key={`dot${i}`}>
-          <circle cx={p.sx.toFixed(1)} cy={p.sy.toFixed(1)} r="6" fill="rgba(124,58,237,0.18)" />
-          <circle cx={p.sx.toFixed(1)} cy={p.sy.toFixed(1)} r="4"
-            fill="#7c3aed" stroke="rgba(221,214,254,0.5)" strokeWidth="1.5" />
-          <circle cx={p.sx.toFixed(1)} cy={p.sy.toFixed(1)} r="1.8" fill="#ede9fe" />
-        </g>
-      ))}
+      {dotPts.map((p, i) => {
+        const dotFrac2 = plotW > 0 ? (p.sx - PL) / plotW : 0
+        const op2      = animate ? Math.max(0, Math.min(1, (revealFrac - dotFrac2 + 0.04) / 0.04)) : 0
+        return (
+          <g key={`dot${i}`} opacity={op2.toFixed(3)}>
+            <circle cx={p.sx.toFixed(1)} cy={p.sy.toFixed(1)} r="6" fill="rgba(124,58,237,0.18)" />
+            <circle cx={p.sx.toFixed(1)} cy={p.sy.toFixed(1)} r="4"
+              fill="#7c3aed" stroke="rgba(221,214,254,0.5)" strokeWidth="1.5" />
+            <circle cx={p.sx.toFixed(1)} cy={p.sy.toFixed(1)} r="1.8" fill="#ede9fe" />
+          </g>
+        )
+      })}
     </svg>
   )
+}
+
+// ─── Personalized badge copy pools ────────────────────────────────────────────
+// {name} is replaced at render time with the user's first name.
+// Badge-earned sentence is only set for levels that actually grant a badge (4-5).
+// Message is selected once per date so the card is stable while the dashboard is open.
+
+interface BadgeCopy { headline: string; badge?: string; support?: string }
+
+const BADGE_COPY_POOLS: Record<PerformanceLevel, BadgeCopy[]> = {
+  0: [
+    { headline: 'Your day is still yours to shape, {name}.', support: 'Start one focused session and build from there.' },
+    { headline: 'It only takes one action to begin, {name}.', support: 'A small action now can create momentum for the rest of the day.' },
+    { headline: 'Your first win starts now, {name}.', support: "Press play and let's get into action 🚀🔥" },
+    { headline: 'Good things come to those who start.', support: 'Your progress starts with the next step.' },
+    { headline: 'You have to start somewhere, {name}.', support: "Let's get into action 🚀🔥" },
+  ],
+  1: [
+    { headline: 'Great start, {name}!', support: 'The important thing is that you started.' },
+    { headline: 'You have to start somewhere, {name}!', support: 'Now keep the momentum alive.' },
+    { headline: 'Momentum begins with one action, {name}!', support: 'Build on this first step.' },
+    { headline: 'You are officially in motion, {name}!', support: 'Keep going 🚀🔥' },
+    { headline: 'Good things come to those who start, {name}!', support: 'One focused session can change the direction of your day.' },
+  ],
+  2: [
+    { headline: 'Solid progress today, {name}!', support: 'Consistency will turn this into something powerful.' },
+    { headline: 'You are moving in the right direction, {name}!', support: 'Keep building on what you started.' },
+    { headline: 'Good momentum, {name}!', support: 'A little more focus can take today even further.' },
+    { headline: 'Great work, {name}!', support: 'Keep going 🚀🔥' },
+    { headline: 'Another productive step forward, {name}!', support: 'Consistency will turn this into something powerful.' },
+  ],
+  3: [
+    { headline: 'Strong performance, {name}!', support: 'Your consistency is producing results.' },
+    { headline: 'Impressive discipline, {name}!', support: 'Keep this momentum moving forward.' },
+    { headline: 'Excellent work, {name}!', support: 'You are building habits that compound into long-term success.' },
+    { headline: 'You are building serious momentum, {name}!', support: 'One more strong push can take you even higher.' },
+    { headline: 'Solid consistency, {name}!', support: 'This is the kind of day that adds up over time.' },
+  ],
+  4: [
+    { headline: 'Excellent progress, {name}!', badge: "You have earned today's Advanced Badge.", support: 'You are closing in on Elite Mode.' },
+    { headline: 'Strong work today, {name}!', badge: "You have earned today's Advanced Badge.", support: 'Your consistency is producing results.' },
+    { headline: 'Impressive discipline, {name}!', badge: "You have earned today's Advanced Badge.", support: 'Keep this momentum moving forward.' },
+    { headline: 'You are building serious momentum, {name}!', badge: "You have earned today's Advanced Badge.", support: 'One more strong push can take you even higher.' },
+    { headline: 'Remarkable effort, {name}!', badge: "You have earned today's Advanced Badge.", support: 'Your hard work is paying off.' },
+  ],
+  5: [
+    { headline: 'Excellent work, {name}!', badge: "You have earned today's Elite Badge.", support: 'Exceptional discipline and consistency.' },
+    { headline: 'Incredible work, {name}!', badge: "You have earned today's Elite Badge.", support: 'You showed up and delivered at an elite level.' },
+    { headline: 'Outstanding discipline, {name}!', badge: "You have earned today's Elite Badge.", support: 'This is what focused execution looks like.' },
+    { headline: 'Remarkable performance, {name}!', badge: "You have earned today's Elite Badge.", support: 'Another powerful day of disciplined action.' },
+    { headline: 'Elite effort today, {name}!', badge: "You have earned today's Elite Badge.", support: 'Exceptional discipline and consistency.' },
+  ],
+}
+
+function selectDailyMessage<T>(pool: T[], seed: string): T {
+  let hash = 0
+  for (let i = 0; i < seed.length; i++) hash += seed.charCodeAt(i)
+  return pool[hash % pool.length]
 }
 
 // ─── Badge asset map — add new entries as artwork is supplied ─────────────────
@@ -666,15 +807,26 @@ const BADGE_ASSETS: Partial<Record<PerformanceLevel, string>> = {
 // ─── Top-right achievement banner — driven by FinalPerformanceLevel ───────────
 
 function AchievementBanner({
-  tier, level, isDark, firstName, dateLabel,
+  tier, level, isDark, firstName, dateLabel, triggerShine = false,
 }: {
   tier: PerformanceTier; level: PerformanceLevel; isDark: boolean;
-  firstName?: string; dateLabel?: string
+  firstName?: string; dateLabel?: string; triggerShine?: boolean
 }) {
-  const isNoBadge  = level === 0
   const badgeAsset = BADGE_ASSETS[level] ?? null
-  const { color, glow, title, message, secondaryMessage } = tier
-  const greeting     = firstName ? `Congratulations, ${firstName}!` : 'Congratulations!'
+  const { color, glow } = tier
+
+  // Select copy pool entry once per day (stable seed = level + dateLabel)
+  const copy = useMemo(() => {
+    const pool = BADGE_COPY_POOLS[level] ?? BADGE_COPY_POOLS[0]
+    const raw  = selectDailyMessage(pool, `${level}-${dateLabel ?? ''}`)
+    const name = firstName?.trim() || ''
+    return {
+      headline: name ? raw.headline.replace('{name}', name) : raw.headline.replace(', {name}', '').replace(' {name}', ''),
+      badge:    raw.badge,
+      support:  raw.support,
+    }
+  }, [level, dateLabel, firstName])
+
   const [shineKey, setShineKey] = useState(0)
   const [showConfetti, setShowConfetti] = useState(false)
   const confettiFiredRef = useRef(false)
@@ -702,12 +854,13 @@ function AchievementBanner({
     return () => clearTimeout(id)
   }, [level])
 
-  // After 4 s delay, run a single shine sweep across the badge artwork
+  // Fire shine sweep once when triggerShine flips to true (orchestrated by parent)
+  const shineFiredRef = useRef(false)
   useEffect(() => {
-    if (!BADGE_ASSETS[level]) return
-    const id = setTimeout(() => setShineKey(k => k + 1), 4000)
-    return () => clearTimeout(id)
-  }, [level])
+    if (!triggerShine || !BADGE_ASSETS[level] || shineFiredRef.current) return
+    shineFiredRef.current = true
+    setShineKey(k => k + 1)
+  }, [triggerShine, level])
 
   return (
     <div
@@ -725,17 +878,17 @@ function AchievementBanner({
       )}
       <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none', background: 'linear-gradient(130deg, transparent 30%, rgba(255,255,255,0.025) 52%, transparent 74%)' }} />
 
-      {/* Greeting */}
+      {/* Personalized headline */}
       <div className="text-center mb-1 relative z-10">
         <p className="text-[11.5px] font-bold leading-snug" style={{ color }}>
-          {isNoBadge ? 'Your Daily Badge' : greeting}
+          {copy.headline}
         </p>
       </div>
 
       {/* Badge artwork — entrance pop applied to the entire artwork row */}
       <div className="flex justify-center items-center mb-1 relative z-10"
         style={{ animation: 'xp-badge-pop 700ms cubic-bezier(0.22, 1, 0.36, 1) both' }}>
-        {isNoBadge ? (
+        {level === 0 ? (
           /* Level 0 — no badge earned yet */
           <div style={{
             width: 80, height: 80, borderRadius: 20,
@@ -762,7 +915,7 @@ function AchievementBanner({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={badgeAsset}
-              alt={`XPadite ${title} Badge`}
+              alt={`XPadite Performance Badge`}
               style={{ width: 174, height: 145, objectFit: 'contain', display: 'block' }}
             />
             {/* Shine sweep — background-position animation keeps element stationary inside container */}
@@ -781,9 +934,7 @@ function AchievementBanner({
                   maskPosition: 'center',
                   maskRepeat: 'no-repeat',
                   background: 'linear-gradient(105deg, transparent 25%, rgba(255,255,255,0.04) 38%, rgba(255,255,255,0.88) 50%, rgba(255,255,255,0.04) 62%, transparent 75%)',
-                  backgroundSize: '400% 100%',
-                  backgroundRepeat: 'no-repeat',
-                  animation: 'xp-badge-shine 1600ms ease-in-out forwards',
+                  animation: 'xp-badge-shine 800ms ease-in-out forwards',
                   pointerEvents: 'none',
                 }}
               />
@@ -821,17 +972,15 @@ function AchievementBanner({
         )}
       </div>
 
-      {/* Rank title + messages */}
+      {/* Badge-earned sentence + supporting line */}
       <div className="text-center relative z-10 flex-1 flex flex-col justify-center">
-        <p className="text-[13px] font-bold leading-tight mb-1.5" style={{ color }}>{title}</p>
-        <p className="text-[10px] leading-relaxed"
-          style={{ color: isDark ? 'rgba(148,163,184,0.72)' : 'var(--xp-txt3)' }}>
-          {message}
-        </p>
-        {secondaryMessage && (
-          <p className="text-[9.5px] leading-relaxed font-semibold mt-1"
-            style={{ color: isDark ? `${color}cc` : color, opacity: 0.92 }}>
-            {secondaryMessage}
+        {copy.badge && (
+          <p className="text-[13px] font-bold leading-tight mb-1.5" style={{ color }}>{copy.badge}</p>
+        )}
+        {copy.support && (
+          <p className="text-[10px] leading-relaxed"
+            style={{ color: isDark ? 'rgba(148,163,184,0.72)' : 'var(--xp-txt3)' }}>
+            {copy.support}
           </p>
         )}
         {badgeAsset && dateLabel && (
@@ -991,7 +1140,9 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
   const isMaximized                 = false  // body layout is always normal; Fit to Screen uses CSS transform
   const [fitScale, setFitScale]     = useState(1)
   const [showExport, setShowExport] = useState(false)
-  const [showAiCoach, setShowAiCoach] = useState(false)
+  const [showAiCoach,      setShowAiCoach]      = useState(false)
+  const [aiCoachHover,    setAiCoachHover]    = useState(false)
+  const [aiCoachActive,   setAiCoachActive]   = useState(false)
   const [exportState, setExportState] = useState<ExportState>('idle')
   const [exportError, setExportError] = useState<string>('')
   const captureRef   = useRef<HTMLDivElement>(null)
@@ -1004,6 +1155,30 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // ── Dashboard animation sequence ────────────────────────────────────────────
+  // Prefers-reduced-motion: snap all widgets to their final state immediately.
+  const prefersReducedRef = useRef(
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
+  const [badgeShine,       setBadgeShine]       = useState(prefersReducedRef.current)
+  // Single flag triggers all four data widgets simultaneously (Phase 2)
+  const [dataRevealActive, setDataRevealActive] = useState(prefersReducedRef.current)
+
+  useEffect(() => {
+    if (prefersReducedRef.current) return
+    // Gauge starts immediately via its own implementation.
+    // Data widgets begin on an independent fixed timer 1200ms after the dashboard opens.
+    // Badge shine fires at ~95% of the 1300ms widget animation (≈1235ms after reveal starts).
+    const WIDGET_REVEAL_MS = 400
+    const WIDGET_MS        = 1300
+    const BADGE_START      = WIDGET_REVEAL_MS + Math.round(WIDGET_MS * 0.95)  // ≈2435ms
+    const timers = [
+      setTimeout(() => setDataRevealActive(true), WIDGET_REVEAL_MS),
+      setTimeout(() => setBadgeShine(true),        BADGE_START),
+    ]
+    return () => { timers.forEach(clearTimeout) }
+  }, [])
 
   // Compute scale factor so body CONTENT fits inside the full-screen shell without scrolling.
   // The shell is always full-width (absolute inset-0 in fit mode); only the body content scales.
@@ -1232,36 +1407,42 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
       bg:     isDark ? 'linear-gradient(135deg, #5B21B6 0%, #7E22CE 50%, #A21CAF 100%)'
                      : 'linear-gradient(135deg, #7C3AED 0%, #A855F7 50%, #D946EF 100%)',
       border: isDark ? 'rgba(162,28,175,0.46)' : 'rgba(126,34,206,0.45)',
+      glowRgb: '139,92,246',
     },
     {
       label: 'Longest Session', value: stats ? formatMs(stats.longestMs) : '—', sub: stats?.isPersonalBest ? '🔥 Best' : null, icon: '⚡',
       bg:     isDark ? 'linear-gradient(135deg, #1D4ED8 0%, #0369A1 52%, #0891B2 100%)'
                      : 'linear-gradient(135deg, #2563EB 0%, #0EA5E9 52%, #22D3EE 100%)',
       border: isDark ? 'rgba(8,145,178,0.46)' : 'rgba(14,165,233,0.45)',
+      glowRgb: '14,165,233',
     },
     {
       label: 'Sessions', value: stats ? String(stats.sessionCount) : '—', sub: null, icon: '📋',
       bg:     isDark ? 'linear-gradient(135deg, #0E7490 0%, #0F766E 54%, #0D9488 100%)'
                      : 'linear-gradient(135deg, #06B6D4 0%, #14B8A6 54%, #2DD4BF 100%)',
       border: isDark ? 'rgba(13,148,136,0.46)' : 'rgba(20,184,166,0.44)',
+      glowRgb: '20,184,166',
     },
     {
       label: 'Tasks Done', value: stats ? `${stats.completedTasks}/${stats.totalTasks}` : '—', sub: stats && stats.totalTasks > 0 ? `${Math.round((stats.completedTasks / stats.totalTasks) * 100)}% complete` : null, icon: '✓',
       bg:     isDark ? 'linear-gradient(135deg, #047857 0%, #15803D 52%, #4D7C0F 100%)'
                      : 'linear-gradient(135deg, #059669 0%, #22C55E 52%, #84CC16 100%)',
       border: isDark ? 'rgba(21,128,61,0.46)' : 'rgba(34,197,94,0.44)',
+      glowRgb: '34,197,94',
     },
     {
       label: 'Deep Work', value: stats ? formatMs(stats.deepWorkMs) : '—', sub: null, icon: '🧠',
       bg:     isDark ? 'linear-gradient(135deg, #9D174D 0%, #BE185D 48%, #86198F 100%)'
                      : 'linear-gradient(135deg, #DB2777 0%, #EC4899 48%, #C026D3 100%)',
       border: isDark ? 'rgba(190,24,93,0.46)' : 'rgba(219,39,119,0.46)',
+      glowRgb: '236,72,153',
     },
     {
       label: 'Focus Score', value: stats ? `${stats.score}%` : '—', sub: stats ? (stats.score >= 80 ? 'Excellent' : stats.score >= 60 ? 'Good' : stats.score >= 40 ? 'Average' : 'Building') : null, icon: '🎯',
       bg:     isDark ? 'linear-gradient(135deg, #5B21B6 0%, #4338CA 52%, #1D4ED8 100%)'
                      : 'linear-gradient(135deg, #7C3AED 0%, #6366F1 52%, #3B82F6 100%)',
       border: isDark ? 'rgba(99,102,241,0.46)' : 'rgba(99,102,241,0.46)',
+      glowRgb: '99,102,241',
     },
   ]
 
@@ -1370,7 +1551,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
     <div
       className={fitMode
         ? 'fixed inset-0 z-50 overflow-hidden'
-        : 'fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-4 sm:pt-6'}
+        : 'fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-4'}
       style={fitMode ? undefined : { background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
       onClick={onClose}
     >
@@ -1483,11 +1664,11 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                   key={m.label}
                   className={`rounded-2xl flex flex-col relative overflow-hidden xp-kpi-card ${isMaximized ? 'p-2' : 'p-2.5'}`}
                   style={{
+                    '--kpi-glow-rgb': m.glowRgb,
                     background: m.bg,
                     border: `0.5px solid ${m.border}`,
                     minHeight: isMaximized ? 56 : 80,
-                    boxShadow: '0 6px 20px rgba(0,0,0,0.20), inset 0 1px 0 rgba(255,255,255,0.12)',
-                  }}
+                  } as React.CSSProperties}
                 >
                   {/* Glass sheen — smooth top highlight */}
                   <div style={{
@@ -1556,7 +1737,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
             </div>
 
             {/* RIGHT — Congratulations / Achievement badge */}
-            <AchievementBanner tier={finalTier} level={finalLevel} isDark={isDark} firstName={firstName} dateLabel={dateLabel} />
+            <AchievementBanner tier={finalTier} level={finalLevel} isDark={isDark} firstName={firstName} dateLabel={dateLabel} triggerShine={badgeShine} />
           </div>
 
           {/* ══════════════════════════════════════════════════════════════════
@@ -1592,6 +1773,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                   totalMs={stats?.totalMs ?? 0}
                   activityColors={new Map<string, string>(activities.map(a => [a.id, a.color] as [string, string]))}
                   activityNames={new Map<string, string>(activities.map(a => [a.id, a.name] as [string, string]))}
+                  animate={dataRevealActive}
                 />
               </div>
             </div>
@@ -1606,6 +1788,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                 <TodayOverviewBars
                   data={stats?.actBreakdown.map(a => ({ label: a.name, ms: a.ms, color: a.color })) ?? []}
                   totalMs={stats?.totalMs ?? 0}
+                  animate={dataRevealActive}
                 />
               </div>
             </div>
@@ -1632,6 +1815,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                     size={isMaximized ? 'sm' : 'lg'}
                     hoveredIdx={actHovIdx}
                     onHoverIdx={setActHovIdx}
+                    animate={dataRevealActive}
                   />
                   <div className={`w-full ${isMaximized ? 'mt-1 flex-1 min-h-0 overflow-y-auto' : 'mt-5'}`}>
                     {stats!.actBreakdown.map((a, i) => {
@@ -1805,10 +1989,11 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                           style={{ background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }}>
                           <div className="h-full rounded-full"
                             style={{
-                              width: `${barPct > 0 ? Math.max(barPct, 4) : 0}%`,
+                              width: `${dataRevealActive ? (barPct > 0 ? Math.max(barPct, 4) : 0) : 0}%`,
                               background: gradStr,
                               boxShadow: isDark ? `0 0 12px rgba(124,58,237,0.44), 0 1px 0 rgba(255,255,255,0.12) inset` : '0 1px 0 rgba(255,255,255,0.35) inset',
-                              transition: 'width 400ms cubic-bezier(0.22,1,0.36,1)',
+                              transition: 'width 1300ms cubic-bezier(0.4, 0, 0.2, 1)',
+                              transitionDelay: dataRevealActive ? `${taskIdx * 25}ms` : '0ms',
                             }} />
                         </div>
                         {/* Task title + duration (pct) on one row */}
@@ -1847,36 +2032,45 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
           {/* ── Daily Summary ─────────────────────────────────────────────── */}
           <div className={`rounded-2xl ${isMaximized ? 'px-3 py-2' : 'px-4 py-3'}`}
             style={{
-              background: isDark
-                ? 'linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(99,102,241,0.05) 100%)'
-                : 'linear-gradient(135deg, rgba(124,58,237,0.05) 0%, rgba(99,102,241,0.03) 100%)',
-              border: isDark ? '0.5px solid rgba(124,58,237,0.22)' : '0.5px solid rgba(124,58,237,0.15)',
-              boxShadow: isDark ? '0 1px 12px rgba(124,58,237,0.10)' : 'none',
+              background: 'linear-gradient(135deg, rgba(109,40,217,0.82) 0%, rgba(79,70,229,0.68) 100%)',
+              border: '0.5px solid rgba(192,132,252,0.32)',
+              boxShadow: '0 4px 22px rgba(109,40,217,0.30), 0 1px 8px rgba(88,28,135,0.18), inset 0 1px 0 rgba(255,255,255,0.10)',
             }}>
             <div className="flex items-start gap-3.5">
               <span className="text-[18px] flex-shrink-0 mt-0.5">🤖</span>
               <div className="flex-1 min-w-0">
                 <div className={`flex items-center justify-between gap-3 ${isMaximized ? 'mb-1' : 'mb-1.5'}`}>
                   <p className="text-[10px] font-bold tracking-widest uppercase"
-                    style={{ color: '#a78bfa', letterSpacing: '0.08em' }}>
+                    style={{ color: '#ffffff', letterSpacing: '0.08em' }}>
                     Daily Summary
                   </p>
                   <button
                     onClick={() => setShowAiCoach(true)}
                     data-export-exclude="true"
-                    className="flex-shrink-0 flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-xl transition-opacity hover:opacity-90"
+                    onMouseEnter={() => setAiCoachHover(true)}
+                    onMouseLeave={() => { setAiCoachHover(false); setAiCoachActive(false) }}
+                    onMouseDown={() => setAiCoachActive(true)}
+                    onMouseUp={() => setAiCoachActive(false)}
+                    className="flex-shrink-0 flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-xl"
                     style={{
-                      background: isDark
-                        ? 'linear-gradient(135deg, rgba(124,58,237,0.28) 0%, rgba(99,102,241,0.22) 100%)'
-                        : 'linear-gradient(135deg, rgba(124,58,237,0.10) 0%, rgba(99,102,241,0.07) 100%)',
-                      border: isDark ? '0.5px solid rgba(167,139,250,0.38)' : '0.5px solid rgba(124,58,237,0.25)',
-                      color: isDark ? '#c4b5fd' : '#7c3aed',
+                      background: 'rgba(255,255,255,1)',
+                      border: `1px solid rgba(139,92,246,${aiCoachHover ? '0.55' : '0.32'})`,
+                      color: '#7c3aed',
+                      boxShadow: aiCoachActive
+                        ? '0 1px 3px rgba(109,40,217,0.10)'
+                        : aiCoachHover
+                        ? '0 0 0 1px rgba(124,58,237,0.08), 0 2px 10px rgba(109,40,217,0.28), 0 5px 18px rgba(109,40,217,0.13)'
+                        : '0 1px 4px rgba(109,40,217,0.12), 0 2px 8px rgba(109,40,217,0.06)',
+                      transform: prefersReducedRef.current ? 'none' : aiCoachActive ? 'scale(0.986)' : aiCoachHover ? 'scale(1.018)' : 'scale(1)',
+                      transition: aiCoachActive
+                        ? 'all 80ms ease'
+                        : 'background 200ms ease, box-shadow 200ms ease, transform 200ms cubic-bezier(0.22,1,0.36,1), border-color 200ms ease',
                     }}>
-                    🧠 AI Coach
+                    🤖 AI Coach
                   </button>
                 </div>
                 <p className="text-[11.5px] leading-relaxed"
-                  style={{ color: isDark ? 'rgba(203,213,225,0.80)' : 'var(--xp-txt2)' }}>
+                  style={{ color: 'rgba(255,255,255,0.88)' }}>
                   {summary}
                 </p>
               </div>

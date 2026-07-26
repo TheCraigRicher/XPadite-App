@@ -12,7 +12,7 @@ import { DayModal } from './DayModal'
 import { MonthZoomModal } from './MonthZoomModal'
 import { MonthFullPage } from './MonthFullPage'
 import { DayDashboardModal } from './DayDashboardModal'
-import { YearlyDashboardModal } from './YearlyDashboardModal'
+import { AnalyticsPage } from './AnalyticsPage'
 import { GalleryModal } from './GalleryModal'
 import { SettingsModal } from './SettingsModal'
 import { MobileBottomNav } from './MobileBottomNav'
@@ -451,7 +451,7 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [zoomedMonth, setZoomedMonth]               = useState<number | null>(null)
   const [fullPageMonth, setFullPageMonth]           = useState<number | null>(null)
   const [motivationOpen, setMotivationOpen]         = useState(false)
-  const [yearlyOpen, setYearlyOpen]                 = useState(false)
+  const [analyticsOpen, setAnalyticsOpen]           = useState(false)
   const [galleryOpen, setGalleryOpen]               = useState(false)
   const [settingsOpen, setSettingsOpen]             = useState(false)
   const [profileOpen, setProfileOpen]               = useState(false)
@@ -460,13 +460,13 @@ function ThemedApp(_props: XpaditeAppProps) {
   // ── Mobile tab ────────────────────────────────────────────────────────────────
   const [mobileTab, setMobileTab] = useState<MobileTab>('overview')
 
-  // When Analytics tab selected → auto-open yearly modal
+  // When Analytics tab selected → auto-open analytics hub
   useEffect(() => {
-    if (mobileTab === 'analytics') setYearlyOpen(true)
+    if (mobileTab === 'analytics') setAnalyticsOpen(true)
   }, [mobileTab])
 
-  function handleYearlyClose() {
-    setYearlyOpen(false)
+  function handleAnalyticsClose() {
+    setAnalyticsOpen(false)
     if (mobileTab === 'analytics') setMobileTab('overview')
   }
 
@@ -536,7 +536,7 @@ function ThemedApp(_props: XpaditeAppProps) {
       <AppSidebar
         onGallery={() => setGalleryOpen(true)}
         onSettings={() => setSettingsOpen(true)}
-        onAnalytics={() => setYearlyOpen(true)}
+        onAnalytics={() => setAnalyticsOpen(true)}
         onMotivate={() => setMotivationOpen(true)}
         onQotd={triggerQotd}
         onProfile={() => setProfileOpen(true)}
@@ -579,7 +579,7 @@ function ThemedApp(_props: XpaditeAppProps) {
 
       {/* Header */}
       <AppHeader
-        onYearDash={() => setYearlyOpen(true)}
+        onAnalytics={() => setAnalyticsOpen(true)}
         onMotivate={() => setMotivationOpen(true)}
       />
 
@@ -674,8 +674,7 @@ function ThemedApp(_props: XpaditeAppProps) {
         activeTab={mobileTab}
         onTabChange={tab => {
           setMobileTab(tab)
-          // Analytics tab immediately opens the yearly modal
-          if (tab === 'analytics') setYearlyOpen(true)
+          if (tab === 'analytics') setAnalyticsOpen(true)
         }}
       />
 
@@ -718,7 +717,7 @@ function ThemedApp(_props: XpaditeAppProps) {
         />
       )}
 
-      {yearlyOpen && <YearlyDashboardModal onClose={handleYearlyClose} />}
+      {analyticsOpen && <AnalyticsPage onClose={handleAnalyticsClose} />}
 
       {motivationOpen && <MotivationModal onClose={() => setMotivationOpen(false)} />}
 

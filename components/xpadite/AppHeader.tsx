@@ -47,11 +47,11 @@ const MoonIcon = () => (
 )
 
 interface AppHeaderProps {
-  onYearDash: () => void
+  onAnalytics: () => void
   onMotivate: () => void
 }
 
-export function AppHeader({ onYearDash, onMotivate }: AppHeaderProps) {
+export function AppHeader({ onAnalytics, onMotivate }: AppHeaderProps) {
   const {
     isDark, setIsDark,
     activeSession, setActiveSession,
@@ -431,11 +431,11 @@ export function AppHeader({ onYearDash, onMotivate }: AppHeaderProps) {
             </button>
 
             <button
-              onClick={onYearDash}
+              onClick={onAnalytics}
               className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150 hover:bg-white/10 flex-shrink-0"
               style={{ color: 'rgba(255,255,255,0.65)', border: '0.5px solid rgba(255,255,255,0.12)' }}
             >
-              📊 Yearly
+              📈 Analytics
             </button>
 
             {ThemeToggle}

@@ -531,10 +531,11 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames, anima
   const PL = 40, PB = 26, PT = 14, PR = 12
   const plotW = VW - PL - PR
   const plotH = VH - PT - PB
+  const DAY_MS = 86_400_000
 
-  // Filter valid sessions and sort chronologically — critical for non-crossing path
+  // Filter valid completed sessions and sort chronologically
   const sorted = [...sessions]
-    .filter(s => s.endTs !== null && s.endTs > s.startTs)
+    .filter(s => s.endTs !== null && getSessionDurationMs(s.startTs, s.endTs!) > 0)
     .sort((a, b) => a.startTs - b.startTs)
 
   if (sorted.length === 0) {
@@ -555,57 +556,81 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames, anima
     )
   }
 
-  const first    = sorted[0].startTs
-  const last     = Math.max(...sorted.map(s => s.endTs!))
-  const timeSpan = Math.max(last - first, 60_000)
-  const yMax     = niceYMax(totalMs)
+  // Derive day-start (local midnight) directly from the first session's timestamp.
+  // This guarantees x-axis alignment regardless of what APP_YEAR/month/day props
+  // the parent holds — the sessions themselves are the authoritative time reference.
+  const _d0 = new Date(sorted[0].startTs)
+  _d0.setHours(0, 0, 0, 0)
+  const dayStartTs = _d0.getTime()
 
-  // Build strictly monotonic step-function: each segment is horizontal (gap) or
-  // diagonal upward (active session). We clamp startTx to prevEndTx so overlapping
-  // sessions never produce a backward x movement.
-  const pts: { tx: number; ms: number }[] = [{ tx: 0, ms: 0 }]
+  // --- Pass 1: build (txMs, ms) point pairs from raw session boundaries ---
+  // txMs  = ms elapsed since local midnight (x position)
+  // ms    = cumulative productive ms at that point (y position)
+  //
+  // Each session contributes exactly two points:
+  //   (sessionStart, cum_before)  — start of rising segment
+  //   (sessionEnd,   cum_after)   — end of rising segment
+  // Between sessions the y value is held constant → horizontal flat segment.
+  interface RawPt { txMs: number; ms: number }
+  const rawPts: RawPt[] = [{ txMs: 0, ms: 0 }]
   let cum = 0
-  let prevEndTx = 0
+  let prevEndTxMs = 0
 
   for (const s of sorted) {
-    const startTx = Math.max(s.startTs - first, prevEndTx)
-    const endTx   = s.endTs! - first
-    if (endTx <= startTx) continue
-    pts.push({ tx: startTx, ms: cum })
-    cum += getSessionDurationMs(s.startTs, s.endTs!)
-    pts.push({ tx: endTx, ms: cum })
-    prevEndTx = endTx
+    const dur      = getSessionDurationMs(s.startTs, s.endTs!)
+    const sTxMs    = Math.max(s.startTs - dayStartTs, prevEndTxMs)   // clamp overlaps
+    const eTxMs    = Math.min(sTxMs + dur, DAY_MS)                   // clamp to day boundary
+    rawPts.push({ txMs: sTxMs, ms: cum })   // flat segment ends here (inactivity)
+    cum += dur
+    rawPts.push({ txMs: eTxMs, ms: cum })   // rising segment ends here (work done)
+    prevEndTxMs = eTxMs
   }
-  if (pts[pts.length - 1].tx < timeSpan) pts.push({ tx: timeSpan, ms: cum })
 
-  const toX = (tx: number) => PL + (tx / timeSpan) * plotW
-  const toY = (ms: number) => PT + plotH - (ms / yMax) * plotH
+  // --- Scale ---
+  const yMax    = niceYMax(Math.max(cum, totalMs))
+  const padPx   = plotH * 0.06   // 6% bottom pad — zero line floats above x-axis
+  const usableH = plotH - padPx
 
-  const svgPts  = pts.map(p => ({ sx: toX(p.tx), sy: toY(p.ms) }))
-  const lp      = svgPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.sx.toFixed(1)} ${p.sy.toFixed(1)}`).join(' ')
-  const lastPt  = svgPts[svgPts.length - 1]
-  const firstPt = svgPts[0]
-  const baseY   = (PT + plotH).toFixed(1)
-  const fp      = `${lp} L ${lastPt.sx.toFixed(1)} ${baseY} L ${firstPt.sx.toFixed(1)} ${baseY} Z`
+  const toX = (txMs: number) => PL + (txMs / DAY_MS) * plotW
+  const toY = (ms: number)   => PT + plotH - padPx - (ms / yMax) * usableH
 
-  // Milestone dot positions: one per original session end
+  // --- SVG coordinates for the solid path ---
+  const svgSolid = rawPts.map(p => ({ sx: toX(p.txMs), sy: toY(p.ms) }))
+  const solidLP  = svgSolid.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.sx.toFixed(1)} ${p.sy.toFixed(1)}`).join(' ')
+
+  // Dotted continuation: flat from last session end → end of day
+  const dottedSx   = toX(prevEndTxMs)
+  const dottedY    = toY(cum)
+  const dottedEndX = toX(DAY_MS)
+  const dottedLP   = `M ${dottedSx.toFixed(1)} ${dottedY.toFixed(1)} L ${dottedEndX.toFixed(1)} ${dottedY.toFixed(1)}`
+
+  // Gradient fill covers solid + dotted region, closed to the x-axis baseline
+  const baseY  = (PT + plotH).toFixed(1)
+  const fillLP = solidLP + ` L ${dottedEndX.toFixed(1)} ${dottedY.toFixed(1)}`
+  const fp     = `${fillLP} L ${dottedEndX.toFixed(1)} ${baseY} L ${svgSolid[0].sx.toFixed(1)} ${baseY} Z`
+
+  // Milestone dots: one per session end, placed at the accumulated cumulative total
   let dotCum = 0
   const dotPts: { sx: number; sy: number; cumMs: number; actId?: string }[] = []
   for (const s of sorted) {
-    dotCum += getSessionDurationMs(s.startTs, s.endTs!)
-    dotPts.push({ sx: toX(s.endTs! - first), sy: toY(dotCum), cumMs: dotCum, actId: s.actId })
+    const dur   = getSessionDurationMs(s.startTs, s.endTs!)
+    dotCum += dur
+    const eTxMs = Math.min(Math.max(s.startTs - dayStartTs, 0) + dur, DAY_MS)
+    dotPts.push({ sx: toX(eTxMs), sy: toY(dotCum), cumMs: dotCum, actId: s.actId })
   }
 
-  const YTICKS = 5, XTICKS = 5
-  const fmtT = (offsetMs: number) => {
-    const d = new Date(first + offsetMs)
+  // X-axis: 4 divisions = clean 6-hour intervals (12am → 6am → 12pm → 6pm → 12am)
+  const XTICKS = 4, YTICKS = 5, MARKER_R = 10
+  // Label color: readable in both light and dark mode
+  const LABEL_FILL = 'rgba(100,116,139,0.72)'
+
+  const fmtT = (txMs: number) => {
+    const d = new Date(dayStartTs + txMs)
     const h = d.getHours(), m = d.getMinutes()
     const ap = h >= 12 ? 'pm' : 'am'
     const h12 = h % 12 || 12
     return m === 0 ? `${h12}${ap}` : `${h12}:${m.toString().padStart(2, '0')}`
   }
-
-  const MARKER_R = 10
 
   return (
     <svg viewBox={`0 0 ${VW} ${VH}`} style={{ width: '100%', height: '100%', display: 'block' }}>
@@ -631,29 +656,31 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames, anima
         </clipPath>
       </defs>
 
+      {/* Y-axis gridlines and labels */}
       {Array.from({ length: YTICKS + 1 }, (_, i) => {
         const frac = i / YTICKS
-        const y = PT + plotH * (1 - frac)
+        const y = toY(frac * yMax)
         return (
           <g key={`yg${i}`}>
             <line x1={PL} y1={y} x2={PL + plotW} y2={y}
               stroke="rgba(148,163,184,0.09)" strokeWidth="0.5" strokeDasharray="2,5" />
-            <text x={PL - 6} y={y + 3.5} textAnchor="end" fontSize="8" fill="rgba(148,163,184,0.45)">
+            <text x={PL - 6} y={y + 3.5} textAnchor="end" fontSize="8" fill={LABEL_FILL}>
               {fmtHrTick(frac * yMax)}
             </text>
           </g>
         )
       })}
 
+      {/* X-axis gridlines and labels — one every 6 hours */}
       {Array.from({ length: XTICKS + 1 }, (_, i) => {
-        const frac = i / XTICKS
-        const x = PL + plotW * frac
+        const txMs = (i / XTICKS) * DAY_MS
+        const x = toX(txMs)
         return (
           <g key={`xg${i}`}>
             <line x1={x} y1={PT} x2={x} y2={PT + plotH}
               stroke="rgba(148,163,184,0.06)" strokeWidth="0.5" />
-            <text x={x} y={PT + plotH + 15} textAnchor="middle" fontSize="8" fill="rgba(148,163,184,0.45)">
-              {fmtT(frac * timeSpan)}
+            <text x={x} y={PT + plotH + 15} textAnchor="middle" fontSize="8" fill={LABEL_FILL}>
+              {fmtT(txMs)}
             </text>
           </g>
         )
@@ -662,64 +689,53 @@ function ProgressGraph({ sessions, totalMs, activityColors, activityNames, anima
       <line x1={PL} y1={PT} x2={PL} y2={PT + plotH} stroke="rgba(148,163,184,0.16)" strokeWidth="0.75" />
       <line x1={PL} y1={PT + plotH} x2={PL + plotW} y2={PT + plotH} stroke="rgba(148,163,184,0.16)" strokeWidth="0.75" />
 
-      {/* Left-to-right reveal: pg-clip clips to plot bounds, pg-reveal grows from left */}
+      {/* Left-to-right reveal: pg-clip = plot bounds, pg-reveal = growing left-to-right rect */}
       <g clipPath="url(#pg-clip)">
         <g clipPath="url(#pg-reveal)">
+          {/* Gradient fill under the entire 24h curve */}
           <path d={fp} fill="url(#pg-area)" />
-          <path d={lp} fill="none" stroke="#7c3aed" strokeWidth="4" strokeOpacity="0.15"
+          {/* Soft glow on the solid portion */}
+          <path d={solidLP} fill="none" stroke="#7c3aed" strokeWidth="4" strokeOpacity="0.15"
             strokeLinecap="round" strokeLinejoin="round" filter="url(#pg-glow)" />
-          <path d={lp} fill="none" stroke="url(#pg-line)" strokeWidth="2.5"
+          {/* Solid line: midnight → last session end */}
+          <path d={solidLP} fill="none" stroke="url(#pg-line)" strokeWidth="2.5"
             strokeLinecap="round" strokeLinejoin="round" />
+          {/* Dotted continuation: last session end → midnight */}
+          <path d={dottedLP} fill="none" stroke="#7c3aed" strokeWidth="2"
+            strokeDasharray="4,4" strokeOpacity="0.35" strokeLinecap="round" />
         </g>
       </g>
 
-      {/* Milestone markers — outside clip groups; fade in as reveal passes their x position */}
+      {/* Milestone markers — outside clip groups; fade in as reveal passes their x */}
       {dotPts.map((p, i) => {
-        const dotFrac = plotW > 0 ? (p.sx - PL) / plotW : 0
-        const op      = animate ? Math.max(0, Math.min(1, (revealFrac - dotFrac + 0.04) / 0.04)) : 0
+        const dotFrac    = plotW > 0 ? (p.sx - PL) / plotW : 0
+        const op         = animate ? Math.max(0, Math.min(1, (revealFrac - dotFrac + 0.04) / 0.04)) : 0
         const actColor   = (p.actId && activityColors?.get(p.actId)) ?? '#7c3aed'
         const actName    = (p.actId && activityNames?.get(p.actId)) ?? ''
         const iconPath   = getActivityIconPath(actName)
         const timeLabel  = p.cumMs >= 3_600_000
           ? `${(p.cumMs / 3_600_000).toFixed(1)}h`
           : `${Math.round(p.cumMs / 60_000)}m`
-
-        // Position marker above the dot; clamp so it stays inside plot
         const markerCy   = Math.max(p.sy - 48, PT + MARKER_R + 6)
         const markerBotY = markerCy + MARKER_R
         const dotTopY    = p.sy - 6
-        // Guide line only when marker and dot are clearly separated
         const hasLine    = dotTopY > markerBotY + 4
-        // Scale 24×24 icon path down to 14×14 centered on (p.sx, markerCy)
         const iconS      = 14 / 24
-        const iconTx     = p.sx - 7
-        const iconTy     = markerCy - 7
-
         return (
           <g key={`mk${i}`} opacity={op.toFixed(3)}>
             {hasLine && (
-              <line
-                x1={p.sx.toFixed(1)} y1={markerBotY.toFixed(1)}
+              <line x1={p.sx.toFixed(1)} y1={markerBotY.toFixed(1)}
                 x2={p.sx.toFixed(1)} y2={dotTopY.toFixed(1)}
-                stroke={actColor} strokeWidth="0.75" strokeDasharray="2,2" opacity="0.38"
-              />
+                stroke={actColor} strokeWidth="0.75" strokeDasharray="2,2" opacity="0.38" />
             )}
             <text x={p.sx.toFixed(1)} y={(markerCy - MARKER_R - 4).toFixed(1)}
               textAnchor="middle" fontSize="7.5" fontWeight="600"
-              fill={actColor} fillOpacity="0.72">{timeLabel}</text>
+              fill={actColor} fillOpacity="0.80">{timeLabel}</text>
             <circle cx={p.sx.toFixed(1)} cy={markerCy.toFixed(1)} r={MARKER_R}
-              fill={actColor} fillOpacity="0.13"
-              stroke={actColor} strokeWidth="1" strokeOpacity="0.5" />
-            {/* Activity icon as pure SVG path — no external dependencies */}
-            <path
-              d={iconPath}
-              fill="none"
-              stroke={actColor}
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              transform={`translate(${iconTx.toFixed(2)},${iconTy.toFixed(2)}) scale(${iconS.toFixed(4)})`}
-            />
+              fill={actColor} fillOpacity="0.13" stroke={actColor} strokeWidth="1" strokeOpacity="0.5" />
+            <path d={iconPath} fill="none" stroke={actColor} strokeWidth="2"
+              strokeLinecap="round" strokeLinejoin="round"
+              transform={`translate(${(p.sx - 7).toFixed(2)},${(markerCy - 7).toFixed(2)}) scale(${(14/24).toFixed(4)})`} />
           </g>
         )
       })}

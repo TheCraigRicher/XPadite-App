@@ -1011,6 +1011,7 @@ function AICoachCard({
       onClick={onActivate}
       onFocus={onActivate}
       style={{
+        flex: 1,
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
@@ -1026,7 +1027,7 @@ function AICoachCard({
       {/* ── Waveform (dark, top of card, no card header) ── */}
       <div
         style={{
-          padding: "12px 12px 8px",
+          padding: "14px 12px 12px",
           flexShrink: 0,
           background: isDark ? "rgba(8,4,20,0.98)" : "#ffffff",
         }}
@@ -1040,7 +1041,7 @@ function AICoachCard({
       <div
         style={{
           flex: 1,
-          margin: "0 12px 8px",
+          margin: "0 12px 12px",
           border: `1px solid ${isDark ? "rgba(147,51,234,0.3)" : "rgba(229,224,255,0.9)"}`,
           borderRadius: 16,
           overflow: "hidden",
@@ -1061,7 +1062,7 @@ function AICoachCard({
 
       {/* ── Suggested Goals (empty state only) ── */}
       {messages.length === 0 && !isStreaming && !inputDisabled && (
-        <div style={{ padding: "0 12px 8px", flexShrink: 0 }}>
+        <div style={{ padding: "0 12px 14px", flexShrink: 0 }}>
           <div
             style={{
               borderRadius: 14,
@@ -1970,6 +1971,7 @@ function TaskManagerCard({
       onClick={onActivate}
       onFocus={onActivate}
       style={{
+        flex: 1,
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
@@ -2697,7 +2699,7 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
           flex: 1,
           minHeight: 0,
           overflow: "hidden",
-          padding: "12px 14px 0",
+          padding: "8px 8px 0",
           display: "flex",
           justifyContent: "center",
         }}
@@ -2705,11 +2707,10 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
         <div
           style={{
             width: "100%",
-            maxWidth: activeTab === "calendar" ? 680 : 420,
+            maxWidth: 760,
             display: "flex",
             flexDirection: "column",
             minHeight: 0,
-            transition: "max-width 220ms ease",
           }}
         >
           {renderSinglePanel()}
@@ -2735,7 +2736,7 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
           100% { background-position: 0% 50%; }
         }
         .xp-aic-hdr {
-          background: linear-gradient(135deg, #2d0657 0%, #4c1d95 22%, #6d28d9 46%, #4f46e5 70%, #3b1480 88%, #5b21b6 100%);
+          background: linear-gradient(135deg, #5b21b6 0%, #6d28d9 22%, #7c3aed 46%, #8b5cf6 65%, #7c3aed 82%, #6d28d9 100%);
           background-size: 320% 320%;
           animation: xpAicHdrFlow 14s ease infinite;
         }
@@ -2743,9 +2744,15 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
     <div
       className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-3 ${isDark ? "xp-dark" : "xp-light"}`}
       style={{
-        background: isDark ? "rgba(0,0,0,0.82)" : "rgba(0,0,0,0.55)",
+        background: isDark
+          ? panelFocusMode ? "rgba(0,0,0,0.88)" : "rgba(0,0,0,0.82)"
+          : panelFocusMode ? "rgba(0,0,0,0.64)" : "rgba(0,0,0,0.55)",
         fontFamily:
           '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        backdropFilter: panelFocusMode ? "blur(9px) saturate(0.85)" : "blur(0px)",
+        WebkitBackdropFilter: panelFocusMode ? "blur(9px) saturate(0.85)" : "blur(0px)",
+        transition:
+          "background 280ms ease-in-out, backdrop-filter 280ms ease-in-out, -webkit-backdrop-filter 280ms ease-in-out",
       }}
       onClick={onClose}
     >
@@ -2791,17 +2798,27 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
         style={{
           background: S0,
           border: isDark
-            ? "0.5px solid rgba(124,58,237,0.22)"
-            : "0.5px solid rgba(124,58,237,0.15)",
+            ? panelFocusMode
+              ? "0.5px solid rgba(124,58,237,0.32)"
+              : "0.5px solid rgba(124,58,237,0.22)"
+            : panelFocusMode
+              ? "0.5px solid rgba(124,58,237,0.22)"
+              : "0.5px solid rgba(124,58,237,0.15)",
           boxShadow: isDark
-            ? "0 30px 70px rgba(0,0,0,0.75), 0 0 0 0.5px rgba(124,58,237,0.16), 0 0 48px rgba(124,58,237,0.1), inset 0 1px 0 rgba(255,255,255,0.04)"
-            : "0 20px 50px rgba(0,0,0,0.12), 0 0 32px rgba(124,58,237,0.07)",
-          marginBottom: 20,
-          // KEY: bound the modal height to the viewport so the bottom is never cut off
-          maxHeight: "calc(100vh - 40px)",
+            ? panelFocusMode
+              ? "0 40px 90px rgba(0,0,0,0.85), 0 0 0 0.5px rgba(124,58,237,0.28), 0 0 72px rgba(124,58,237,0.16), inset 0 1px 0 rgba(255,255,255,0.05)"
+              : "0 30px 70px rgba(0,0,0,0.75), 0 0 0 0.5px rgba(124,58,237,0.16), 0 0 48px rgba(124,58,237,0.1), inset 0 1px 0 rgba(255,255,255,0.04)"
+            : panelFocusMode
+              ? "0 28px 64px rgba(0,0,0,0.18), 0 0 44px rgba(124,58,237,0.12)"
+              : "0 20px 50px rgba(0,0,0,0.12), 0 0 32px rgba(124,58,237,0.07)",
+          marginBottom: 4,
+          // Always fill the viewport — minHeight stretches to full height, maxHeight caps overflow
+          minHeight: "calc(100vh - 32px)",
+          maxHeight: "calc(100vh - 32px)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
+          transition: "box-shadow 280ms ease-in-out, border-color 280ms ease-in-out",
         }}
         onClick={(e) => e.stopPropagation()}
       >

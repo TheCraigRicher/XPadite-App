@@ -16,7 +16,13 @@ import type {
   DraftTask,
   AIPlanState,
   Activity,
+  TaskAttachment,
 } from "./types";
+import {
+  buildAttachment,
+  AttachmentItem,
+  ImageLightbox,
+} from "./attachmentUtils";
 
 // ═══════════════════════════════════════════════════════════════════
 // SECTION 1 — HELPERS
@@ -1604,6 +1610,8 @@ function PlaceholderTaskRow({ idx }: { idx: number }) {
   );
 }
 
+// ── TaskCard ──────────────────────────────────────────────────────────────────
+
 function TaskCard({
   task,
   idx,
@@ -1619,6 +1627,33 @@ function TaskCard({
 }) {
   const { isDark } = useApp();
   const [editing, setEditing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const notesRef = useRef<HTMLTextAreaElement>(null);
+  const attachments = task.attachments ?? [];
+
+  async function handleFiles(files: FileList | null, source: "upload" | "camera") {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    try {
+      const next: TaskAttachment[] = [];
+      for (const file of Array.from(files)) {
+        next.push(await buildAttachment(file, source));
+      }
+      onUpdate({ attachments: [...attachments, ...next] });
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function removeAttachment(id: string) {
+    const att = attachments.find((a) => a.id === id);
+    if (att) { try { URL.revokeObjectURL(att.url); } catch {} }
+    onUpdate({ attachments: attachments.filter((a) => a.id !== id) });
+  }
 
   const totalMs = useMemo(() => {
     if (!task.startTime || !task.endTime) return task.estimatedMinutes * 60_000;
@@ -1628,6 +1663,7 @@ function TaskCard({
   }, [task]);
 
   return (
+    <>
     <div
       style={{
         borderRadius: 12,
@@ -1777,6 +1813,37 @@ function TaskCard({
           </span>
         </div>
 
+        {/* Expand toggle */}
+        <button
+          onClick={() => {
+            const next = !expanded;
+            setExpanded(next);
+            if (next) setTimeout(() => notesRef.current?.focus(), 80);
+          }}
+          title={expanded ? "Collapse" : "Notes & Attachments"}
+          style={{
+            width: 22,
+            height: 22,
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "none",
+            background: expanded
+              ? isDark ? "rgba(124,58,237,0.18)" : "rgba(124,58,237,0.1)"
+              : "none",
+            borderRadius: 5,
+            cursor: "pointer",
+            color: expanded
+              ? isDark ? "rgba(167,139,250,0.9)" : "#7c3aed"
+              : isDark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.3)",
+            fontSize: 11,
+            transition: "background 150ms, color 150ms",
+          }}
+        >
+          {expanded ? "⌃" : "⌄"}
+        </button>
+
         {/* Remove */}
         <button
           onClick={onRemove}
@@ -1906,7 +1973,150 @@ function TaskCard({
           ▶
         </div>
       </div>
+
+      {/* ── Expanded: Notes + Attachments ── */}
+      {expanded && (
+        <div
+          style={{
+            borderTop: isDark
+              ? "0.5px solid rgba(124,58,237,0.18)"
+              : "0.5px solid rgba(124,58,237,0.14)",
+            padding: "10px 12px 12px",
+          }}
+        >
+          {/* Action bar */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+            {(["editNotes", "upload", "camera"] as const).map((action) => {
+              const labels = {
+                editNotes: "✏️ Edit Notes",
+                upload: "📎 Upload File",
+                camera: "📷 Camera",
+              };
+              return (
+                <button
+                  key={action}
+                  onClick={() => {
+                    if (action === "editNotes") notesRef.current?.focus();
+                    else if (action === "upload") uploadRef.current?.click();
+                    else cameraRef.current?.click();
+                  }}
+                  disabled={uploading && action !== "editNotes"}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "4px 10px",
+                    borderRadius: 7,
+                    background: isDark ? "rgba(124,58,237,0.10)" : "rgba(124,58,237,0.06)",
+                    border: isDark
+                      ? "0.5px solid rgba(124,58,237,0.28)"
+                      : "0.5px solid rgba(124,58,237,0.2)",
+                    cursor: "pointer",
+                    fontSize: 11.5,
+                    fontWeight: 500,
+                    color: isDark ? "rgba(196,168,255,0.88)" : "#5b21b6",
+                    transition: "background 130ms",
+                    opacity: uploading && action !== "editNotes" ? 0.5 : 1,
+                  }}
+                >
+                  {labels[action]}
+                </button>
+              );
+            })}
+            {uploading && (
+              <span style={{ fontSize: 11, color: isDark ? "rgba(167,139,250,0.7)" : "#7c3aed", display: "flex", alignItems: "center", gap: 4 }}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    border: "1.5px solid currentColor",
+                    borderTopColor: "transparent",
+                    animation: "xp-spin 0.7s linear infinite",
+                  }}
+                />
+                Uploading…
+              </span>
+            )}
+          </div>
+
+          {/* Hidden file inputs */}
+          <input
+            ref={uploadRef}
+            type="file"
+            multiple
+            accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z"
+            style={{ display: "none" }}
+            onChange={(e) => { handleFiles(e.target.files, "upload"); e.currentTarget.value = ""; }}
+          />
+          <input
+            ref={cameraRef}
+            type="file"
+            accept="image/*"
+            capture={"environment" as unknown as boolean}
+            style={{ display: "none" }}
+            onChange={(e) => { handleFiles(e.target.files, "camera"); e.currentTarget.value = ""; }}
+          />
+
+          {/* Notes textarea */}
+          <textarea
+            ref={notesRef}
+            value={task.notes ?? ""}
+            onChange={(e) => onUpdate({ notes: e.target.value || null })}
+            placeholder="Add notes, links, ideas…"
+            rows={2}
+            style={{
+              width: "100%",
+              resize: "vertical",
+              border: isDark
+                ? "0.5px solid rgba(124,58,237,0.25)"
+                : "0.5px solid rgba(124,58,237,0.2)",
+              borderRadius: 8,
+              background: isDark ? "rgba(255,255,255,0.03)" : "rgba(248,246,255,0.9)",
+              color: "var(--xp-txt)",
+              fontSize: 12.5,
+              lineHeight: 1.55,
+              padding: "8px 10px",
+              outline: "none",
+              boxSizing: "border-box",
+              minHeight: 56,
+              maxHeight: 140,
+              fontFamily: "inherit",
+            }}
+            onFocus={(e) => {
+              e.target.style.borderColor = isDark ? "rgba(124,58,237,0.55)" : "rgba(124,58,237,0.5)";
+            }}
+            onBlur={(e) => {
+              e.target.style.borderColor = isDark ? "rgba(124,58,237,0.25)" : "rgba(124,58,237,0.2)";
+            }}
+          />
+
+          {/* Attachments list */}
+          {attachments.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
+              {attachments.map((att) => (
+                <AttachmentItem
+                  key={att.id}
+                  attachment={att}
+                  isDark={isDark}
+                  onRemove={() => removeAttachment(att.id)}
+                  onPreview={() => {
+                    if (att.mimeType.startsWith("image/")) setLightbox(att.url);
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
+
+    {/* Image lightbox */}
+    {lightbox && (
+      <ImageLightbox src={lightbox} alt="Attachment preview" onClose={() => setLightbox(null)} />
+    )}
+  </>
   );
 }
 
@@ -2739,6 +2949,9 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
           background: linear-gradient(135deg, #5b21b6 0%, #6d28d9 22%, #7c3aed 46%, #8b5cf6 65%, #7c3aed 82%, #6d28d9 100%);
           background-size: 320% 320%;
           animation: xpAicHdrFlow 14s ease infinite;
+        }
+        @keyframes xp-spin {
+          to { transform: rotate(360deg); }
         }
       `}</style>
     <div

@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useApp, EMPTY_DAY } from './AppContext'
-import type { Task, TaskSession, Activity } from './types'
+import type { Task, TaskSession, Activity, TaskAttachment } from './types'
 import { formatMs, formatHMS, formatTime, APP_YEAR } from './utils'
 import { ReminderModal } from './ReminderModal'
+import { buildAttachment, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
 
 // ─── Recent-emoji localStorage helpers ───────────────────────────────────────
 
@@ -338,6 +339,7 @@ interface TaskRowProps {
   onDragOver: (e: React.DragEvent) => void
   onDrop: () => void
   bellTriggerKey: number
+  onAttachmentsChange: (attachments: TaskAttachment[]) => void
 }
 
 function TaskRow({
@@ -347,8 +349,44 @@ function TaskRow({
   draftJournal, onNotesDraftChange, onNotesSave,
   onTextChange, onActChange, onAdjustTime, onSetReminder,
   onDragStart, onDragOver, onDrop, bellTriggerKey,
+  onAttachmentsChange,
 }: TaskRowProps) {
   const { activities, reminders, isDark, setToast } = useApp()
+  const attachments = task.attachments ?? []
+  const [uploading,   setUploading]   = useState(false)
+  const [lightbox,    setLightbox]    = useState<string | null>(null)
+  const [cameraOpen,  setCameraOpen]  = useState(false)
+  const uploadRef = useRef<HTMLInputElement>(null)
+
+  async function handleFiles(files: FileList | null, source: 'upload' | 'camera') {
+    if (!files || files.length === 0) return
+    setUploading(true)
+    try {
+      const next: TaskAttachment[] = []
+      for (const file of Array.from(files)) {
+        next.push(await buildAttachment(file, source))
+      }
+      onAttachmentsChange([...attachments, ...next])
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function handleSingleFile(file: File, source: 'upload' | 'camera') {
+    setUploading(true)
+    try {
+      const att = await buildAttachment(file, source)
+      onAttachmentsChange([...attachments, att])
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  function removeAttachment(id: string) {
+    const att = attachments.find(a => a.id === id)
+    if (att) { try { URL.revokeObjectURL(att.url) } catch {} }
+    onAttachmentsChange(attachments.filter(a => a.id !== id))
+  }
   const hasReminder = reminders.some(r => r.taskId === task.id && r.dateKey === dateKey && r.isActive)
 
   const [menuOpen,       setMenuOpen]       = useState(false)
@@ -704,15 +742,51 @@ function TaskRow({
               )}
 
               {/* Controls row */}
-              <div className="flex items-center justify-between mt-1.5">
-                {/* Mode toggle */}
-                <button
-                  onClick={() => setNotesViewMode(m => m === 'preview' ? 'edit' : 'preview')}
-                  className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
-                  style={{ color: 'var(--xp-txt3)' }}
-                >
-                  {notesViewMode === 'preview' ? '✏️ Edit notes' : '👁 Preview'}
-                </button>
+              <div className="flex items-center justify-between mt-1.5" style={{ flexWrap: 'wrap', gap: 4 }}>
+                {/* Left: mode toggle + upload + camera */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => setNotesViewMode(m => m === 'preview' ? 'edit' : 'preview')}
+                    className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
+                    style={{ color: 'var(--xp-txt3)' }}
+                  >
+                    {notesViewMode === 'preview' ? '✏️ Edit notes' : '👁 Preview'}
+                  </button>
+
+                  <button
+                    onClick={() => uploadRef.current?.click()}
+                    disabled={uploading}
+                    title="Upload file or photo"
+                    className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
+                    style={{ color: 'var(--xp-txt3)', opacity: uploading ? 0.5 : 1, cursor: 'pointer' }}
+                  >
+                    📎 Upload File
+                  </button>
+
+                  <button
+                    onClick={() => setCameraOpen(true)}
+                    disabled={uploading}
+                    title="Take a photo with your camera"
+                    className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
+                    style={{ color: 'var(--xp-txt3)', opacity: uploading ? 0.5 : 1, cursor: 'pointer' }}
+                  >
+                    📷 Camera
+                  </button>
+
+                  {uploading && (
+                    <span style={{ fontSize: 10, color: 'var(--xp-txt3)' }}>Uploading…</span>
+                  )}
+
+                  {/* Hidden upload input */}
+                  <input
+                    ref={uploadRef}
+                    type="file"
+                    multiple
+                    accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z"
+                    style={{ display: 'none' }}
+                    onChange={e => { handleFiles(e.target.files, 'upload'); e.currentTarget.value = '' }}
+                  />
+                </div>
 
                 <div className="flex items-center gap-1.5">
                   {/* Notes save — always visible, purple-themed */}
@@ -742,10 +816,38 @@ function TaskRow({
                   </div>
                 </div>
               </div>
+
+              {/* Attachment list */}
+              {attachments.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
+                  {attachments.map(att => (
+                    <AttachmentItem
+                      key={att.id}
+                      attachment={att}
+                      isDark={isDark}
+                      onRemove={() => removeAttachment(att.id)}
+                      onPreview={() => { if (att.mimeType.startsWith('image/')) setLightbox(att.url) }}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Image lightbox */}
+      {lightbox && (
+        <ImageLightbox src={lightbox} alt="Attachment preview" onClose={() => setLightbox(null)} />
+      )}
+
+      {/* Camera modal */}
+      {cameraOpen && (
+        <CameraModal
+          onCapture={file => handleSingleFile(file, 'camera')}
+          onClose={() => setCameraOpen(false)}
+        />
+      )}
 
       {adjustOpen && (
         <AdjustTimeModal task={task} dateKey={dateKey} onClose={() => setAdjustOpen(false)} onSave={(sid, s, e, n) => { onAdjustTime(sid, s, e, n); setAdjustOpen(false) }} />
@@ -1252,6 +1354,9 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   function updateTaskJournal(id: string, journal: string) {
     updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === id ? { ...t, journal } : t) }))
   }
+  function updateTaskAttachments(id: string, attachments: TaskAttachment[]) {
+    updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === id ? { ...t, attachments } : t) }))
+  }
 
   // ── Notes dirty-state helpers ─────────────────────────────────────────────
 
@@ -1495,6 +1600,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
                   onDragOver={e => e.preventDefault()}
                   onDrop={() => handleDrop(task.id)}
                   bellTriggerKey={reminderSavedKey[task.id] ?? 0}
+                  onAttachmentsChange={atts => updateTaskAttachments(task.id, atts)}
                 />
               ))}
 

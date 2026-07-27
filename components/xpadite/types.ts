@@ -19,6 +19,7 @@ export interface Task {
   noteDone?: boolean
   linkedSessionId?: string  // set when auto-created by Clock In; matches the WorkSession id
   aiPlanId?: string          // set when created by AI Coach
+  attachments?: TaskAttachment[]
 }
 
 export interface DayData {
@@ -72,6 +73,17 @@ export type RepeatFrequency = 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly'
 
 // ── AI Coach types ─────────────────────────────────────────────────────────────
 
+export interface TaskAttachment {
+  id: string
+  name: string
+  mimeType: string
+  size: number
+  url: string           // object URL (session) or data URL (images)
+  thumbnail: string | null  // base64 JPEG for image previews
+  addedAt: number       // Unix ms
+  source: 'upload' | 'camera'
+}
+
 export interface AIMessage {
   id: string
   role: 'user' | 'assistant'
@@ -92,6 +104,7 @@ export interface DraftTask {
   reminderEnabled: boolean   // user toggle
   priority: 'low' | 'medium' | 'high'
   notes: string | null
+  attachments?: TaskAttachment[]
   aiPlanId: string
   done: boolean
 }

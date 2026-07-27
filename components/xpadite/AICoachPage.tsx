@@ -901,42 +901,32 @@ function MicIcon({
 }) {
   return (
     <svg
-      width={size * 0.62}
+      width={size * 0.72}
       height={size}
-      viewBox="0 0 62 100"
+      viewBox="0 0 64 90"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
       style={{ display: "block", flexShrink: 0 }}
     >
-      {/* Capsule body */}
-      <rect x="13" y="2" width="36" height="54" rx="18" fill={color} />
-      {/* U-arc stand */}
+      {/* Hollow capsule body — outline only, matching reference */}
+      <rect x="14" y="2" width="36" height="52" rx="18" stroke={color} strokeWidth="7" fill="none" />
+      {/* Wide U-arc stand */}
       <path
-        d="M6 46 Q6 82 31 82 Q56 82 56 46"
+        d="M4 46 Q4 78 32 78 Q60 78 60 46"
         fill="none"
         stroke={color}
-        strokeWidth="6.5"
+        strokeWidth="7"
         strokeLinecap="round"
       />
       {/* Stem */}
       <line
-        x1="31"
-        y1="82"
-        x2="31"
-        y2="97"
+        x1="32"
+        y1="78"
+        x2="32"
+        y2="94"
         stroke={color}
-        strokeWidth="6.5"
-        strokeLinecap="round"
-      />
-      {/* Base */}
-      <line
-        x1="19"
-        y1="97"
-        x2="43"
-        y2="97"
-        stroke={color}
-        strokeWidth="6.5"
+        strokeWidth="7"
         strokeLinecap="round"
       />
     </svg>
@@ -962,13 +952,10 @@ function AICoachCard({
 }: AICoachCardProps) {
   const { isDark } = useApp();
   const [text, setText] = useState("");
+  const [showNudge, setShowNudge] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
   const { planState, messages, isStreaming, voiceState } = coach;
-  const userMsgCount = messages.filter((m) => m.role === "user").length;
-  const canGenerate =
-    userMsgCount >= 3 &&
-    (planState === "ready_to_generate" || planState === "conversation");
   const isGenerating = planState === "generating";
   const isSaved = planState === "saved";
   const inputDisabled =
@@ -1101,9 +1088,7 @@ function AICoachCard({
               {[
                 { emoji: "💪", label: "Build muscle" },
                 { emoji: "🎓", label: "College Project" },
-                { emoji: "💰", label: "Save $10,000" },
                 { emoji: "🚀", label: "Launch a SaaS" },
-                { emoji: "🏃", label: "Run a Marathon" },
               ].map((g) => (
                 <button
                   key={g.label}
@@ -1200,7 +1185,7 @@ function AICoachCard({
           <textarea
             ref={taRef}
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => { setText(e.target.value); setShowNudge(false); }}
             onKeyDown={handleKey}
             disabled={inputDisabled || voiceState !== "idle"}
             placeholder={
@@ -1225,6 +1210,30 @@ function AICoachCard({
               opacity: inputDisabled ? 0.5 : 1,
             }}
           />
+
+          {/* Nudge banner — appears when Generate Plan is clicked too early */}
+          {showNudge && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "7px 10px 7px 12px",
+                background: isDark ? "rgba(109,40,217,0.12)" : "rgba(237,233,254,0.9)",
+                borderTop: `0.5px solid ${isDark ? "rgba(124,58,237,0.25)" : "rgba(167,139,250,0.4)"}`,
+              }}
+            >
+              <span style={{ flex: 1, fontSize: 11.5, lineHeight: 1.45, color: isDark ? "rgba(196,168,255,0.92)" : "#5b21b6" }}>
+                Please discuss your goal with AI Coach before generating a plan.
+              </span>
+              <button
+                onClick={() => setShowNudge(false)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: isDark ? "rgba(167,139,250,0.7)" : "rgba(109,40,217,0.5)", fontSize: 14, lineHeight: 1, padding: "2px 4px", flexShrink: 0 }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {/* Bottom row: mic (left) + Generate Plan (right) */}
           <div
@@ -1303,43 +1312,33 @@ function AICoachCard({
             {/* Generate Plan / status */}
             {!isSaved ? (
               <button
-                onClick={coach.generatePlan}
-                disabled={!canGenerate || isGenerating || isStreaming}
+                onClick={() => {
+                  if (isGenerating || isStreaming) return;
+                  const userMsgCount = messages.filter((m) => m.role === "user").length;
+                  if (userMsgCount < 3) {
+                    setShowNudge(true);
+                  } else {
+                    setShowNudge(false);
+                    coach.generatePlan();
+                  }
+                }}
                 style={{
                   flex: 1,
                   padding: "9px 0",
                   borderRadius: 11,
                   fontSize: 13.5,
                   fontWeight: 700,
-                  background:
-                    canGenerate && !isGenerating
-                      ? "linear-gradient(135deg, #5b21b6, #7c3aed)"
-                      : isDark
-                        ? "rgba(255,255,255,0.06)"
-                        : "rgba(124,58,237,0.06)",
-                  color:
-                    canGenerate && !isGenerating
-                      ? "white"
-                      : isDark
-                        ? "rgba(255,255,255,0.28)"
-                        : "rgba(124,58,237,0.38)",
-                  border: canGenerate
-                    ? "0.5px solid rgba(167,139,250,0.35)"
-                    : isDark
-                      ? "0.5px solid rgba(255,255,255,0.07)"
-                      : "0.5px solid rgba(124,58,237,0.14)",
-                  cursor:
-                    canGenerate && !isGenerating ? "pointer" : "not-allowed",
-                  boxShadow:
-                    canGenerate && !isGenerating
-                      ? "0 3px 12px rgba(124,58,237,0.28)"
-                      : "none",
+                  background: isGenerating
+                    ? "rgba(124,58,237,0.55)"
+                    : "linear-gradient(135deg, #5b21b6, #7c3aed)",
+                  color: "white",
+                  border: "0.5px solid rgba(167,139,250,0.35)",
+                  cursor: "pointer",
+                  boxShadow: isGenerating ? "none" : "0 3px 12px rgba(124,58,237,0.28)",
                   transition: "all 200ms ease",
                 }}
               >
-                {isGenerating
-                  ? "⏳ Generating your plan…"
-                  : `✨ Generate Plan${!canGenerate && messages.length > 0 ? " (keep chatting)" : ""}`}
+                {isGenerating ? "⏳ Generating your plan…" : "✨ Generate Plan"}
               </button>
             ) : (
               <div
@@ -2478,13 +2477,12 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
 
   const Header = (
     <div
+      className="xp-aic-hdr"
       style={{
         display: "flex",
         alignItems: "center",
         height: 60,
         flexShrink: 0,
-        background:
-          "linear-gradient(135deg, #3b0764 0%, #6d28d9 50%, #4f46e5 100%)",
         borderBottom: "0.5px solid rgba(255,255,255,0.06)",
         padding: "0 12px",
         gap: 10,
@@ -2496,120 +2494,78 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
         ← Back
       </button>
 
-      {/* Center two-zone: AI Coach pill (left) | Date (right) */}
+      {/* Flex-1 spacer: keeps Back and Focus Mode buttons at the edges */}
+      <div style={{ flex: 1, minWidth: 0 }} />
+
+      {/* Far-right: toggles between Focus Mode and ↩ Full Workspace */}
+      {panelFocusMode ? (
+        <button
+          onClick={() => setPanelFocusMode(false)}
+          style={hdrBtnStyle}
+          title="Return to full workspace"
+        >
+          ↩ Full Workspace
+        </button>
+      ) : (
+        <button
+          onClick={() => {
+            setPanelFocusMode(true);
+            setActiveTab("coach");
+          }}
+          style={hdrBtnStyle}
+          title="Enter Focus Mode"
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 14 14"
+            fill="none"
+            style={{ flexShrink: 0 }}
+          >
+            <circle cx="7" cy="7" r="5.5" stroke="white" strokeWidth="1.5" />
+            <circle cx="7" cy="7" r="1.8" fill="white" />
+            <line x1="7" y1="0" x2="7" y2="3" stroke="white" strokeWidth="1.4" strokeLinecap="round" />
+            <line x1="7" y1="11" x2="7" y2="14" stroke="white" strokeWidth="1.4" strokeLinecap="round" />
+            <line x1="0" y1="7" x2="3" y2="7" stroke="white" strokeWidth="1.4" strokeLinecap="round" />
+            <line x1="11" y1="7" x2="14" y2="7" stroke="white" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+          Focus Mode
+        </button>
+      )}
+
+      {/* Absolutely centered 🤖 AI Coach pill — independent of button widths */}
       <div
         style={{
-          flex: 1,
-          minWidth: 0,
-          display: "grid",
-          gridTemplateColumns: showThreePanels ? "52fr 48fr" : "1fr",
+          position: "absolute",
+          left: "50%",
+          transform: "translateX(-50%)",
+          top: 0,
+          bottom: 0,
+          display: "flex",
           alignItems: "center",
-          height: "100%",
+          pointerEvents: "none",
+          zIndex: 1,
         }}
       >
-        {/* Left zone: AI Coach pill */}
         <div
           style={{
+            background: "rgba(255,255,255,0.96)",
+            borderRadius: 28,
+            padding: "6px 20px",
             display: "flex",
             alignItems: "center",
-            justifyContent: "center",
+            gap: 7,
+            color: "#4c1d95",
+            fontWeight: 700,
+            fontSize: 14,
+            boxShadow: "0 2px 14px rgba(0,0,0,0.22)",
+            letterSpacing: "0.01em",
+            userSelect: "none",
           }}
         >
-          <div
-            style={{
-              background: "rgba(255,255,255,0.96)",
-              borderRadius: 28,
-              padding: "6px 20px",
-              display: "flex",
-              alignItems: "center",
-              gap: 7,
-              color: "#4c1d95",
-              fontWeight: 700,
-              fontSize: 14,
-              boxShadow: "0 2px 14px rgba(0,0,0,0.22)",
-              letterSpacing: "0.01em",
-              userSelect: "none",
-            }}
-          >
-            🤖 AI Coach
-          </div>
+          🤖 AI Coach
         </div>
-
-        {/* Right zone: date + microcopy (desktop three-panel only) */}
-        {showThreePanels && (
-          <div style={{ paddingLeft: 8 }}>
-            <p
-              style={{
-                fontSize: 16,
-                fontWeight: 700,
-                color: "white",
-                lineHeight: 1.2,
-              }}
-            >
-              {fmtDateLong(todayStr())}
-            </p>
-          </div>
-        )}
       </div>
-
-      {/* Far-right: Focus Mode (Phase 2 activation wired here) */}
-      <button
-        onClick={() => {
-          setPanelFocusMode(true);
-          setActiveTab("coach");
-        }}
-        style={hdrBtnStyle}
-        title="Enter Focus Mode"
-      >
-        {/* Focus icon — simplified target/crosshair */}
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 14 14"
-          fill="none"
-          style={{ flexShrink: 0 }}
-        >
-          <circle cx="7" cy="7" r="5.5" stroke="white" strokeWidth="1.5" />
-          <circle cx="7" cy="7" r="1.8" fill="white" />
-          <line
-            x1="7"
-            y1="0"
-            x2="7"
-            y2="3"
-            stroke="white"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-          />
-          <line
-            x1="7"
-            y1="11"
-            x2="7"
-            y2="14"
-            stroke="white"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-          />
-          <line
-            x1="0"
-            y1="7"
-            x2="3"
-            y2="7"
-            stroke="white"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-          />
-          <line
-            x1="11"
-            y1="7"
-            x2="14"
-            y2="7"
-            stroke="white"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-          />
-        </svg>
-        Focus Mode
-      </button>
     </div>
   );
 
@@ -2621,17 +2577,32 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
         minHeight: 0,
         display: "flex",
         flexDirection: "column",
-        padding: "12px 12px 0",
+        padding: "10px 12px 0",
         overflow: "hidden",
       }}
     >
+      {/* Subtle date — sits naturally below header in the workspace body */}
+      <div style={{ flexShrink: 0, textAlign: "center", paddingBottom: 6 }}>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 500,
+            color: isDark ? "rgba(196,168,255,0.45)" : "rgba(109,40,217,0.4)",
+            letterSpacing: "0.025em",
+            userSelect: "none",
+          }}
+        >
+          {fmtDateLong(todayStr())}
+        </span>
+      </div>
+
       {/* Top row: AI Coach (left, 52%) + Task Panel (right, 48%) */}
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "52fr 48fr",
           gap: 12,
-          flex: "0 0 56%",
+          flex: "0 0 60%",
           minHeight: 260,
           overflow: "hidden",
         }}
@@ -2674,12 +2645,12 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
           cursor: "default",
         }}
       >
-        {/* Calendar section header — purple bar with title + controls */}
+        {/* Calendar section header — purple bar with centered title */}
         <div
           style={{
             display: "flex",
             alignItems: "center",
-            justifyContent: "space-between",
+            justifyContent: "center",
             padding: "10px 14px",
             background:
               "linear-gradient(135deg, #4c1d95 0%, #6d28d9 60%, #7c3aed 100%)",
@@ -2695,48 +2666,8 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
               userSelect: "none",
             }}
           >
-            AI Goal Setting🚀
+            AI Goal Setting 🚀
           </p>
-          <div style={{ display: "flex", gap: 5 }}>
-            <button
-              style={{
-                width: 24,
-                height: 24,
-                borderRadius: 6,
-                background: "rgba(255,255,255,0.14)",
-                border: "none",
-                cursor: "pointer",
-                color: "rgba(255,255,255,0.85)",
-                fontSize: 11,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                transition: "background 150ms",
-              }}
-              title="Filter"
-            >
-              ⊙
-            </button>
-            <button
-              style={{
-                width: 24,
-                height: 24,
-                borderRadius: 6,
-                background: "rgba(255,255,255,0.14)",
-                border: "none",
-                cursor: "pointer",
-                color: "rgba(255,255,255,0.85)",
-                fontSize: 11,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                transition: "background 150ms",
-              }}
-              title="Expand"
-            >
-              ↗
-            </button>
-          </div>
         </div>
         {/* Internal scroll — only this region scrolls, top panels stay fixed */}
         <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
@@ -2768,10 +2699,21 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
           overflow: "hidden",
           padding: "12px 14px 0",
           display: "flex",
-          flexDirection: "column",
+          justifyContent: "center",
         }}
       >
-        {renderSinglePanel()}
+        <div
+          style={{
+            width: "100%",
+            maxWidth: activeTab === "calendar" ? 680 : 420,
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+            transition: "max-width 220ms ease",
+          }}
+        >
+          {renderSinglePanel()}
+        </div>
       </div>
       <WorkspaceNavBar
         active={activeTab}
@@ -2785,6 +2727,19 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
 
   // ── NORMAL MODE — centered modal, height-bounded so bottom is never cut off ─
   return (
+    <>
+      <style>{`
+        @keyframes xpAicHdrFlow {
+          0%   { background-position: 0% 50%; }
+          50%  { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
+        .xp-aic-hdr {
+          background: linear-gradient(135deg, #2d0657 0%, #4c1d95 22%, #6d28d9 46%, #4f46e5 70%, #3b1480 88%, #5b21b6 100%);
+          background-size: 320% 320%;
+          animation: xpAicHdrFlow 14s ease infinite;
+        }
+      `}</style>
     <div
       className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-3 ${isDark ? "xp-dark" : "xp-light"}`}
       style={{
@@ -2854,5 +2809,6 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
         {showThreePanels ? ThreePanelBody : SinglePanelBody}
       </div>
     </div>
+    </>
   );
 }

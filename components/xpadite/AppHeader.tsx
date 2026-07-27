@@ -49,9 +49,10 @@ const MoonIcon = () => (
 interface AppHeaderProps {
   onAnalytics: () => void
   onMotivate: () => void
+  onAICoach?: () => void
 }
 
-export function AppHeader({ onAnalytics, onMotivate }: AppHeaderProps) {
+export function AppHeader({ onAnalytics, onMotivate, onAICoach }: AppHeaderProps) {
   const {
     isDark, setIsDark,
     activeSession, setActiveSession,
@@ -429,6 +430,16 @@ export function AppHeader({ onAnalytics, onMotivate }: AppHeaderProps) {
             >
               Motivate Me 🔥
             </button>
+
+            {onAICoach && (
+              <button
+                onClick={onAICoach}
+                className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150 hover:opacity-85 flex-shrink-0"
+                style={{ background: 'rgba(109,40,217,0.2)', color: '#c4b5fd', border: '0.5px solid rgba(167,139,250,0.3)' }}
+              >
+                🤖 AI Coach
+              </button>
+            )}
 
             <button
               onClick={onAnalytics}

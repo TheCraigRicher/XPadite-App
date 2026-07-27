@@ -13,6 +13,7 @@ import { MonthZoomModal } from './MonthZoomModal'
 import { MonthFullPage } from './MonthFullPage'
 import { DayDashboardModal } from './DayDashboardModal'
 import { AnalyticsPage } from './AnalyticsPage'
+import { AICoachPage } from './AICoachPage'
 import { GalleryModal } from './GalleryModal'
 import { SettingsModal } from './SettingsModal'
 import { MobileBottomNav } from './MobileBottomNav'
@@ -452,6 +453,7 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [fullPageMonth, setFullPageMonth]           = useState<number | null>(null)
   const [motivationOpen, setMotivationOpen]         = useState(false)
   const [analyticsOpen, setAnalyticsOpen]           = useState(false)
+  const [aiCoachOpen, setAICoachOpen]               = useState(false)
   const [galleryOpen, setGalleryOpen]               = useState(false)
   const [settingsOpen, setSettingsOpen]             = useState(false)
   const [profileOpen, setProfileOpen]               = useState(false)
@@ -463,11 +465,17 @@ function ThemedApp(_props: XpaditeAppProps) {
   // When Analytics tab selected → auto-open analytics hub
   useEffect(() => {
     if (mobileTab === 'analytics') setAnalyticsOpen(true)
+    if (mobileTab === 'ai-coach') setAICoachOpen(true)
   }, [mobileTab])
 
   function handleAnalyticsClose() {
     setAnalyticsOpen(false)
     if (mobileTab === 'analytics') setMobileTab('overview')
+  }
+
+  function handleAICoachClose() {
+    setAICoachOpen(false)
+    if (mobileTab === 'ai-coach') setMobileTab('overview')
   }
 
   // ── Mobile collapsible stats ──────────────────────────────────────────────────
@@ -581,6 +589,7 @@ function ThemedApp(_props: XpaditeAppProps) {
       <AppHeader
         onAnalytics={() => setAnalyticsOpen(true)}
         onMotivate={() => setMotivationOpen(true)}
+        onAICoach={() => setAICoachOpen(true)}
       />
 
       {/* ── MAIN CONTENT ─────────────────────────────────────────────────── */}
@@ -718,6 +727,8 @@ function ThemedApp(_props: XpaditeAppProps) {
       )}
 
       {analyticsOpen && <AnalyticsPage onClose={handleAnalyticsClose} />}
+
+      {aiCoachOpen && <AICoachPage onClose={handleAICoachClose} />}
 
       {motivationOpen && <MotivationModal onClose={() => setMotivationOpen(false)} />}
 

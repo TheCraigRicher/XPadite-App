@@ -18,6 +18,7 @@ export interface Task {
   sessions: TaskSession[]
   noteDone?: boolean
   linkedSessionId?: string  // set when auto-created by Clock In; matches the WorkSession id
+  aiPlanId?: string          // set when created by AI Coach
 }
 
 export interface DayData {
@@ -68,6 +69,71 @@ export interface ActiveTaskTimer {
 }
 
 export type RepeatFrequency = 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly'
+
+// ── AI Coach types ─────────────────────────────────────────────────────────────
+
+export interface AIMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: number
+}
+
+export interface DraftTask {
+  clientId: string
+  title: string
+  date: string          // YYYY-MM-DD
+  startTime: string | null   // HH:mm
+  endTime: string | null     // HH:mm
+  estimatedMinutes: number
+  activityId: string | null  // existing activity id (null = new)
+  activityName: string
+  reminderRecommended: boolean
+  reminderEnabled: boolean   // user toggle
+  priority: 'low' | 'medium' | 'high'
+  notes: string | null
+  aiPlanId: string
+  done: boolean
+}
+
+export interface AIDraftPlan {
+  id: string
+  createdAt: number
+  goal: {
+    title: string
+    description: string
+    targetDate: string | null
+    timelineType: 'fixed' | 'flexible'
+    seriousness: string
+    successDefinition: string
+  }
+  activitySuggestion: {
+    suggestedName: string
+    existingActivityId: string | null
+    suggestedColor: string | null
+    emoji: string | null
+  }
+  phases: Array<{ id: string; title: string; startDate: string; endDate: string; description?: string }>
+  milestones: Array<{ id: string; title: string; date: string; description?: string }>
+  tasks: DraftTask[]
+  dateRange: { start: string; end: string }
+  warnings: string[]
+  assumptions: string[]
+}
+
+export type AIPlanState =
+  | 'idle'
+  | 'conversation'
+  | 'ready_to_generate'
+  | 'generating'
+  | 'draft_ready'
+  | 'editing'
+  | 'validating'
+  | 'saving'
+  | 'saved'
+  | 'failed'
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export interface Reminder {
   id: string

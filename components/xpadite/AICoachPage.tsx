@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react'
 import { useApp } from './AppContext'
 import { CalendarSection } from './CalendarSection'
 import type { AIMessage, AIDraftPlan, DraftTask, AIPlanState, Activity } from './types'
@@ -560,26 +560,25 @@ function ConversationArea({ messages, streamingContent, isStreaming }: {
 // SECTION 5b — MICROPHONE ICON  (custom SVG matching supplied asset)
 // ═══════════════════════════════════════════════════════════════════
 
-function MicIcon({ size = 22 }: { size?: number }) {
-  // Render at 3:5 portrait ratio so the capsule is visibly taller than wide (no squeezing)
-  const w = Math.round(size * 0.6)
-  const h = size
+function MicIcon({ size = 22, color = 'white' }: { size?: number; color?: string }) {
   return (
     <svg
-      width={w}
-      height={h}
-      viewBox="0 0 60 100"
+      width={size * 0.62}
+      height={size}
+      viewBox="0 0 62 100"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
       style={{ display: 'block', flexShrink: 0 }}
     >
-      {/* Capsule body — tall narrow pill matching supplied asset */}
-      <rect x="12" y="2" width="36" height="52" rx="18" fill="white"/>
-      {/* U-shaped stand arms — wide sweep, matching supplied proportions */}
-      <path d="M5 46 C5 78 55 78 55 46" fill="none" stroke="white" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round"/>
-      {/* Stem — fully visible, no cropping */}
-      <line x1="30" y1="78" x2="30" y2="96" stroke="white" strokeWidth="8" strokeLinecap="round"/>
+      {/* Capsule body */}
+      <rect x="13" y="2" width="36" height="54" rx="18" fill={color} />
+      {/* U-arc stand */}
+      <path d="M6 46 Q6 82 31 82 Q56 82 56 46" fill="none" stroke={color} strokeWidth="6.5" strokeLinecap="round" />
+      {/* Stem */}
+      <line x1="31" y1="82" x2="31" y2="97" stroke={color} strokeWidth="6.5" strokeLinecap="round" />
+      {/* Base */}
+      <line x1="19" y1="97" x2="43" y2="97" stroke={color} strokeWidth="6.5" strokeLinecap="round" />
     </svg>
   )
 }
@@ -732,99 +731,120 @@ function AICoachCard({ coach, onEnterFocusMode: _onEnterFocusMode, isActive, onA
         </div>
       )}
 
-      {/* ── Bottom: composer + mic + generate plan ── */}
+      {/* ── Unified composer: input + mic + Generate Plan in one container ── */}
       <div style={{ padding: '0 12px 12px', flexShrink: 0 }}>
-        {/* Composer input */}
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9,
-          border: `1.5px solid ${isDark ? 'rgba(147,51,234,0.28)' : 'rgba(209,200,255,0.9)'}`,
-          borderRadius: 14, padding: '8px 12px',
+          border: `1.5px solid ${isDark ? 'rgba(124,58,237,0.32)' : 'rgba(209,200,255,0.95)'}`,
+          borderRadius: 16,
           background: isDark ? 'rgba(255,255,255,0.04)' : 'white',
-          boxShadow: isDark ? 'none' : '0 1px 4px rgba(124,58,237,0.05)',
+          boxShadow: isDark
+            ? 'inset 0 1px 0 rgba(255,255,255,0.04)'
+            : '0 2px 8px rgba(124,58,237,0.07), inset 0 1px 0 rgba(255,255,255,0.9)',
+          display: 'flex', flexDirection: 'column',
+          overflow: 'hidden',
         }}>
+          {/* Upper: text input */}
           <textarea
             ref={taRef}
             value={text}
             onChange={e => setText(e.target.value)}
             onKeyDown={handleKey}
             disabled={inputDisabled || voiceState !== 'idle'}
-            placeholder={voiceState === 'listening' ? '🎤 Listening…' : voiceState === 'processing' ? 'Transcribing…' : 'What goal do you want to discuss?'}
-            rows={1}
+            placeholder={
+              voiceState === 'listening'  ? '🎤 Listening…'   :
+              voiceState === 'processing' ? 'Transcribing…'   :
+              'What goal do you want to discuss?'
+            }
+            rows={2}
             style={{
-              flex: 1, resize: 'none', border: 'none', background: 'transparent', outline: 'none',
-              fontSize: 14, color: 'var(--xp-txt)', lineHeight: 1.5, maxHeight: 80, overflowY: 'auto',
+              resize: 'none', border: 'none', background: 'transparent', outline: 'none',
+              fontSize: 13.5, color: 'var(--xp-txt)', lineHeight: 1.55,
+              padding: '12px 14px 6px',
+              maxHeight: 90, overflowY: 'auto',
               opacity: inputDisabled ? 0.5 : 1,
             }}
           />
-        </div>
 
-        {/* Mic + Generate Plan row */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {/* Circular mic button — custom icon, no emoji */}
-          <button
-            onClick={handleMic}
-            disabled={voiceState === 'processing' || inputDisabled}
-            title={voiceState === 'listening' ? 'Stop recording' : voiceState === 'processing' ? 'Transcribing…' : 'Voice input'}
-            style={{
-              width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
-              background: voiceState === 'listening'
-                ? 'rgba(239,68,68,0.12)'
-                : voiceState === 'processing'
-                  ? 'rgba(109,40,217,0.2)'
-                  : (inputDisabled && voiceState === 'idle')
-                    ? 'rgba(163,117,242,0.12)'
-                    : 'linear-gradient(145deg,#6d28d9,#8b5cf6)',
-              border: voiceState === 'listening'
-                ? '1.5px solid rgba(239,68,68,0.55)'
-                : (inputDisabled && voiceState === 'idle')
-                  ? '1px solid rgba(163,117,242,0.2)'
-                  : 'none',
-              cursor: voiceState === 'processing' || inputDisabled ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              transition: 'background 200ms, box-shadow 200ms, border 200ms',
-              boxShadow: voiceState === 'listening'
-                ? '0 0 0 4px rgba(239,68,68,0.12), 0 0 0 8px rgba(239,68,68,0.06)'
-                : voiceState === 'idle' && !inputDisabled
-                  ? '0 2px 10px rgba(124,58,237,0.4)'
-                  : 'none',
-              opacity: voiceState === 'processing' ? 0.7 : 1,
-            }}
-          >
-            {voiceState === 'processing'
-              ? <span style={{ fontSize: 11, color: 'rgba(167,139,250,0.8)', letterSpacing: '0.15em' }}>···</span>
-              : <MicIcon size={20} />
-            }
-          </button>
-
-          {/* Generate Plan / status button */}
-          {!isSaved ? (
+          {/* Bottom row: mic (left) + Generate Plan (right) */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '6px 8px 8px',
+            borderTop: isDark ? '0.5px solid rgba(255,255,255,0.05)' : '0.5px solid rgba(229,224,255,0.8)',
+          }}>
+            {/* Circular mic button */}
             <button
-              onClick={coach.generatePlan}
-              disabled={!canGenerate || isGenerating || isStreaming}
+              onClick={handleMic}
+              disabled={voiceState === 'processing' || inputDisabled}
+              title={voiceState === 'listening' ? 'Stop recording' : voiceState === 'processing' ? 'Transcribing…' : 'Voice input'}
               style={{
-                flex: 1, padding: '10px 0', borderRadius: 12, fontSize: 14, fontWeight: 700,
-                background: canGenerate && !isGenerating
-                  ? 'linear-gradient(135deg, #5b21b6, #7c3aed)'
-                  : isDark ? 'rgba(255,255,255,0.07)' : 'rgba(124,58,237,0.07)',
-                color: canGenerate && !isGenerating ? 'white' : isDark ? 'rgba(255,255,255,0.3)' : 'rgba(124,58,237,0.4)',
-                border: canGenerate ? '0.5px solid rgba(167,139,250,0.4)' : isDark ? '0.5px solid rgba(255,255,255,0.08)' : '0.5px solid rgba(124,58,237,0.15)',
-                cursor: canGenerate && !isGenerating ? 'pointer' : 'not-allowed',
-                boxShadow: canGenerate && !isGenerating ? '0 4px 14px rgba(124,58,237,0.3)' : 'none',
-                transition: 'all 200ms ease',
+                width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                background: voiceState === 'listening'
+                  ? 'rgba(239,68,68,0.14)'
+                  : voiceState === 'processing'
+                    ? 'rgba(109,40,217,0.18)'
+                    : (inputDisabled && voiceState === 'idle')
+                      ? 'rgba(163,117,242,0.10)'
+                      : 'linear-gradient(145deg, #6d28d9 0%, #8b5cf6 100%)',
+                border: voiceState === 'listening'
+                  ? '1.5px solid rgba(239,68,68,0.50)'
+                  : (inputDisabled && voiceState === 'idle')
+                    ? '1px solid rgba(163,117,242,0.18)'
+                    : 'none',
+                cursor: voiceState === 'processing' || inputDisabled ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'background 200ms, box-shadow 200ms',
+                boxShadow: voiceState === 'listening'
+                  ? '0 0 0 4px rgba(239,68,68,0.10), 0 0 0 7px rgba(239,68,68,0.05)'
+                  : voiceState === 'idle' && !inputDisabled
+                    ? '0 2px 10px rgba(124,58,237,0.42), 0 0 0 2px rgba(124,58,237,0.10)'
+                    : 'none',
+                opacity: voiceState === 'processing' ? 0.65 : 1,
               }}
             >
-              {isGenerating ? '⏳ Generating your plan…' : `✨ Generate Plan${!canGenerate && messages.length > 0 ? ' (keep chatting)' : ''}`}
+              {voiceState === 'processing'
+                ? <span style={{ fontSize: 10, color: 'rgba(167,139,250,0.85)', letterSpacing: '0.18em' }}>···</span>
+                : <MicIcon size={19} />
+              }
             </button>
-          ) : (
-            <div style={{ flex: 1, padding: '10px 0', borderRadius: 12, textAlign: 'center', background: 'rgba(22,163,74,0.12)', border: '0.5px solid rgba(22,163,74,0.3)', fontSize: 14, color: '#86efac', fontWeight: 700 }}>
-              ✅ Tasks saved to calendar!
-            </div>
-          )}
+
+            {/* Generate Plan / status */}
+            {!isSaved ? (
+              <button
+                onClick={coach.generatePlan}
+                disabled={!canGenerate || isGenerating || isStreaming}
+                style={{
+                  flex: 1, padding: '9px 0', borderRadius: 11, fontSize: 13.5, fontWeight: 700,
+                  background: canGenerate && !isGenerating
+                    ? 'linear-gradient(135deg, #5b21b6, #7c3aed)'
+                    : isDark ? 'rgba(255,255,255,0.06)' : 'rgba(124,58,237,0.06)',
+                  color: canGenerate && !isGenerating ? 'white' : isDark ? 'rgba(255,255,255,0.28)' : 'rgba(124,58,237,0.38)',
+                  border: canGenerate
+                    ? '0.5px solid rgba(167,139,250,0.35)'
+                    : isDark ? '0.5px solid rgba(255,255,255,0.07)' : '0.5px solid rgba(124,58,237,0.14)',
+                  cursor: canGenerate && !isGenerating ? 'pointer' : 'not-allowed',
+                  boxShadow: canGenerate && !isGenerating ? '0 3px 12px rgba(124,58,237,0.28)' : 'none',
+                  transition: 'all 200ms ease',
+                }}
+              >
+                {isGenerating
+                  ? '⏳ Generating your plan…'
+                  : `✨ Generate Plan${!canGenerate && messages.length > 0 ? ' (keep chatting)' : ''}`
+                }
+              </button>
+            ) : (
+              <div style={{ flex: 1, padding: '9px 0', borderRadius: 11, textAlign: 'center', background: 'rgba(22,163,74,0.10)', border: '0.5px solid rgba(22,163,74,0.28)', fontSize: 13.5, color: '#86efac', fontWeight: 700 }}>
+                ✅ Tasks saved to calendar!
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* New conversation link */}
+        {/* Reset link */}
         {messages.length > 0 && (
-          <button onClick={coach.resetConversation} style={{ display: 'block', width: '100%', marginTop: 8, textAlign: 'center', fontSize: 11, color: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)', background: 'none', border: 'none', cursor: 'pointer' }}>
+          <button
+            onClick={coach.resetConversation}
+            style={{ display: 'block', width: '100%', marginTop: 7, textAlign: 'center', fontSize: 11, color: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.28)', background: 'none', border: 'none', cursor: 'pointer' }}
+          >
             Start new conversation ↺
           </button>
         )}
@@ -1364,85 +1384,102 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
     )
   }
 
-  // ── Header: two-zone layout matching ITR 4 ────────────────────────────────
-  // Left zone centers "🤖 AI Coach" pill above the left panel.
-  // Right zone shows the date prominently above the task panel + Collapse button.
+  // ── Header ────────────────────────────────────────────────────────────────
+  // Layout: [← Back] | [two-zone center: AI Coach pill | Date] | [Focus Mode]
+  // Back + Focus Mode are at the edges; the center aligns with the two panels.
+  const hdrBtnStyle: CSSProperties = {
+    background: 'rgba(255,255,255,0.12)',
+    border: '0.5px solid rgba(255,255,255,0.20)',
+    borderRadius: 8,
+    padding: '5px 13px',
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 5,
+    flexShrink: 0,
+    transition: 'background 150ms ease',
+    whiteSpace: 'nowrap',
+  }
+
   const Header = (
     <div style={{
-      display: 'grid',
-      gridTemplateColumns: showThreePanels ? '1fr 1fr' : '1fr',
+      display: 'flex',
       alignItems: 'center',
       height: 60,
       flexShrink: 0,
       background: 'linear-gradient(135deg, #3b0764 0%, #6d28d9 50%, #4f46e5 100%)',
       borderBottom: '0.5px solid rgba(255,255,255,0.06)',
+      padding: '0 12px',
+      gap: 10,
+      position: 'relative',
     }}>
-      {/* Left zone: AI Coach pill centered */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px' }}>
-        <div style={{
-          background: 'rgba(255,255,255,0.96)',
-          borderRadius: 28, padding: '7px 22px',
-          display: 'flex', alignItems: 'center', gap: 7,
-          color: '#4c1d95', fontWeight: 700, fontSize: 14,
-          boxShadow: '0 2px 14px rgba(0,0,0,0.25)',
-          letterSpacing: '0.01em',
-          userSelect: 'none',
-        }}>
-          🤖 AI Coach
-        </div>
-      </div>
+      {/* Far-left: ← Back */}
+      <button onClick={onClose} style={hdrBtnStyle}>
+        ← Back
+      </button>
 
-      {/* Right zone: date + microcopy + Collapse button (desktop only) */}
-      {showThreePanels && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px' }}>
-          <div>
-            <p style={{ fontSize: 17, fontWeight: 700, color: 'white', lineHeight: 1.2 }}>
+      {/* Center two-zone: AI Coach pill (left) | Date (right) */}
+      <div style={{
+        flex: 1, minWidth: 0,
+        display: 'grid',
+        gridTemplateColumns: showThreePanels ? '52fr 48fr' : '1fr',
+        alignItems: 'center',
+        height: '100%',
+      }}>
+        {/* Left zone: AI Coach pill */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{
+            background: 'rgba(255,255,255,0.96)',
+            borderRadius: 28, padding: '6px 20px',
+            display: 'flex', alignItems: 'center', gap: 7,
+            color: '#4c1d95', fontWeight: 700, fontSize: 14,
+            boxShadow: '0 2px 14px rgba(0,0,0,0.22)',
+            letterSpacing: '0.01em',
+            userSelect: 'none',
+          }}>
+            🤖 AI Coach
+          </div>
+        </div>
+
+        {/* Right zone: date + microcopy (desktop three-panel only) */}
+        {showThreePanels && (
+          <div style={{ paddingLeft: 8 }}>
+            <p style={{ fontSize: 16, fontWeight: 700, color: 'white', lineHeight: 1.2 }}>
               {fmtDateLong(todayStr())}
             </p>
-            <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.50)', marginTop: 2 }}>
-              Single click = toggle productive · Double click = notes
-            </p>
           </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: 'rgba(255,255,255,0.14)',
-              border: '0.5px solid rgba(255,255,255,0.22)',
-              borderRadius: 8, padding: '5px 13px',
-              color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
-            }}
-          >
-            ← Collapse
-          </button>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Mobile / focus mode: title + close in the single zone */}
-      {!showThreePanels && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '0 14px', marginTop: -60, position: 'absolute', right: 0, top: 0, height: 60, pointerEvents: 'none' }}>
-          <button
-            onClick={onClose}
-            style={{
-              pointerEvents: 'all',
-              background: 'rgba(255,255,255,0.14)', border: '0.5px solid rgba(255,255,255,0.22)',
-              borderRadius: 8, padding: '5px 12px',
-              color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-            }}
-          >
-            ← Back
-          </button>
-        </div>
-      )}
+      {/* Far-right: Focus Mode (Phase 2 activation wired here) */}
+      <button
+        onClick={() => { setPanelFocusMode(true); setActiveTab('coach') }}
+        style={hdrBtnStyle}
+        title="Enter Focus Mode"
+      >
+        {/* Focus icon — simplified target/crosshair */}
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0 }}>
+          <circle cx="7" cy="7" r="5.5" stroke="white" strokeWidth="1.5"/>
+          <circle cx="7" cy="7" r="1.8" fill="white"/>
+          <line x1="7" y1="0" x2="7" y2="3" stroke="white" strokeWidth="1.4" strokeLinecap="round"/>
+          <line x1="7" y1="11" x2="7" y2="14" stroke="white" strokeWidth="1.4" strokeLinecap="round"/>
+          <line x1="0" y1="7" x2="3" y2="7" stroke="white" strokeWidth="1.4" strokeLinecap="round"/>
+          <line x1="11" y1="7" x2="14" y2="7" stroke="white" strokeWidth="1.4" strokeLinecap="round"/>
+        </svg>
+        Focus Mode
+      </button>
     </div>
   )
 
   // ── Three-panel layout body ────────────────────────────────────────────────
   const ThreePanelBody = (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '12px 12px 0', overflow: 'hidden' }}>
-      {/* Top row: AI Coach (left) + Task Panel (right) */}
+      {/* Top row: AI Coach (left, 52%) + Task Panel (right, 48%) */}
       <div style={{
-        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12,
+        display: 'grid', gridTemplateColumns: '52fr 48fr', gap: 12,
         flex: '0 0 56%', minHeight: 260, overflow: 'hidden',
       }}>
         <AICoachCard
@@ -1475,11 +1512,19 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
           cursor: 'default',
         }}
       >
-        {/* Calendar section header row */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '5px 10px 0', flexShrink: 0 }}>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button style={{ width: 22, height: 22, borderRadius: 5, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)', border: 'none', cursor: 'pointer', color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.35)', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Filter">⊙</button>
-            <button style={{ width: 22, height: 22, borderRadius: 5, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)', border: 'none', cursor: 'pointer', color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.35)', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Expand">↗</button>
+        {/* Calendar section header — purple bar with title + controls */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '10px 14px',
+          background: 'linear-gradient(135deg, #4c1d95 0%, #6d28d9 60%, #7c3aed 100%)',
+          flexShrink: 0,
+        }}>
+          <p style={{ fontSize: 14, fontWeight: 700, color: 'white', letterSpacing: '0.01em', userSelect: 'none' }}>
+            AI Goal Setting🚀
+          </p>
+          <div style={{ display: 'flex', gap: 5 }}>
+            <button style={{ width: 24, height: 24, borderRadius: 6, background: 'rgba(255,255,255,0.14)', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.85)', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 150ms' }} title="Filter">⊙</button>
+            <button style={{ width: 24, height: 24, borderRadius: 6, background: 'rgba(255,255,255,0.14)', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.85)', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 150ms' }} title="Expand">↗</button>
           </div>
         </div>
         {/* Internal scroll — only this region scrolls, top panels stay fixed */}

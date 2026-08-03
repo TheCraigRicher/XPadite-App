@@ -2510,9 +2510,10 @@ function WorkspaceNavBar({
 
 interface AICoachPageProps {
   onClose: () => void;
+  onMotivate: () => void;
 }
 
-export function AICoachPage({ onClose }: AICoachPageProps) {
+export function AICoachPage({ onClose, onMotivate }: AICoachPageProps) {
   const { isDark } = useApp();
   const coach = useAICoach();
 
@@ -2646,6 +2647,15 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
           🤖 AI Coach
         </div>
       </div>
+
+      {/* Far-right: Motivate Me */}
+      <button
+        onClick={onMotivate}
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all duration-150 hover:opacity-85 hover:scale-105 flex-shrink-0"
+        style={{ background: '#7c3aed', border: '0.5px solid rgba(167,139,250,0.35)', marginLeft: "auto" }}
+      >
+        Motivate Me 🔥
+      </button>
     </div>
   );
 

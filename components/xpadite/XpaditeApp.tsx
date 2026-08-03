@@ -727,7 +727,7 @@ function ThemedApp(_props: XpaditeAppProps) {
 
       {analyticsOpen && <AnalyticsPage onClose={handleAnalyticsClose} />}
 
-      {aiCoachOpen && <AICoachPage onClose={handleAICoachClose} onMotivate={() => setMotivationOpen(true)} />}
+      {aiCoachOpen && <AICoachPage onClose={handleAICoachClose} />}
 
       {motivationOpen && <MotivationModal onClose={() => setMotivationOpen(false)} />}
 

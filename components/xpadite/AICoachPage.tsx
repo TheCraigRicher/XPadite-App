@@ -86,18 +86,21 @@ function fmtMs(ms: number): string {
 
 const LS_KEY = "xp9-aic";
 
+type ConversationIntent = 'general' | 'motivate';
+
 interface PersistedState {
   messages: AIMessage[];
   planState: AIPlanState;
   draftPlan: AIDraftPlan | null;
+  intent: ConversationIntent;
 }
 
 function loadState(): PersistedState {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) return { intent: 'general', ...JSON.parse(raw) };
   } catch {}
-  return { messages: [], planState: "idle", draftPlan: null };
+  return { messages: [], planState: "idle", draftPlan: null, intent: 'general' };
 }
 
 function saveState(s: PersistedState) {
@@ -120,12 +123,14 @@ interface UseAICoachReturn {
   draftPlan: AIDraftPlan | null;
   voiceState: VoiceState;
   errorMsg: string | null;
+  intent: ConversationIntent;
   sendMessage: (text: string) => Promise<void>;
   generatePlan: () => Promise<void>;
   addTasksToCalendar: () => Promise<void>;
   updateDraftTask: (clientId: string, patch: Partial<DraftTask>) => void;
   removeDraftTask: (clientId: string) => void;
   resetConversation: () => void;
+  setIntent: (i: ConversationIntent) => void;
   startVoice: () => void;
   stopVoice: () => Promise<string | null>;
   cancelVoice: () => void;
@@ -141,6 +146,7 @@ function useAICoach(): UseAICoachReturn {
   const [draftPlan, setDraftPlan] = useState<AIDraftPlan | null>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [intent, setIntentState] = useState<ConversationIntent>('general');
 
   const abortRef = useRef<AbortController | null>(null);
   const mediaRecRef = useRef<MediaRecorder | null>(null);
@@ -152,24 +158,26 @@ function useAICoach(): UseAICoachReturn {
       setMessages(saved.messages);
       setPlanState(saved.planState);
       setDraftPlan(saved.draftPlan);
+      setIntentState(saved.intent);
     }
   }, []);
 
   useEffect(() => {
-    saveState({ messages, planState, draftPlan });
-  }, [messages, planState, draftPlan]);
+    saveState({ messages, planState, draftPlan, intent });
+  }, [messages, planState, draftPlan, intent]);
 
   const buildContext = useCallback(
     () => ({
       today: todayStr(),
       timezone: getTimezone(),
+      intent,
       activities: activities.map((a) => ({
         id: a.id,
         name: a.name,
         emoji: a.emoji ?? null,
       })),
     }),
-    [activities],
+    [activities, intent],
   );
 
   const sendMessage = useCallback(
@@ -410,9 +418,14 @@ function useAICoach(): UseAICoachReturn {
     setStreaming("");
     setIsStreaming(false);
     setErrorMsg(null);
+    setIntentState('general');
     try {
       localStorage.removeItem(LS_KEY);
     } catch {}
+  }, []);
+
+  const setIntent = useCallback((i: ConversationIntent) => {
+    setIntentState(i);
   }, []);
 
   const startVoice = useCallback(async () => {
@@ -481,12 +494,14 @@ function useAICoach(): UseAICoachReturn {
     draftPlan,
     voiceState,
     errorMsg,
+    intent,
     sendMessage,
     generatePlan,
     addTasksToCalendar,
     updateDraftTask,
     removeDraftTask,
     resetConversation,
+    setIntent,
     startVoice,
     stopVoice,
     cancelVoice,
@@ -659,10 +674,12 @@ function ConversationArea({
   messages,
   streamingContent,
   isStreaming,
+  intent = 'general',
 }: {
   messages: AIMessage[];
   streamingContent: string;
   isStreaming: boolean;
+  intent?: ConversationIntent;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -722,11 +739,12 @@ function ConversationArea({
                 marginBottom: 5,
               }}
             >
-              Hi Craig! 👋
+              {intent === 'motivate' ? 'Hey! 🔥' : 'Hi! 👋'}
             </p>
             <p style={{ fontSize: 13, color: "#3d3456", lineHeight: 1.6 }}>
-              I'm your AI Coach. Let's build a plan that actually fits your life
-              and helps you reach your goal.
+              {intent === 'motivate'
+                ? "I'm here to help you get unstuck and find your drive again."
+                : "I'm your AI Coach. Let's build a plan that actually fits your life and helps you reach your goal."}
             </p>
             <p
               style={{
@@ -736,7 +754,9 @@ function ConversationArea({
                 fontWeight: 600,
               }}
             >
-              What goal do you want to focus on?
+              {intent === 'motivate'
+                ? "What's on your mind right now?"
+                : "What goal do you want to focus on?"}
             </p>
             <p
               style={{
@@ -942,12 +962,14 @@ interface AICoachCardProps {
   coach: UseAICoachReturn;
   isActive: boolean;
   onActivate: () => void;
+  intent?: ConversationIntent;
 }
 
 function AICoachCard({
   coach,
   isActive,
   onActivate,
+  intent = 'general',
 }: AICoachCardProps) {
   const { isDark } = useApp();
   const [text, setText] = useState("");
@@ -1048,6 +1070,7 @@ function AICoachCard({
           messages={coach.messages}
           streamingContent={coach.streamingContent}
           isStreaming={isStreaming}
+          intent={intent}
         />
       </div>
 
@@ -1185,7 +1208,9 @@ function AICoachCard({
                 ? "🎤 Listening…"
                 : voiceState === "processing"
                   ? "Transcribing…"
-                  : "What goal do you want to discuss?"
+                  : intent === 'motivate'
+                    ? "What's on your mind today?"
+                    : "What goal do you want to discuss?"
             }
             rows={2}
             style={{
@@ -2505,19 +2530,137 @@ function WorkspaceNavBar({
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// SECTION 8b — MOTIVATE CONFIRM DIALOG
+// ═══════════════════════════════════════════════════════════════════
+
+function MotivateConfirmDialog({
+  isDark,
+  onContinue,
+  onGetMotivated,
+}: {
+  isDark: boolean;
+  onContinue: () => void;
+  onGetMotivated: () => void;
+}) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: isDark ? "rgba(4,1,14,0.72)" : "rgba(0,0,0,0.38)",
+        backdropFilter: "blur(4px)",
+        WebkitBackdropFilter: "blur(4px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 20,
+        padding: 20,
+      }}
+    >
+      <div
+        style={{
+          background: isDark ? "rgba(11,5,28,0.98)" : "white",
+          border: isDark
+            ? "0.5px solid rgba(124,58,237,0.45)"
+            : "0.5px solid rgba(124,58,237,0.28)",
+          borderRadius: 18,
+          padding: "24px 20px 20px",
+          maxWidth: 320,
+          width: "100%",
+          boxShadow: isDark
+            ? "0 24px 64px rgba(0,0,0,0.7), 0 0 0 0.5px rgba(124,58,237,0.35)"
+            : "0 12px 40px rgba(0,0,0,0.18)",
+          textAlign: "center",
+        }}
+      >
+        <p style={{ fontSize: 28, marginBottom: 10 }}>🔥</p>
+        <p
+          style={{
+            fontSize: 15,
+            fontWeight: 700,
+            color: isDark ? "rgba(255,255,255,0.95)" : "#1a1033",
+            marginBottom: 8,
+            lineHeight: 1.3,
+          }}
+        >
+          Get Motivated Now?
+        </p>
+        <p
+          style={{
+            fontSize: 12.5,
+            color: isDark ? "rgba(255,255,255,0.5)" : "#6b6080",
+            lineHeight: 1.6,
+            marginBottom: 20,
+          }}
+        >
+          You're already in a conversation. Continue where you left off, or
+          shift to motivation mode?
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <button
+            onClick={onGetMotivated}
+            style={{
+              width: "100%",
+              padding: "11px 0",
+              borderRadius: 10,
+              background: "linear-gradient(135deg,#7c3aed,#9333ea)",
+              color: "white",
+              fontSize: 13,
+              fontWeight: 700,
+              border: "none",
+              cursor: "pointer",
+              boxShadow: "0 3px 12px rgba(124,58,237,0.32)",
+            }}
+          >
+            🔥 Get Motivated Now
+          </button>
+          <button
+            onClick={onContinue}
+            style={{
+              width: "100%",
+              padding: "11px 0",
+              borderRadius: 10,
+              background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+              color: isDark ? "rgba(255,255,255,0.75)" : "#3d3456",
+              fontSize: 13,
+              fontWeight: 600,
+              border: isDark
+                ? "0.5px solid rgba(255,255,255,0.12)"
+                : "0.5px solid rgba(0,0,0,0.12)",
+              cursor: "pointer",
+            }}
+          >
+            Continue Current Conversation
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // SECTION 9 — AICoachPage  (main export, orchestrator)
 // ═══════════════════════════════════════════════════════════════════
 
 interface AICoachPageProps {
   onClose: () => void;
-  onMotivate: () => void;
 }
 
-export function AICoachPage({ onClose, onMotivate }: AICoachPageProps) {
+export function AICoachPage({ onClose }: AICoachPageProps) {
   const { isDark } = useApp();
   const coach = useAICoach();
 
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("coach");
+  const [showMotivateConfirm, setShowMotivateConfirm] = useState(false);
+
+  function handleHeaderMotivate() {
+    if (coach.messages.length > 0) {
+      setShowMotivateConfirm(true);
+    } else {
+      coach.setIntent('motivate');
+      setActiveTab('coach');
+    }
+  }
 
   // ESC: close
   useEffect(() => {
@@ -2571,6 +2714,7 @@ export function AICoachPage({ onClose, onMotivate }: AICoachPageProps) {
         coach={coach}
         isActive
         onActivate={() => {}}
+        intent={coach.intent}
       />
     );
   }
@@ -2650,7 +2794,7 @@ export function AICoachPage({ onClose, onMotivate }: AICoachPageProps) {
 
       {/* Far-right: Motivate Me */}
       <button
-        onClick={onMotivate}
+        onClick={handleHeaderMotivate}
         className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all duration-150 hover:opacity-85 hover:scale-105 flex-shrink-0"
         style={{ background: '#7c3aed', border: '0.5px solid rgba(167,139,250,0.35)', marginLeft: "auto" }}
       >
@@ -2764,6 +2908,7 @@ export function AICoachPage({ onClose, onMotivate }: AICoachPageProps) {
       <div
         className="w-full rounded-2xl overflow-hidden max-w-[640px]"
         style={{
+          position: "relative",
           background: S0,
           border: isDark
             ? "0.5px solid rgba(124,58,237,0.32)"
@@ -2782,6 +2927,17 @@ export function AICoachPage({ onClose, onMotivate }: AICoachPageProps) {
       >
         {Header}
         {SinglePanelBody}
+        {showMotivateConfirm && (
+          <MotivateConfirmDialog
+            isDark={isDark}
+            onContinue={() => setShowMotivateConfirm(false)}
+            onGetMotivated={() => {
+              coach.setIntent('motivate');
+              setShowMotivateConfirm(false);
+              setActiveTab('coach');
+            }}
+          />
+        )}
       </div>
     </div>
     </>

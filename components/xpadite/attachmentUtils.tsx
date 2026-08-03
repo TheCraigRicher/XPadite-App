@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TaskAttachment } from './types'
 
 // ── File helpers ──────────────────────────────────────────────────────────────
@@ -56,16 +56,36 @@ export async function buildAttachment(
   source: 'upload' | 'camera',
 ): Promise<TaskAttachment> {
   const thumbnail = await makeThumb(file)
+  const now = Date.now()
   return {
-    id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    id: `att_${now}_${Math.random().toString(36).slice(2, 7)}`,
     name: file.name,
     mimeType: file.type || 'application/octet-stream',
     size: file.size,
     url: URL.createObjectURL(file),
     thumbnail,
-    addedAt: Date.now(),
+    addedAt: now,
     source,
   }
+}
+
+export const ATTACHMENT_ACCEPT =
+  'image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z'
+
+export async function buildAttachments(
+  files: File[] | FileList,
+  source: 'upload' | 'camera',
+): Promise<TaskAttachment[]> {
+  return Promise.all(Array.from(files).map(f => buildAttachment(f, source)))
+}
+
+export function removeAttachmentById(
+  attachments: TaskAttachment[],
+  id: string,
+): TaskAttachment[] {
+  const att = attachments.find(a => a.id === id)
+  if (att) { try { URL.revokeObjectURL(att.url) } catch {} }
+  return attachments.filter(a => a.id !== id)
 }
 
 // ── AttachmentItem ────────────────────────────────────────────────────────────
@@ -311,12 +331,12 @@ export function CameraModal({
   onCapture: (file: File) => Promise<void> | void
   onClose: () => void
 }) {
-  const videoRef   = useRef<HTMLVideoElement>(null)
-  const canvasRef  = useRef<HTMLCanvasElement>(null)
-  const streamRef  = useRef<MediaStream | null>(null)
-  const [phase, setPhase]             = useState<CameraPhase>('requesting')
-  const [capturedUrl, setCapturedUrl] = useState<string | null>(null)
-  const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null)
+  const videoRef       = useRef<HTMLVideoElement>(null)
+  const canvasRef      = useRef<HTMLCanvasElement>(null)
+  const streamRef      = useRef<MediaStream | null>(null)
+  const handleCloseRef = useRef<() => void>(() => {})
+  const [phase, setPhase]       = useState<CameraPhase>('requesting')
+  const [captured, setCaptured] = useState<{ blob: Blob; url: string } | null>(null)
 
   function stopStream() {
     streamRef.current?.getTracks().forEach(t => t.stop())
@@ -324,7 +344,7 @@ export function CameraModal({
     if (videoRef.current) videoRef.current.srcObject = null
   }
 
-  async function startCamera() {
+  const startCamera = useCallback(async () => {
     setPhase('requesting')
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -340,22 +360,20 @@ export function CameraModal({
     } catch {
       setPhase('denied')
     }
-  }
+  }, [])
 
   // Start camera on mount; stop on unmount
   useEffect(() => {
     startCamera()
     return () => { stopStream() }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [startCamera])
 
-  // Escape key
+  // Stable Escape key listener — never re-registers on capture
   useEffect(() => {
-    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') handleClose() }
+    const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') handleCloseRef.current() }
     window.addEventListener('keydown', fn)
     return () => window.removeEventListener('keydown', fn)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [capturedUrl])
+  }, [])
 
   function capturePhoto() {
     const video  = videoRef.current
@@ -366,32 +384,31 @@ export function CameraModal({
     canvas.getContext('2d')?.drawImage(video, 0, 0)
     canvas.toBlob(blob => {
       if (!blob) return
-      setCapturedBlob(blob)
-      setCapturedUrl(URL.createObjectURL(blob))
+      setCaptured({ blob, url: URL.createObjectURL(blob) })
       stopStream()
       setPhase('captured')
     }, 'image/jpeg', 0.92)
   }
 
   function retake() {
-    if (capturedUrl) { URL.revokeObjectURL(capturedUrl); setCapturedUrl(null) }
-    setCapturedBlob(null)
+    if (captured) { URL.revokeObjectURL(captured.url); setCaptured(null) }
     startCamera()
   }
 
   async function usePhoto() {
-    if (!capturedBlob) return
-    const file = new File([capturedBlob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' })
+    if (!captured) return
+    const file = new File([captured.blob], `photo_${Date.now()}.jpg`, { type: 'image/jpeg' })
     await onCapture(file)
-    if (capturedUrl) URL.revokeObjectURL(capturedUrl)
+    URL.revokeObjectURL(captured.url)
     onClose()
   }
 
   function handleClose() {
     stopStream()
-    if (capturedUrl) URL.revokeObjectURL(capturedUrl)
+    if (captured) URL.revokeObjectURL(captured.url)
     onClose()
   }
+  handleCloseRef.current = handleClose
 
   return (
     <div
@@ -489,10 +506,10 @@ export function CameraModal({
       )}
 
       {/* ── Captured preview ── */}
-      {phase === 'captured' && capturedUrl && (
+      {phase === 'captured' && captured && (
         <>
           <img
-            src={capturedUrl}
+            src={captured.url}
             alt="Captured photo"
             style={{
               width: '100%', maxWidth: 560, borderRadius: 14,

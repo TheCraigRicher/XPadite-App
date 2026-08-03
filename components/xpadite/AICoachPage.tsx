@@ -16,13 +16,20 @@ import type {
   DraftTask,
   AIPlanState,
   Activity,
-  TaskAttachment,
 } from "./types";
 import {
-  buildAttachment,
+  buildAttachments,
+  removeAttachmentById,
+  ATTACHMENT_ACCEPT,
   AttachmentItem,
   ImageLightbox,
 } from "./attachmentUtils";
+
+const ACTION_LABELS = {
+  editNotes: "✏️ Edit Notes",
+  upload:    "📎 Upload File",
+  camera:    "📷 Camera",
+} as const;
 
 // ═══════════════════════════════════════════════════════════════════
 // SECTION 1 — HELPERS
@@ -44,15 +51,6 @@ function fmtDate(dateKey: string): string {
   });
 }
 
-function fmtDateLong(dateKey: string): string {
-  const [y, m, d] = dateKey.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
-}
 
 function fmtTime(hhmm: string | null): string {
   if (!hhmm) return "";
@@ -627,27 +625,24 @@ function WaveformDisplay({
   }, []);
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "20px 14px 16px" }}>
       <canvas
         ref={canvasRef}
         style={{
           display: "block",
           width: "100%",
-          height: 86,
-          borderRadius: 10,
+          height: 150,
+          borderRadius: 6,
         }}
       />
       <div
         style={{
-          position: "absolute",
-          bottom: 7,
-          left: 0,
-          right: 0,
-          textAlign: "center",
-          fontSize: 11,
-          color: "rgba(196,168,255,0.72)",
-          letterSpacing: "0.03em",
+          marginTop: 14,
+          fontSize: 10.5,
+          color: "rgba(196,168,255,0.65)",
+          letterSpacing: "0.06em",
           pointerEvents: "none",
+          userSelect: "none",
         }}
       >
         {label}
@@ -945,14 +940,12 @@ function MicIcon({
 
 interface AICoachCardProps {
   coach: UseAICoachReturn;
-  onEnterFocusMode: () => void; // panel-level focus mode (not modal fit-to-screen)
   isActive: boolean;
   onActivate: () => void;
 }
 
 function AICoachCard({
   coach,
-  onEnterFocusMode: _onEnterFocusMode,
   isActive,
   onActivate,
 }: AICoachCardProps) {
@@ -1030,17 +1023,9 @@ function AICoachCard({
         ...cardStyle,
       }}
     >
-      {/* ── Waveform (dark, top of card, no card header) ── */}
-      <div
-        style={{
-          padding: "14px 12px 12px",
-          flexShrink: 0,
-          background: isDark ? "rgba(8,4,20,0.98)" : "#ffffff",
-        }}
-      >
-        <div style={{ borderRadius: 10, overflow: "hidden" }}>
-          <WaveformDisplay voiceState={voiceState} isStreaming={isStreaming} />
-        </div>
+      {/* ── Waveform (always dark audio panel, top of card) ── */}
+      <div style={{ flexShrink: 0, background: "#04010e" }}>
+        <WaveformDisplay voiceState={voiceState} isStreaming={isStreaming} />
       </div>
 
       {/* ── Conversation / welcome message area ── */}
@@ -1630,19 +1615,17 @@ function TaskCard({
   const [expanded, setExpanded] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [notesFocused, setNotesFocused] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const notesRef = useRef<HTMLTextAreaElement>(null);
-  const attachments = task.attachments ?? [];
+  const attachments = useMemo(() => task.attachments ?? [], [task.attachments]);
 
   async function handleFiles(files: FileList | null, source: "upload" | "camera") {
     if (!files || files.length === 0) return;
     setUploading(true);
     try {
-      const next: TaskAttachment[] = [];
-      for (const file of Array.from(files)) {
-        next.push(await buildAttachment(file, source));
-      }
+      const next = await buildAttachments(files, source);
       onUpdate({ attachments: [...attachments, ...next] });
     } finally {
       setUploading(false);
@@ -1650,9 +1633,7 @@ function TaskCard({
   }
 
   function removeAttachment(id: string) {
-    const att = attachments.find((a) => a.id === id);
-    if (att) { try { URL.revokeObjectURL(att.url); } catch {} }
-    onUpdate({ attachments: attachments.filter((a) => a.id !== id) });
+    onUpdate({ attachments: removeAttachmentById(attachments, id) });
   }
 
   const totalMs = useMemo(() => {
@@ -1986,43 +1967,36 @@ function TaskCard({
         >
           {/* Action bar */}
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-            {(["editNotes", "upload", "camera"] as const).map((action) => {
-              const labels = {
-                editNotes: "✏️ Edit Notes",
-                upload: "📎 Upload File",
-                camera: "📷 Camera",
-              };
-              return (
-                <button
-                  key={action}
-                  onClick={() => {
-                    if (action === "editNotes") notesRef.current?.focus();
-                    else if (action === "upload") uploadRef.current?.click();
-                    else cameraRef.current?.click();
-                  }}
-                  disabled={uploading && action !== "editNotes"}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 4,
-                    padding: "4px 10px",
-                    borderRadius: 7,
-                    background: isDark ? "rgba(124,58,237,0.10)" : "rgba(124,58,237,0.06)",
-                    border: isDark
-                      ? "0.5px solid rgba(124,58,237,0.28)"
-                      : "0.5px solid rgba(124,58,237,0.2)",
-                    cursor: "pointer",
-                    fontSize: 11.5,
-                    fontWeight: 500,
-                    color: isDark ? "rgba(196,168,255,0.88)" : "#5b21b6",
-                    transition: "background 130ms",
-                    opacity: uploading && action !== "editNotes" ? 0.5 : 1,
-                  }}
-                >
-                  {labels[action]}
-                </button>
-              );
-            })}
+            {(["editNotes", "upload", "camera"] as const).map((action) => (
+              <button
+                key={action}
+                onClick={() => {
+                  if (action === "editNotes") notesRef.current?.focus();
+                  else if (action === "upload") uploadRef.current?.click();
+                  else cameraRef.current?.click();
+                }}
+                disabled={uploading && action !== "editNotes"}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "4px 10px",
+                  borderRadius: 7,
+                  background: isDark ? "rgba(124,58,237,0.10)" : "rgba(124,58,237,0.06)",
+                  border: isDark
+                    ? "0.5px solid rgba(124,58,237,0.28)"
+                    : "0.5px solid rgba(124,58,237,0.2)",
+                  cursor: "pointer",
+                  fontSize: 11.5,
+                  fontWeight: 500,
+                  color: isDark ? "rgba(196,168,255,0.88)" : "#5b21b6",
+                  transition: "background 130ms",
+                  opacity: uploading && action !== "editNotes" ? 0.5 : 1,
+                }}
+              >
+                {ACTION_LABELS[action]}
+              </button>
+            ))}
             {uploading && (
               <span style={{ fontSize: 11, color: isDark ? "rgba(167,139,250,0.7)" : "#7c3aed", display: "flex", alignItems: "center", gap: 4 }}>
                 <span
@@ -2046,7 +2020,7 @@ function TaskCard({
             ref={uploadRef}
             type="file"
             multiple
-            accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z"
+            accept={ATTACHMENT_ACCEPT}
             style={{ display: "none" }}
             onChange={(e) => { handleFiles(e.target.files, "upload"); e.currentTarget.value = ""; }}
           />
@@ -2054,7 +2028,7 @@ function TaskCard({
             ref={cameraRef}
             type="file"
             accept="image/*"
-            capture={"environment" as unknown as boolean}
+            {...{ capture: "environment" }}
             style={{ display: "none" }}
             onChange={(e) => { handleFiles(e.target.files, "camera"); e.currentTarget.value = ""; }}
           />
@@ -2070,8 +2044,8 @@ function TaskCard({
               width: "100%",
               resize: "vertical",
               border: isDark
-                ? "0.5px solid rgba(124,58,237,0.25)"
-                : "0.5px solid rgba(124,58,237,0.2)",
+                ? `0.5px solid ${notesFocused ? "rgba(124,58,237,0.55)" : "rgba(124,58,237,0.25)"}`
+                : `0.5px solid ${notesFocused ? "rgba(124,58,237,0.5)" : "rgba(124,58,237,0.2)"}`,
               borderRadius: 8,
               background: isDark ? "rgba(255,255,255,0.03)" : "rgba(248,246,255,0.9)",
               color: "var(--xp-txt)",
@@ -2084,12 +2058,8 @@ function TaskCard({
               maxHeight: 140,
               fontFamily: "inherit",
             }}
-            onFocus={(e) => {
-              e.target.style.borderColor = isDark ? "rgba(124,58,237,0.55)" : "rgba(124,58,237,0.5)";
-            }}
-            onBlur={(e) => {
-              e.target.style.borderColor = isDark ? "rgba(124,58,237,0.25)" : "rgba(124,58,237,0.2)";
-            }}
+            onFocus={() => setNotesFocused(true)}
+            onBlur={() => setNotesFocused(false)}
           />
 
           {/* Attachments list */}
@@ -2535,23 +2505,7 @@ function WorkspaceNavBar({
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// SECTION 9 — useIsDesktop
-// ═══════════════════════════════════════════════════════════════════
-
-function useIsDesktop(): boolean {
-  const [isDesktop, setIsDesktop] = useState(() =>
-    typeof window !== "undefined" ? window.innerWidth >= 768 : true,
-  );
-  useEffect(() => {
-    const fn = () => setIsDesktop(window.innerWidth >= 768);
-    window.addEventListener("resize", fn, { passive: true });
-    return () => window.removeEventListener("resize", fn);
-  }, []);
-  return isDesktop;
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// SECTION 10 — AICoachPage  (main export, orchestrator)
+// SECTION 9 — AICoachPage  (main export, orchestrator)
 // ═══════════════════════════════════════════════════════════════════
 
 interface AICoachPageProps {
@@ -2561,79 +2515,33 @@ interface AICoachPageProps {
 export function AICoachPage({ onClose }: AICoachPageProps) {
   const { isDark } = useApp();
   const coach = useAICoach();
-  const isDesktop = useIsDesktop();
 
-  // panelFocusMode = PANEL-level focus (single panel + nav inside the same modal size)
-  const [panelFocusMode, setPanelFocusMode] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("coach");
-  // activePanel tracks which card is glowing (3-panel desktop view)
-  const [activePanel, setActivePanel] = useState<
-    "coach" | "tasks" | "calendar"
-  >("coach");
 
-  // ESC: exit panel focus first, then close
+  // ESC: close
   useEffect(() => {
-    const fn = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (panelFocusMode) setPanelFocusMode(false);
-        else onClose();
-      }
-    };
+    const fn = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", fn);
     return () => window.removeEventListener("keydown", fn);
-  }, [onClose, panelFocusMode]);
+  }, [onClose]);
 
   // Auto-switch to tasks tab when plan arrives
   useEffect(() => {
-    if (coach.planState === "draft_ready") {
-      setActiveTab("tasks");
-      setActivePanel("tasks");
-    }
+    if (coach.planState === "draft_ready") setActiveTab("tasks");
   }, [coach.planState]);
-
-  const showThreePanels = isDesktop && !panelFocusMode;
 
   const S0 = isDark
     ? "linear-gradient(160deg, #0a0420 0%, #0d0628 60%, #060218 100%)"
     : "#f9f8ff";
 
-  // Active calendar glow (applied to calendar wrapper)
-  const calIsActive = activePanel === "calendar";
-  const calBorder = calIsActive
-    ? "1.5px solid rgba(124,58,237,0.62)"
-    : isDark
-      ? "0.5px solid rgba(124,58,237,0.22)"
-      : "1px solid rgba(124,58,237,0.18)";
-  const calShadow = calIsActive
-    ? isDark
-      ? "0 0 0 3px rgba(124,58,237,0.11), 0 0 22px rgba(124,58,237,0.17)"
-      : "0 0 0 3px rgba(124,58,237,0.08), 0 0 18px rgba(124,58,237,0.14)"
-    : isDark
-      ? "0 -4px 20px rgba(0,0,0,0.25)"
-      : "0 -2px 10px rgba(124,58,237,0.06)";
-  const calBg = calIsActive
-    ? isDark
-      ? "rgba(10,5,26,0.97)"
-      : "#fdfbff"
-    : isDark
-      ? "rgba(8,4,22,0.95)"
-      : "#ffffff";
-
-  // Single-panel view renderer (mobile OR panel focus mode)
+  // Single-panel view renderer
   function renderSinglePanel() {
     if (activeTab === "tasks") {
-      return (
-        <TaskManagerCard
-          coach={coach}
-          isActive
-          onActivate={() => setActivePanel("tasks")}
-        />
-      );
+      return <TaskManagerCard coach={coach} isActive onActivate={() => {}} />;
     }
     if (activeTab === "calendar") {
       return (
         <div
-          onClick={() => setActivePanel("calendar")}
           style={{
             flex: 1,
             display: "flex",
@@ -2660,9 +2568,8 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
     return (
       <AICoachCard
         coach={coach}
-        onEnterFocusMode={() => setPanelFocusMode(true)}
         isActive
-        onActivate={() => setActivePanel("coach")}
+        onActivate={() => {}}
       />
     );
   }
@@ -2706,45 +2613,6 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
         ← Back
       </button>
 
-      {/* Flex-1 spacer: keeps Back and Focus Mode buttons at the edges */}
-      <div style={{ flex: 1, minWidth: 0 }} />
-
-      {/* Far-right: toggles between Focus Mode and ↩ Full Workspace */}
-      {panelFocusMode ? (
-        <button
-          onClick={() => setPanelFocusMode(false)}
-          style={hdrBtnStyle}
-          title="Return to full workspace"
-        >
-          ↩ Full Workspace
-        </button>
-      ) : (
-        <button
-          onClick={() => {
-            setPanelFocusMode(true);
-            setActiveTab("coach");
-          }}
-          style={hdrBtnStyle}
-          title="Enter Focus Mode"
-        >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 14 14"
-            fill="none"
-            style={{ flexShrink: 0 }}
-          >
-            <circle cx="7" cy="7" r="5.5" stroke="white" strokeWidth="1.5" />
-            <circle cx="7" cy="7" r="1.8" fill="white" />
-            <line x1="7" y1="0" x2="7" y2="3" stroke="white" strokeWidth="1.4" strokeLinecap="round" />
-            <line x1="7" y1="11" x2="7" y2="14" stroke="white" strokeWidth="1.4" strokeLinecap="round" />
-            <line x1="0" y1="7" x2="3" y2="7" stroke="white" strokeWidth="1.4" strokeLinecap="round" />
-            <line x1="11" y1="7" x2="14" y2="7" stroke="white" strokeWidth="1.4" strokeLinecap="round" />
-          </svg>
-          Focus Mode
-        </button>
-      )}
-
       {/* Absolutely centered 🤖 AI Coach pill — independent of button widths */}
       <div
         style={{
@@ -2781,119 +2649,7 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
     </div>
   );
 
-  // ── Three-panel layout body ────────────────────────────────────────────────
-  const ThreePanelBody = (
-    <div
-      style={{
-        flex: 1,
-        minHeight: 0,
-        display: "flex",
-        flexDirection: "column",
-        padding: "10px 12px 0",
-        overflow: "hidden",
-      }}
-    >
-      {/* Subtle date — sits naturally below header in the workspace body */}
-      <div style={{ flexShrink: 0, textAlign: "center", paddingBottom: 6 }}>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 500,
-            color: isDark ? "rgba(196,168,255,0.45)" : "rgba(109,40,217,0.4)",
-            letterSpacing: "0.025em",
-            userSelect: "none",
-          }}
-        >
-          {fmtDateLong(todayStr())}
-        </span>
-      </div>
-
-      {/* Top row: AI Coach (left, 52%) + Task Panel (right, 48%) */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "52fr 48fr",
-          gap: 12,
-          flex: "0 0 60%",
-          minHeight: 260,
-          overflow: "hidden",
-        }}
-      >
-        <AICoachCard
-          coach={coach}
-          onEnterFocusMode={() => {
-            setPanelFocusMode(true);
-            setActiveTab("coach");
-          }}
-          isActive={activePanel === "coach"}
-          onActivate={() => setActivePanel("coach")}
-        />
-        <TaskManagerCard
-          coach={coach}
-          onCollapse={undefined}
-          isActive={activePanel === "tasks"}
-          onActivate={() => setActivePanel("tasks")}
-        />
-      </div>
-
-      {/* Calendar — takes remaining height, internal scroll only */}
-      <div
-        onClick={() => setActivePanel("calendar")}
-        onFocus={() => setActivePanel("calendar")}
-        style={{
-          flex: 1,
-          minHeight: 140,
-          marginTop: 12,
-          borderRadius: "14px 14px 0 0",
-          border: calBorder,
-          borderBottom: "none",
-          background: calBg,
-          boxShadow: calShadow,
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          transition:
-            "background-color 190ms ease-out, border-color 190ms ease-out, box-shadow 190ms ease-out",
-          cursor: "default",
-        }}
-      >
-        {/* Calendar section header — purple bar with centered title */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "10px 14px",
-            background:
-              "linear-gradient(135deg, #4c1d95 0%, #6d28d9 60%, #7c3aed 100%)",
-            flexShrink: 0,
-          }}
-        >
-          <p
-            style={{
-              fontSize: 14,
-              fontWeight: 700,
-              color: "white",
-              letterSpacing: "0.01em",
-              userSelect: "none",
-            }}
-          >
-            AI Goal Setting 🚀
-          </p>
-        </div>
-        {/* Internal scroll — only this region scrolls, top panels stay fixed */}
-        <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
-          <CalendarSection
-            onDayDoubleClick={() => {}}
-            onMonthZoom={() => {}}
-            activeMonth={null}
-          />
-        </div>
-      </div>
-    </div>
-  );
-
-  // ── Panel focus / mobile body ──────────────────────────────────────────────
+  // ── Dedicated AI Coach body ────────────────────────────────────────────────
   const SinglePanelBody = (
     <div
       style={{
@@ -2928,10 +2684,7 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
       </div>
       <WorkspaceNavBar
         active={activeTab}
-        onChange={(tab) => {
-          setActiveTab(tab);
-          setActivePanel(tab);
-        }}
+        onChange={setActiveTab}
       />
     </div>
   );
@@ -2957,15 +2710,10 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
     <div
       className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-3 ${isDark ? "xp-dark" : "xp-light"}`}
       style={{
-        background: isDark
-          ? panelFocusMode ? "rgba(0,0,0,0.88)" : "rgba(0,0,0,0.82)"
-          : panelFocusMode ? "rgba(0,0,0,0.64)" : "rgba(0,0,0,0.55)",
-        fontFamily:
-          '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        backdropFilter: panelFocusMode ? "blur(9px) saturate(0.85)" : "blur(0px)",
-        WebkitBackdropFilter: panelFocusMode ? "blur(9px) saturate(0.85)" : "blur(0px)",
-        transition:
-          "background 280ms ease-in-out, backdrop-filter 280ms ease-in-out, -webkit-backdrop-filter 280ms ease-in-out",
+        background: isDark ? "rgba(0,0,0,0.88)" : "rgba(0,0,0,0.64)",
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        backdropFilter: "blur(9px) saturate(0.85)",
+        WebkitBackdropFilter: "blur(9px) saturate(0.85)",
       }}
       onClick={onClose}
     >
@@ -3002,41 +2750,28 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
         </div>
       )}
 
-      {/* Modal shell
-          • maxHeight: calc(100vh - 40px) ensures bottom is ALWAYS visible (20px top + 20px bottom clearance)
-          • overflow: hidden — no modal-level scrolling; only calendar scrolls internally
-          • Outer purple glow on box-shadow (weaker than active-panel glow) */}
+      {/* Modal shell */}
       <div
-        className="w-full rounded-2xl overflow-hidden max-w-[640px] lg:max-w-[1296px]"
+        className="w-full rounded-2xl overflow-hidden max-w-[640px]"
         style={{
           background: S0,
           border: isDark
-            ? panelFocusMode
-              ? "0.5px solid rgba(124,58,237,0.32)"
-              : "0.5px solid rgba(124,58,237,0.22)"
-            : panelFocusMode
-              ? "0.5px solid rgba(124,58,237,0.22)"
-              : "0.5px solid rgba(124,58,237,0.15)",
+            ? "0.5px solid rgba(124,58,237,0.32)"
+            : "0.5px solid rgba(124,58,237,0.22)",
           boxShadow: isDark
-            ? panelFocusMode
-              ? "0 40px 90px rgba(0,0,0,0.85), 0 0 0 0.5px rgba(124,58,237,0.28), 0 0 72px rgba(124,58,237,0.16), inset 0 1px 0 rgba(255,255,255,0.05)"
-              : "0 30px 70px rgba(0,0,0,0.75), 0 0 0 0.5px rgba(124,58,237,0.16), 0 0 48px rgba(124,58,237,0.1), inset 0 1px 0 rgba(255,255,255,0.04)"
-            : panelFocusMode
-              ? "0 28px 64px rgba(0,0,0,0.18), 0 0 44px rgba(124,58,237,0.12)"
-              : "0 20px 50px rgba(0,0,0,0.12), 0 0 32px rgba(124,58,237,0.07)",
+            ? "0 40px 90px rgba(0,0,0,0.85), 0 0 0 0.5px rgba(124,58,237,0.28), 0 0 72px rgba(124,58,237,0.16), inset 0 1px 0 rgba(255,255,255,0.05)"
+            : "0 28px 64px rgba(0,0,0,0.18), 0 0 44px rgba(124,58,237,0.12)",
           marginBottom: 4,
-          // Always fill the viewport — minHeight stretches to full height, maxHeight caps overflow
           minHeight: "calc(100vh - 32px)",
           maxHeight: "calc(100vh - 32px)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          transition: "box-shadow 280ms ease-in-out, border-color 280ms ease-in-out",
         }}
         onClick={(e) => e.stopPropagation()}
       >
         {Header}
-        {showThreePanels ? ThreePanelBody : SinglePanelBody}
+        {SinglePanelBody}
       </div>
     </div>
     </>

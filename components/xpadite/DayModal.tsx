@@ -5,7 +5,7 @@ import { useApp, EMPTY_DAY } from './AppContext'
 import type { Task, TaskSession, Activity, TaskAttachment } from './types'
 import { formatMs, formatHMS, formatTime, APP_YEAR } from './utils'
 import { ReminderModal } from './ReminderModal'
-import { buildAttachment, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
+import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
 
 // ─── Recent-emoji localStorage helpers ───────────────────────────────────────
 
@@ -358,34 +358,19 @@ function TaskRow({
   const [cameraOpen,  setCameraOpen]  = useState(false)
   const uploadRef = useRef<HTMLInputElement>(null)
 
-  async function handleFiles(files: FileList | null, source: 'upload' | 'camera') {
+  async function handleFiles(files: File[] | FileList | null, source: 'upload' | 'camera') {
     if (!files || files.length === 0) return
     setUploading(true)
     try {
-      const next: TaskAttachment[] = []
-      for (const file of Array.from(files)) {
-        next.push(await buildAttachment(file, source))
-      }
+      const next = await buildAttachments(files, source)
       onAttachmentsChange([...attachments, ...next])
     } finally {
       setUploading(false)
     }
   }
 
-  async function handleSingleFile(file: File, source: 'upload' | 'camera') {
-    setUploading(true)
-    try {
-      const att = await buildAttachment(file, source)
-      onAttachmentsChange([...attachments, att])
-    } finally {
-      setUploading(false)
-    }
-  }
-
   function removeAttachment(id: string) {
-    const att = attachments.find(a => a.id === id)
-    if (att) { try { URL.revokeObjectURL(att.url) } catch {} }
-    onAttachmentsChange(attachments.filter(a => a.id !== id))
+    onAttachmentsChange(removeAttachmentById(attachments, id))
   }
   const hasReminder = reminders.some(r => r.taskId === task.id && r.dateKey === dateKey && r.isActive)
 
@@ -782,7 +767,7 @@ function TaskRow({
                     ref={uploadRef}
                     type="file"
                     multiple
-                    accept="image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,.7z"
+                    accept={ATTACHMENT_ACCEPT}
                     style={{ display: 'none' }}
                     onChange={e => { handleFiles(e.target.files, 'upload'); e.currentTarget.value = '' }}
                   />
@@ -844,7 +829,7 @@ function TaskRow({
       {/* Camera modal */}
       {cameraOpen && (
         <CameraModal
-          onCapture={file => handleSingleFile(file, 'camera')}
+          onCapture={file => handleFiles([file], 'camera')}
           onClose={() => setCameraOpen(false)}
         />
       )}

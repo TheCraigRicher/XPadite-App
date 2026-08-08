@@ -14,6 +14,8 @@ import { MonthFullPage } from './MonthFullPage'
 import { DayDashboardModal } from './DayDashboardModal'
 import { AnalyticsPage } from './AnalyticsPage'
 import { AICoachPage } from './AICoachPage'
+import { JournalNotesModal } from './JournalNotesModal'
+import { NotificationsModal } from './NotificationsModal'
 import { GalleryModal } from './GalleryModal'
 import { SettingsModal } from './SettingsModal'
 import { MobileBottomNav } from './MobileBottomNav'
@@ -451,13 +453,15 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [dashboardDay, setDashboardDay]             = useState<ModalDay | null>(null)
   const [zoomedMonth, setZoomedMonth]               = useState<number | null>(null)
   const [fullPageMonth, setFullPageMonth]           = useState<number | null>(null)
-  const [motivationOpen, setMotivationOpen]         = useState(false)
-  const [analyticsOpen, setAnalyticsOpen]           = useState(false)
-  const [aiCoachOpen, setAICoachOpen]               = useState(false)
-  const [galleryOpen, setGalleryOpen]               = useState(false)
-  const [settingsOpen, setSettingsOpen]             = useState(false)
-  const [profileOpen, setProfileOpen]               = useState(false)
-  const [activityManagerOpen, setActivityManagerOpen] = useState(false)
+  const [motivationOpen, setMotivationOpen]             = useState(false)
+  const [analyticsOpen, setAnalyticsOpen]               = useState(false)
+  const [aiCoachOpen, setAICoachOpen]                   = useState(false)
+  const [galleryOpen, setGalleryOpen]                   = useState(false)
+  const [settingsOpen, setSettingsOpen]                 = useState(false)
+  const [profileOpen, setProfileOpen]                   = useState(false)
+  const [activityManagerOpen, setActivityManagerOpen]   = useState(false)
+  const [journalNotesOpen, setJournalNotesOpen]         = useState(false)
+  const [notificationsOpen, setNotificationsOpen]       = useState(false)
 
   // ── Mobile tab ────────────────────────────────────────────────────────────────
   const [mobileTab, setMobileTab] = useState<MobileTab>('overview')
@@ -546,9 +550,11 @@ function ThemedApp(_props: XpaditeAppProps) {
         onSettings={() => setSettingsOpen(true)}
         onAnalytics={() => setAnalyticsOpen(true)}
         onMotivate={() => setMotivationOpen(true)}
-        onQotd={triggerQotd}
         onProfile={() => setProfileOpen(true)}
         onActivities={() => setActivityManagerOpen(true)}
+        onAICoach={() => setAICoachOpen(true)}
+        onJournalNotes={() => setJournalNotesOpen(true)}
+        onNotifications={() => setNotificationsOpen(true)}
       />
 
       {/* QOTD banner */}
@@ -738,6 +744,10 @@ function ThemedApp(_props: XpaditeAppProps) {
       {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
 
       {activityManagerOpen && <ActivityManagerModal onClose={() => setActivityManagerOpen(false)} />}
+
+      {journalNotesOpen && <JournalNotesModal onClose={() => setJournalNotesOpen(false)} />}
+
+      {notificationsOpen && <NotificationsModal onClose={() => setNotificationsOpen(false)} />}
 
       {/* Toast — above bottom nav on mobile */}
       {toast && (

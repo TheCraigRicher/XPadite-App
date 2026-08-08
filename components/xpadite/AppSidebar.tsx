@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { useApp } from './AppContext'
 import { XpaditeLogo } from '@/components/auth/XpaditeLogo'
 import { createBrowserClient } from '@supabase/ssr'
@@ -27,13 +28,13 @@ type MenuAction =
   | 'analytics'
   | 'activities'
   | 'sync-calendar'
-  | 'goal-setting'
+  | 'ai-coach'
   | 'meetings'
-  | 'reminders'
   | 'gallery'
   | 'settings'
   | 'motivate'
-  | 'qotd'
+  | 'journal-notes'
+  | 'notifications'
   | 'help'
 
 interface MenuItem {
@@ -44,18 +45,18 @@ interface MenuItem {
 }
 
 const MENU_ITEMS: MenuItem[] = [
-  { icon: '👤', label: 'Profile',               action: 'profile'        },
-  { icon: '📊', label: 'Analytics',             action: 'analytics',      dividerBefore: true },
-  { icon: '🎯', label: 'Activities',            action: 'activities'      },
-  { icon: '📅', label: 'Sync Google Calendar',  action: 'sync-calendar',  dividerBefore: true },
-  { icon: '✨', label: 'Goal Setting with AI',  action: 'goal-setting'    },
-  { icon: '👥', label: 'Meetings',              action: 'meetings'        },
-  { icon: '🔔', label: 'Reminders',             action: 'reminders'       },
-  { icon: '🖼️', label: 'Gallery',              action: 'gallery'          },
-  { icon: '⚙️', label: 'Settings',             action: 'settings'         },
-  { icon: '🔥', label: 'Motivate Me',           action: 'motivate',        dividerBefore: true },
-  { icon: '💬', label: 'Quote of the Day',      action: 'qotd'            },
-  { icon: '❓', label: 'Help & Feedback',       action: 'help',            dividerBefore: true },
+  { icon: '👤', label: 'Profile',               action: 'profile'          },
+  { icon: '📊', label: 'Analytics',             action: 'analytics',        dividerBefore: true },
+  { icon: '🎯', label: 'Activities',            action: 'activities'        },
+  { icon: '📅', label: 'Sync Google Calendar',  action: 'sync-calendar',    dividerBefore: true },
+  { icon: '🤖', label: 'XPadite AI Coach',      action: 'ai-coach'          },
+  { icon: '👥', label: 'Meetings',              action: 'meetings'          },
+  { icon: '🖼️', label: 'Gallery',              action: 'gallery'            },
+  { icon: '⚙️', label: 'Settings',             action: 'settings'           },
+  { icon: '🔥', label: 'Motivate Me',           action: 'motivate',          dividerBefore: true },
+  { icon: '📝', label: 'Journal Notes',         action: 'journal-notes'     },
+  { icon: '🔔', label: 'Notifications',         action: 'notifications'     },
+  { icon: '❓', label: 'Help & Feedback',       action: 'help',              dividerBefore: true },
 ]
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -65,10 +66,11 @@ interface AppSidebarProps {
   onSettings?: () => void
   onAnalytics?: () => void
   onMotivate?: () => void
-  onQotd?: () => void
   onProfile?: () => void
   onActivities?: () => void
-  onReminders?: () => void
+  onAICoach?: () => void
+  onJournalNotes?: () => void
+  onNotifications?: () => void
 }
 
 export function AppSidebar({
@@ -76,13 +78,22 @@ export function AppSidebar({
   onSettings,
   onAnalytics,
   onMotivate,
-  onQotd,
   onProfile,
   onActivities,
-  onReminders,
+  onAICoach,
+  onJournalNotes,
+  onNotifications,
 }: AppSidebarProps) {
   const { sidebarOpen, setSidebarOpen } = useApp()
   const router = useRouter()
+  const [avatarUrl, setAvatarUrl] = useState('')
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('xp9-profile')
+      if (raw) setAvatarUrl(JSON.parse(raw).avatarUrl || '')
+    } catch {}
+  }, [sidebarOpen])
 
   async function handleSignOut() {
     setSidebarOpen(false)
@@ -103,11 +114,11 @@ export function AppSidebar({
       case 'gallery':        onGallery?.(); break
       case 'settings':       onSettings?.(); break
       case 'motivate':       onMotivate?.(); break
-      case 'qotd':           onQotd?.(); break
-      case 'reminders':      onReminders?.(); break
+      case 'ai-coach':       onAICoach?.(); break
+      case 'journal-notes':  onJournalNotes?.(); break
+      case 'notifications':  onNotifications?.(); break
       // Stubs — close sidebar only
       case 'sync-calendar':
-      case 'goal-setting':
       case 'meetings':
       case 'help':
       default: break
@@ -164,7 +175,16 @@ export function AppSidebar({
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors duration-150 hover:bg-white/7"
                 style={{ color: '#cbd5e1' }}
               >
-                <span className="text-base w-5 text-center flex-shrink-0">{item.icon}</span>
+                {item.action === 'profile' && avatarUrl ? (
+                  <img
+                    src={avatarUrl}
+                    alt=""
+                    className="w-5 h-5 rounded-full flex-shrink-0"
+                    style={{ objectFit: 'cover' }}
+                  />
+                ) : (
+                  <span className="text-base w-5 text-center flex-shrink-0">{item.icon}</span>
+                )}
                 {item.label}
               </button>
             </div>

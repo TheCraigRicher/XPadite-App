@@ -456,6 +456,7 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [motivationOpen, setMotivationOpen]             = useState(false)
   const [analyticsOpen, setAnalyticsOpen]               = useState(false)
   const [aiCoachOpen, setAICoachOpen]                   = useState(false)
+  const [aiCoachMotivate, setAICoachMotivate]           = useState(false)
   const [galleryOpen, setGalleryOpen]                   = useState(false)
   const [settingsOpen, setSettingsOpen]                 = useState(false)
   const [profileOpen, setProfileOpen]                   = useState(false)
@@ -479,6 +480,7 @@ function ThemedApp(_props: XpaditeAppProps) {
 
   function handleAICoachClose() {
     setAICoachOpen(false)
+    setAICoachMotivate(false)
     if (mobileTab === 'ai-coach') setMobileTab('overview')
   }
 
@@ -549,7 +551,7 @@ function ThemedApp(_props: XpaditeAppProps) {
         onGallery={() => setGalleryOpen(true)}
         onSettings={() => setSettingsOpen(true)}
         onAnalytics={() => setAnalyticsOpen(true)}
-        onMotivate={() => setMotivationOpen(true)}
+        onMotivate={() => { setAICoachMotivate(true); setAICoachOpen(true) }}
         onProfile={() => setProfileOpen(true)}
         onActivities={() => setActivityManagerOpen(true)}
         onAICoach={() => setAICoachOpen(true)}
@@ -733,7 +735,7 @@ function ThemedApp(_props: XpaditeAppProps) {
 
       {analyticsOpen && <AnalyticsPage onClose={handleAnalyticsClose} />}
 
-      {aiCoachOpen && <AICoachPage onClose={handleAICoachClose} />}
+      {aiCoachOpen && <AICoachPage onClose={handleAICoachClose} startWithMotivate={aiCoachMotivate} />}
 
       {motivationOpen && <MotivationModal onClose={() => setMotivationOpen(false)} />}
 

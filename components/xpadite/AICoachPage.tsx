@@ -2644,14 +2644,16 @@ function MotivateConfirmDialog({
 
 interface AICoachPageProps {
   onClose: () => void;
+  startWithMotivate?: boolean;
 }
 
-export function AICoachPage({ onClose }: AICoachPageProps) {
+export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
   const { isDark } = useApp();
   const coach = useAICoach();
 
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("coach");
   const [showMotivateConfirm, setShowMotivateConfirm] = useState(false);
+  const motivateOnMountRef = useRef(startWithMotivate ?? false);
 
   function handleHeaderMotivate() {
     if (coach.messages.length > 0) {
@@ -2661,6 +2663,18 @@ export function AICoachPage({ onClose }: AICoachPageProps) {
       setActiveTab('coach');
     }
   }
+
+  // When opened via "Motivate Me" burger menu entry, activate motivate intent on mount
+  useEffect(() => {
+    if (!motivateOnMountRef.current) return;
+    if (coach.messages.length > 0) {
+      setShowMotivateConfirm(true);
+    } else {
+      coach.setIntent('motivate');
+      setActiveTab('coach');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ESC: close
   useEffect(() => {

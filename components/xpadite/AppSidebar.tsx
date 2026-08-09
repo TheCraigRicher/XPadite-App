@@ -35,6 +35,7 @@ type MenuAction =
   | 'motivate'
   | 'journal-notes'
   | 'notifications'
+  | 'tutorials'
   | 'help'
 
 interface MenuItem {
@@ -42,21 +43,23 @@ interface MenuItem {
   label: string
   action: MenuAction
   dividerBefore?: boolean
+  href?: string
 }
 
 const MENU_ITEMS: MenuItem[] = [
-  { icon: '👤', label: 'Profile',               action: 'profile'          },
-  { icon: '📊', label: 'Analytics',             action: 'analytics',        dividerBefore: true },
-  { icon: '🎯', label: 'Activities',            action: 'activities'        },
-  { icon: '📅', label: 'Sync Google Calendar',  action: 'sync-calendar',    dividerBefore: true },
-  { icon: '🤖', label: 'XPadite AI Coach',      action: 'ai-coach'          },
-  { icon: '👥', label: 'Meetings',              action: 'meetings'          },
-  { icon: '🖼️', label: 'Gallery',              action: 'gallery'            },
-  { icon: '⚙️', label: 'Settings',             action: 'settings'           },
-  { icon: '🔥', label: 'Motivate Me',           action: 'motivate',          dividerBefore: true },
-  { icon: '📝', label: 'Journal Notes',         action: 'journal-notes'     },
-  { icon: '🔔', label: 'Notifications',         action: 'notifications'     },
-  { icon: '❓', label: 'Help & Feedback',       action: 'help',              dividerBefore: true },
+  { icon: '👤', label: 'Profile',               action: 'profile'                                                                    },
+  { icon: '📊', label: 'Analytics',             action: 'analytics',     dividerBefore: true                                         },
+  { icon: '🎯', label: 'Activities',            action: 'activities'                                                                 },
+  { icon: '📅', label: 'Sync Google Calendar',  action: 'sync-calendar', dividerBefore: true                                         },
+  { icon: '🤖', label: 'XPadite AI Coach',      action: 'ai-coach'                                                                   },
+  { icon: '👥', label: 'Meetings',              action: 'meetings'                                                                   },
+  { icon: '🖼️', label: 'Gallery',              action: 'gallery'                                                                     },
+  { icon: '🔥', label: 'Motivate Me',           action: 'motivate',      dividerBefore: true                                         },
+  { icon: '📝', label: 'Journal Notes',         action: 'journal-notes'                                                              },
+  { icon: '🔔', label: 'Notifications',         action: 'notifications'                                                              },
+  { icon: '🎓', label: 'XPadite Tutorials',     action: 'tutorials',     dividerBefore: true, href: 'https://www.youtube.com/@Xpadite' },
+  { icon: '⚙️', label: 'Settings',             action: 'settings'                                                                    },
+  { icon: '❓', label: 'Help & Feedback',       action: 'help'                                                                       },
 ]
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -87,6 +90,7 @@ export function AppSidebar({
   const { sidebarOpen, setSidebarOpen } = useApp()
   const router = useRouter()
   const [avatarUrl, setAvatarUrl] = useState('')
+  const [loadingMotivate, setLoadingMotivate] = useState(false)
 
   useEffect(() => {
     try {
@@ -106,6 +110,10 @@ export function AppSidebar({
   }
 
   function handleAction(action: MenuAction) {
+    if (action === 'motivate') {
+      setLoadingMotivate(true)
+      setTimeout(() => setLoadingMotivate(false), 350)
+    }
     setSidebarOpen(false)
     switch (action) {
       case 'profile':        onProfile?.(); break
@@ -120,6 +128,7 @@ export function AppSidebar({
       // Stubs — close sidebar only
       case 'sync-calendar':
       case 'meetings':
+      case 'tutorials':
       case 'help':
       default: break
     }
@@ -170,23 +179,37 @@ export function AppSidebar({
               {item.dividerBefore && (
                 <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.06)', margin: '4px 0' }} />
               )}
-              <button
-                onClick={() => handleAction(item.action)}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors duration-150 hover:bg-white/7"
-                style={{ color: '#cbd5e1' }}
-              >
-                {item.action === 'profile' && avatarUrl ? (
-                  <img
-                    src={avatarUrl}
-                    alt=""
-                    className="w-5 h-5 rounded-full flex-shrink-0"
-                    style={{ objectFit: 'cover' }}
-                  />
-                ) : (
+              {item.href ? (
+                <a
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setSidebarOpen(false)}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors duration-150 hover:bg-white/7"
+                  style={{ color: '#cbd5e1', textDecoration: 'none', display: 'flex' }}
+                >
                   <span className="text-base w-5 text-center flex-shrink-0">{item.icon}</span>
-                )}
-                {item.label}
-              </button>
+                  {item.label}
+                </a>
+              ) : (
+                <button
+                  onClick={() => handleAction(item.action)}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors duration-150 hover:bg-white/7"
+                  style={{ color: '#cbd5e1' }}
+                >
+                  {item.action === 'profile' && avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt=""
+                      className="w-5 h-5 rounded-full flex-shrink-0"
+                      style={{ objectFit: 'cover' }}
+                    />
+                  ) : (
+                    <span className="text-base w-5 text-center flex-shrink-0">{item.icon}</span>
+                  )}
+                  {item.label}
+                </button>
+              )}
             </div>
           ))}
         </nav>

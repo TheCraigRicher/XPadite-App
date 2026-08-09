@@ -30,6 +30,7 @@ export interface DayData {
   journal: string
   milestone?: boolean
   goal?: boolean
+  attachments?: TaskAttachment[]
 }
 
 export type CalendarData = Record<string, DayData>

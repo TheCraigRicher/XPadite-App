@@ -14,7 +14,7 @@ import { MonthFullPage } from './MonthFullPage'
 import { DayDashboardModal } from './DayDashboardModal'
 import { AnalyticsPage } from './AnalyticsPage'
 import { AICoachPage } from './AICoachPage'
-import { JournalNotesModal } from './JournalNotesModal'
+import { JournalWorkspaceModal } from './JournalWorkspaceModal'
 import { NotificationsModal } from './NotificationsModal'
 import { GalleryModal } from './GalleryModal'
 import { SettingsModal } from './SettingsModal'
@@ -747,7 +747,7 @@ function ThemedApp(_props: XpaditeAppProps) {
 
       {activityManagerOpen && <ActivityManagerModal onClose={() => setActivityManagerOpen(false)} />}
 
-      {journalNotesOpen && <JournalNotesModal onClose={() => setJournalNotesOpen(false)} />}
+      {journalNotesOpen && <JournalWorkspaceModal onClose={() => setJournalNotesOpen(false)} />}
 
       {notificationsOpen && <NotificationsModal onClose={() => setNotificationsOpen(false)} />}
 

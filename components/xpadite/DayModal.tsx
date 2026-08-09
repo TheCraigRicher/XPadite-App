@@ -6,63 +6,16 @@ import type { Task, TaskSession, Activity, TaskAttachment } from './types'
 import { formatMs, formatHMS, formatTime, APP_YEAR } from './utils'
 import { ReminderModal } from './ReminderModal'
 import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
+import dynamic from 'next/dynamic'
+import { Theme } from 'emoji-picker-react'
+import type { EmojiClickData } from 'emoji-picker-react'
 
-// ─── Recent-emoji localStorage helpers ───────────────────────────────────────
+const JournalEditorEmbed = dynamic(
+  () => import('./JournalEditorEmbed').then(m => ({ default: m.JournalEditorEmbed })),
+  { ssr: false }
+)
 
-const RECENT_KEY = 'xp9e'
-
-function getRecentEmojis(): string[] {
-  if (typeof window === 'undefined') return []
-  try { return JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') } catch { return [] }
-}
-
-function pushRecentEmoji(emoji: string): string[] {
-  const next = [emoji, ...getRecentEmojis().filter(e => e !== emoji)].slice(0, 20)
-  try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)) } catch { /* ignore */ }
-  return next
-}
-
-// ─── Expanded emoji dataset (12 categories) ──────────────────────────────────
-
-const EMOJI_CATS = [
-  { key: 'recent',   icon: '🕐', name: 'Recent',                  emojis: [] as string[] },
-  { key: 'smileys',  icon: '😊', name: 'Smileys & People',
-    emojis: ['😊','😄','😂','🤣','😍','🥰','😎','🤩','😅','🥺','😱','🤔','😢','😡','🥳','😮','🤯','😤','🙄','😪','🤗','😇','😆','😁','😀','🫠','🥹','😭','🤭','🫢','😌','😋','😛','🤑','😏','😒','😑','😶','🧐','🥸'],
-  },
-  { key: 'people',   icon: '👋', name: 'Gestures & People',
-    emojis: ['👍','👎','👋','✌️','🤞','💪','🙏','🤝','✋','☝️','👆','👇','👌','🤙','💅','✍️','🫶','🤜','👊','✊','👏','🙌','👐','🤲','🤘','🖖','🫵','🤛','🫸','🫷','🖐️','🤏','🫂','🙋','🤷','🤦','💁','🙅','🙆','🧏'],
-  },
-  { key: 'animals',  icon: '🐶', name: 'Animals & Nature',
-    emojis: ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🙈','🙉','🙊','🦋','🐝','🐛','🦎','🐢','🐍','🦅','🦆','🦉','🦚','🦜','🐬','🐳','🦈','🐙','🦀','🐠','🌸','🌺','🌻','🌿','🌱'],
-  },
-  { key: 'food',     icon: '🍎', name: 'Food & Drink',
-    emojis: ['🍎','🍊','🍋','🍇','🍓','🍑','🍒','🍌','🍉','🥝','🍅','🥑','🥦','🥕','🌽','🍕','🍔','🌮','🌯','🥗','🍜','🍣','🍱','🍿','🍰','🎂','🍩','🍪','🧁','☕','🍵','🧃','🥤','🍺','🥂','🍾','🧊','🥞','🥓','🍳'],
-  },
-  { key: 'activities', icon: '⚽', name: 'Activities & Sports',
-    emojis: ['⚽','🏀','🏈','⚾','🎾','🏐','🏉','🎱','🏓','🏸','🥊','🤸','🏋️','🧘','⛷️','🏊','🚴','🧗','🤾','🤺','🏇','🎿','🏒','🎣','🤿','🎯','🎮','🕹️','🎲','🃏','♟️','🎳','🎪','🎭','🎬','🎤','🎧','🎵','🎶','💯'],
-  },
-  { key: 'travel',   icon: '✈️', name: 'Travel & Places',
-    emojis: ['✈️','🚀','🛸','🚗','🚕','🚌','🚢','⛵','🏍️','🚁','🛶','🚂','🏠','🏡','🏢','🏯','🗼','🗽','🗺️','🌍','🌎','🌏','🏔️','⛰️','🌋','🏖️','🏝️','🌊','🌅','🌄','🌠','⛺','🏕️','🚦','🚧','🌃','🌆','🌇','🌉','🎠'],
-  },
-  { key: 'tech',     icon: '💻', name: 'Technology & Digital',
-    emojis: ['💻','🖥️','📱','⌨️','🖱️','🖨️','💾','💿','📀','🔋','🔌','📡','🛰️','🔭','🧬','🧪','🧲','🤖','👾','📺','📻','📷','📸','📹','🎥','🎙️','🎚️','🎛️','📞','☎️','⌚','🖲️','💡','🔦','🔬','🧫','🦾','🧠','🪐','⚛️'],
-  },
-  { key: 'business', icon: '💼', name: 'Business & Work',
-    emojis: ['💼','📊','📈','📉','🏆','🥇','🎯','💡','🔑','🗝️','📋','📌','📍','✅','📅','🗓️','💰','💵','💸','💳','🤝','🏦','📣','📢','🔔','⚡','💥','🎉','📝','✍️','🗂️','📁','📂','🏢','🏬','💹','📤','📥','✉️','📨'],
-  },
-  { key: 'hobbies',  icon: '🎨', name: 'Hobbies & Creativity',
-    emojis: ['🎨','🖌️','✏️','📝','🎵','🎶','🎸','🎹','🥁','🎻','🎺','🎷','🎤','🎭','🎬','♟️','🧩','🪄','🎪','🎡','🎢','🎗️','🎀','✂️','🪡','🧶','🧵','🪆','🖼️','📚','📖','📕','📗','📘','📙','🗞️','📓','📔','🔖','🪬'],
-  },
-  { key: 'objects',  icon: '🔧', name: 'Objects & Tools',
-    emojis: ['🔧','🛠️','🔨','⚙️','🔩','🪛','🪚','🔑','🗝️','🔒','🔓','💊','🩺','🩹','🌡️','🧯','🪜','🧰','🔮','🧿','💎','💍','👑','🏅','🎖️','🏷️','🪙','💰','💸','🪞','🛋️','🪑','🚪','🛏️','🪟','🧹','🧺','🧻','🪣','🧴'],
-  },
-  { key: 'symbols',  icon: '❤️', name: 'Symbols',
-    emojis: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','💔','❣️','💕','💞','💓','💗','💖','💘','💝','✨','🌟','⭐','💫','🎆','🎇','🔮','🔔','💐','🎊','♾️','⚡','🔴','🟢','🔵','🟣','🟡','🟠','⚪','⚫','♻️','⚠️','🔱'],
-  },
-  { key: 'flags',    icon: '🏳️', name: 'Flags',
-    emojis: ['🏳️','🏴','🚩','🏁','🎌','🏳️‍🌈','🏳️‍⚧️','🇺🇸','🇬🇧','🇨🇦','🇦🇺','🇩🇪','🇫🇷','🇯🇵','🇰🇷','🇨🇳','🇮🇳','🇧🇷','🇲🇽','🇮🇹','🇪🇸','🇳🇱','🇷🇺','🇸🇪','🇳🇴','🇩🇰','🇫🇮','🇮🇪','🇵🇹','🇵🇱','🇺🇦','🇹🇷','🇦🇷','🇿🇦','🇳🇿','🇸🇬','🇦🇪','🇮🇱','🇸🇦','🇨🇭'],
-  },
-]
+const EmojiPickerLib = dynamic(() => import('emoji-picker-react'), { ssr: false })
 
 // ─── Task helpers ─────────────────────────────────────────────────────────────
 
@@ -230,84 +183,6 @@ function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, 
   )
 }
 
-// ─── WhatsApp-style Emoji Picker ──────────────────────────────────────────────
-
-function EmojiPicker({ onSelect, onClose }: { onSelect: (e: string) => void; onClose: () => void }) {
-  const [catKey,  setCatKey]  = useState('smileys')
-  const [search,  setSearch]  = useState('')
-  const [recents, setRecents] = useState<string[]>(() => getRecentEmojis())
-  const ref                   = useRef<HTMLDivElement>(null)
-  const searchRef             = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    function onDown(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
-    setTimeout(() => document.addEventListener('mousedown', onDown), 10)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [onClose])
-
-  useEffect(() => { searchRef.current?.focus() }, [])
-
-  function handleSelect(emoji: string) {
-    const next = pushRecentEmoji(emoji)
-    setRecents(next)
-    onSelect(emoji)
-    onClose()
-  }
-
-  // Resolve display list
-  const allEmojis = EMOJI_CATS.flatMap(c => c.key === 'recent' ? [] : c.emojis)
-  const currentCat = EMOJI_CATS.find(c => c.key === catKey)!
-  const displayList = search.trim()
-    ? allEmojis
-    : catKey === 'recent'
-      ? (recents.length > 0 ? recents : allEmojis.slice(0, 40))
-      : currentCat.emojis
-
-  return (
-    <div ref={ref} className="absolute bottom-full right-0 mb-1.5 rounded-2xl z-30 flex flex-col overflow-hidden" style={{ width: 288, background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 12px 40px rgba(0,0,0,0.22),0 4px 12px rgba(0,0,0,0.10)' }}>
-      {/* Search */}
-      <div className="px-2.5 pt-2.5 pb-1">
-        <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg" style={{ background: 'var(--xp-bg2)', border: '1px solid var(--xp-bdr)' }}>
-          <span style={{ fontSize: 12, opacity: 0.5 }}>🔍</span>
-          <input ref={searchRef} type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search emoji..." className="flex-1 bg-transparent outline-none text-[11px]" style={{ color: 'var(--xp-txt)' }} />
-          {search && <button onClick={() => setSearch('')} style={{ color: 'var(--xp-txt3)', fontSize: 12 }}>×</button>}
-        </div>
-      </div>
-
-      {/* Category tabs */}
-      {!search && (
-        <div className="flex items-center gap-0 px-1.5 pb-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-          {EMOJI_CATS.map(c => (
-            <button key={c.key} onClick={() => setCatKey(c.key)} title={c.name} className="flex items-center justify-center rounded-lg transition-all flex-shrink-0" style={{ width: 28, height: 24, fontSize: 14, background: catKey === c.key ? 'rgba(124,58,237,0.12)' : 'transparent', border: `1px solid ${catKey === c.key ? 'rgba(124,58,237,0.30)' : 'transparent'}` }}>
-              {c.icon}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {search && !search.trim() && <p className="px-3 pb-1 text-[10px]" style={{ color: 'var(--xp-txt3)' }}>All emojis</p>}
-
-      {/* Emoji grid with smooth scrolling */}
-      <div style={{ maxHeight: 192, overflowY: 'auto', padding: '0 8px 8px', scrollBehavior: 'smooth' }}>
-        {displayList.length === 0 ? (
-          <p className="text-center py-6 text-[11px]" style={{ color: 'var(--xp-txt3)' }}>No recent emojis yet</p>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 1 }}>
-            {displayList.map((emoji, i) => (
-              <button key={`${catKey}-${i}`} onClick={() => handleSelect(emoji)} className="flex items-center justify-center rounded-lg transition-colors" style={{ width: 30, height: 30, fontSize: 18 }}
-                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(124,58,237,0.09)')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 // ─── TaskRow ──────────────────────────────────────────────────────────────────
 
 const PILL_W = 100 // fixed pill width — all pills identical
@@ -408,9 +283,20 @@ function TaskRow({
     if (bellTriggerKey !== prevTriggerRef.current) { prevTriggerRef.current = bellTriggerKey; setIsBellAnimating(true) }
   }, [bellTriggerKey])
 
-  const notesRef        = useRef<HTMLTextAreaElement>(null)
+  const notesRef          = useRef<HTMLTextAreaElement>(null)
+  const emojiPickerRef    = useRef<HTMLDivElement>(null)
   const titleContainerRef = useRef<HTMLDivElement>(null)
   const tooltipTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Close emoji picker when clicking outside
+  useEffect(() => {
+    if (!emojiOpen) return
+    function onDown(e: MouseEvent) {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) setEmojiOpen(false)
+    }
+    const t = setTimeout(() => document.addEventListener('mousedown', onDown), 10)
+    return () => { clearTimeout(t); document.removeEventListener('mousedown', onDown) }
+  }, [emojiOpen])
   const [showTooltip, setShowTooltip] = useState(false)
   const [tooltipPos,  setTooltipPos]  = useState<{ top: number; left: number; width: number } | null>(null)
   const [showPopover, setShowPopover] = useState(false)
@@ -468,13 +354,26 @@ function TaskRow({
   function handleEmojiSelect(emoji: string) {
     const current = draftJournal ?? task.journal
     if (notesViewMode === 'edit' && notesRef.current) {
-      const ta     = notesRef.current
-      const start  = ta.selectionStart ?? current.length
-      const next   = current.slice(0, start) + emoji + current.slice(start)
+      const ta    = notesRef.current
+      const start = ta.selectionStart ?? current.length
+      const next  = current.slice(0, start) + emoji + current.slice(start)
       onNotesDraftChange(next)
       requestAnimationFrame(() => { ta.setSelectionRange(start + emoji.length, start + emoji.length); ta.focus() })
     } else {
       onNotesDraftChange(current + emoji)
+    }
+  }
+
+  function insertAtCursor(text: string) {
+    const current = draftJournal ?? task.journal
+    if (notesRef.current) {
+      const ta    = notesRef.current
+      const start = ta.selectionStart ?? current.length
+      const next  = current.slice(0, start) + text + current.slice(start)
+      onNotesDraftChange(next)
+      requestAnimationFrame(() => { ta.setSelectionRange(start + text.length, start + text.length); ta.focus() })
+    } else {
+      onNotesDraftChange((current ? current + '\n' : '') + text)
     }
   }
 
@@ -728,7 +627,7 @@ function TaskRow({
 
               {/* Controls row */}
               <div className="flex items-center justify-between mt-1.5" style={{ flexWrap: 'wrap', gap: 4 }}>
-                {/* Left: mode toggle + upload + camera */}
+                {/* Left: mode toggle + formatting (edit-only) + upload + camera */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
                   <button
                     onClick={() => setNotesViewMode(m => m === 'preview' ? 'edit' : 'preview')}
@@ -737,6 +636,14 @@ function TaskRow({
                   >
                     {notesViewMode === 'preview' ? '✏️ Edit notes' : '👁 Preview'}
                   </button>
+
+                  {notesViewMode === 'edit' && (
+                    <>
+                      <button onClick={() => insertAtCursor('• ')} title="Insert bullet point" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>• List</button>
+                      <button onClick={() => insertAtCursor('1. ')} title="Insert numbered item" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>1. List</button>
+                      <button onClick={() => insertAtCursor('☐ ')} title="Insert checklist item" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>☐ Check</button>
+                    </>
+                  )}
 
                   <button
                     onClick={() => uploadRef.current?.click()}
@@ -794,10 +701,21 @@ function TaskRow({
                     {notesJustSaved ? '✓ Saved' : '✓ Save'}
                   </button>
 
-                  {/* Emoji picker */}
+                  {/* Emoji picker — emoji-picker-react */}
                   <div className="relative flex-shrink-0">
                     <button onClick={() => setEmojiOpen(o => !o)} tabIndex={expanded ? 0 : -1} className="hover:scale-110 transition-transform leading-none" style={{ fontSize: 17 }} title="Insert emoji">😊</button>
-                    {emojiOpen && <EmojiPicker onSelect={handleEmojiSelect} onClose={() => setEmojiOpen(false)} />}
+                    {emojiOpen && (
+                      <div ref={emojiPickerRef} style={{ position: 'absolute', bottom: 'calc(100% + 6px)', right: 0, zIndex: 30, borderRadius: 12, overflow: 'hidden', boxShadow: '0 12px 40px rgba(0,0,0,0.22)' }}>
+                        <EmojiPickerLib
+                          onEmojiClick={(data: EmojiClickData) => { handleEmojiSelect(data.emoji); setEmojiOpen(false) }}
+                          theme={isDark ? Theme.DARK : Theme.LIGHT}
+                          width={280}
+                          height={340}
+                          searchPlaceHolder="Search emoji…"
+                          lazyLoadEmojis
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1203,7 +1121,6 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   const [mainSaving,       setMainSaving]        = useState(false)
   const [isMounted, setIsMounted] = useState(false)
   const [isClosing, setIsClosing] = useState(false)
-  const journalTextareaRef  = useRef<HTMLTextAreaElement>(null)
   const journalSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevNotesOpenRef    = useRef(false)
   const openSnapshotRef     = useRef<typeof dayData | null>(null)
@@ -1241,12 +1158,9 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasDirtyChanges, onClose])
 
-  // Detect journal opening: play border animation + auto-focus textarea
+  // Detect journal opening: play border animation
   useEffect(() => {
-    if (notesOpen && !prevNotesOpenRef.current) {
-      setJournalAnimKey(k => k + 1)
-      setTimeout(() => journalTextareaRef.current?.focus(), 60)
-    }
+    if (notesOpen && !prevNotesOpenRef.current) setJournalAnimKey(k => k + 1)
     prevNotesOpenRef.current = notesOpen
   }, [notesOpen])
 
@@ -1621,21 +1535,20 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
             {notesOpen && (
               <div style={{ position: 'relative' }}>
                 {journalAnimKey > 0 && <JournalBorderAnim key={journalAnimKey} onDone={() => {}} />}
-                <textarea
-                  ref={journalTextareaRef}
-                  value={dayData.notes ?? ''}
-                  onChange={e => {
-                    updateDay(dateKey, prev => ({ ...prev, notes: e.target.value }))
+                <JournalEditorEmbed
+                  dateKey={dateKey}
+                  rawContent={dayData.notes ?? ''}
+                  isDark={isDark}
+                  onChange={content => {
+                    updateDay(dateKey, prev => ({ ...prev, notes: content }))
                     if (journalSaveTimerRef.current) clearTimeout(journalSaveTimerRef.current)
                     journalSaveTimerRef.current = setTimeout(() => {
                       setJournalSaved(true)
                       setTimeout(() => setJournalSaved(false), 1000)
                     }, 600)
                   }}
-                  placeholder="What made today great? Reflections, insights, gratitude..."
-                  rows={4}
-                  className="w-full text-xs px-3 py-2.5 rounded-xl outline-none resize-none leading-relaxed"
-                  style={{ border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)', position: 'relative', zIndex: 0 }}
+                  attachments={dayData.attachments ?? []}
+                  onAttachmentsChange={atts => updateDay(dateKey, prev => ({ ...prev, attachments: atts }))}
                 />
               </div>
             )}

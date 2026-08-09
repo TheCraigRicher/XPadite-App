@@ -4,7 +4,6 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { useApp } from './AppContext'
 
-// Editor loaded only when the editor view is active (reduces initial bundle)
 const JournalEditorContent = dynamic(
   () => import('./JournalEditorContent').then(m => ({ default: m.JournalEditorContent })),
   { ssr: false }
@@ -41,10 +40,9 @@ function fromKey(key: string): [number, number, number] {
 
 function buildCells(y: number, m: number): (number | null)[] {
   const firstDow = new Date(y, m, 1).getDay()
-  const days = new Date(y, m + 1, 0).getDate()
+  const days     = new Date(y, m + 1, 0).getDate()
   const out: (number | null)[] = Array(firstDow).fill(null)
   for (let d = 1; d <= days; d++) out.push(d)
-  // Pad to multiple of 7
   while (out.length % 7 !== 0) out.push(null)
   return out
 }
@@ -60,7 +58,20 @@ function shiftDay(key: string, delta: number): string {
   return toKey(t.getFullYear(), t.getMonth(), t.getDate())
 }
 
-// ─── Journal month card ───────────────────────────────────────────────────────
+// ─── Chevron ─────────────────────────────────────────────────────────────────
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      className="w-3.5 h-3.5 transition-transform duration-200"
+      style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', flexShrink: 0 }}
+    >
+      <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+// ─── Journal Month Card ───────────────────────────────────────────────────────
 
 interface JournalMonthCardProps {
   year: number
@@ -76,11 +87,11 @@ interface JournalMonthCardProps {
 function JournalMonthCard({
   year, month, todayKey, selectedDate, hasEntry, isDark, onDayClick, onDayDoubleClick,
 }: JournalMonthCardProps) {
-  const cells = useMemo(() => buildCells(year, month), [year, month])
-  const acc = '#7c3aed'
-  const txt = isDark ? '#e2e8f0' : '#1e293b'
-  const muted = isDark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.28)'
-  const cardBg = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.7)'
+  const cells   = useMemo(() => buildCells(year, month), [year, month])
+  const acc     = '#7c3aed'
+  const txt     = isDark ? '#e2e8f0' : '#1e293b'
+  const muted   = isDark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.28)'
+  const cardBg  = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.70)'
   const cardBdr = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'
 
   return (
@@ -88,19 +99,13 @@ function JournalMonthCard({
       background: cardBg,
       border: `0.5px solid ${cardBdr}`,
       borderRadius: 10,
-      padding: '8px 6px 6px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 2,
+      padding: '10px 8px 8px',
+      display: 'flex', flexDirection: 'column', gap: 2,
     }}>
       {/* Month name */}
       <div style={{
-        textAlign: 'center',
-        fontSize: 11,
-        fontWeight: 600,
-        color: txt,
-        paddingBottom: 4,
-        letterSpacing: '0.02em',
+        textAlign: 'center', fontSize: 11, fontWeight: 600,
+        color: txt, paddingBottom: 4, letterSpacing: '0.02em',
       }}>
         {MONTH_NAMES[month]}
       </div>
@@ -109,11 +114,8 @@ function JournalMonthCard({
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
         {DOW_LABELS.map((d, i) => (
           <div key={i} style={{
-            textAlign: 'center',
-            fontSize: 8,
-            fontWeight: 500,
-            color: muted,
-            padding: '0 0 2px',
+            textAlign: 'center', fontSize: 9, fontWeight: 600,
+            color: muted, padding: '0 0 3px',
           }}>
             {d}
           </div>
@@ -121,27 +123,29 @@ function JournalMonthCard({
       </div>
 
       {/* Day cells */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
         {cells.map((day, i) => {
-          if (day === null) return <div key={`_${i}`} style={{ aspectRatio: '1' }} />
+          if (day === null) return (
+            // Filler — same height as real cells so grid rows stay consistent
+            <div key={`_${i}`} style={{ minHeight: 44 }} />
+          )
+
           const dateKey = toKey(year, month, day)
           const isToday = dateKey === todayKey
-          const isSel = selectedDate === dateKey
-          const entry = hasEntry(dateKey)
+          const isSel   = selectedDate === dateKey
+          const entry   = hasEntry(dateKey)
 
           return (
             <button
               key={dateKey}
               onClick={() => onDayClick(dateKey)}
               onDoubleClick={() => onDayDoubleClick(dateKey)}
-              title={entry ? `Journal entry — ${MONTH_SHORT[month]} ${day}` : undefined}
+              title={entry ? `Journal entry — ${MONTH_SHORT[month]} ${day}` : `${MONTH_SHORT[month]} ${day}`}
               style={{
-                aspectRatio: '1',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: 5,
+                minHeight: 44,
+                display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center',
+                borderRadius: 6,
                 border: isSel
                   ? `1.5px solid ${acc}`
                   : isToday
@@ -153,49 +157,41 @@ function JournalMonthCard({
                   ? isDark ? 'rgba(124,58,237,0.10)' : 'rgba(124,58,237,0.05)'
                   : 'transparent',
                 cursor: 'pointer',
-                padding: 0,
-                gap: 0,
+                padding: '4px 2px 3px',
+                gap: 3,
                 transition: 'background 100ms',
               }}
             >
               <span style={{
-                fontSize: 9,
+                fontSize: 11,
                 fontWeight: isToday ? 700 : 400,
                 color: isToday ? acc : isSel ? acc : txt,
                 lineHeight: 1,
               }}>
                 {day}
               </span>
-              {entry && (
-                <span style={{ fontSize: 7, lineHeight: 1, marginTop: 1 }}>📝</span>
-              )}
+
+              {/* Indicator area — always reserved to prevent grid jumping */}
+              <div style={{ height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {entry && (
+                  <span style={{
+                    fontSize: 7, fontWeight: 700,
+                    padding: '1.5px 5px', borderRadius: 4,
+                    background: 'rgba(124,58,237,0.15)',
+                    color: '#a78bfa',
+                    border: '0.5px solid rgba(124,58,237,0.22)',
+                    lineHeight: 1.4, whiteSpace: 'nowrap',
+                    display: 'block',
+                  }}>
+                    📝
+                  </span>
+                )}
+              </div>
             </button>
           )
         })}
       </div>
     </div>
-  )
-}
-
-// ─── Chevron for quarter headers ─────────────────────────────────────────────
-
-function Chevron({ open }: { open: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      style={{
-        width: 13,
-        height: 13,
-        transition: 'transform 200ms',
-        transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
-        flexShrink: 0,
-      }}
-    >
-      <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   )
 }
 
@@ -209,50 +205,38 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
   const { isDark, calData, updateDay } = useApp()
 
   const todayDate = useMemo(() => new Date(), [])
-  const todayKey = useMemo(getTodayKey, [])
+  const todayKey  = useMemo(getTodayKey, [])
 
-  // ─── View ─────────────────────────────────────────────────────────────────
-  const [view, setView] = useState<'calendar' | 'editor'>('calendar')
-
-  // ─── Calendar state ────────────────────────────────────────────────────────
-  const [calYear, setCalYear] = useState(todayDate.getFullYear())
-  const [openQ, setOpenQ] = useState<Record<string, boolean>>({ Q1: true, Q2: true, Q3: true, Q4: true })
+  const [view, setView]             = useState<'calendar' | 'editor'>('calendar')
+  const [calYear, setCalYear]       = useState(todayDate.getFullYear())
+  const [openQ, setOpenQ]           = useState<Record<string, boolean>>({ Q1: true, Q2: true, Q3: true, Q4: true })
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
-
-  // ─── Editor state ──────────────────────────────────────────────────────────
   const [editorDate, setEditorDate] = useState(todayKey)
-  // Latest content from the editor (updated on every keystroke via callback)
-  const pendingContentRef = useRef<string>('')
+  const pendingContentRef           = useRef<string>('')
 
-  // ─── ESC key (ref pattern — stable listener, always reads latest state) ─────
+  // ── ESC key ──────────────────────────────────────────────────────────────────
   const escRef = useRef<() => void>(() => {})
   escRef.current = () => {
     if (view === 'editor') doGoCalendar()
     else doClose()
   }
-
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') escRef.current()
-    }
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') escRef.current() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Persist entry ─────────────────────────────────────────────────────────
+  // ── Persist ───────────────────────────────────────────────────────────────────
   const persistEntry = useCallback((dateKey: string, content: string) => {
     updateDay(dateKey, prev => ({ ...prev, notes: content }))
   }, [updateDay])
 
-  // Flush any pending unsaved content immediately
   function flush() {
     const content = pendingContentRef.current
-    if (content !== undefined) {
-      persistEntry(editorDate, content)
-    }
+    if (content !== undefined) persistEntry(editorDate, content)
   }
 
-  // ─── Open editor ───────────────────────────────────────────────────────────
+  // ── Navigation ────────────────────────────────────────────────────────────────
   function doOpenEditor(dateKey: string) {
     pendingContentRef.current = calData[dateKey]?.notes ?? ''
     setEditorDate(dateKey)
@@ -260,19 +244,9 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
     setView('editor')
   }
 
-  // ─── Back to calendar ──────────────────────────────────────────────────────
-  function doGoCalendar() {
-    flush()
-    setView('calendar')
-  }
+  function doGoCalendar() { flush(); setView('calendar') }
+  function doClose()      { if (view === 'editor') flush(); onClose() }
 
-  // ─── Close modal ───────────────────────────────────────────────────────────
-  function doClose() {
-    if (view === 'editor') flush()
-    onClose()
-  }
-
-  // ─── Navigate days in editor ───────────────────────────────────────────────
   function navigateDay(delta: number) {
     flush()
     const key = shiftDay(editorDate, delta)
@@ -289,27 +263,22 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
     setCalYear(todayDate.getFullYear())
   }
 
-  // ─── Calendar day interactions ─────────────────────────────────────────────
   function handleDayClick(dateKey: string) {
-    if (selectedDate === dateKey) doOpenEditor(dateKey) // tap-again = open (mobile-friendly)
+    if (selectedDate === dateKey) doOpenEditor(dateKey)
     else setSelectedDate(dateKey)
   }
 
-  function handleDayDoubleClick(dateKey: string) {
-    doOpenEditor(dateKey)
-  }
+  function handleDayDoubleClick(dateKey: string) { doOpenEditor(dateKey) }
 
-  // ─── Quarter toggle ────────────────────────────────────────────────────────
   function toggleQ(label: string) {
     setOpenQ(prev => ({ ...prev, [label]: !prev[label] }))
   }
 
-  // ─── Has journal entry check ────────────────────────────────────────────────
   const hasEntry = useCallback((dateKey: string) => {
     return !!(calData[dateKey]?.notes?.trim())
   }, [calData])
 
-  // ─── Scroll to today's quarter on open ────────────────────────────────────
+  // ── Scroll to today's quarter on calendar open ────────────────────────────────
   const calContentRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (view !== 'calendar') return
@@ -317,149 +286,124 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
     if (!q) return
     requestAnimationFrame(() => {
       const el = document.getElementById(`xp-j-q-${q.label}`)
-      if (el && calContentRef.current) {
-        calContentRef.current.scrollTop = el.offsetTop - 12
-      }
+      if (el && calContentRef.current) calContentRef.current.scrollTop = el.offsetTop - 12
     })
   }, [view, todayDate])
 
-  // ─── Theme tokens ──────────────────────────────────────────────────────────
-  const bg = isDark ? '#0d0f1a' : '#f8fafc'
-  const bdr = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'
-  const txt = isDark ? '#f1f5f9' : '#0f172a'
-  const muted = isDark ? 'rgba(255,255,255,0.38)' : 'rgba(0,0,0,0.36)'
-  const surfaceBg = isDark ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.02)'
-  const acc = '#7c3aed'
+  // ── Theme ─────────────────────────────────────────────────────────────────────
+  // Match Dashboard exactly: rgba(9,4,22,0.99) dark / var(--xp-bg3) light
+  const shellBg = isDark ? 'rgba(9,4,22,0.99)' : 'var(--xp-bg3)'
+  const bdr     = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'
+  const txt     = isDark ? '#f1f5f9' : '#0f172a'
+  const muted   = isDark ? 'rgba(255,255,255,0.38)' : 'rgba(0,0,0,0.36)'
+  const surfBg  = isDark ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.02)'
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // CALENDAR VIEW — header + quarterly grid
+  // CALENDAR VIEW
   // ═══════════════════════════════════════════════════════════════════════════
 
   const calendarView = (
     <>
-      {/* Animated purple header */}
-      <style>{`
-        @keyframes xpJHdrFlow {
-          0%   { background-position: 0%   50%; }
-          50%  { background-position: 100% 50%; }
-          100% { background-position: 0%   50%; }
-        }
-        .xp-j-hdr {
-          background: linear-gradient(
-            135deg,
-            #4a1a8c  0%,
-            #5b21b6 22%,
-            #7c3aed 46%,
-            #8b5cf6 65%,
-            #7c3aed 82%,
-            #6d28d9 100%
-          );
-          background-size: 320% 320%;
-          animation: xpJHdrFlow 14s ease infinite;
-        }
-      `}</style>
-
+      {/* Header — centered title, Dashboard-style buttons */}
       <div
         className="xp-j-hdr"
         style={{
-          height: 60,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          height: 64,
+          display: 'flex', alignItems: 'center',
           padding: '0 20px',
           flexShrink: 0,
+          position: 'relative',
           borderBottom: '0.5px solid rgba(255,255,255,0.06)',
         }}
       >
-        <div>
-          <div style={{ color: '#fff', fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>
+        {/* Back — absolute left so it doesn't offset the center */}
+        <button
+          onClick={doClose}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0"
+          style={{ position: 'absolute', left: 20, background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.80)' }}
+        >
+          ← Back
+        </button>
+
+        {/* Centered title */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', pointerEvents: 'none' }}>
+          <div style={{ color: '#fff', fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em', lineHeight: 1.2 }}>
             📝 Journal
           </div>
-          <div style={{ color: 'rgba(255,255,255,0.58)', fontSize: 11, marginTop: 1 }}>
+          <div style={{ color: 'rgba(167,139,250,0.62)', fontSize: 11, marginTop: 2 }}>
             Personal reflections &amp; notes
           </div>
         </div>
+
+        {/* Close — absolute right */}
         <button
           onClick={doClose}
-          style={{
-            width: 32, height: 32, borderRadius: '50%', border: 'none', cursor: 'pointer',
-            background: 'rgba(255,255,255,0.14)', color: '#fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
-          }}
+          className="text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
+          style={{ position: 'absolute', right: 20, background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}
         >
-          ✕
+          × Close
         </button>
       </div>
 
-      {/* Year navigation bar */}
+      {/* Year navigation */}
       <div style={{
         position: 'relative',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 16,
-        padding: '9px 20px',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        gap: 16, padding: '9px 20px',
         borderBottom: `0.5px solid ${bdr}`,
-        flexShrink: 0,
-        background: surfaceBg,
+        flexShrink: 0, background: surfBg,
       }}>
         <button
           onClick={() => setCalYear(y => y - 1)}
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: muted, fontSize: 18, padding: '2px 6px', lineHeight: 1 }}
-        >
-          ‹
-        </button>
+        >‹</button>
         <span style={{ color: txt, fontSize: 14, fontWeight: 600, minWidth: 48, textAlign: 'center' }}>
           {calYear}
         </span>
         <button
           onClick={() => setCalYear(y => y + 1)}
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: muted, fontSize: 18, padding: '2px 6px', lineHeight: 1 }}
-        >
-          ›
-        </button>
+        >›</button>
         {calYear !== todayDate.getFullYear() && (
           <button
-            onClick={() => { setCalYear(todayDate.getFullYear()) }}
-            style={{
-              fontSize: 11, padding: '2px 8px', borderRadius: 6,
-              border: `0.5px solid ${acc}`, background: 'transparent',
-              color: acc, cursor: 'pointer', fontWeight: 500,
-              position: 'absolute', right: 20,
-            }}
+            onClick={() => setCalYear(todayDate.getFullYear())}
+            className="text-[10px] px-2.5 py-1 rounded-full border transition-colors hover:border-violet-400 hover:text-violet-500"
+            style={{ position: 'absolute', right: 20, borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt3)' }}
           >
             Today
           </button>
         )}
       </div>
 
-      {/* Quarterly calendar content — scrollable */}
-      <div ref={calContentRef} style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 20px' }}>
+      {/* Quarterly calendar content */}
+      <div ref={calContentRef} style={{ flex: 1, overflowY: 'auto', padding: '14px 20px 28px' }}>
         {QUARTERS.map(q => {
           const isOpen = openQ[q.label]
           return (
-            <div key={q.label} id={`xp-j-q-${q.label}`} style={{ marginBottom: 12 }}>
-              {/* Quarter header */}
+            <div
+              key={q.label}
+              id={`xp-j-q-${q.label}`}
+              style={{ marginBottom: 12, borderBottom: `0.5px solid ${bdr}`, paddingBottom: 4 }}
+            >
+              {/* Quarter header — matches CalendarSection.tsx style */}
               <button
                 onClick={() => toggleQ(q.label)}
-                style={{
-                  width: '100%', display: 'flex', alignItems: 'center', gap: 7,
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  padding: '5px 4px 6px',
-                  borderRadius: 6,
-                  color: muted,
-                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-left transition-colors"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--xp-txt2)' }}
               >
                 <Chevron open={isOpen} />
-                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', color: muted }}>
-                  {q.label} {calYear}
+                <span className="text-xs font-semibold" style={{ color: 'var(--xp-acc)' }}>
+                  {q.label}
+                </span>
+                <span className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>
+                  {calYear}
                 </span>
                 <div style={{ flex: 1, height: '0.5px', background: bdr, marginLeft: 4 }} />
               </button>
 
-              {/* Quarter months grid */}
+              {/* Month grid */}
               {isOpen && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, paddingTop: 4 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, paddingTop: 4, paddingBottom: 8 }}>
                   {q.months.map(m => (
                     <JournalMonthCard
                       key={m}
@@ -479,10 +423,9 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
           )
         })}
 
-        {/* Footer hint */}
         <div style={{ textAlign: 'center', paddingTop: 4 }}>
           <span style={{ fontSize: 11, color: muted }}>
-            Double-click a date to open the editor &nbsp;·&nbsp; 📝 has an entry
+            Double-click a date to open the editor &nbsp;·&nbsp; 📝 indicates a journal entry
           </span>
         </div>
       </div>
@@ -499,7 +442,7 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
       rawContent={calData[editorDate]?.notes ?? ''}
       isDark={isDark}
       isEditorOnToday={editorDate === todayKey}
-      onContentChange={(s) => { pendingContentRef.current = s }}
+      onContentChange={s => { pendingContentRef.current = s }}
       onPersist={persistEntry}
       onNavigateDay={navigateDay}
       onNavigateToday={navigateToday}
@@ -512,29 +455,53 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
 
   // ─── Root ─────────────────────────────────────────────────────────────────
   return (
-    <div
-      className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-4"
-      style={{ background: 'rgba(0,0,0,0.60)' }}
-      onClick={doClose}
-    >
+    <>
+      {/* Shared animated header — always mounted so editor view can use xp-j-hdr */}
+      <style>{`
+        @keyframes xpJHdrFlow {
+          0%   { background-position: 0%   50%; }
+          50%  { background-position: 100% 50%; }
+          100% { background-position: 0%   50%; }
+        }
+        .xp-j-hdr {
+          background: linear-gradient(
+            135deg,
+            #0f052e  0%,
+            #2d1b69 45%,
+            #4c1d95 75%,
+            #1a0a4e 100%
+          );
+          background-size: 300% 300%;
+          animation: xpJHdrFlow 16s ease infinite;
+        }
+      `}</style>
+
+      {/* Overlay — exactly matches DayDashboardModal */}
       <div
-        className="w-full sm:rounded-2xl"
-        style={{
-          maxWidth: 800,
-          background: bg,
-          border: `0.5px solid ${bdr}`,
-          boxShadow: '0 24px 64px rgba(0,0,0,0.35)',
-          height: 'calc(100vh - 48px)',
-          maxHeight: 860,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          flexShrink: 0,
-        }}
-        onClick={e => e.stopPropagation()}
+        className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-4"
+        style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
+        onClick={doClose}
       >
-        {view === 'calendar' ? calendarView : editorView}
+        {/* Shell — exactly matches DayDashboardModal width tokens */}
+        <div
+          className="w-full rounded-2xl shadow-2xl overflow-hidden max-w-[640px] lg:max-w-[1296px]"
+          style={{
+            background: shellBg,
+            border: isDark ? '0.5px solid rgba(124,58,237,0.22)' : '0.5px solid var(--xp-bdr2)',
+            boxShadow: isDark
+              ? '0 30px 70px rgba(0,0,0,0.75), 0 0 0 0.5px rgba(124,58,237,0.16), inset 0 1px 0 rgba(255,255,255,0.04)'
+              : '0 20px 50px rgba(0,0,0,0.12)',
+            // Fixed height so Journal fills near the full viewport
+            height: 'calc(100vh - 44px)',
+            maxHeight: 'calc(100vh - 44px)',
+            display: 'flex', flexDirection: 'column',
+            marginBottom: 24,
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          {view === 'calendar' ? calendarView : editorView}
+        </div>
       </div>
-    </div>
+    </>
   )
 }

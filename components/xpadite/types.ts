@@ -82,7 +82,7 @@ export interface TaskAttachment {
   url: string           // object URL (session) or data URL (images)
   thumbnail: string | null  // base64 JPEG for image previews
   addedAt: number       // Unix ms
-  source: 'upload' | 'camera'
+  source: 'upload' | 'camera' | 'drawing'
 }
 
 export interface AIMessage {

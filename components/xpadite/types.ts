@@ -84,6 +84,7 @@ export interface JournalBlock {
   thumbnail?: string    // small preview for image/drawing blocks
   sectionColor?: string // 'blue' | 'green' | 'peach' | 'yellow' | 'lavender'
   name?: string         // display label for image/drawing
+  width?: number        // layout width: 33 | 50 | 66 | 75 | 100 (percent), default 100
   createdAt: number
   updatedAt: number
 }

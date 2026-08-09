@@ -306,12 +306,13 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     } else {
       // Shape preview: restore snap, then draw preview
       if (!previewSnap.current || !shapeStart.current) return
-      const snap = previewSnap.current
-      const img  = new Image()
-      img.onload = () => {
+      const snap  = previewSnap.current
+      const start = shapeStart.current  // capture before img.onload (ref may be nulled async)
+      const img   = new Image()
+      img.onload  = () => {
         c.clearRect(0, 0, canvas.offsetWidth, canvas.offsetHeight)
         c.drawImage(img, 0, 0, canvas.offsetWidth, canvas.offsetHeight)
-        drawShape(c, tool, shapeStart.current!.x, shapeStart.current!.y, pos.x, pos.y,
+        drawShape(c, tool, start.x, start.y, pos.x, pos.y,
           drawColor, PEN_SIZES[sizeIdx], filled)
       }
       img.src = snap
@@ -331,13 +332,14 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
       if (!canvas) return
       const pos = getPos(e, canvas)
       if (pos && shapeStart.current && previewSnap.current) {
-        const c = getCtx()!
-        const snap = previewSnap.current
-        const img = new Image()
-        img.onload = () => {
+        const c     = getCtx()!
+        const snap  = previewSnap.current
+        const start = shapeStart.current  // capture BEFORE nulling (img.onload is async)
+        const img   = new Image()
+        img.onload  = () => {
           c.clearRect(0, 0, canvas.offsetWidth, canvas.offsetHeight)
           c.drawImage(img, 0, 0, canvas.offsetWidth, canvas.offsetHeight)
-          drawShape(c, tool, shapeStart.current!.x, shapeStart.current!.y, pos.x, pos.y,
+          drawShape(c, tool, start.x, start.y, pos.x, pos.y,
             drawColor, PEN_SIZES[sizeIdx], filled)
           snapshot()
         }

@@ -308,120 +308,7 @@ function InlineMediaBlock({ block, isDark, canMoveUp, canMoveDown, onEdit, onMov
   )
 }
 
-// ─── InsertRow ────────────────────────────────────────────────────────────────
-
-interface InsertRowProps {
-  isDark: boolean
-  atIndex: number
-  onInsertText: (atIndex: number) => void
-  onInsertSection: (atIndex: number, color: SectionColorKey) => void
-  onInsertDraw: (atIndex: number) => void
-  onInsertUpload: (atIndex: number, files: FileList) => void
-  onInsertCamera: (atIndex: number) => void
-}
-
-function InsertRow({ isDark, atIndex, onInsertText, onInsertSection, onInsertDraw, onInsertUpload, onInsertCamera }: InsertRowProps) {
-  const [open, setOpen] = useState(false)
-  const [showColors, setShowColors] = useState(false)
-  const popRef = useRef<HTMLDivElement>(null)
-  const uploadRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    function outside(e: MouseEvent) {
-      if (popRef.current?.contains(e.target as Node)) return
-      setOpen(false)
-      setShowColors(false)
-    }
-    document.addEventListener('mousedown', outside)
-    return () => document.removeEventListener('mousedown', outside)
-  }, [open])
-
-  function close() { setOpen(false); setShowColors(false) }
-
-  const lineColor = isDark ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.12)'
-  const btnColor  = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)'
-  const popBg     = isDark ? '#1e1130' : '#fff'
-  const popBdr    = isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.12)'
-
-  return (
-    <div
-      className="xp-j-insert"
-      style={{ position: 'relative', margin: '2px 0', display: 'flex', alignItems: 'center', gap: 6, opacity: 0.35, transition: 'opacity 200ms' }}
-      onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
-      onMouseLeave={e => { if (!open) e.currentTarget.style.opacity = '0.35' }}
-    >
-      <div style={{ flex: 1, height: 1, background: lineColor }} />
-      <div ref={popRef} style={{ position: 'relative', flexShrink: 0 }}>
-        <button
-          onClick={() => { setOpen(v => !v); setShowColors(false) }}
-          title="Insert content"
-          style={{
-            width: 22, height: 22, borderRadius: '50%', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.45)' : 'rgba(124,58,237,0.35)'}`,
-            background: isDark ? 'rgba(124,58,237,0.15)' : 'rgba(124,58,237,0.08)',
-            color: isDark ? '#a78bfa' : '#7c3aed',
-            fontSize: 14, fontWeight: 500, lineHeight: 1,
-            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
-        >+</button>
-
-        {open && (
-          <div style={{
-            position: 'absolute', top: 28, left: '50%', transform: 'translateX(-50%)',
-            zIndex: 50, background: popBg,
-            border: `0.5px solid ${popBdr}`, borderRadius: 10,
-            boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.55)' : '0 4px 20px rgba(0,0,0,0.12)',
-            padding: '4px 0', overflow: 'hidden', minWidth: 148,
-          }}>
-            {!showColors ? (
-              <>
-                <button onClick={() => { onInsertText(atIndex); close() }} style={menuItemStyle(isDark)}>+ Text Block</button>
-                <button
-                  onClick={() => setShowColors(true)}
-                  style={{ ...menuItemStyle(isDark), display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
-                >
-                  <span>+ Section</span><span style={{ opacity: 0.5, fontSize: 10 }}>›</span>
-                </button>
-                <button onClick={() => { onInsertDraw(atIndex); close() }} style={menuItemStyle(isDark)}>✏️ Draw</button>
-                <label style={{ ...menuItemStyle(isDark), display: 'block', cursor: 'pointer' }}>
-                  📎 Upload Image
-                  <input
-                    ref={uploadRef}
-                    type="file" multiple accept="image/*"
-                    style={{ display: 'none' }}
-                    onChange={e => {
-                      if (e.target.files?.length) { onInsertUpload(atIndex, e.target.files); e.currentTarget.value = '' }
-                      close()
-                    }}
-                  />
-                </label>
-                <button onClick={() => { onInsertCamera(atIndex); close() }} style={menuItemStyle(isDark)}>📷 Camera</button>
-              </>
-            ) : (
-              <>
-                <button onClick={() => setShowColors(false)} style={{ ...menuItemStyle(isDark), opacity: 0.55, fontSize: 11 }}>← Back</button>
-                {SECTION_COLORS.map(c => (
-                  <button
-                    key={c.key}
-                    onClick={() => { onInsertSection(atIndex, c.key as SectionColorKey); close() }}
-                    style={{ ...menuItemStyle(isDark), display: 'flex', alignItems: 'center', gap: 8 }}
-                  >
-                    <span style={{
-                      width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
-                      background: getSectionStyle(c.key, isDark).labelColor,
-                    }} />
-                    {c.label}
-                  </button>
-                ))}
-              </>
-            )}
-          </div>
-        )}
-      </div>
-      <div style={{ flex: 1, height: 1, background: lineColor }} />
-    </div>
-  )
-}
+// InsertRow component removed — new sections/content added via the bottom toolbar.
 
 // ─── Shared style helpers ─────────────────────────────────────────────────────
 
@@ -433,6 +320,78 @@ function menuItemStyle(isDark: boolean): React.CSSProperties {
     color: isDark ? 'rgba(255,255,255,0.82)' : 'rgba(0,0,0,0.72)',
     transition: 'background 100ms',
   }
+}
+
+// ─── Grid span helper ─────────────────────────────────────────────────────────
+
+function getGridSpan(width?: number): number {
+  if (!width || width >= 100) return 12
+  if (width >= 66) return 8
+  if (width >= 50) return 6
+  if (width >= 33) return 4
+  return 3  // 25%
+}
+
+// ─── Block selection toolbar ──────────────────────────────────────────────────
+
+function selToolBtnStyle(isDark: boolean, active = false, danger = false): React.CSSProperties {
+  return {
+    padding: '2px 7px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
+    border: `0.5px solid ${active ? 'rgba(124,58,237,0.55)' : danger ? 'rgba(239,68,68,0.30)' : isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.14)'}`,
+    background: active ? 'rgba(124,58,237,0.20)' : 'transparent',
+    color: active ? '#a78bfa' : danger ? '#f87171' : isDark ? 'rgba(255,255,255,0.72)' : 'rgba(0,0,0,0.62)',
+    fontSize: 10, fontWeight: active ? 700 : 500,
+    transition: 'all 100ms',
+  }
+}
+
+function BlockSelectionToolbar({
+  block, idx, total, isDark, onWidth, onMoveUp, onMoveDown, onEdit, onDelete,
+}: {
+  block: JournalBlock
+  idx: number
+  total: number
+  isDark: boolean
+  onWidth: (w: number) => void
+  onMoveUp: () => void
+  onMoveDown: () => void
+  onEdit?: () => void
+  onDelete: () => void
+}) {
+  const curW = block.width ?? 100
+  const divStyle: React.CSSProperties = { width: 1, height: 14, background: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)', flexShrink: 0, margin: '0 3px', alignSelf: 'center' }
+
+  return (
+    <div
+      onClick={e => e.stopPropagation()}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap',
+        marginBottom: 5, padding: '4px 8px', borderRadius: 8,
+        background: isDark ? 'rgba(30,17,48,0.97)' : '#fff',
+        border: '0.5px solid rgba(124,58,237,0.28)',
+        boxShadow: isDark ? '0 2px 14px rgba(0,0,0,0.50)' : '0 2px 10px rgba(0,0,0,0.10)',
+        userSelect: 'none',
+      }}
+    >
+      <span style={{ fontSize: 9, color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)', marginRight: 1 }}>Width</span>
+      {([33, 50, 66, 100] as const).map(w => (
+        <button key={w} onClick={() => onWidth(w)} style={selToolBtnStyle(isDark, curW === w)}>
+          {w === 100 ? 'Full' : `${w}%`}
+        </button>
+      ))}
+      <div style={divStyle} />
+      {idx > 0 && <button onClick={onMoveUp} title="Move up" style={selToolBtnStyle(isDark)}>↑</button>}
+      {idx < total - 1 && <button onClick={onMoveDown} title="Move down" style={selToolBtnStyle(isDark)}>↓</button>}
+      {onEdit && (
+        <>
+          <div style={divStyle} />
+          <button onClick={onEdit} title="Edit drawing" style={selToolBtnStyle(isDark)}>✏️ Edit</button>
+        </>
+      )}
+      <div style={divStyle} />
+      <button onClick={onDelete} title="Delete block" style={selToolBtnStyle(isDark, false, true)}>🗑 Delete</button>
+    </div>
+  )
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -462,12 +421,13 @@ export function JournalEditorContent({
 }: JournalEditorContentProps) {
 
   // ── State ───────────────────────────────────────────────────────────────────
-  const [blocks, setBlocks]         = useState<JournalBlock[]>([])
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle')
-  const [showEmoji, setShowEmoji]   = useState(false)
+  const [blocks, setBlocks]             = useState<JournalBlock[]>([])
+  const [saveStatus, setSaveStatus]     = useState<'idle' | 'saved'>('idle')
+  const [showEmoji, setShowEmoji]       = useState(false)
   const [cameraInsertAt, setCameraInsertAt] = useState<number | null>(null)
-  const [focusTick, setFocusTick]   = useState(0)  // triggers dock state update
-  const [drawState, setDrawState]   = useState<{
+  const [focusTick, setFocusTick]       = useState(0)  // triggers dock state update
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
+  const [drawState, setDrawState]       = useState<{
     insertAt: number
     editingBlock: JournalBlock | null
   } | null>(null)
@@ -500,6 +460,7 @@ export function JournalEditorContent({
       }
     })
     setDrawState(null)
+    setSelectedBlockId(null)
     setShowEmoji(false)
     setSaveStatus('idle')
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
@@ -601,24 +562,8 @@ export function JournalEditorContent({
     scheduleSave()
   }
 
-  // Insert row handlers
-  function handleInsertText(atIndex: number) {
-    insertBlock(createTextBlock(), atIndex)
-  }
-  function handleInsertSection(atIndex: number, color: SectionColorKey) {
-    insertBlock(createSectionBlock(color), atIndex)
-  }
-  function handleInsertDraw(atIndex: number) {
-    setDrawState({ insertAt: atIndex, editingBlock: null })
-  }
-  function handleInsertCamera(atIndex: number) {
-    setCameraInsertAt(atIndex)
-  }
-  async function handleInsertUpload(atIndex: number, files: FileList) {
-    const atts = await buildAttachments(Array.from(files), 'upload')
-    const newBlocks = atts.map(att => createImageBlock(att.url, att.name))
-    const next = [...blocksRef.current]
-    next.splice(atIndex + 1, 0, ...newBlocks)
+  function setBlockWidth(id: string, width: number) {
+    const next = blocksRef.current.map(b => b.id === id ? { ...b, width } : b)
     blocksRef.current = next
     setBlocks(next)
     onContentChange(buildDocStr())
@@ -738,7 +683,6 @@ export function JournalEditorContent({
           color: ${isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.30)'};
           float: left; pointer-events: none; height: 0;
         }
-        .xp-j-insert { user-select: none; }
       `}</style>
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
@@ -750,7 +694,7 @@ export function JournalEditorContent({
           position: 'relative', display: 'flex', alignItems: 'center',
           height: 52, padding: '0 14px', gap: 6,
         }}>
-          {/* Left: back + prev */}
+          {/* Left: back */}
           <button
             onClick={onBack}
             style={{
@@ -759,28 +703,39 @@ export function JournalEditorContent({
               fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
             }}
           >← Calendar</button>
-          <button
-            onClick={() => onNavigateDay(-1)}
-            title="Previous day"
-            style={{
-              padding: '4px 9px', borderRadius: 7, border: '0.5px solid rgba(255,255,255,0.12)',
-              background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.70)',
-              fontSize: 18, lineHeight: 1, cursor: 'pointer', flexShrink: 0,
-            }}
-          >‹</button>
 
-          {/* Centered date — absolute so it's never offset by button widths */}
+          {/* Center: ‹ date › as one visual unit — absolute so it's always centered */}
           <div style={{
             position: 'absolute', left: 0, right: 0,
             display: 'flex', justifyContent: 'center', alignItems: 'center',
             pointerEvents: 'none',
           }}>
-            <span style={{ color: '#fff', fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', textAlign: 'center' }}>
-              {fmtEditorDate(dateKey)}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'auto' }}>
+              <button
+                onClick={() => onNavigateDay(-1)}
+                title="Previous day"
+                style={{
+                  padding: '4px 8px', borderRadius: 7, border: '0.5px solid rgba(255,255,255,0.12)',
+                  background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.70)',
+                  fontSize: 18, lineHeight: 1, cursor: 'pointer', flexShrink: 0,
+                }}
+              >‹</button>
+              <span style={{ color: '#fff', fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+                {fmtEditorDate(dateKey)}
+              </span>
+              <button
+                onClick={() => onNavigateDay(1)}
+                title="Next day"
+                style={{
+                  padding: '4px 8px', borderRadius: 7, border: '0.5px solid rgba(255,255,255,0.12)',
+                  background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.70)',
+                  fontSize: 18, lineHeight: 1, cursor: 'pointer', flexShrink: 0,
+                }}
+              >›</button>
+            </div>
           </div>
 
-          {/* Spacer + right: next + today (if not today) + close */}
+          {/* Right: today + close */}
           <div style={{ flex: 1 }} />
           {!isEditorOnToday && (
             <button
@@ -792,15 +747,6 @@ export function JournalEditorContent({
               }}
             >Today</button>
           )}
-          <button
-            onClick={() => onNavigateDay(1)}
-            title="Next day"
-            style={{
-              padding: '4px 9px', borderRadius: 7, border: '0.5px solid rgba(255,255,255,0.12)',
-              background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.70)',
-              fontSize: 18, lineHeight: 1, cursor: 'pointer', flexShrink: 0,
-            }}
-          >›</button>
           <button
             onClick={onClose}
             style={{
@@ -823,60 +769,76 @@ export function JournalEditorContent({
         />
       ) : (
         <>
-          {/* Block list */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '12px 20px 8px', minHeight: 0 }}>
-            {/* Insert row before first block */}
-            <InsertRow
-              isDark={isDark}
-              atIndex={-1}
-              onInsertText={handleInsertText}
-              onInsertSection={handleInsertSection}
-              onInsertDraw={handleInsertDraw}
-              onInsertUpload={handleInsertUpload}
-              onInsertCamera={handleInsertCamera}
-            />
+          {/* Block list — 12-col CSS Grid; blocks can span different widths */}
+          <div
+            style={{ flex: 1, overflowY: 'auto', padding: '12px 20px 8px', minHeight: 0 }}
+            onClick={() => setSelectedBlockId(null)}
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: 8, alignItems: 'start' }}>
+              {blocks.map((block, idx) => {
+                const span = getGridSpan(block.width)
+                const isSelected = selectedBlockId === block.id
+                const isSelectable = block.type !== 'text'
 
-            {blocks.map((block, idx) => (
-              <React.Fragment key={block.id}>
-                {(block.type === 'text' || block.type === 'section') ? (
-                  <JournalTextBlock
-                    block={block}
-                    isDark={isDark}
-                    isOnlyBlock={blocks.length === 1}
-                    onContentChange={onBlockContentChange}
-                    onFocus={onEditorFocus}
-                    onSelectionUpdate={onEditorSelectionUpdate}
-                    onDelete={blocks.length > 1 ? () => deleteBlock(block.id) : undefined}
-                    canMoveUp={idx > 0}
-                    canMoveDown={idx < blocks.length - 1}
-                    onMoveUp={() => moveBlock(block.id, -1)}
-                    onMoveDown={() => moveBlock(block.id, 1)}
-                  />
-                ) : (
-                  <InlineMediaBlock
-                    block={block}
-                    isDark={isDark}
-                    canMoveUp={idx > 0}
-                    canMoveDown={idx < blocks.length - 1}
-                    onEdit={() => setDrawState({ insertAt: idx, editingBlock: block })}
-                    onMoveUp={() => moveBlock(block.id, -1)}
-                    onMoveDown={() => moveBlock(block.id, 1)}
-                    onDelete={() => deleteBlock(block.id)}
-                  />
-                )}
+                return (
+                  <div
+                    key={block.id}
+                    style={{ gridColumn: `span ${span}`, minWidth: 0 }}
+                    onClick={isSelectable ? e => { e.stopPropagation(); setSelectedBlockId(block.id) } : undefined}
+                  >
+                    {/* Inline selection toolbar — appears above selected non-text block */}
+                    {isSelected && isSelectable && (
+                      <BlockSelectionToolbar
+                        block={block}
+                        idx={idx}
+                        total={blocks.length}
+                        isDark={isDark}
+                        onWidth={w => setBlockWidth(block.id, w)}
+                        onMoveUp={() => moveBlock(block.id, -1)}
+                        onMoveDown={() => moveBlock(block.id, 1)}
+                        onEdit={block.type === 'drawing'
+                          ? () => setDrawState({ insertAt: idx, editingBlock: block })
+                          : undefined}
+                        onDelete={() => { deleteBlock(block.id); setSelectedBlockId(null) }}
+                      />
+                    )}
 
-                {/* Insert row after each block */}
-                <InsertRow
-                  isDark={isDark}
-                  atIndex={idx}
-                  onInsertText={handleInsertText}
-                  onInsertSection={handleInsertSection}
-                  onInsertDraw={handleInsertDraw}
-                  onInsertUpload={handleInsertUpload}
-                  onInsertCamera={handleInsertCamera}
-                />
-              </React.Fragment>
-            ))}
+                    {/* Block content with selection outline */}
+                    <div style={{
+                      outline: isSelected && isSelectable ? '1.5px solid rgba(124,58,237,0.55)' : '1.5px solid transparent',
+                      borderRadius: 10, transition: 'outline 120ms',
+                    }}>
+                      {(block.type === 'text' || block.type === 'section') ? (
+                        <JournalTextBlock
+                          block={block}
+                          isDark={isDark}
+                          isOnlyBlock={blocks.length === 1}
+                          onContentChange={onBlockContentChange}
+                          onFocus={onEditorFocus}
+                          onSelectionUpdate={onEditorSelectionUpdate}
+                          onDelete={blocks.length > 1 ? () => deleteBlock(block.id) : undefined}
+                          canMoveUp={idx > 0}
+                          canMoveDown={idx < blocks.length - 1}
+                          onMoveUp={() => moveBlock(block.id, -1)}
+                          onMoveDown={() => moveBlock(block.id, 1)}
+                        />
+                      ) : (
+                        <InlineMediaBlock
+                          block={block}
+                          isDark={isDark}
+                          canMoveUp={idx > 0}
+                          canMoveDown={idx < blocks.length - 1}
+                          onEdit={() => setDrawState({ insertAt: idx, editingBlock: block })}
+                          onMoveUp={() => moveBlock(block.id, -1)}
+                          onMoveDown={() => moveBlock(block.id, 1)}
+                          onDelete={() => deleteBlock(block.id)}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
 
           {/* ── Tool dock ─────────────────────────────────────────────────── */}

@@ -74,6 +74,25 @@ export type RepeatFrequency = 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly'
 
 // ── AI Coach types ─────────────────────────────────────────────────────────────
 
+// ─── Journal block system ─────────────────────────────────────────────────────
+
+export interface JournalBlock {
+  id: string
+  type: 'text' | 'section' | 'image' | 'drawing'
+  content?: string      // Tiptap JSON for text/section blocks
+  src?: string          // data URL for image/drawing blocks
+  thumbnail?: string    // small preview for image/drawing blocks
+  sectionColor?: string // 'blue' | 'green' | 'peach' | 'yellow' | 'lavender'
+  name?: string         // display label for image/drawing
+  createdAt: number
+  updatedAt: number
+}
+
+export interface JournalDoc {
+  v: 1
+  blocks: JournalBlock[]
+}
+
 export interface TaskAttachment {
   id: string
   name: string

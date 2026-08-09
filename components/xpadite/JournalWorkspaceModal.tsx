@@ -464,15 +464,9 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
           100% { background-position: 0%   50%; }
         }
         .xp-j-hdr {
-          background: linear-gradient(
-            135deg,
-            #0f052e  0%,
-            #2d1b69 45%,
-            #4c1d95 75%,
-            #1a0a4e 100%
-          );
+          background: linear-gradient(135deg, #4a1a8c 0%, #5b21b6 30%, #7c3aed 65%, #8b5cf6 100%);
           background-size: 300% 300%;
-          animation: xpJHdrFlow 16s ease infinite;
+          animation: xpJHdrFlow 14s ease infinite;
         }
       `}</style>
 

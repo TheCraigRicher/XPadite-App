@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
+import type { Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
@@ -9,34 +10,22 @@ import Placeholder from '@tiptap/extension-placeholder'
 import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
 import dynamic from 'next/dynamic'
-import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
-import type { TaskAttachment } from './types'
+import { buildAttachments, ATTACHMENT_ACCEPT, CameraModal, ImageLightbox } from './attachmentUtils'
+import type { JournalBlock, TaskAttachment } from './types'
 import { JournalDrawModal } from './JournalDrawModal'
+import {
+  parseJournalDoc, parseJournalContent, serializeJournalContent,
+  getSectionStyle, SECTION_COLORS, createTextBlock, createSectionBlock,
+  createDrawingBlock, createImageBlock,
+} from './journalUtils'
+import type { SectionColorKey } from './journalUtils'
+
+// Re-export for backward compat — JournalEditorEmbed imports these
+export { parseJournalContent, serializeJournalContent }
 
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false })
 
-// ─── Content helpers ──────────────────────────────────────────────────────────
-
-export function parseJournalContent(raw: string): object {
-  if (!raw?.trim()) return { type: 'doc', content: [{ type: 'paragraph' }] }
-  try {
-    const parsed = JSON.parse(raw)
-    if (parsed?.type === 'doc') return parsed
-  } catch {}
-  return {
-    type: 'doc',
-    content: raw.split('\n').map(line => ({
-      type: 'paragraph',
-      ...(line ? { content: [{ type: 'text', text: line }] } : {}),
-    })),
-  }
-}
-
-export function serializeJournalContent(editor: ReturnType<typeof useEditor>): string {
-  if (!editor) return ''
-  if (editor.getText().trim() === '') return ''
-  return JSON.stringify(editor.getJSON())
-}
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmtEditorDate(key: string): string {
   const [y, m, d] = key.split('-').map(Number)
@@ -45,7 +34,408 @@ function fmtEditorDate(key: string): string {
   })
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+function fmtShortDate(key: string): string {
+  const [y, m, d] = key.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+// ─── JournalTextBlock ─────────────────────────────────────────────────────────
+
+interface JournalTextBlockProps {
+  block: JournalBlock
+  isDark: boolean
+  isOnlyBlock: boolean
+  onContentChange: (id: string, content: string) => void
+  onFocus: (editor: Editor) => void
+  onSelectionUpdate: () => void
+  onDelete?: () => void        // undefined for first/only block (not deletable)
+  canMoveUp: boolean
+  canMoveDown: boolean
+  onMoveUp: () => void
+  onMoveDown: () => void
+}
+
+const JournalTextBlock = React.memo(function JournalTextBlock({
+  block, isDark, isOnlyBlock,
+  onContentChange, onFocus, onSelectionUpdate,
+  onDelete, canMoveUp, canMoveDown, onMoveUp, onMoveDown,
+}: JournalTextBlockProps) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const acc = '#7c3aed'
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: false, codeBlock: false, blockquote: false,
+        strike: false, code: false, bold: false, italic: false, horizontalRule: false,
+      }),
+      TaskList,
+      TaskItem.configure({ nested: false }),
+      Placeholder.configure({
+        placeholder: block.type === 'section'
+          ? 'Add section content…'
+          : 'What made today great? Reflections, insights, gratitude…',
+      }),
+    ],
+    content: { type: 'doc', content: [{ type: 'paragraph' }] },
+    editorProps: { attributes: { class: 'xp-j-prose' } },
+    onUpdate: ({ editor: e }) => {
+      const content = serializeJournalContent(e)
+      onContentChange(block.id, content)
+    },
+  })
+
+  // Set content when block.id changes (new block mounted)
+  useEffect(() => {
+    if (!editor) return
+    editor.commands.setContent(parseJournalContent(block.content || ''))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, block.id])
+
+  // Wire focus and selection events
+  useEffect(() => {
+    if (!editor) return
+    const handleFocus = () => onFocus(editor)
+    const handleSelection = () => onSelectionUpdate()
+    editor.on('focus', handleFocus)
+    editor.on('selectionUpdate', handleSelection)
+    return () => {
+      editor.off('focus', handleFocus)
+      editor.off('selectionUpdate', handleSelection)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor])
+
+  // Close ⋮ menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return
+    function outside(e: MouseEvent) {
+      if (menuRef.current?.contains(e.target as Node)) return
+      setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', outside)
+    return () => document.removeEventListener('mousedown', outside)
+  }, [menuOpen])
+
+  const isSection = block.type === 'section'
+  const sectionStyle = isSection && block.sectionColor
+    ? getSectionStyle(block.sectionColor, isDark)
+    : null
+
+  const hasMenu = isSection || canMoveUp || canMoveDown || (!!onDelete && !isOnlyBlock)
+
+  return (
+    <div style={{
+      position: 'relative',
+      borderRadius: sectionStyle ? 10 : 0,
+      border: sectionStyle ? `0.5px solid ${sectionStyle.border}` : 'none',
+      background: sectionStyle ? sectionStyle.background : 'transparent',
+      padding: sectionStyle ? '12px 40px 12px 14px' : '0',
+      marginBottom: sectionStyle ? 4 : 0,
+    }}>
+      {/* Section color label */}
+      {sectionStyle && block.sectionColor && (
+        <div style={{
+          fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
+          letterSpacing: '0.06em', color: sectionStyle.labelColor,
+          marginBottom: 6, userSelect: 'none',
+        }}>
+          {SECTION_COLORS.find(c => c.key === block.sectionColor)?.label ?? 'Section'}
+        </div>
+      )}
+
+      {/* Editor */}
+      <div onClick={() => editor?.commands.focus()} style={{ cursor: 'text' }}>
+        <EditorContent editor={editor} />
+      </div>
+
+      {/* ⋮ block menu */}
+      {hasMenu && (
+        <div ref={menuRef} style={{ position: 'absolute', top: 8, right: 8 }}>
+          <button
+            onClick={() => setMenuOpen(v => !v)}
+            style={{
+              width: 24, height: 24, borderRadius: 6, border: 'none', cursor: 'pointer',
+              background: menuOpen
+                ? (isDark ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.10)')
+                : 'transparent',
+              color: isDark ? 'rgba(255,255,255,0.40)' : 'rgba(0,0,0,0.35)',
+              fontSize: 14, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all 120ms',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1'; (e.currentTarget as HTMLButtonElement).style.color = isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)' }}
+            onMouseLeave={e => { if (!menuOpen) { (e.currentTarget as HTMLButtonElement).style.color = isDark ? 'rgba(255,255,255,0.40)' : 'rgba(0,0,0,0.35)' } }}
+          >⋮</button>
+
+          {menuOpen && (
+            <div style={{
+              position: 'absolute', top: 28, right: 0, zIndex: 40, minWidth: 148,
+              background: isDark ? '#1e1130' : '#fff',
+              border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.12)'}`,
+              borderRadius: 10,
+              boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.55)' : '0 4px 20px rgba(0,0,0,0.12)',
+              padding: '4px 0', overflow: 'hidden',
+            }}>
+              {canMoveUp && (
+                <button onClick={() => { onMoveUp(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                  ↑ Move Up
+                </button>
+              )}
+              {canMoveDown && (
+                <button onClick={() => { onMoveDown(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                  ↓ Move Down
+                </button>
+              )}
+              {!!onDelete && !isOnlyBlock && (
+                <button
+                  onClick={() => { onDelete(); setMenuOpen(false) }}
+                  style={{ ...menuItemStyle(isDark), color: '#f87171' }}
+                >
+                  🗑 Delete
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+})
+
+// ─── InlineMediaBlock ─────────────────────────────────────────────────────────
+
+interface InlineMediaBlockProps {
+  block: JournalBlock
+  isDark: boolean
+  canMoveUp: boolean
+  canMoveDown: boolean
+  onEdit: () => void
+  onMoveUp: () => void
+  onMoveDown: () => void
+  onDelete: () => void
+}
+
+function InlineMediaBlock({ block, isDark, canMoveUp, canMoveDown, onEdit, onMoveUp, onMoveDown, onDelete }: InlineMediaBlockProps) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [lightbox, setLightbox] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function outside(e: MouseEvent) {
+      if (menuRef.current?.contains(e.target as Node)) return
+      setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', outside)
+    return () => document.removeEventListener('mousedown', outside)
+  }, [menuOpen])
+
+  return (
+    <div style={{ position: 'relative', margin: '4px 0' }}>
+      {/* Image */}
+      {block.src && (
+        <img
+          src={block.thumbnail ?? block.src}
+          alt={block.name ?? (block.type === 'drawing' ? 'Drawing' : 'Image')}
+          onClick={() => setLightbox(true)}
+          style={{
+            maxWidth: '100%', display: 'block', cursor: 'zoom-in',
+            borderRadius: 10,
+            border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}`,
+            boxShadow: isDark ? '0 2px 12px rgba(0,0,0,0.35)' : '0 2px 8px rgba(0,0,0,0.08)',
+          }}
+        />
+      )}
+
+      {/* Label */}
+      {block.name && (
+        <div style={{
+          fontSize: 10, color: isDark ? 'rgba(255,255,255,0.40)' : 'rgba(0,0,0,0.40)',
+          marginTop: 4, textAlign: 'center', userSelect: 'none',
+        }}>
+          {block.type === 'drawing' ? '✏️ ' : '📷 '}{block.name}
+        </div>
+      )}
+
+      {/* ⋮ menu */}
+      <div ref={menuRef} style={{ position: 'absolute', top: 8, right: 8 }}>
+        <button
+          onClick={() => setMenuOpen(v => !v)}
+          style={{
+            width: 26, height: 26, borderRadius: 6, border: 'none', cursor: 'pointer',
+            background: menuOpen ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.45)',
+            color: '#fff', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backdropFilter: 'blur(4px)',
+          }}
+        >⋮</button>
+
+        {menuOpen && (
+          <div style={{
+            position: 'absolute', top: 32, right: 0, zIndex: 40, minWidth: 148,
+            background: isDark ? '#1e1130' : '#fff',
+            border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.12)'}`,
+            borderRadius: 10,
+            boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.55)' : '0 4px 20px rgba(0,0,0,0.12)',
+            padding: '4px 0', overflow: 'hidden',
+          }}>
+            {block.type === 'drawing' && (
+              <button onClick={() => { onEdit(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                ✏️ Edit Drawing
+              </button>
+            )}
+            {canMoveUp && (
+              <button onClick={() => { onMoveUp(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                ↑ Move Up
+              </button>
+            )}
+            {canMoveDown && (
+              <button onClick={() => { onMoveDown(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                ↓ Move Down
+              </button>
+            )}
+            <button onClick={() => { onDelete(); setMenuOpen(false) }} style={{ ...menuItemStyle(isDark), color: '#f87171' }}>
+              🗑 Delete
+            </button>
+          </div>
+        )}
+      </div>
+
+      {lightbox && block.src && (
+        <ImageLightbox src={block.src} alt={block.name ?? 'Image'} onClose={() => setLightbox(false)} />
+      )}
+    </div>
+  )
+}
+
+// ─── InsertRow ────────────────────────────────────────────────────────────────
+
+interface InsertRowProps {
+  isDark: boolean
+  atIndex: number
+  onInsertText: (atIndex: number) => void
+  onInsertSection: (atIndex: number, color: SectionColorKey) => void
+  onInsertDraw: (atIndex: number) => void
+  onInsertUpload: (atIndex: number, files: FileList) => void
+  onInsertCamera: (atIndex: number) => void
+}
+
+function InsertRow({ isDark, atIndex, onInsertText, onInsertSection, onInsertDraw, onInsertUpload, onInsertCamera }: InsertRowProps) {
+  const [open, setOpen] = useState(false)
+  const [showColors, setShowColors] = useState(false)
+  const popRef = useRef<HTMLDivElement>(null)
+  const uploadRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function outside(e: MouseEvent) {
+      if (popRef.current?.contains(e.target as Node)) return
+      setOpen(false)
+      setShowColors(false)
+    }
+    document.addEventListener('mousedown', outside)
+    return () => document.removeEventListener('mousedown', outside)
+  }, [open])
+
+  function close() { setOpen(false); setShowColors(false) }
+
+  const lineColor = isDark ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.12)'
+  const btnColor  = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)'
+  const popBg     = isDark ? '#1e1130' : '#fff'
+  const popBdr    = isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.12)'
+
+  return (
+    <div
+      className="xp-j-insert"
+      style={{ position: 'relative', margin: '2px 0', display: 'flex', alignItems: 'center', gap: 6, opacity: 0.35, transition: 'opacity 200ms' }}
+      onMouseEnter={e => (e.currentTarget.style.opacity = '1')}
+      onMouseLeave={e => { if (!open) e.currentTarget.style.opacity = '0.35' }}
+    >
+      <div style={{ flex: 1, height: 1, background: lineColor }} />
+      <div ref={popRef} style={{ position: 'relative', flexShrink: 0 }}>
+        <button
+          onClick={() => { setOpen(v => !v); setShowColors(false) }}
+          title="Insert content"
+          style={{
+            width: 22, height: 22, borderRadius: '50%', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.45)' : 'rgba(124,58,237,0.35)'}`,
+            background: isDark ? 'rgba(124,58,237,0.15)' : 'rgba(124,58,237,0.08)',
+            color: isDark ? '#a78bfa' : '#7c3aed',
+            fontSize: 14, fontWeight: 500, lineHeight: 1,
+            cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >+</button>
+
+        {open && (
+          <div style={{
+            position: 'absolute', top: 28, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 50, background: popBg,
+            border: `0.5px solid ${popBdr}`, borderRadius: 10,
+            boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.55)' : '0 4px 20px rgba(0,0,0,0.12)',
+            padding: '4px 0', overflow: 'hidden', minWidth: 148,
+          }}>
+            {!showColors ? (
+              <>
+                <button onClick={() => { onInsertText(atIndex); close() }} style={menuItemStyle(isDark)}>+ Text Block</button>
+                <button
+                  onClick={() => setShowColors(true)}
+                  style={{ ...menuItemStyle(isDark), display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                >
+                  <span>+ Section</span><span style={{ opacity: 0.5, fontSize: 10 }}>›</span>
+                </button>
+                <button onClick={() => { onInsertDraw(atIndex); close() }} style={menuItemStyle(isDark)}>✏️ Draw</button>
+                <label style={{ ...menuItemStyle(isDark), display: 'block', cursor: 'pointer' }}>
+                  📎 Upload Image
+                  <input
+                    ref={uploadRef}
+                    type="file" multiple accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={e => {
+                      if (e.target.files?.length) { onInsertUpload(atIndex, e.target.files); e.currentTarget.value = '' }
+                      close()
+                    }}
+                  />
+                </label>
+                <button onClick={() => { onInsertCamera(atIndex); close() }} style={menuItemStyle(isDark)}>📷 Camera</button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => setShowColors(false)} style={{ ...menuItemStyle(isDark), opacity: 0.55, fontSize: 11 }}>← Back</button>
+                {SECTION_COLORS.map(c => (
+                  <button
+                    key={c.key}
+                    onClick={() => { onInsertSection(atIndex, c.key as SectionColorKey); close() }}
+                    style={{ ...menuItemStyle(isDark), display: 'flex', alignItems: 'center', gap: 8 }}
+                  >
+                    <span style={{
+                      width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
+                      background: getSectionStyle(c.key, isDark).labelColor,
+                    }} />
+                    {c.label}
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+      <div style={{ flex: 1, height: 1, background: lineColor }} />
+    </div>
+  )
+}
+
+// ─── Shared style helpers ─────────────────────────────────────────────────────
+
+function menuItemStyle(isDark: boolean): React.CSSProperties {
+  return {
+    display: 'block', width: '100%', textAlign: 'left',
+    padding: '7px 14px', border: 'none', background: 'transparent', cursor: 'pointer',
+    fontSize: 12, fontWeight: 500,
+    color: isDark ? 'rgba(255,255,255,0.82)' : 'rgba(0,0,0,0.72)',
+    transition: 'background 100ms',
+  }
+}
+
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 interface JournalEditorContentProps {
   dateKey: string
@@ -58,111 +448,218 @@ interface JournalEditorContentProps {
   onNavigateToday: () => void
   onBack: () => void
   onClose: () => void
+  // Legacy props — accepted for backward compat; attachments now live as inline blocks
   attachments?: TaskAttachment[]
   onAttachmentsChange?: (atts: TaskAttachment[]) => void
 }
 
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export function JournalEditorContent({
   dateKey, rawContent, isDark, isEditorOnToday,
-  onContentChange, onPersist, onNavigateDay, onNavigateToday,
-  onBack, onClose, attachments = [], onAttachmentsChange,
+  onContentChange, onPersist,
+  onNavigateDay, onNavigateToday, onBack, onClose,
 }: JournalEditorContentProps) {
 
-  const [saveStatus, setSaveStatus]   = useState<'idle' | 'saved'>('idle')
-  const [showEmoji, setShowEmoji]     = useState(false)
-  const [drawOpen, setDrawOpen]       = useState(false)
-  const [serialized, setSerialized]   = useState('')
-  const [committed, setCommitted]     = useState('')
-  const [cameraOpen, setCameraOpen]   = useState(false)
-  const [lightbox, setLightbox]       = useState<string | null>(null)
-  const emojiBtnRef   = useRef<HTMLButtonElement>(null)
-  const uploadRef     = useRef<HTMLInputElement>(null)
-  const suppressUpdate = useRef(false)
+  // ── State ───────────────────────────────────────────────────────────────────
+  const [blocks, setBlocks]         = useState<JournalBlock[]>([])
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle')
+  const [showEmoji, setShowEmoji]   = useState(false)
+  const [cameraInsertAt, setCameraInsertAt] = useState<number | null>(null)
+  const [focusTick, setFocusTick]   = useState(0)  // triggers dock state update
+  const [drawState, setDrawState]   = useState<{
+    insertAt: number
+    editingBlock: JournalBlock | null
+  } | null>(null)
 
-  const acc = '#7c3aed'
+  // ── Refs ────────────────────────────────────────────────────────────────────
+  const contentMapRef   = useRef<Map<string, string>>(new Map())
+  const blocksRef       = useRef<JournalBlock[]>([])
+  const focusedEditor   = useRef<Editor | null>(null)
+  const saveTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dateKeyRef      = useRef(dateKey)
+  const emojiBtnRef     = useRef<HTMLButtonElement>(null)
 
-  // ── Editor ────────────────────────────────────────────────────────────────
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: false, codeBlock: false, blockquote: false,
-        strike: false, code: false, bold: false, italic: false, horizontalRule: false,
-      }),
-      TaskList,
-      TaskItem.configure({ nested: false }),
-      Placeholder.configure({ placeholder: 'What made today great? Reflections, insights, gratitude…' }),
-    ],
-    content: parseJournalContent(rawContent),
-    editorProps: { attributes: { class: 'xp-j-prose' } },
-    onUpdate: ({ editor: e }) => {
-      if (suppressUpdate.current) return
-      const s = serializeJournalContent(e)
-      setSerialized(s)
-      onContentChange(s)
-    },
-  })
+  dateKeyRef.current = dateKey
 
-  // Reload on date change, suppressing autosave
+  // Keep blocksRef in sync with blocks state
+  useEffect(() => { blocksRef.current = blocks }, [blocks])
+
+  // ── Init / date change ───────────────────────────────────────────────────────
   useEffect(() => {
-    if (!editor) return
-    suppressUpdate.current = true
-    editor.commands.setContent(parseJournalContent(rawContent))
-    requestAnimationFrame(() => {
-      const s = serializeJournalContent(editor)
-      setSerialized(s)
-      setCommitted(s)
-      setSaveStatus('idle')
-      suppressUpdate.current = false
+    const doc = parseJournalDoc(rawContent)
+    // Ensure at least one text block
+    const initialBlocks = doc.blocks.length > 0 ? doc.blocks : [createTextBlock()]
+    setBlocks(initialBlocks)
+    blocksRef.current = initialBlocks
+    contentMapRef.current.clear()
+    // Pre-populate contentMap from loaded blocks
+    initialBlocks.forEach(b => {
+      if ((b.type === 'text' || b.type === 'section') && b.content) {
+        contentMapRef.current.set(b.id, b.content)
+      }
     })
+    setDrawState(null)
     setShowEmoji(false)
-    setDrawOpen(false)
+    setSaveStatus('idle')
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateKey])
 
-  // Debounced autosave
-  useEffect(() => {
-    if (!serialized || serialized === committed) return
-    const t = setTimeout(() => {
-      onPersist(dateKey, serialized)
-      setCommitted(serialized)
+  // ── Doc serialization ───────────────────────────────────────────────────────
+  const buildDocStr = useCallback((): string => {
+    const doc = {
+      v: 1 as const,
+      blocks: blocksRef.current.map(b => ({
+        ...b,
+        content: (b.type === 'text' || b.type === 'section')
+          ? (contentMapRef.current.get(b.id) ?? b.content ?? '')
+          : b.content,
+      })),
+    }
+    return JSON.stringify(doc)
+  }, [])
+
+  // ── Autosave scheduler ──────────────────────────────────────────────────────
+  const scheduleSave = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      const serialized = buildDocStr()
+      onPersist(dateKeyRef.current, serialized)
       setSaveStatus('saved')
       setTimeout(() => setSaveStatus(s => s === 'saved' ? 'idle' : s), 2200)
+      saveTimerRef.current = null
     }, 1500)
-    return () => clearTimeout(t)
-  }, [serialized, committed, dateKey, onPersist])
+  }, [buildDocStr, onPersist])
 
-  const handleManualSave = useCallback(() => {
-    onPersist(dateKey, serialized)
-    setCommitted(serialized)
+  // ── Block content change ────────────────────────────────────────────────────
+  const onBlockContentChange = useCallback((id: string, content: string) => {
+    contentMapRef.current.set(id, content)
+    onContentChange(buildDocStr())
+    scheduleSave()
+  }, [buildDocStr, onContentChange, scheduleSave])
+
+  // ── Editor focus tracking ───────────────────────────────────────────────────
+  const onEditorFocus = useCallback((editor: Editor) => {
+    focusedEditor.current = editor
+    setFocusTick(t => t + 1)
+  }, [])
+
+  const onEditorSelectionUpdate = useCallback(() => {
+    setFocusTick(t => t + 1)
+  }, [])
+
+  const isActive = (name: string) => focusedEditor.current?.isActive(name) ?? false
+  // focusTick is consumed by the isActive call above — just reference it to avoid lint warning
+  void focusTick
+
+  // ── Manual save ─────────────────────────────────────────────────────────────
+  function handleManualSave() {
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+    const serialized = buildDocStr()
+    onPersist(dateKeyRef.current, serialized)
     setSaveStatus('saved')
     setTimeout(() => setSaveStatus(s => s === 'saved' ? 'idle' : s), 2200)
-  }, [dateKey, serialized, onPersist])
+  }
 
-  // ── Attachments ───────────────────────────────────────────────────────────
-  async function handleFiles(files: File[] | FileList | null, source: 'upload' | 'camera') {
+  // ── Block structural operations ─────────────────────────────────────────────
+  // IMPORTANT: always update blocksRef.current BEFORE calling buildDocStr()
+
+  function insertBlock(block: JournalBlock, atIndex: number) {
+    const next = [...blocksRef.current]
+    next.splice(atIndex + 1, 0, block)
+    blocksRef.current = next
+    setBlocks(next)
+    onContentChange(buildDocStr())
+    scheduleSave()
+  }
+
+  function deleteBlock(id: string) {
+    contentMapRef.current.delete(id)
+    const filtered = blocksRef.current.filter(b => b.id !== id)
+    const next = filtered.length > 0 ? filtered : [createTextBlock()]
+    blocksRef.current = next
+    setBlocks(next)
+    onContentChange(buildDocStr())
+    scheduleSave()
+  }
+
+  function moveBlock(id: string, delta: -1 | 1) {
+    const current = blocksRef.current
+    const idx = current.findIndex(b => b.id === id)
+    if (idx < 0) return
+    const newIdx = idx + delta
+    if (newIdx < 0 || newIdx >= current.length) return
+    const next = [...current]
+    // Preserve live content before swap
+    next[idx]    = { ...next[idx],    content: contentMapRef.current.get(next[idx].id)    ?? next[idx].content    ?? '' }
+    next[newIdx] = { ...next[newIdx], content: contentMapRef.current.get(next[newIdx].id) ?? next[newIdx].content ?? '' }
+    ;[next[idx], next[newIdx]] = [next[newIdx], next[idx]]
+    blocksRef.current = next
+    setBlocks(next)
+    onContentChange(buildDocStr())
+    scheduleSave()
+  }
+
+  // Insert row handlers
+  function handleInsertText(atIndex: number) {
+    insertBlock(createTextBlock(), atIndex)
+  }
+  function handleInsertSection(atIndex: number, color: SectionColorKey) {
+    insertBlock(createSectionBlock(color), atIndex)
+  }
+  function handleInsertDraw(atIndex: number) {
+    setDrawState({ insertAt: atIndex, editingBlock: null })
+  }
+  function handleInsertCamera(atIndex: number) {
+    setCameraInsertAt(atIndex)
+  }
+  async function handleInsertUpload(atIndex: number, files: FileList) {
+    const atts = await buildAttachments(Array.from(files), 'upload')
+    const newBlocks = atts.map(att => createImageBlock(att.url, att.name))
+    const next = [...blocksRef.current]
+    next.splice(atIndex + 1, 0, ...newBlocks)
+    blocksRef.current = next
+    setBlocks(next)
+    onContentChange(buildDocStr())
+    scheduleSave()
+  }
+
+  // Upload via bottom toolbar (appends to end)
+  async function handleUploadAtEnd(files: FileList | File[] | null, isCamera = false) {
     if (!files || files.length === 0) return
-    const next = await buildAttachments(files, source)
-    onAttachmentsChange?.([...attachments, ...next])
+    const arr = Array.isArray(files) ? files : Array.from(files)
+    const atts = await buildAttachments(arr, isCamera ? 'camera' : 'upload')
+    const newBlocks = atts.map(att => createImageBlock(att.url, att.name))
+    const next = [...blocksRef.current, ...newBlocks]
+    blocksRef.current = next
+    setBlocks(next)
+    onContentChange(buildDocStr())
+    scheduleSave()
   }
 
-  function handleDrawingSave(dataUrl: string) {
-    const att: TaskAttachment = {
-      id:        crypto.randomUUID(),
-      name:      `Drawing — ${fmtEditorDate(dateKey)}`,
-      mimeType:  'image/png',
-      size:      Math.round(dataUrl.length * 0.75),
-      url:       dataUrl,
-      thumbnail: dataUrl,
-      addedAt:   Date.now(),
-      source:    'drawing',
+  // Draw handlers
+  function handleDrawSave(dataUrl: string) {
+    if (!drawState) return
+    let next: JournalBlock[]
+    if (drawState.editingBlock) {
+      const updatedBlock: JournalBlock = { ...drawState.editingBlock, src: dataUrl, thumbnail: dataUrl, updatedAt: Date.now() }
+      next = blocksRef.current.map(b => b.id === drawState.editingBlock!.id ? updatedBlock : b)
+    } else {
+      const drawBlock = createDrawingBlock(dataUrl, `Drawing — ${fmtShortDate(dateKey)}`)
+      next = [...blocksRef.current]
+      next.splice(drawState.insertAt + 1, 0, drawBlock)
     }
-    onAttachmentsChange?.([...attachments, att])
-    setDrawOpen(false)
+    blocksRef.current = next
+    setBlocks(next)
+    setDrawState(null)
+    onContentChange(buildDocStr())
+    scheduleSave()
   }
 
-  // ── Emoji ─────────────────────────────────────────────────────────────────
+  // Emoji
   function handleEmojiClick(data: EmojiClickData) {
-    editor?.chain().focus().insertContent(data.emoji).run()
+    focusedEditor.current?.chain().focus().insertContent(data.emoji).run()
     setShowEmoji(false)
   }
   useEffect(() => {
@@ -177,38 +674,29 @@ export function JournalEditorContent({
     return () => document.removeEventListener('mousedown', outside)
   }, [showEmoji])
 
-  const isActive = (name: string) => editor?.isActive(name) ?? false
+  // ── Styles ──────────────────────────────────────────────────────────────────
+  const dockBg  = isDark ? 'rgba(9,4,22,0.96)' : '#f1f5f9'
+  const dockBdr = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.09)'
+  const dockDiv = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.12)'
+  const acc = '#7c3aed'
+  void acc
 
-  // ── Dock button style ─────────────────────────────────────────────────────
-  // Premium dark-dock buttons — readable by default, purple on hover/active
   function dockBtn(active = false): React.CSSProperties {
     return {
       padding: '5px 11px', borderRadius: 7, cursor: 'pointer',
-      border: `0.5px solid ${active
-        ? 'rgba(124,58,237,0.55)'
-        : isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.15)'}`,
-      background: active
-        ? 'rgba(124,58,237,0.22)'
-        : isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
-      color: active
-        ? '#a78bfa'
-        : isDark ? 'rgba(255,255,255,0.82)' : 'rgba(0,0,0,0.72)',
+      border: `0.5px solid ${active ? 'rgba(124,58,237,0.55)' : isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.15)'}`,
+      background: active ? 'rgba(124,58,237,0.22)' : isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
+      color: active ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.82)' : 'rgba(0,0,0,0.72)',
       fontSize: 12, fontWeight: active ? 600 : 500,
       transition: 'all 120ms', flexShrink: 0, whiteSpace: 'nowrap' as const,
     }
   }
 
-  // ── Dock surface colours ──────────────────────────────────────────────────
-  const dockBg   = isDark ? 'rgba(9,4,22,0.96)'                   : '#f1f5f9'
-  const dockBdr  = isDark ? 'rgba(255,255,255,0.07)'               : 'rgba(0,0,0,0.09)'
-  const dockDivider = isDark ? 'rgba(255,255,255,0.10)'            : 'rgba(0,0,0,0.12)'
-  const editorBg = isDark ? 'rgba(255,255,255,0.025)'              : '#f8fafc'
-  const editorBdr = isDark ? 'rgba(255,255,255,0.08)'              : 'rgba(0,0,0,0.10)'
-
   // ─────────────────────────────────────────────────────────────────────────
+
   return (
     <>
-      {/* ── CSS: prose, placeholder, xp-j-hdr animation, dock hover ── */}
+      {/* ── CSS ─────────────────────────────────────────────────────────── */}
       <style>{`
         @keyframes xpJHdrFlow {
           0%   { background-position: 0%   50%; }
@@ -216,17 +704,10 @@ export function JournalEditorContent({
           100% { background-position: 0%   50%; }
         }
         .xp-j-hdr {
-          background: linear-gradient(
-            135deg,
-            #0f052e  0%,
-            #2d1b69 45%,
-            #4c1d95 75%,
-            #1a0a4e 100%
-          );
+          background: linear-gradient(135deg, #4a1a8c 0%, #5b21b6 30%, #7c3aed 65%, #8b5cf6 100%);
           background-size: 300% 300%;
-          animation: xpJHdrFlow 16s ease infinite;
+          animation: xpJHdrFlow 14s ease infinite;
         }
-        /* Dock button hover — skip active (.xp-j-active) */
         .xp-jd-btn:hover:not(.xp-j-active):not(:disabled) {
           border-color: rgba(124,58,237,0.50) !important;
           background:   rgba(124,58,237,0.12) !important;
@@ -239,7 +720,7 @@ export function JournalEditorContent({
           line-height: 1.75;
           font-family: inherit;
           color: ${isDark ? '#f1f5f9' : '#0f172a'};
-          min-height: 100%;
+          min-height: 32px;
         }
         .xp-j-prose p { margin: 0 0 6px; }
         .xp-j-prose p:last-child { margin-bottom: 0; }
@@ -249,7 +730,7 @@ export function JournalEditorContent({
         .xp-j-prose ul[data-type="taskList"] { list-style: none; padding-left: 0; margin: 0 0 6px; }
         .xp-j-prose ul[data-type="taskList"] > li { display: flex; align-items: flex-start; gap: 7px; margin-bottom: 4px; }
         .xp-j-prose ul[data-type="taskList"] > li > label { flex-shrink: 0; margin-top: 3px; cursor: pointer; display: flex; }
-        .xp-j-prose ul[data-type="taskList"] > li > label > input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accent-color: ${acc}; margin: 0; }
+        .xp-j-prose ul[data-type="taskList"] > li > label > input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accent-color: #7c3aed; margin: 0; }
         .xp-j-prose ul[data-type="taskList"] > li > div { flex: 1; min-width: 0; }
         .xp-j-prose ul[data-type="taskList"] > li[data-checked="true"] > div { opacity: 0.52; }
         .xp-j-prose p.is-editor-empty:first-child::before {
@@ -257,269 +738,328 @@ export function JournalEditorContent({
           color: ${isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.30)'};
           float: left; pointer-events: none; height: 0;
         }
+        .xp-j-insert { user-select: none; }
       `}</style>
 
-      {/* ── Header — animated purple, centered date ── */}
-      <div className="xp-j-hdr" style={{ flexShrink: 0, borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}>
-
-        {/* Row 1: Back | Centered date | Close */}
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div
+        className="xp-j-hdr"
+        style={{ flexShrink: 0, borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}
+      >
         <div style={{
           position: 'relative', display: 'flex', alignItems: 'center',
-          padding: '12px 20px 0',
+          height: 52, padding: '0 14px', gap: 6,
         }}>
+          {/* Left: back + prev */}
           <button
             onClick={onBack}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0"
-            style={{ background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.80)' }}
-          >
-            ← Calendar
-          </button>
+            style={{
+              padding: '5px 10px', borderRadius: 8, border: '0.5px solid rgba(255,255,255,0.16)',
+              background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.78)',
+              fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
+            }}
+          >← Calendar</button>
+          <button
+            onClick={() => onNavigateDay(-1)}
+            title="Previous day"
+            style={{
+              padding: '4px 9px', borderRadius: 7, border: '0.5px solid rgba(255,255,255,0.12)',
+              background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.70)',
+              fontSize: 18, lineHeight: 1, cursor: 'pointer', flexShrink: 0,
+            }}
+          >‹</button>
 
-          {/* Date — absolutely centered so it's never offset by button widths */}
+          {/* Centered date — absolute so it's never offset by button widths */}
           <div style={{
             position: 'absolute', left: 0, right: 0,
             display: 'flex', justifyContent: 'center', alignItems: 'center',
             pointerEvents: 'none',
           }}>
-            <span style={{
-              color: '#fff', fontSize: 13, fontWeight: 600,
-              letterSpacing: '-0.01em', textAlign: 'center', lineHeight: 1.3,
-            }}>
+            <span style={{ color: '#fff', fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', textAlign: 'center' }}>
               {fmtEditorDate(dateKey)}
             </span>
           </div>
 
-          {/* Close — right end */}
+          {/* Spacer + right: next + today (if not today) + close */}
           <div style={{ flex: 1 }} />
-          <button
-            onClick={onClose}
-            className="text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
-            style={{ background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}
-          >
-            × Close
-          </button>
-        </div>
-
-        {/* Row 2: Day navigation — centered */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          gap: 10, padding: '10px 20px 13px',
-        }}>
-          <button
-            onClick={() => onNavigateDay(-1)}
-            title="Previous day"
-            style={{
-              background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.12)',
-              borderRadius: 7, cursor: 'pointer',
-              color: 'rgba(255,255,255,0.70)', fontSize: 18, padding: '2px 10px', lineHeight: 1,
-              transition: 'all 120ms',
-            }}
-          >‹</button>
-
           {!isEditorOnToday && (
             <button
               onClick={onNavigateToday}
-              className="text-[10px] px-2.5 py-1 rounded-full border transition-colors hover:border-violet-400 hover:text-violet-400"
-              style={{ borderColor: 'rgba(255,255,255,0.22)', color: 'rgba(255,255,255,0.60)' }}
-            >
-              Today
-            </button>
+              style={{
+                padding: '3px 8px', borderRadius: 20, border: '0.5px solid rgba(255,255,255,0.22)',
+                background: 'transparent', color: 'rgba(255,255,255,0.60)',
+                fontSize: 11, cursor: 'pointer', flexShrink: 0,
+              }}
+            >Today</button>
           )}
-
           <button
             onClick={() => onNavigateDay(1)}
             title="Next day"
             style={{
-              background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.12)',
-              borderRadius: 7, cursor: 'pointer',
-              color: 'rgba(255,255,255,0.70)', fontSize: 18, padding: '2px 10px', lineHeight: 1,
-              transition: 'all 120ms',
+              padding: '4px 9px', borderRadius: 7, border: '0.5px solid rgba(255,255,255,0.12)',
+              background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.70)',
+              fontSize: 18, lineHeight: 1, cursor: 'pointer', flexShrink: 0,
             }}
           >›</button>
-        </div>
-      </div>
-
-      {/* ── Writing canvas ── */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px 0', position: 'relative' }}>
-        <div
-          onClick={() => editor?.commands.focus()}
-          style={{
-            minHeight: '100%', cursor: 'text',
-            padding: '16px 18px',
-            borderRadius: 12,
-            border: `0.5px solid ${editorBdr}`,
-            background: editorBg,
-            boxShadow: isDark ? 'inset 0 1px 0 rgba(255,255,255,0.03)' : 'inset 0 1px 0 rgba(0,0,0,0.02)',
-            transition: 'border-color 150ms',
-          }}
-        >
-          <EditorContent editor={editor} />
-        </div>
-
-        {/* Attachments list (below writing area, above dock) */}
-        {attachments.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10, marginBottom: 10 }}>
-            {attachments.map(att => (
-              <AttachmentItem
-                key={att.id}
-                attachment={att}
-                isDark={isDark}
-                onRemove={() => onAttachmentsChange?.(removeAttachmentById(attachments, att.id))}
-                onPreview={() => { if (att.mimeType.startsWith('image/')) setLightbox(att.url) }}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* ── Premium tool dock ── */}
-      <div style={{
-        background: dockBg,
-        borderTop: `0.5px solid ${dockBdr}`,
-        boxShadow: isDark
-          ? 'inset 0 1px 0 rgba(255,255,255,0.04), 0 -4px 16px rgba(0,0,0,0.30)'
-          : 'inset 0 1px 0 rgba(0,0,0,0.04)',
-        padding: '10px 16px 12px',
-        flexShrink: 0,
-        display: 'flex', alignItems: 'center',
-        justifyContent: 'space-between', gap: 6,
-        flexWrap: 'wrap',
-        position: 'relative',
-      }}>
-        {/* Left cluster: Formatting + Attachments + Draw */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-
-          {/* Formatting group */}
           <button
-            className={`xp-jd-btn${isActive('bulletList') ? ' xp-j-active' : ''}`}
-            style={dockBtn(isActive('bulletList'))}
-            onClick={() => editor?.chain().focus().toggleBulletList().run()}
-            title="Bulleted list"
-          >• List</button>
-          <button
-            className={`xp-jd-btn${isActive('orderedList') ? ' xp-j-active' : ''}`}
-            style={dockBtn(isActive('orderedList'))}
-            onClick={() => editor?.chain().focus().toggleOrderedList().run()}
-            title="Numbered list"
-          >1. List</button>
-          <button
-            className={`xp-jd-btn${isActive('taskList') ? ' xp-j-active' : ''}`}
-            style={dockBtn(isActive('taskList'))}
-            onClick={() => editor?.chain().focus().toggleTaskList().run()}
-            title="Interactive checklist"
-          >☐ Check</button>
-
-          {/* Divider */}
-          <span style={{ width: 1, height: 18, background: dockDivider, flexShrink: 0, margin: '0 2px' }} />
-
-          {/* Attachments group */}
-          {onAttachmentsChange && (
-            <>
-              <button
-                className="xp-jd-btn"
-                style={dockBtn()}
-                onClick={() => uploadRef.current?.click()}
-                title="Upload file or photo"
-              >📎 Upload</button>
-              <button
-                className="xp-jd-btn"
-                style={dockBtn()}
-                onClick={() => setCameraOpen(true)}
-                title="Take a photo"
-              >📷 Camera</button>
-              <input
-                ref={uploadRef}
-                type="file" multiple accept={ATTACHMENT_ACCEPT}
-                style={{ display: 'none' }}
-                onChange={e => { handleFiles(e.target.files, 'upload'); e.currentTarget.value = '' }}
-              />
-            </>
-          )}
-
-          {/* Draw */}
-          <button
-            className="xp-jd-btn"
-            style={dockBtn()}
-            onClick={() => setDrawOpen(true)}
-            title="Freehand drawing"
-          >✏️ Draw</button>
-        </div>
-
-        {/* Right cluster: Emoji + Saved ✓ + Save Notes */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          {/* Saved indicator */}
-          <span style={{
-            fontSize: 11, whiteSpace: 'nowrap', userSelect: 'none',
-            color: saveStatus === 'saved' ? '#16a34a' : 'transparent',
-            transition: 'color 200ms',
-          }}>
-            Saved ✓
-          </span>
-
-          {/* Emoji trigger */}
-          <button
-            ref={emojiBtnRef}
-            className="xp-jd-btn"
-            onClick={() => setShowEmoji(v => !v)}
-            title="Add emoji"
+            onClick={onClose}
             style={{
-              ...dockBtn(),
-              fontSize: 16, padding: '4px 9px', lineHeight: 1, borderRadius: 8,
+              padding: '5px 10px', borderRadius: 8,
+              border: '0.5px solid rgba(239,68,68,0.28)',
+              background: 'rgba(239,68,68,0.15)', color: '#fca5a5',
+              fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
             }}
-          >
-            😊
-          </button>
-
-          {/* Save Notes CTA */}
-          <button
-            onClick={handleManualSave}
-            style={{
-              padding: '6px 18px', borderRadius: 8, border: 'none', cursor: 'pointer',
-              background: 'linear-gradient(135deg, #7c3aed, #6d28d9)',
-              color: '#fff', fontSize: 12, fontWeight: 600,
-              boxShadow: '0 2px 8px rgba(124,58,237,0.35)',
-              whiteSpace: 'nowrap', transition: 'opacity 120ms',
-            }}
-          >
-            Save Notes
-          </button>
+          >× Close</button>
         </div>
-
-        {/* Emoji picker — floats above dock */}
-        {showEmoji && (
-          <div id="xp-j-emoji" style={{
-            position: 'absolute', bottom: 'calc(100% + 8px)', right: 16, zIndex: 100,
-            borderRadius: 12, overflow: 'hidden',
-            boxShadow: `0 8px 32px rgba(0,0,0,${isDark ? '0.50' : '0.20'})`,
-          }}>
-            <EmojiPicker
-              onEmojiClick={handleEmojiClick}
-              theme={isDark ? Theme.DARK : Theme.LIGHT}
-              width={300} height={360}
-              searchPlaceHolder="Search emoji…"
-              lazyLoadEmojis
-            />
-          </div>
-        )}
       </div>
 
-      {/* ── Overlays ── */}
-      {lightbox && (
-        <ImageLightbox src={lightbox} alt="Attachment preview" onClose={() => setLightbox(null)} />
-      )}
-      {cameraOpen && (
-        <CameraModal
-          onCapture={file => handleFiles([file], 'camera')}
-          onClose={() => setCameraOpen(false)}
-        />
-      )}
-      {drawOpen && (
+      {/* ── Content area or Draw canvas ─────────────────────────────────────── */}
+      {drawState ? (
         <JournalDrawModal
           isDark={isDark}
-          onSave={handleDrawingSave}
-          onClose={() => setDrawOpen(false)}
+          initialSrc={drawState.editingBlock?.src}
+          onSave={handleDrawSave}
+          onClose={() => setDrawState(null)}
+        />
+      ) : (
+        <>
+          {/* Block list */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '12px 20px 8px', minHeight: 0 }}>
+            {/* Insert row before first block */}
+            <InsertRow
+              isDark={isDark}
+              atIndex={-1}
+              onInsertText={handleInsertText}
+              onInsertSection={handleInsertSection}
+              onInsertDraw={handleInsertDraw}
+              onInsertUpload={handleInsertUpload}
+              onInsertCamera={handleInsertCamera}
+            />
+
+            {blocks.map((block, idx) => (
+              <React.Fragment key={block.id}>
+                {(block.type === 'text' || block.type === 'section') ? (
+                  <JournalTextBlock
+                    block={block}
+                    isDark={isDark}
+                    isOnlyBlock={blocks.length === 1}
+                    onContentChange={onBlockContentChange}
+                    onFocus={onEditorFocus}
+                    onSelectionUpdate={onEditorSelectionUpdate}
+                    onDelete={blocks.length > 1 ? () => deleteBlock(block.id) : undefined}
+                    canMoveUp={idx > 0}
+                    canMoveDown={idx < blocks.length - 1}
+                    onMoveUp={() => moveBlock(block.id, -1)}
+                    onMoveDown={() => moveBlock(block.id, 1)}
+                  />
+                ) : (
+                  <InlineMediaBlock
+                    block={block}
+                    isDark={isDark}
+                    canMoveUp={idx > 0}
+                    canMoveDown={idx < blocks.length - 1}
+                    onEdit={() => setDrawState({ insertAt: idx, editingBlock: block })}
+                    onMoveUp={() => moveBlock(block.id, -1)}
+                    onMoveDown={() => moveBlock(block.id, 1)}
+                    onDelete={() => deleteBlock(block.id)}
+                  />
+                )}
+
+                {/* Insert row after each block */}
+                <InsertRow
+                  isDark={isDark}
+                  atIndex={idx}
+                  onInsertText={handleInsertText}
+                  onInsertSection={handleInsertSection}
+                  onInsertDraw={handleInsertDraw}
+                  onInsertUpload={handleInsertUpload}
+                  onInsertCamera={handleInsertCamera}
+                />
+              </React.Fragment>
+            ))}
+          </div>
+
+          {/* ── Tool dock ─────────────────────────────────────────────────── */}
+          <div style={{
+            background: dockBg, borderTop: `0.5px solid ${dockBdr}`,
+            boxShadow: isDark ? 'inset 0 1px 0 rgba(255,255,255,0.04), 0 -4px 16px rgba(0,0,0,0.30)' : 'inset 0 1px 0 rgba(0,0,0,0.04)',
+            padding: '10px 16px 12px', flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            gap: 6, flexWrap: 'wrap', position: 'relative',
+          }}>
+            {/* Left cluster */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+              <button
+                className={`xp-jd-btn${isActive('bulletList') ? ' xp-j-active' : ''}`}
+                style={dockBtn(isActive('bulletList'))}
+                onClick={() => focusedEditor.current?.chain().focus().toggleBulletList().run()}
+                title="Bulleted list"
+              >• List</button>
+              <button
+                className={`xp-jd-btn${isActive('orderedList') ? ' xp-j-active' : ''}`}
+                style={dockBtn(isActive('orderedList'))}
+                onClick={() => focusedEditor.current?.chain().focus().toggleOrderedList().run()}
+                title="Numbered list"
+              >1. List</button>
+              <button
+                className={`xp-jd-btn${isActive('taskList') ? ' xp-j-active' : ''}`}
+                style={dockBtn(isActive('taskList'))}
+                onClick={() => focusedEditor.current?.chain().focus().toggleTaskList().run()}
+                title="Interactive checklist"
+              >☐ Check</button>
+
+              <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
+
+              {/* Upload */}
+              <label style={{ ...dockBtn(), cursor: 'pointer' }} title="Upload image" className="xp-jd-btn">
+                📎 Upload
+                <input
+                  type="file" multiple accept={ATTACHMENT_ACCEPT}
+                  style={{ display: 'none' }}
+                  onChange={e => { handleUploadAtEnd(e.target.files); e.currentTarget.value = '' }}
+                />
+              </label>
+              <button
+                className="xp-jd-btn"
+                style={dockBtn()}
+                onClick={() => setCameraInsertAt(blocks.length - 1)}
+                title="Take a photo"
+              >📷 Camera</button>
+
+              <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
+
+              {/* Draw */}
+              <button
+                className="xp-jd-btn"
+                style={dockBtn()}
+                onClick={() => setDrawState({ insertAt: blocks.length - 1, editingBlock: null })}
+                title="Open draw canvas"
+              >✏️ Draw</button>
+
+              {/* + New Section */}
+              <SectionPicker isDark={isDark} onPick={color => {
+                insertBlock(createSectionBlock(color), blocks.length - 1)
+              }} />
+            </div>
+
+            {/* Right cluster */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <span style={{
+                fontSize: 11, whiteSpace: 'nowrap', userSelect: 'none',
+                color: saveStatus === 'saved' ? '#16a34a' : 'transparent',
+                transition: 'color 200ms',
+              }}>Saved ✓</span>
+
+              <button
+                ref={emojiBtnRef}
+                className="xp-jd-btn"
+                onClick={() => setShowEmoji(v => !v)}
+                title="Add emoji"
+                style={{ ...dockBtn(), fontSize: 16, padding: '4px 9px', lineHeight: 1, borderRadius: 8 }}
+              >😊</button>
+
+              <button
+                onClick={handleManualSave}
+                style={{
+                  padding: '6px 18px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                  background: 'linear-gradient(135deg, #7c3aed, #6d28d9)',
+                  color: '#fff', fontSize: 12, fontWeight: 600,
+                  boxShadow: '0 2px 8px rgba(124,58,237,0.35)',
+                  whiteSpace: 'nowrap', transition: 'opacity 120ms',
+                }}
+              >Save Notes</button>
+            </div>
+
+            {/* Emoji picker */}
+            {showEmoji && (
+              <div id="xp-j-emoji" style={{
+                position: 'absolute', bottom: 'calc(100% + 8px)', right: 16, zIndex: 100,
+                borderRadius: 12, overflow: 'hidden',
+                boxShadow: `0 8px 32px rgba(0,0,0,${isDark ? '0.50' : '0.20'})`,
+              }}>
+                <EmojiPicker
+                  onEmojiClick={handleEmojiClick}
+                  theme={isDark ? Theme.DARK : Theme.LIGHT}
+                  width={300} height={360}
+                  searchPlaceHolder="Search emoji…"
+                  lazyLoadEmojis
+                />
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ── Modals ─────────────────────────────────────────────────────────── */}
+      {cameraInsertAt !== null && (
+        <CameraModal
+          onCapture={file => {
+            handleUploadAtEnd([file], true)
+            setCameraInsertAt(null)
+          }}
+          onClose={() => setCameraInsertAt(null)}
         />
       )}
     </>
+  )
+}
+
+// ─── Section picker inline component ─────────────────────────────────────────
+
+function SectionPicker({ isDark, onPick }: { isDark: boolean; onPick: (c: SectionColorKey) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function outside(e: MouseEvent) {
+      if (ref.current?.contains(e.target as Node)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', outside)
+    return () => document.removeEventListener('mousedown', outside)
+  }, [open])
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        className="xp-jd-btn"
+        style={{
+          padding: '5px 11px', borderRadius: 7, cursor: 'pointer',
+          border: `0.5px solid ${open ? 'rgba(124,58,237,0.55)' : isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.15)'}`,
+          background: open ? 'rgba(124,58,237,0.22)' : isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
+          color: open ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.82)' : 'rgba(0,0,0,0.72)',
+          fontSize: 12, fontWeight: open ? 600 : 500,
+          transition: 'all 120ms', flexShrink: 0, whiteSpace: 'nowrap' as const,
+        }}
+        onClick={() => setOpen(v => !v)}
+        title="Add a colored section"
+      >+ Section</button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, zIndex: 50,
+          background: isDark ? '#1e1130' : '#fff',
+          border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.12)'}`,
+          borderRadius: 10,
+          boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.55)' : '0 4px 20px rgba(0,0,0,0.12)',
+          padding: '4px 0', overflow: 'hidden', minWidth: 148,
+        }}>
+          {SECTION_COLORS.map(c => (
+            <button
+              key={c.key}
+              onClick={() => { onPick(c.key as SectionColorKey); setOpen(false) }}
+              style={{ ...menuItemStyle(isDark), display: 'flex', alignItems: 'center', gap: 8 }}
+            >
+              <span style={{
+                width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
+                background: getSectionStyle(c.key, isDark).labelColor,
+              }} />
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

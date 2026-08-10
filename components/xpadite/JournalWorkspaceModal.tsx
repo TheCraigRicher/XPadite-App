@@ -39,7 +39,7 @@ const SECTION_ACCENT: Record<string, string> = {
   blue:     '#60a5fa',
   green:    '#4ade80',
   peach:    '#fb923c',
-  yellow:   '#fbbf24',
+  pink:     '#f472b6',
   lavender: '#a78bfa',
 }
 
@@ -159,13 +159,22 @@ interface JournalMonthCardProps {
 
 const MAX_LABELS = 3
 
+// Single source of truth for the 7-column calendar grid.
+// Both the DOW header row and the day-cell rows reference this SAME object,
+// making column misalignment structurally impossible.
+const CAL_GRID: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(7, 1fr)',
+  gap: 2,
+}
+
 function JournalMonthCard({
   year, month, todayKey, selectedDate, getEntrySummaries, isDark, onDayClick, onDayDoubleClick,
 }: JournalMonthCardProps) {
   const cells   = useMemo(() => buildCells(year, month), [year, month])
   const acc     = '#7c3aed'
   const txt     = isDark ? '#e2e8f0' : '#1e293b'
-  const muted   = isDark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.28)'
+  const dowColor = isDark ? 'rgba(167,139,250,0.58)' : 'rgba(109,40,217,0.48)'
   const cardBg  = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.70)'
   const cardBdr = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'
 
@@ -192,22 +201,19 @@ function JournalMonthCard({
         {MONTH_NAMES[month]}
       </div>
 
-      {/* Day-of-week headers — MUST match day cells grid exactly: same columns, same columnGap */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', columnGap: 2 }}>
+      {/* Single CAL_GRID container: DOW headers and ALL day cells share the exact same
+          7-column grid definition. Column alignment is structurally guaranteed. */}
+      <div style={CAL_GRID}>
         {DOW_LABELS.map((d, i) => (
-          <div key={i} style={{
+          <div key={`dow_${i}`} style={{
             textAlign: 'center', fontSize: 9, fontWeight: 600,
-            color: muted, padding: '0 0 3px',
+            color: dowColor, paddingBottom: 8,
           }}>
             {d}
           </div>
         ))}
-      </div>
-
-      {/* Day cells — gap: 2 on both axes; columnGap must match DOW header above */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2, gridAutoRows: '60px' }}>
         {cells.map((day, i) => {
-          if (day === null) return <div key={`_${i}`} />
+          if (day === null) return <div key={`_${i}`} style={{ height: 60 }} />
 
           const dateKey   = toKey(year, month, day)
           const isToday   = dateKey === todayKey
@@ -242,7 +248,7 @@ function JournalMonthCard({
                   : journalBg
               }}
               style={{
-                height: '100%',
+                height: 60,
                 display: 'flex', flexDirection: 'column',
                 alignItems: 'stretch',
                 borderRadius: 7,
@@ -266,14 +272,13 @@ function JournalMonthCard({
                 overflow: 'hidden',
               }}
             >
-              {/* Date number — always top-left for grid consistency */}
+              {/* Date number — centered horizontally to align with the DOW label above */}
               <span style={{
                 fontSize: 11,
                 fontWeight: isToday ? 700 : isSel ? 600 : 400,
                 color: isToday || isSel ? acc : txt,
                 lineHeight: 1,
-                alignSelf: 'flex-start',
-                paddingLeft: 2,
+                textAlign: 'center',
                 marginBottom: 2,
                 flexShrink: 0,
               }}>
@@ -424,9 +429,7 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
   // Match Dashboard exactly: rgba(9,4,22,0.99) dark / var(--xp-bg3) light
   const shellBg = isDark ? 'rgba(9,4,22,0.99)' : 'var(--xp-bg3)'
   const bdr     = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'
-  const txt     = isDark ? '#f1f5f9' : '#0f172a'
   const muted   = isDark ? 'rgba(255,255,255,0.38)' : 'rgba(0,0,0,0.36)'
-  const surfBg  = isDark ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.02)'
 
   // ═══════════════════════════════════════════════════════════════════════════
   // CALENDAR VIEW
@@ -456,23 +459,27 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
         </button>
 
         {/* Centered: large circular arrows flanking the title */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
             <button
               onClick={() => setCalYear(y => y - 1)}
               title="Previous year"
               style={{
-                width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
+                width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'rgba(255,255,255,0.14)', border: '0.5px solid rgba(255,255,255,0.28)',
-                color: '#fff', fontSize: 18, lineHeight: 1, cursor: 'pointer',
+                background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.28)',
+                color: '#fff', cursor: 'pointer', padding: 0,
                 transition: 'background 120ms, transform 80ms',
               }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.24)' }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.14)' }}
               onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.92)' }}
               onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
-            >‹</button>
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </button>
 
             <span style={{ color: '#fff', fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em', lineHeight: 1 }}>
               📝 Journal {calYear}
@@ -482,20 +489,21 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
               onClick={() => setCalYear(y => y + 1)}
               title="Next year"
               style={{
-                width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
+                width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'rgba(255,255,255,0.14)', border: '0.5px solid rgba(255,255,255,0.28)',
-                color: '#fff', fontSize: 18, lineHeight: 1, cursor: 'pointer',
+                background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.28)',
+                color: '#fff', cursor: 'pointer', padding: 0,
                 transition: 'background 120ms, transform 80ms',
               }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.24)' }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.14)' }}
               onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.92)' }}
               onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
-            >›</button>
-          </div>
-          <div style={{ color: 'rgba(167,139,250,0.62)', fontSize: 11, marginTop: 3 }}>
-            Personal reflections &amp; notes
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -622,7 +630,6 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
       <div
         className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-4"
         style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
-        onClick={doClose}
       >
         {/* Shell — exactly matches DayDashboardModal width tokens */}
         <div

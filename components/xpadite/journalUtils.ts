@@ -19,7 +19,7 @@ export const SECTION_COLORS = [
   { key: 'blue',    label: 'Blue'    },
   { key: 'green',   label: 'Green'   },
   { key: 'peach',   label: 'Peach'   },
-  { key: 'yellow',  label: 'Yellow'  },
+  { key: 'pink',    label: 'Pink'    },
   { key: 'lavender',label: 'Lavender'},
 ] as const
 
@@ -45,9 +45,9 @@ export function getSectionStyle(colorKey: string, isDark: boolean): SectionStyle
       d: { background: 'rgba(249,115,22,0.09)', border: 'rgba(249,115,22,0.25)', labelColor: '#fdba74' },
       l: { background: 'rgba(249,115,22,0.07)', border: 'rgba(249,115,22,0.20)', labelColor: '#ea580c' },
     },
-    yellow: {
-      d: { background: 'rgba(234,179,8,0.09)',  border: 'rgba(234,179,8,0.24)',  labelColor: '#fde68a' },
-      l: { background: 'rgba(234,179,8,0.07)',  border: 'rgba(234,179,8,0.20)',  labelColor: '#ca8a04' },
+    pink: {
+      d: { background: 'rgba(236,72,153,0.09)', border: 'rgba(236,72,153,0.26)', labelColor: '#f9a8d4' },
+      l: { background: 'rgba(236,72,153,0.07)', border: 'rgba(236,72,153,0.20)', labelColor: '#db2777' },
     },
     lavender: {
       d: { background: 'rgba(124,58,237,0.10)', border: 'rgba(124,58,237,0.28)', labelColor: '#a78bfa' },

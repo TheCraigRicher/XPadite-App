@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import type { Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -39,6 +39,68 @@ function fmtShortDate(key: string): string {
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+// ─── Grid masonry layout ──────────────────────────────────────────────────────
+// Uses CSS Grid with per-block ResizeObserver span tracking.
+// Each block independently measures its own content height and sets grid-row: span N,
+// so shorter blocks stack beside taller ones without dead space.
+
+const GRID_COLS = 12
+const ROW_PX    = 4  // grid-auto-rows base unit in px
+const GRID_GAP  = 8  // gap between blocks in px
+
+function widthToColSpan(pct: number): number {
+  return Math.max(1, Math.min(GRID_COLS, Math.round((pct / 100) * GRID_COLS)))
+}
+
+function GridBlockItem({
+  blockId, colSpan, className, style, onClick, onMouseDown, children,
+}: {
+  blockId: string
+  colSpan: number
+  className?: string
+  style?: React.CSSProperties
+  onClick?: React.MouseEventHandler<HTMLDivElement>
+  onMouseDown?: React.MouseEventHandler<HTMLDivElement>
+  children: React.ReactNode
+}) {
+  const [rowSpan, setRowSpan] = useState(1)
+  const measureRef = useRef<HTMLDivElement>(null)
+
+  // Sync initial measurement before first paint to avoid layout jump
+  useLayoutEffect(() => {
+    const el = measureRef.current
+    if (!el) return
+    const h = el.offsetHeight
+    if (h > 0) setRowSpan(Math.max(1, Math.ceil((h + GRID_GAP) / (ROW_PX + GRID_GAP))))
+  }, [])
+
+  // Keep span updated as content resizes (text editing, image load, etc.)
+  useEffect(() => {
+    const el = measureRef.current
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => {
+      const h = entry.borderBoxSize?.[0]?.blockSize ?? el.offsetHeight
+      if (h > 0) setRowSpan(Math.max(1, Math.ceil((h + GRID_GAP) / (ROW_PX + GRID_GAP))))
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  return (
+    <div
+      data-block-id={blockId}
+      className={className}
+      style={{ gridColumn: `span ${colSpan}`, gridRow: `span ${rowSpan}`, position: 'relative', minWidth: 0, ...style }}
+      onClick={onClick}
+      onMouseDown={onMouseDown}
+    >
+      <div ref={measureRef} style={{ position: 'relative' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
 // ─── JournalTextBlock ─────────────────────────────────────────────────────────
 
 interface JournalTextBlockProps {
@@ -49,6 +111,7 @@ interface JournalTextBlockProps {
   onFocus: (editor: Editor) => void
   onSelectionUpdate: () => void
   onDelete?: () => void        // undefined for first/only block (not deletable)
+  onMoveActivate?: () => void  // section blocks only
   canMoveUp: boolean
   canMoveDown: boolean
   onMoveUp: () => void
@@ -58,11 +121,10 @@ interface JournalTextBlockProps {
 const JournalTextBlock = React.memo(function JournalTextBlock({
   block, isDark, isOnlyBlock,
   onContentChange, onFocus, onSelectionUpdate,
-  onDelete, canMoveUp, canMoveDown, onMoveUp, onMoveDown,
+  onDelete, onMoveActivate, canMoveUp, canMoveDown, onMoveUp, onMoveDown,
 }: JournalTextBlockProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const acc = '#7c3aed'
 
   const editor = useEditor({
     extensions: [
@@ -123,7 +185,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
     ? getSectionStyle(block.sectionColor, isDark)
     : null
 
-  const hasMenu = isSection || canMoveUp || canMoveDown || (!!onDelete && !isOnlyBlock)
+  const hasMenu = isSection ? true : canMoveUp || canMoveDown || (!!onDelete && !isOnlyBlock)
 
   return (
     <div style={{
@@ -177,23 +239,38 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
               boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.55)' : '0 4px 20px rgba(0,0,0,0.12)',
               padding: '4px 0', overflow: 'hidden',
             }}>
-              {canMoveUp && (
-                <button onClick={() => { onMoveUp(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
-                  ↑ Move Up
-                </button>
-              )}
-              {canMoveDown && (
-                <button onClick={() => { onMoveDown(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
-                  ↓ Move Down
-                </button>
-              )}
-              {!!onDelete && !isOnlyBlock && (
-                <button
-                  onClick={() => { onDelete(); setMenuOpen(false) }}
-                  style={{ ...menuItemStyle(isDark), color: '#f87171' }}
-                >
-                  🗑 Delete
-                </button>
+              {isSection ? (
+                <>
+                  <button onClick={() => { onMoveActivate?.(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                    ✥ Move
+                  </button>
+                  <button onClick={() => { editor?.commands.focus(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                    ✏ Edit Section
+                  </button>
+                  {!!onDelete && !isOnlyBlock && (
+                    <button onClick={() => { onDelete(); setMenuOpen(false) }} style={{ ...menuItemStyle(isDark), color: '#f87171' }}>
+                      🗑 Delete
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  {canMoveUp && (
+                    <button onClick={() => { onMoveUp(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                      ↑ Move Up
+                    </button>
+                  )}
+                  {canMoveDown && (
+                    <button onClick={() => { onMoveDown(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                      ↓ Move Down
+                    </button>
+                  )}
+                  {!!onDelete && !isOnlyBlock && (
+                    <button onClick={() => { onDelete(); setMenuOpen(false) }} style={{ ...menuItemStyle(isDark), color: '#f87171' }}>
+                      🗑 Delete
+                    </button>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -208,15 +285,12 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
 interface InlineMediaBlockProps {
   block: JournalBlock
   isDark: boolean
-  canMoveUp: boolean
-  canMoveDown: boolean
   onEdit: () => void
-  onMoveUp: () => void
-  onMoveDown: () => void
+  onMoveActivate: () => void
   onDelete: () => void
 }
 
-function InlineMediaBlock({ block, isDark, canMoveUp, canMoveDown, onEdit, onMoveUp, onMoveDown, onDelete }: InlineMediaBlockProps) {
+function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete }: InlineMediaBlockProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [lightbox, setLightbox] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -233,14 +307,17 @@ function InlineMediaBlock({ block, isDark, canMoveUp, canMoveDown, onEdit, onMov
 
   return (
     <div style={{ position: 'relative', margin: '4px 0' }}>
-      {/* Image */}
+      {/* Image — explicit height when user has resized vertically */}
       {block.src && (
         <img
           src={block.thumbnail ?? block.src}
           alt={block.name ?? (block.type === 'drawing' ? 'Drawing' : 'Image')}
           onClick={() => setLightbox(true)}
           style={{
-            maxWidth: '100%', display: 'block', cursor: 'zoom-in',
+            display: 'block', cursor: 'zoom-in',
+            width: '100%',
+            height: block.height != null ? block.height + 'px' : 'auto',
+            objectFit: block.height != null ? 'contain' : undefined,
             borderRadius: 10,
             border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}`,
             boxShadow: isDark ? '0 2px 12px rgba(0,0,0,0.35)' : '0 2px 8px rgba(0,0,0,0.08)',
@@ -248,8 +325,8 @@ function InlineMediaBlock({ block, isDark, canMoveUp, canMoveDown, onEdit, onMov
         />
       )}
 
-      {/* Label */}
-      {block.name && (
+      {/* Label — hidden once explicit height is set (keeps handle positions clean) */}
+      {block.name && block.height == null && (
         <div style={{
           fontSize: 10, color: isDark ? 'rgba(255,255,255,0.40)' : 'rgba(0,0,0,0.40)',
           marginTop: 4, textAlign: 'center', userSelect: 'none',
@@ -258,7 +335,7 @@ function InlineMediaBlock({ block, isDark, canMoveUp, canMoveDown, onEdit, onMov
         </div>
       )}
 
-      {/* ⋮ menu */}
+      {/* ⋮ menu — Move, Resize, Edit, Delete */}
       <div ref={menuRef} style={{ position: 'absolute', top: 8, right: 8 }}>
         <button
           onClick={() => setMenuOpen(v => !v)}
@@ -279,19 +356,15 @@ function InlineMediaBlock({ block, isDark, canMoveUp, canMoveDown, onEdit, onMov
             boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.55)' : '0 4px 20px rgba(0,0,0,0.12)',
             padding: '4px 0', overflow: 'hidden',
           }}>
+              <button onClick={() => { onMoveActivate(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+              ✥ Move
+            </button>
+            <button onClick={() => setMenuOpen(false)} style={menuItemStyle(isDark)}>
+              ⤡ Resize
+            </button>
             {block.type === 'drawing' && (
               <button onClick={() => { onEdit(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
                 ✏️ Edit Drawing
-              </button>
-            )}
-            {canMoveUp && (
-              <button onClick={() => { onMoveUp(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
-                ↑ Move Up
-              </button>
-            )}
-            {canMoveDown && (
-              <button onClick={() => { onMoveDown(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
-                ↓ Move Down
               </button>
             )}
             <button onClick={() => { onDelete(); setMenuOpen(false) }} style={{ ...menuItemStyle(isDark), color: '#f87171' }}>
@@ -322,75 +395,36 @@ function menuItemStyle(isDark: boolean): React.CSSProperties {
   }
 }
 
-// ─── Grid span helper ─────────────────────────────────────────────────────────
+// ─── Resize system ────────────────────────────────────────────────────────────
 
-function getGridSpan(width?: number): number {
-  if (!width || width >= 100) return 12
-  if (width >= 66) return 8
-  if (width >= 50) return 6
-  if (width >= 33) return 4
-  return 3  // 25%
-}
+type ResizeDir = 'e' | 'w' | 'n' | 's' | 'ne' | 'nw' | 'se' | 'sw'
 
-// ─── Block selection toolbar ──────────────────────────────────────────────────
-
-function selToolBtnStyle(isDark: boolean, active = false, danger = false): React.CSSProperties {
-  return {
-    padding: '2px 7px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
-    border: `0.5px solid ${active ? 'rgba(124,58,237,0.55)' : danger ? 'rgba(239,68,68,0.30)' : isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.14)'}`,
-    background: active ? 'rgba(124,58,237,0.20)' : 'transparent',
-    color: active ? '#a78bfa' : danger ? '#f87171' : isDark ? 'rgba(255,255,255,0.72)' : 'rgba(0,0,0,0.62)',
-    fontSize: 10, fontWeight: active ? 700 : 500,
-    transition: 'all 100ms',
-  }
-}
-
-function BlockSelectionToolbar({
-  block, idx, total, isDark, onWidth, onMoveUp, onMoveDown, onEdit, onDelete,
-}: {
-  block: JournalBlock
-  idx: number
-  total: number
-  isDark: boolean
-  onWidth: (w: number) => void
-  onMoveUp: () => void
-  onMoveDown: () => void
-  onEdit?: () => void
-  onDelete: () => void
+// 8-direction handles shown on selected media blocks
+function ResizeHandles({ onResizeStart }: {
+  onResizeStart: (dir: ResizeDir, e: React.MouseEvent) => void
 }) {
-  const curW = block.width ?? 100
-  const divStyle: React.CSSProperties = { width: 1, height: 14, background: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)', flexShrink: 0, margin: '0 3px', alignSelf: 'center' }
-
+  const dot: React.CSSProperties = {
+    position: 'absolute', width: 8, height: 8, borderRadius: 2,
+    background: '#7c3aed', boxShadow: '0 1px 6px rgba(0,0,0,0.38)', zIndex: 15,
+  }
+  const pill: React.CSSProperties = {
+    position: 'absolute', background: '#7c3aed', borderRadius: 2,
+    opacity: 0.82, boxShadow: '0 1px 6px rgba(0,0,0,0.35)', zIndex: 15,
+  }
+  const md = (dir: ResizeDir) => (e: React.MouseEvent) => { e.stopPropagation(); onResizeStart(dir, e) }
   return (
-    <div
-      onClick={e => e.stopPropagation()}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap',
-        marginBottom: 5, padding: '4px 8px', borderRadius: 8,
-        background: isDark ? 'rgba(30,17,48,0.97)' : '#fff',
-        border: '0.5px solid rgba(124,58,237,0.28)',
-        boxShadow: isDark ? '0 2px 14px rgba(0,0,0,0.50)' : '0 2px 10px rgba(0,0,0,0.10)',
-        userSelect: 'none',
-      }}
-    >
-      <span style={{ fontSize: 9, color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)', marginRight: 1 }}>Width</span>
-      {([33, 50, 66, 100] as const).map(w => (
-        <button key={w} onClick={() => onWidth(w)} style={selToolBtnStyle(isDark, curW === w)}>
-          {w === 100 ? 'Full' : `${w}%`}
-        </button>
-      ))}
-      <div style={divStyle} />
-      {idx > 0 && <button onClick={onMoveUp} title="Move up" style={selToolBtnStyle(isDark)}>↑</button>}
-      {idx < total - 1 && <button onClick={onMoveDown} title="Move down" style={selToolBtnStyle(isDark)}>↓</button>}
-      {onEdit && (
-        <>
-          <div style={divStyle} />
-          <button onClick={onEdit} title="Edit drawing" style={selToolBtnStyle(isDark)}>✏️ Edit</button>
-        </>
-      )}
-      <div style={divStyle} />
-      <button onClick={onDelete} title="Delete block" style={selToolBtnStyle(isDark, false, true)}>🗑 Delete</button>
-    </div>
+    <>
+      {/* Corners */}
+      <div onMouseDown={md('nw')} style={{ ...dot, top: -4, left: -4,   cursor: 'nwse-resize' }} />
+      <div onMouseDown={md('ne')} style={{ ...dot, top: -4, right: -4,  cursor: 'nesw-resize' }} />
+      <div onMouseDown={md('sw')} style={{ ...dot, bottom: -4, left: -4,  cursor: 'nesw-resize' }} />
+      <div onMouseDown={md('se')} style={{ ...dot, bottom: -4, right: -4, cursor: 'nwse-resize' }} />
+      {/* Edge pills */}
+      <div onMouseDown={md('e')} style={{ ...pill, width: 4, height: 28, right: -6, top: '50%', transform: 'translateY(-50%)', cursor: 'ew-resize' }} />
+      <div onMouseDown={md('w')} style={{ ...pill, width: 4, height: 28, left: -6,  top: '50%', transform: 'translateY(-50%)', cursor: 'ew-resize' }} />
+      <div onMouseDown={md('s')} style={{ ...pill, width: 28, height: 4, bottom: -6, left: '50%', transform: 'translateX(-50%)', cursor: 'ns-resize' }} />
+      <div onMouseDown={md('n')} style={{ ...pill, width: 28, height: 4, top: -6,   left: '50%', transform: 'translateX(-50%)', cursor: 'ns-resize' }} />
+    </>
   )
 }
 
@@ -432,6 +466,21 @@ export function JournalEditorContent({
     editingBlock: JournalBlock | null
   } | null>(null)
 
+  // ── Move mode state ──────────────────────────────────────────────────────────
+  const [moveModeId, setMoveModeId] = useState<string | null>(null)
+  // dragPos: non-null while mouse is held down during a move drag
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
+  const [dropIdx,  setDropIdx]  = useState(0)
+  const [snapGuides, setSnapGuides] = useState<
+    Array<{ type: 'v' | 'h'; coord: number; from: number; to: number }>
+  >([])
+  // Ref holds drag metadata without triggering extra re-renders
+  const dragMoveRef = useRef<{
+    blockId: string
+    offsetX: number; offsetY: number
+    blockW: number;  blockH: number
+  } | null>(null)
+
   // ── Refs ────────────────────────────────────────────────────────────────────
   const contentMapRef   = useRef<Map<string, string>>(new Map())
   const blocksRef       = useRef<JournalBlock[]>([])
@@ -439,6 +488,7 @@ export function JournalEditorContent({
   const saveTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dateKeyRef      = useRef(dateKey)
   const emojiBtnRef     = useRef<HTMLButtonElement>(null)
+  const blockListRef    = useRef<HTMLDivElement>(null)
 
   dateKeyRef.current = dateKey
 
@@ -570,6 +620,82 @@ export function JournalEditorContent({
     scheduleSave()
   }
 
+  // 8-direction drag-to-resize — handles width %, height px, and aspect-constrained corners
+  function startBlockResize(blockId: string, dir: ResizeDir, e: React.MouseEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    const container = blockListRef.current
+    if (!container) return
+
+    // Snapshot DOM state at drag start
+    const blockEl = container.querySelector(`[data-block-id="${blockId}"]`) as HTMLElement | null
+    const imgEl   = blockEl?.querySelector('img') as HTMLImageElement | null
+    const containerW   = container.offsetWidth
+    const startHeightPx = blockEl?.offsetHeight ?? 200
+    const naturalAspect = (imgEl && imgEl.naturalWidth && imgEl.naturalHeight)
+      ? imgEl.naturalWidth / imgEl.naturalHeight
+      : 0
+
+    const block = blocksRef.current.find(b => b.id === blockId)
+    if (!block) return
+    const startWidthPct = block.width ?? 100
+    const startX = e.clientX
+    const startY = e.clientY
+
+    const isW      = dir === 'w' || dir === 'nw' || dir === 'sw'
+    const isN      = dir === 'n' || dir === 'ne' || dir === 'nw'
+    const isHoriz  = dir !== 'n' && dir !== 's'
+    const isVert   = dir !== 'e' && dir !== 'w'
+    const isCorner = dir === 'ne' || dir === 'nw' || dir === 'se' || dir === 'sw'
+
+    const SNAP_POINTS = [25, 33, 50, 66, 75, 100]
+    const SNAP_THRESHOLD = 5
+    const MIN_W = 15
+    const MAX_W = 100
+    const MIN_H = 60
+
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX
+      const dy = ev.clientY - startY
+
+      let newWidthPct = startWidthPct
+      let newHeightPx: number | undefined = block.height ?? undefined
+
+      if (isHoriz) {
+        let w = startWidthPct + (isW ? -1 : 1) * (dx / containerW) * 100
+        const nearest = SNAP_POINTS.reduce((b, p) => Math.abs(p - w) < Math.abs(b - w) ? p : b)
+        if (Math.abs(nearest - w) <= SNAP_THRESHOLD) w = nearest
+        newWidthPct = Math.max(MIN_W, Math.min(MAX_W, Math.round(w)))
+      }
+
+      if (isVert) {
+        if (isCorner && naturalAspect > 0) {
+          // Preserve natural aspect ratio on corners
+          const newWidthPx = (newWidthPct / 100) * containerW
+          newHeightPx = Math.max(MIN_H, Math.round(newWidthPx / naturalAspect))
+        } else {
+          newHeightPx = Math.max(MIN_H, Math.round(startHeightPx + (isN ? -1 : 1) * dy))
+        }
+      }
+
+      const next = blocksRef.current.map(b =>
+        b.id === blockId ? { ...b, width: newWidthPct, height: newHeightPx } : b
+      )
+      blocksRef.current = next
+      setBlocks(next)
+    }
+
+    const onUp = () => {
+      onContentChange(buildDocStr())
+      scheduleSave()
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
   // Upload via bottom toolbar (appends to end)
   async function handleUploadAtEnd(files: FileList | File[] | null, isCamera = false) {
     if (!files || files.length === 0) return
@@ -581,6 +707,124 @@ export function JournalEditorContent({
     setBlocks(next)
     onContentChange(buildDocStr())
     scheduleSave()
+  }
+
+  // ── Drag-to-reorder: activated by ✥ Move in the ⋮ menu ─────────────────────
+
+  // Compute which array index the block should be inserted at given mouse position.
+  // Only considers non-dragged blocks so the ghost slot doesn't skew the geometry.
+  function computeDropIdx(draggedId: string, mouseX: number, mouseY: number): number {
+    const container = blockListRef.current
+    if (!container) return 0
+    const els = Array.from(container.querySelectorAll('[data-block-id]'))
+    const others = els.filter(el => el.getAttribute('data-block-id') !== draggedId)
+    if (others.length === 0) return 0
+
+    let bestEl: Element | null = null
+    let bestDist = Infinity
+    for (const el of others) {
+      const r = (el as HTMLElement).getBoundingClientRect()
+      const cx = r.left + r.width / 2
+      const cy = r.top  + r.height / 2
+      // Weight vertical distance more heavily so row-detection is reliable
+      const dist = Math.hypot(mouseX - cx, (mouseY - cy) * 1.4)
+      if (dist < bestDist) { bestDist = dist; bestEl = el }
+    }
+    if (!bestEl) return 0
+
+    const targetId  = bestEl.getAttribute('data-block-id')!
+    const targetArr = blocksRef.current.findIndex(b => b.id === targetId)
+    const rect = (bestEl as HTMLElement).getBoundingClientRect()
+    // In a 2D masonry grid, use Y-midpoint: upper half = insert before, lower half = insert after
+    const insertBefore = mouseY < rect.top + rect.height / 2
+    return Math.max(0, Math.min(blocksRef.current.length, insertBefore ? targetArr : targetArr + 1))
+  }
+
+  // Compute up to 4 alignment guide lines (fixed-coord space) during a drag.
+  function computeAlignGuides(
+    draggedId: string, floatL: number, floatT: number, floatW: number, floatH: number
+  ): Array<{ type: 'v' | 'h'; coord: number; from: number; to: number }> {
+    const SNAP = 14
+    const container = blockListRef.current
+    if (!container) return []
+    const guides: Array<{ type: 'v' | 'h'; coord: number; from: number; to: number }> = []
+    const floatR = floatL + floatW
+    const floatB = floatT + floatH
+
+    for (const el of container.querySelectorAll('[data-block-id]')) {
+      if (el.getAttribute('data-block-id') === draggedId) continue
+      const r = (el as HTMLElement).getBoundingClientRect()
+      const addV = (x: number) => guides.push({ type: 'v', coord: x, from: Math.min(floatT, r.top) - 16, to: Math.max(floatB, r.bottom) + 16 })
+      const addH = (y: number) => guides.push({ type: 'h', coord: y, from: Math.min(floatL, r.left) - 16, to: Math.max(floatR, r.right)  + 16 })
+      if (Math.abs(floatL  - r.left)   < SNAP) addV(r.left)
+      if (Math.abs(floatL  - r.right)  < SNAP) addV(r.right)
+      if (Math.abs(floatR  - r.right)  < SNAP) addV(r.right)
+      if (Math.abs(floatT  - r.top)    < SNAP) addH(r.top)
+      if (Math.abs(floatB  - r.bottom) < SNAP) addH(r.bottom)
+    }
+    // Deduplicate by rounding coord to nearest 4px
+    const seen = new Set<string>()
+    return guides.filter(g => { const k = `${g.type}_${Math.round(g.coord / 4) * 4}`; return seen.has(k) ? false : (seen.add(k), true) })
+  }
+
+  // Reorder the blocks array, moving blockId to targetIdx.
+  function doMoveBlockToIdx(blockId: string, targetIdx: number) {
+    const cur = blocksRef.current
+    const from = cur.findIndex(b => b.id === blockId)
+    if (from < 0) return
+    const next = [...cur]
+    const [blk] = next.splice(from, 1)
+    const adj   = from < targetIdx ? targetIdx - 1 : targetIdx
+    next.splice(adj, 0, blk)
+    blocksRef.current = next
+    setBlocks(next)
+    onContentChange(buildDocStr())
+    scheduleSave()
+  }
+
+  function startBlockMove(blockId: string, e: React.MouseEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    const container = blockListRef.current
+    const blockEl   = container?.querySelector(`[data-block-id="${blockId}"]`) as HTMLElement | null
+    if (!blockEl) return
+
+    const rect = blockEl.getBoundingClientRect()
+    dragMoveRef.current = {
+      blockId,
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+      blockW:  rect.width,
+      blockH:  rect.height,
+    }
+    setDragPos({ x: e.clientX, y: e.clientY })
+    setDropIdx(blocksRef.current.findIndex(b => b.id === blockId))
+
+    function onMove(ev: MouseEvent) {
+      const dm = dragMoveRef.current
+      if (!dm) return
+      setDragPos({ x: ev.clientX, y: ev.clientY })
+      setDropIdx(computeDropIdx(blockId, ev.clientX, ev.clientY))
+      setSnapGuides(computeAlignGuides(
+        blockId,
+        ev.clientX - dm.offsetX,
+        ev.clientY - dm.offsetY,
+        dm.blockW,
+        dm.blockH,
+      ))
+    }
+    function onUp(ev: MouseEvent) {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup',   onUp)
+      const finalIdx = computeDropIdx(blockId, ev.clientX, ev.clientY)
+      doMoveBlockToIdx(blockId, finalIdx)
+      dragMoveRef.current = null
+      setDragPos(null)
+      setSnapGuides([])
+      setMoveModeId(null)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup',   onUp)
   }
 
   // Draw handlers
@@ -620,18 +864,17 @@ export function JournalEditorContent({
   }, [showEmoji])
 
   // ── Styles ──────────────────────────────────────────────────────────────────
-  const dockBg  = isDark ? 'rgba(9,4,22,0.96)' : '#f1f5f9'
-  const dockBdr = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.09)'
-  const dockDiv = isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.12)'
-  const acc = '#7c3aed'
-  void acc
+  // Dock is a fixed premium deep navy/plum regardless of page theme
+  const dockBg  = 'rgba(10,5,26,0.98)'
+  const dockBdr = 'rgba(124,58,237,0.22)'
+  const dockDiv = 'rgba(255,255,255,0.08)'
 
   function dockBtn(active = false): React.CSSProperties {
     return {
       padding: '5px 11px', borderRadius: 7, cursor: 'pointer',
-      border: `0.5px solid ${active ? 'rgba(124,58,237,0.55)' : isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.15)'}`,
-      background: active ? 'rgba(124,58,237,0.22)' : isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
-      color: active ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.82)' : 'rgba(0,0,0,0.72)',
+      border: `0.5px solid ${active ? 'rgba(124,58,237,0.65)' : 'rgba(255,255,255,0.11)'}`,
+      background: active ? 'rgba(124,58,237,0.28)' : 'rgba(255,255,255,0.055)',
+      color: active ? '#c4b5fd' : 'rgba(255,255,255,0.78)',
       fontSize: 12, fontWeight: active ? 600 : 500,
       transition: 'all 120ms', flexShrink: 0, whiteSpace: 'nowrap' as const,
     }
@@ -654,11 +897,23 @@ export function JournalEditorContent({
           animation: xpJHdrFlow 14s ease infinite;
         }
         .xp-jd-btn:hover:not(.xp-j-active):not(:disabled) {
-          border-color: rgba(124,58,237,0.50) !important;
-          background:   rgba(124,58,237,0.12) !important;
-          color: #a78bfa !important;
+          border-color: rgba(124,58,237,0.55) !important;
+          background:   rgba(124,58,237,0.16) !important;
+          color: #c4b5fd !important;
           transform: translateY(-1px);
         }
+        .xp-jd-btn:active {
+          transform: scale(0.97) !important;
+          transition-duration: 60ms !important;
+        }
+        @keyframes xpSecMenuIn {
+          from { opacity: 0; transform: scale(0.95) translateY(5px); }
+          to   { opacity: 1; transform: scale(1)    translateY(0); }
+        }
+        .xp-j-sec-menu { animation: xpSecMenuIn 140ms cubic-bezier(0.16,1,0.3,1) both; }
+        .xp-j-save-btn { transition: all 120ms; }
+        .xp-j-save-btn:hover { opacity: 0.88; transform: translateY(-1px); }
+        .xp-j-save-btn:active { transform: scale(0.97); transition-duration: 60ms; }
         .xp-j-prose {
           outline: none;
           font-size: 14px;
@@ -683,6 +938,27 @@ export function JournalEditorContent({
           color: ${isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.30)'};
           float: left; pointer-events: none; height: 0;
         }
+        /* Selectable blocks: hover outline signals interactivity; handles appear on selection */
+        .xp-j-blk { cursor: pointer; }
+        .xp-j-blk:hover { box-shadow: 0 0 0 1.5px rgba(124,58,237,0.22); border-radius: 10px; }
+        /* Responsive collapse: narrow viewports stack all blocks in a single column */
+        @media (max-width: 640px) {
+          .xp-j-grid { grid-template-columns: 1fr !important; grid-auto-rows: auto !important; }
+          .xp-j-grid > * { grid-column: 1 / -1 !important; grid-row: auto !important; }
+        }
+        /* Drop indicator lines — absolute positioned, no grid layout impact */
+        .xp-j-drop-before { position: relative; }
+        .xp-j-drop-before::before {
+          content: ''; position: absolute; top: -5px; left: 0; right: 0; height: 2px;
+          background: rgba(124,58,237,0.80); border-radius: 2px;
+          box-shadow: 0 0 6px rgba(124,58,237,0.50); z-index: 20; pointer-events: none;
+        }
+        .xp-j-drop-after { position: relative; }
+        .xp-j-drop-after::after {
+          content: ''; position: absolute; bottom: -5px; left: 0; right: 0; height: 2px;
+          background: rgba(124,58,237,0.80); border-radius: 2px;
+          box-shadow: 0 0 6px rgba(124,58,237,0.50); z-index: 20; pointer-events: none;
+        }
       `}</style>
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
@@ -704,22 +980,32 @@ export function JournalEditorContent({
             }}
           >← Calendar</button>
 
-          {/* Center: ‹ date › as one visual unit — absolute so it's always centered */}
+          {/* Center: circular prev/next flanking the date — absolutely centered regardless of side controls */}
           <div style={{
             position: 'absolute', left: 0, right: 0,
             display: 'flex', justifyContent: 'center', alignItems: 'center',
             pointerEvents: 'none',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, pointerEvents: 'auto' }}>
               <button
                 onClick={() => onNavigateDay(-1)}
                 title="Previous day"
                 style={{
-                  padding: '4px 8px', borderRadius: 7, border: '0.5px solid rgba(255,255,255,0.12)',
-                  background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.70)',
-                  fontSize: 18, lineHeight: 1, cursor: 'pointer', flexShrink: 0,
+                  width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.28)',
+                  color: '#fff', cursor: 'pointer', padding: 0,
+                  transition: 'background 120ms, transform 80ms',
                 }}
-              >‹</button>
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.24)' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.14)' }}
+                onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.92)' }}
+                onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+              </button>
               <span style={{ color: '#fff', fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
                 {fmtEditorDate(dateKey)}
               </span>
@@ -727,11 +1013,21 @@ export function JournalEditorContent({
                 onClick={() => onNavigateDay(1)}
                 title="Next day"
                 style={{
-                  padding: '4px 8px', borderRadius: 7, border: '0.5px solid rgba(255,255,255,0.12)',
-                  background: 'rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.70)',
-                  fontSize: 18, lineHeight: 1, cursor: 'pointer', flexShrink: 0,
+                  width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.28)',
+                  color: '#fff', cursor: 'pointer', padding: 0,
+                  transition: 'background 120ms, transform 80ms',
                 }}
-              >›</button>
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.24)' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.14)' }}
+                onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.92)' }}
+                onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
             </div>
           </div>
 
@@ -769,45 +1065,61 @@ export function JournalEditorContent({
         />
       ) : (
         <>
-          {/* Block list — 12-col CSS Grid; blocks can span different widths */}
+          {/* Block list — flex-wrap; blocks sized by block.width % for free side-by-side layout */}
           <div
             style={{ flex: 1, overflowY: 'auto', padding: '12px 20px 8px', minHeight: 0 }}
-            onClick={() => setSelectedBlockId(null)}
+            onClick={() => { setSelectedBlockId(null); setMoveModeId(null) }}
           >
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: 8, alignItems: 'start' }}>
+            <div
+              ref={blockListRef}
+              className="xp-j-grid"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
+                gap: GRID_GAP,
+                gridAutoRows: `${ROW_PX}px`,
+                alignContent: 'start',
+              }}
+            >
               {blocks.map((block, idx) => {
-                const span = getGridSpan(block.width)
+                const w          = block.width ?? 100
                 const isSelected = selectedBlockId === block.id
                 const isSelectable = block.type !== 'text'
+                const isMoveMode = moveModeId === block.id
+                const isDragging = isMoveMode && dragPos !== null
+                const colSpan    = widthToColSpan(w)
+                // Drop indicator: show before this block, or after last block
+                const showDropBefore = dragPos !== null && !isDragging && dropIdx === idx
+                const showDropAfter  = dragPos !== null && !isDragging && idx === blocks.length - 1 && dropIdx >= blocks.length
+                const dropClass = showDropBefore ? 'xp-j-drop-before' : showDropAfter ? 'xp-j-drop-after' : ''
 
                 return (
-                  <div
+                  <GridBlockItem
                     key={block.id}
-                    style={{ gridColumn: `span ${span}`, minWidth: 0 }}
-                    onClick={isSelectable ? e => { e.stopPropagation(); setSelectedBlockId(block.id) } : undefined}
+                    blockId={block.id}
+                    colSpan={colSpan}
+                    className={dropClass || undefined}
+                    style={{
+                      opacity: isDragging ? 0.25 : 1,
+                      cursor: isMoveMode ? (isDragging ? 'grabbing' : 'grab') : undefined,
+                      transition: isDragging ? 'none' : 'opacity 150ms',
+                    }}
+                    onClick={isSelectable ? e => {
+                      e.stopPropagation()
+                      if (moveModeId && moveModeId !== block.id) setMoveModeId(null)
+                      setSelectedBlockId(block.id)
+                    } : undefined}
+                    onMouseDown={isMoveMode && !isDragging ? e => startBlockMove(block.id, e) : undefined}
                   >
-                    {/* Inline selection toolbar — appears above selected non-text block */}
-                    {isSelected && isSelectable && (
-                      <BlockSelectionToolbar
-                        block={block}
-                        idx={idx}
-                        total={blocks.length}
-                        isDark={isDark}
-                        onWidth={w => setBlockWidth(block.id, w)}
-                        onMoveUp={() => moveBlock(block.id, -1)}
-                        onMoveDown={() => moveBlock(block.id, 1)}
-                        onEdit={block.type === 'drawing'
-                          ? () => setDrawState({ insertAt: idx, editingBlock: block })
-                          : undefined}
-                        onDelete={() => { deleteBlock(block.id); setSelectedBlockId(null) }}
-                      />
-                    )}
-
-                    {/* Block content with selection outline */}
-                    <div style={{
-                      outline: isSelected && isSelectable ? '1.5px solid rgba(124,58,237,0.55)' : '1.5px solid transparent',
-                      borderRadius: 10, transition: 'outline 120ms',
-                    }}>
+                    {/* Block content with hover/selection outline */}
+                    <div
+                      className={isSelectable ? 'xp-j-blk' : ''}
+                      style={{
+                        position: 'relative',
+                        outline: isSelected && isSelectable ? '1.5px solid rgba(124,58,237,0.55)' : '1.5px solid transparent',
+                        borderRadius: 10, transition: 'outline 120ms',
+                      }}
+                    >
                       {(block.type === 'text' || block.type === 'section') ? (
                         <JournalTextBlock
                           block={block}
@@ -817,6 +1129,10 @@ export function JournalEditorContent({
                           onFocus={onEditorFocus}
                           onSelectionUpdate={onEditorSelectionUpdate}
                           onDelete={blocks.length > 1 ? () => deleteBlock(block.id) : undefined}
+                          onMoveActivate={block.type === 'section' ? () => {
+                            setMoveModeId(block.id)
+                            setSelectedBlockId(block.id)
+                          } : undefined}
                           canMoveUp={idx > 0}
                           canMoveDown={idx < blocks.length - 1}
                           onMoveUp={() => moveBlock(block.id, -1)}
@@ -826,16 +1142,21 @@ export function JournalEditorContent({
                         <InlineMediaBlock
                           block={block}
                           isDark={isDark}
-                          canMoveUp={idx > 0}
-                          canMoveDown={idx < blocks.length - 1}
                           onEdit={() => setDrawState({ insertAt: idx, editingBlock: block })}
-                          onMoveUp={() => moveBlock(block.id, -1)}
-                          onMoveDown={() => moveBlock(block.id, 1)}
+                          onMoveActivate={() => {
+                            setMoveModeId(block.id)
+                            setSelectedBlockId(block.id)
+                          }}
                           onDelete={() => deleteBlock(block.id)}
                         />
                       )}
                     </div>
-                  </div>
+
+                    {/* Resize handles: image/drawing only — sections are naturally sized by content */}
+                    {isSelected && (block.type === 'image' || block.type === 'drawing') && !isDragging && (
+                      <ResizeHandles onResizeStart={(dir, e) => startBlockResize(block.id, dir, e)} />
+                    )}
+                  </GridBlockItem>
                 )
               })}
             </div>
@@ -844,7 +1165,7 @@ export function JournalEditorContent({
           {/* ── Tool dock ─────────────────────────────────────────────────── */}
           <div style={{
             background: dockBg, borderTop: `0.5px solid ${dockBdr}`,
-            boxShadow: isDark ? 'inset 0 1px 0 rgba(255,255,255,0.04), 0 -4px 16px rgba(0,0,0,0.30)' : 'inset 0 1px 0 rgba(0,0,0,0.04)',
+            boxShadow: 'inset 0 1px 0 rgba(124,58,237,0.10), 0 -6px 24px rgba(0,0,0,0.40)',
             padding: '10px 16px 12px', flexShrink: 0,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             gap: 6, flexWrap: 'wrap', position: 'relative',
@@ -921,13 +1242,14 @@ export function JournalEditorContent({
               >😊</button>
 
               <button
+                className="xp-j-save-btn"
                 onClick={handleManualSave}
                 style={{
                   padding: '6px 18px', borderRadius: 8, border: 'none', cursor: 'pointer',
                   background: 'linear-gradient(135deg, #7c3aed, #6d28d9)',
-                  color: '#fff', fontSize: 12, fontWeight: 600,
-                  boxShadow: '0 2px 8px rgba(124,58,237,0.35)',
-                  whiteSpace: 'nowrap', transition: 'opacity 120ms',
+                  color: '#fff', fontSize: 12, fontWeight: 700,
+                  boxShadow: '0 2px 10px rgba(124,58,237,0.45)',
+                  whiteSpace: 'nowrap',
                 }}
               >Save Notes</button>
             </div>
@@ -949,6 +1271,70 @@ export function JournalEditorContent({
               </div>
             )}
           </div>
+
+          {/* ── Floating clone: follows mouse during drag-move ─────────────── */}
+          {dragPos !== null && dragMoveRef.current && (() => {
+            const d = dragMoveRef.current!
+            const draggedBlock = blocks.find(b => b.id === d.blockId)
+            if (!draggedBlock) return null
+            return (
+              <div
+                style={{
+                  position: 'fixed',
+                  left: dragPos.x - d.offsetX,
+                  top:  dragPos.y - d.offsetY,
+                  width: d.blockW,
+                  height: d.blockH,
+                  pointerEvents: 'none',
+                  zIndex: 9999,
+                  opacity: 0.88,
+                  borderRadius: 10,
+                  border: '1.5px solid rgba(124,58,237,0.60)',
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.45), 0 0 0 1px rgba(124,58,237,0.20)',
+                  overflow: 'hidden',
+                  background: isDark ? 'rgba(18,10,38,0.96)' : 'rgba(255,255,255,0.96)',
+                }}
+              >
+                {draggedBlock.src && (
+                  <img
+                    src={draggedBlock.src}
+                    alt=""
+                    style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                    draggable={false}
+                  />
+                )}
+              </div>
+            )
+          })()}
+
+          {/* ── Alignment guides: thin fixed lines at edge proximity ───────── */}
+          {snapGuides.map((g, i) => (
+            g.type === 'v' ? (
+              <div key={i} style={{
+                position: 'fixed',
+                left: g.coord,
+                top: g.from,
+                width: 1,
+                height: g.to - g.from,
+                background: 'rgba(124,58,237,0.70)',
+                boxShadow: '0 0 4px rgba(124,58,237,0.40)',
+                pointerEvents: 'none',
+                zIndex: 9998,
+              }} />
+            ) : (
+              <div key={i} style={{
+                position: 'fixed',
+                left: g.from,
+                top: g.coord,
+                width: g.to - g.from,
+                height: 1,
+                background: 'rgba(124,58,237,0.70)',
+                boxShadow: '0 0 4px rgba(124,58,237,0.40)',
+                pointerEvents: 'none',
+                zIndex: 9998,
+              }} />
+            )
+          ))}
         </>
       )}
 
@@ -988,9 +1374,9 @@ function SectionPicker({ isDark, onPick }: { isDark: boolean; onPick: (c: Sectio
         className="xp-jd-btn"
         style={{
           padding: '5px 11px', borderRadius: 7, cursor: 'pointer',
-          border: `0.5px solid ${open ? 'rgba(124,58,237,0.55)' : isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.15)'}`,
-          background: open ? 'rgba(124,58,237,0.22)' : isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
-          color: open ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.82)' : 'rgba(0,0,0,0.72)',
+          border: `0.5px solid ${open ? 'rgba(124,58,237,0.70)' : 'rgba(124,58,237,0.38)'}`,
+          background: open ? 'rgba(124,58,237,0.30)' : 'rgba(124,58,237,0.10)',
+          color: '#c4b5fd',
           fontSize: 12, fontWeight: open ? 600 : 500,
           transition: 'all 120ms', flexShrink: 0, whiteSpace: 'nowrap' as const,
         }}
@@ -999,23 +1385,23 @@ function SectionPicker({ isDark, onPick }: { isDark: boolean; onPick: (c: Sectio
       >+ Section</button>
 
       {open && (
-        <div style={{
+        <div className="xp-j-sec-menu" style={{
           position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, zIndex: 50,
-          background: isDark ? '#1e1130' : '#fff',
-          border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.12)'}`,
+          background: '#160a30',
+          border: '0.5px solid rgba(124,58,237,0.32)',
           borderRadius: 10,
-          boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.55)' : '0 4px 20px rgba(0,0,0,0.12)',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.65)',
           padding: '4px 0', overflow: 'hidden', minWidth: 148,
         }}>
           {SECTION_COLORS.map(c => (
             <button
               key={c.key}
               onClick={() => { onPick(c.key as SectionColorKey); setOpen(false) }}
-              style={{ ...menuItemStyle(isDark), display: 'flex', alignItems: 'center', gap: 8 }}
+              style={{ ...menuItemStyle(true), display: 'flex', alignItems: 'center', gap: 8 }}
             >
               <span style={{
                 width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
-                background: getSectionStyle(c.key, isDark).labelColor,
+                background: getSectionStyle(c.key, true).labelColor,
               }} />
               {c.label}
             </button>

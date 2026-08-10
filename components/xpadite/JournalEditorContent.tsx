@@ -7,6 +7,9 @@ import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import Placeholder from '@tiptap/extension-placeholder'
+import Underline from '@tiptap/extension-underline'
+import { TextStyle } from '@tiptap/extension-text-style'
+import { Color } from '@tiptap/extension-color'
 import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
 import dynamic from 'next/dynamic'
@@ -171,6 +174,9 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
           ? 'Add section content…'
           : 'What made today great? Reflections, insights, gratitude…',
       }),
+      Underline,
+      TextStyle,
+      Color,
     ],
     content: { type: 'doc', content: [{ type: 'paragraph' }] },
     editorProps: { attributes: { class: 'xp-j-prose' } },
@@ -555,30 +561,50 @@ function GhostSlot({ colSpan, blockH }: { colSpan: number; blockH?: number }) {
 
 // ─── Floating text formatter — appears above text selection ──────────────────
 
+const TEXT_COLORS: Array<{ label: string; value: string | null; swatch: string }> = [
+  { label: 'Default',  value: null,      swatch: 'linear-gradient(135deg,rgba(255,255,255,0.55) 0%,rgba(255,255,255,0.20) 100%)' },
+  { label: 'Purple',   value: '#a78bfa', swatch: '#a78bfa' },
+  { label: 'Blue',     value: '#60a5fa', swatch: '#60a5fa' },
+  { label: 'Green',    value: '#4ade80', swatch: '#4ade80' },
+  { label: 'Red',      value: '#f87171', swatch: '#f87171' },
+  { label: 'Pink',     value: '#f9a8d4', swatch: '#f9a8d4' },
+  { label: 'Orange',   value: '#fb923c', swatch: '#fb923c' },
+  { label: 'Gray',     value: '#94a3b8', swatch: '#94a3b8' },
+  { label: 'White',    value: '#f1f5f9', swatch: '#f1f5f9' },
+  { label: 'Black',    value: '#1e293b', swatch: '#1e293b' },
+]
+
 function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMRect }) {
-  const [showSize, setShowSize] = useState(false)
+  const [showSize,  setShowSize]  = useState(false)
+  const [showColor, setShowColor] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  // Close size menu on outside click
+  // Close sub-menus on outside click
   useEffect(() => {
-    if (!showSize) return
+    if (!showSize && !showColor) return
     function outside(e: MouseEvent) {
       if (ref.current?.contains(e.target as Node)) return
       setShowSize(false)
+      setShowColor(false)
     }
     document.addEventListener('mousedown', outside)
     return () => document.removeEventListener('mousedown', outside)
-  }, [showSize])
+  }, [showSize, showColor])
 
   if (!editor) return null
 
-  const isBold   = editor.isActive('bold')
-  const isItalic = editor.isActive('italic')
-  const isH2     = editor.isActive('heading', { level: 2 })
-  const isH3     = editor.isActive('heading', { level: 3 })
-  const sizeLabel = isH2 ? 'Heading' : isH3 ? 'Large' : 'Normal'
+  const isBold      = editor.isActive('bold')
+  const isItalic    = editor.isActive('italic')
+  const isUnderline = editor.isActive('underline')
+  const isH2        = editor.isActive('heading', { level: 2 })
+  const isH3        = editor.isActive('heading', { level: 3 })
+  const sizeLabel   = isH2 ? 'Heading' : isH3 ? 'Large' : 'Normal'
 
-  const top  = Math.max(8, rect.top - 46)
+  // Active color: what the current selection has (null = default)
+  const activeColor: string | null = (editor.getAttributes('textStyle').color as string | undefined) ?? null
+  const hasCustomColor = activeColor !== null
+
+  const top  = Math.max(8, rect.top - 50)
   const left = rect.left + rect.width / 2
 
   const fBtn = (active: boolean, extra?: React.CSSProperties): React.CSSProperties => ({
@@ -588,6 +614,10 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
     fontSize: 12, fontWeight: active ? 700 : 500,
     transition: 'background 80ms', ...extra,
   })
+
+  const divider = (
+    <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.14)', margin: '0 2px', flexShrink: 0 }} />
+  )
 
   return (
     <div
@@ -604,17 +634,93 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
         backdropFilter: 'blur(8px)',
         userSelect: 'none',
       }}
-      onMouseDown={e => e.preventDefault()} // prevent editor blur
+      onMouseDown={e => e.preventDefault()}
     >
+      {/* B */}
       <button style={{ ...fBtn(isBold), fontWeight: 700, minWidth: 26, textAlign: 'center' }}
         onMouseDown={e => { e.preventDefault(); editor.chain().focus().toggleBold().run() }}>B</button>
+
+      {/* I */}
       <button style={{ ...fBtn(isItalic), fontStyle: 'italic', minWidth: 26, textAlign: 'center' }}
         onMouseDown={e => { e.preventDefault(); editor.chain().focus().toggleItalic().run() }}>I</button>
-      <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.14)', margin: '0 2px', flexShrink: 0 }} />
+
+      {/* U */}
+      <button
+        style={{ ...fBtn(isUnderline), minWidth: 26, textAlign: 'center', textDecoration: isUnderline ? 'underline' : 'none' }}
+        onMouseDown={e => { e.preventDefault(); editor.chain().focus().toggleUnderline().run() }}
+      >U</button>
+
+      {divider}
+
+      {/* Text Color — A with color dot beneath */}
+      <div style={{ position: 'relative' }}>
+        <button
+          style={{ ...fBtn(hasCustomColor || showColor), minWidth: 26, textAlign: 'center', padding: '3px 6px', position: 'relative' }}
+          onMouseDown={e => { e.preventDefault(); setShowColor(v => !v); setShowSize(false) }}
+          title="Text color"
+        >
+          <span style={{ fontSize: 12, fontWeight: 700, lineHeight: 1 }}>A</span>
+          <span style={{
+            display: 'block', height: 3, borderRadius: 1, marginTop: 1,
+            background: activeColor ?? 'linear-gradient(90deg,#f87171,#fb923c,#4ade80,#60a5fa,#a78bfa)',
+            width: '100%',
+          }} />
+        </button>
+
+        {showColor && (
+          <div style={{
+            position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(10,6,30,0.98)',
+            border: '0.5px solid rgba(124,58,237,0.28)',
+            borderRadius: 10, padding: '8px 9px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.65)',
+            zIndex: 10, minWidth: 148,
+          }}>
+            <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'rgba(255,255,255,0.35)', marginBottom: 7, userSelect: 'none' }}>
+              Text Color
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 5 }}>
+              {TEXT_COLORS.map(({ label, value, swatch }) => {
+                const isSelected = value === activeColor
+                return (
+                  <button
+                    key={label}
+                    title={label}
+                    onMouseDown={e => {
+                      e.preventDefault()
+                      if (value === null) {
+                        editor.chain().focus().unsetColor().run()
+                      } else {
+                        editor.chain().focus().setColor(value).run()
+                      }
+                      setShowColor(false)
+                    }}
+                    style={{
+                      width: 22, height: 22, borderRadius: 5, border: 'none', cursor: 'pointer', padding: 0,
+                      background: swatch,
+                      outline: isSelected ? '2px solid #a78bfa' : '1.5px solid rgba(255,255,255,0.12)',
+                      outlineOffset: isSelected ? 2 : 0,
+                      transition: 'transform 80ms, outline 80ms',
+                      transform: 'scale(1)',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.18)' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
+                  />
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {divider}
+
+      {/* Size ▼ */}
       <div style={{ position: 'relative' }}>
         <button
           style={{ ...fBtn(false), display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, whiteSpace: 'nowrap' as const }}
-          onMouseDown={e => { e.preventDefault(); setShowSize(v => !v) }}
+          onMouseDown={e => { e.preventDefault(); setShowSize(v => !v); setShowColor(false) }}
         >
           {sizeLabel} <span style={{ fontSize: 8, opacity: 0.65 }}>▾</span>
         </button>

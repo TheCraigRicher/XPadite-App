@@ -16,6 +16,7 @@ function now(): number {
 // ─── Section colors ───────────────────────────────────────────────────────────
 
 export const SECTION_COLORS = [
+  { key: 'plain',   label: 'Plain'   },
   { key: 'blue',    label: 'Blue'    },
   { key: 'green',   label: 'Green'   },
   { key: 'peach',   label: 'Peach'   },
@@ -33,6 +34,10 @@ interface SectionStyle {
 
 export function getSectionStyle(colorKey: string, isDark: boolean): SectionStyle {
   const map: Record<string, { d: SectionStyle; l: SectionStyle }> = {
+    plain: {
+      d: { background: 'rgba(255,255,255,0.035)', border: 'rgba(255,255,255,0.10)', labelColor: 'rgba(255,255,255,0.28)' },
+      l: { background: 'rgba(0,0,0,0.022)',       border: 'rgba(0,0,0,0.09)',       labelColor: 'rgba(0,0,0,0.28)' },
+    },
     blue: {
       d: { background: 'rgba(59,130,246,0.10)', border: 'rgba(59,130,246,0.28)', labelColor: '#93c5fd' },
       l: { background: 'rgba(59,130,246,0.07)', border: 'rgba(59,130,246,0.22)', labelColor: '#2563eb' },
@@ -54,7 +59,7 @@ export function getSectionStyle(colorKey: string, isDark: boolean): SectionStyle
       l: { background: 'rgba(124,58,237,0.07)', border: 'rgba(124,58,237,0.22)', labelColor: '#7c3aed' },
     },
   }
-  const entry = map[colorKey] ?? map.lavender
+  const entry = map[colorKey] ?? map.plain
   return isDark ? entry.d : entry.l
 }
 

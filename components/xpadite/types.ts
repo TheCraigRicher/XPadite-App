@@ -90,9 +90,15 @@ export interface JournalBlock {
   updatedAt: number
 }
 
+export interface JournalTimerSession {
+  startTs: number  // Unix ms
+  endTs: number    // Unix ms
+}
+
 export interface JournalDoc {
   v: 1
   blocks: JournalBlock[]
+  timerSessions?: JournalTimerSession[]
 }
 
 export interface TaskAttachment {

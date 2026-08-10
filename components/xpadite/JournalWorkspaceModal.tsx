@@ -347,13 +347,12 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
   const [openQ, setOpenQ]           = useState<Record<string, boolean>>({ Q1: true, Q2: true, Q3: true, Q4: true })
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [editorDate, setEditorDate] = useState(todayKey)
-  const pendingContentRef           = useRef<string>('')
 
-  // ── ESC key ──────────────────────────────────────────────────────────────────
+  // ── ESC key — calendar view only; editor ESC is owned by JournalEditorContent ─
   const escRef = useRef<() => void>(() => {})
   escRef.current = () => {
-    if (view === 'editor') doGoCalendar()
-    else doClose()
+    if (view !== 'editor') doClose()
+    // editor ESC is intercepted by JournalEditorContent's own capture listener
   }
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') escRef.current() }
@@ -366,33 +365,24 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
     updateDay(dateKey, prev => ({ ...prev, notes: content }))
   }, [updateDay])
 
-  function flush() {
-    const content = pendingContentRef.current
-    if (content !== undefined) persistEntry(editorDate, content)
-  }
-
   // ── Navigation ────────────────────────────────────────────────────────────────
+  // NOTE: no flush() on navigation — the child editor owns save/discard via its dirty guard
   function doOpenEditor(dateKey: string) {
-    pendingContentRef.current = calData[dateKey]?.notes ?? ''
     setEditorDate(dateKey)
     setSelectedDate(dateKey)
     setView('editor')
   }
 
-  function doGoCalendar() { flush(); setView('calendar') }
-  function doClose()      { if (view === 'editor') flush(); onClose() }
+  function doGoCalendar() { setView('calendar') }
+  function doClose()      { onClose() }
 
   function navigateDay(delta: number) {
-    flush()
     const key = shiftDay(editorDate, delta)
-    pendingContentRef.current = calData[key]?.notes ?? ''
     setEditorDate(key)
     setSelectedDate(key)
   }
 
   function navigateToday() {
-    flush()
-    pendingContentRef.current = calData[todayKey]?.notes ?? ''
     setEditorDate(todayKey)
     setSelectedDate(todayKey)
     setCalYear(todayDate.getFullYear())
@@ -598,7 +588,7 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
       rawContent={calData[editorDate]?.notes ?? ''}
       isDark={isDark}
       isEditorOnToday={editorDate === todayKey}
-      onContentChange={s => { pendingContentRef.current = s }}
+      onContentChange={() => {/* child owns all persistence via onPersist */}}
       onPersist={persistEntry}
       onNavigateDay={navigateDay}
       onNavigateToday={navigateToday}

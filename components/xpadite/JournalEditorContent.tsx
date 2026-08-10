@@ -11,7 +11,7 @@ import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
 import dynamic from 'next/dynamic'
 import { buildAttachments, ATTACHMENT_ACCEPT, CameraModal, ImageLightbox } from './attachmentUtils'
-import type { JournalBlock, TaskAttachment } from './types'
+import type { JournalBlock, JournalTimerSession, TaskAttachment } from './types'
 import { JournalDrawModal } from './JournalDrawModal'
 import {
   parseJournalDoc, parseJournalContent, serializeJournalContent,
@@ -37,6 +37,28 @@ function fmtEditorDate(key: string): string {
 function fmtShortDate(key: string): string {
   const [y, m, d] = key.split('-').map(Number)
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function fmtBlockTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+}
+
+function fmtTimerElapsed(ms: number): string {
+  const s = Math.floor(ms / 1000)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
+  return `${m}:${String(sec).padStart(2,'0')}`
+}
+
+function fmtTimerDuration(ms: number): string {
+  const m = Math.round(ms / 60000)
+  return m < 1 ? '<1m' : `${m}m`
+}
+
+function calcTotalMs(sessions: JournalTimerSession[], runningMs = 0): number {
+  return sessions.reduce((acc, s) => acc + (s.endTs - s.startTs), 0) + runningMs
 }
 
 // ─── Grid masonry layout ──────────────────────────────────────────────────────
@@ -110,8 +132,11 @@ interface JournalTextBlockProps {
   onContentChange: (id: string, content: string) => void
   onFocus: (editor: Editor) => void
   onSelectionUpdate: () => void
-  onDelete?: () => void        // undefined for first/only block (not deletable)
-  onMoveActivate?: () => void  // section blocks only
+  onDelete?: () => void
+  onMoveActivate?: () => void
+  onResizeActivate?: () => void
+  onColorChange?: (color: SectionColorKey) => void
+  onNameChange?: (name: string | undefined) => void
   canMoveUp: boolean
   canMoveDown: boolean
   onMoveUp: () => void
@@ -121,16 +146,23 @@ interface JournalTextBlockProps {
 const JournalTextBlock = React.memo(function JournalTextBlock({
   block, isDark, isOnlyBlock,
   onContentChange, onFocus, onSelectionUpdate,
-  onDelete, onMoveActivate, canMoveUp, canMoveDown, onMoveUp, onMoveDown,
+  onDelete, onMoveActivate, onResizeActivate, onColorChange, onNameChange,
+  canMoveUp, canMoveDown, onMoveUp, onMoveDown,
 }: JournalTextBlockProps) {
-  const [menuOpen, setMenuOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
+  const [menuOpen,       setMenuOpen]       = useState(false)
+  const [showColorPick,  setShowColorPick]  = useState(false)
+  const [addingTitle,    setAddingTitle]    = useState(false)
+  const [titleValue,     setTitleValue]     = useState(block.name ?? '')
+  const menuRef      = useRef<HTMLDivElement>(null)
+  const titleInputRef = useRef<HTMLInputElement>(null)
 
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
-        heading: false, codeBlock: false, blockquote: false,
-        strike: false, code: false, bold: false, italic: false, horizontalRule: false,
+        heading: { levels: [2, 3] },
+        codeBlock: false, blockquote: false,
+        strike: false, code: false, horizontalRule: false,
+        // bold and italic enabled (default)
       }),
       TaskList,
       TaskItem.configure({ nested: false }),
@@ -142,34 +174,35 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
     ],
     content: { type: 'doc', content: [{ type: 'paragraph' }] },
     editorProps: { attributes: { class: 'xp-j-prose' } },
-    onUpdate: ({ editor: e }) => {
-      const content = serializeJournalContent(e)
-      onContentChange(block.id, content)
-    },
+    onUpdate: ({ editor: e }) => onContentChange(block.id, serializeJournalContent(e)),
   })
 
-  // Set content when block.id changes (new block mounted)
   useEffect(() => {
     if (!editor) return
     editor.commands.setContent(parseJournalContent(block.content || ''))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, block.id])
 
-  // Wire focus and selection events
   useEffect(() => {
     if (!editor) return
-    const handleFocus = () => onFocus(editor)
-    const handleSelection = () => onSelectionUpdate()
-    editor.on('focus', handleFocus)
-    editor.on('selectionUpdate', handleSelection)
-    return () => {
-      editor.off('focus', handleFocus)
-      editor.off('selectionUpdate', handleSelection)
-    }
+    const onF = () => onFocus(editor)
+    const onS = () => onSelectionUpdate()
+    editor.on('focus', onF)
+    editor.on('selectionUpdate', onS)
+    return () => { editor.off('focus', onF); editor.off('selectionUpdate', onS) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor])
 
-  // Close ⋮ menu on outside click
+  useEffect(() => {
+    if (!menuOpen) setShowColorPick(false)
+  }, [menuOpen])
+
+  useEffect(() => {
+    if (addingTitle) titleInputRef.current?.focus()
+  }, [addingTitle])
+
+  useEffect(() => { setTitleValue(block.name ?? '') }, [block.name])
+
   useEffect(() => {
     if (!menuOpen) return
     function outside(e: MouseEvent) {
@@ -180,37 +213,98 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
     return () => document.removeEventListener('mousedown', outside)
   }, [menuOpen])
 
-  const isSection = block.type === 'section'
-  const sectionStyle = isSection && block.sectionColor
-    ? getSectionStyle(block.sectionColor, isDark)
-    : null
+  function commitTitle() {
+    const trimmed = titleValue.trim()
+    onNameChange?.(trimmed || undefined)
+    setAddingTitle(false)
+  }
 
-  const hasMenu = isSection ? true : canMoveUp || canMoveDown || (!!onDelete && !isOnlyBlock)
+  const isSection   = block.type === 'section'
+  const sectionStyle = isSection
+    ? getSectionStyle(block.sectionColor ?? 'plain', isDark)
+    : null
+  const hasTitle = isSection && !!block.name
+  const hasMenu  = isSection ? true : canMoveUp || canMoveDown || (!!onDelete && !isOnlyBlock)
 
   return (
-    <div style={{
-      position: 'relative',
-      borderRadius: sectionStyle ? 10 : 0,
-      border: sectionStyle ? `0.5px solid ${sectionStyle.border}` : 'none',
-      background: sectionStyle ? sectionStyle.background : 'transparent',
-      padding: sectionStyle ? '12px 40px 12px 14px' : '0',
-      marginBottom: sectionStyle ? 4 : 0,
-    }}>
-      {/* Section color label */}
-      {sectionStyle && block.sectionColor && (
-        <div style={{
-          fontSize: 10, fontWeight: 600, textTransform: 'uppercase',
-          letterSpacing: '0.06em', color: sectionStyle.labelColor,
-          marginBottom: 6, userSelect: 'none',
-        }}>
-          {SECTION_COLORS.find(c => c.key === block.sectionColor)?.label ?? 'Section'}
-        </div>
-      )}
+    <div
+      className={isSection ? 'xp-j-sec-wrap' : undefined}
+      style={{
+        position: 'relative',
+        borderRadius: sectionStyle ? 10 : 0,
+        border: sectionStyle ? `0.5px solid ${sectionStyle.border}` : 'none',
+        background: sectionStyle ? sectionStyle.background : 'transparent',
+        padding: sectionStyle ? '12px 40px 12px 14px' : '0',
+        marginBottom: sectionStyle ? 4 : 0,
+        ...(isSection && block.height != null ? { minHeight: block.height } : {}),
+      }}
+    >
+
+      {/* Optional section title */}
+      {isSection && (hasTitle || addingTitle) ? (
+        addingTitle ? (
+          <input
+            ref={titleInputRef}
+            value={titleValue}
+            onChange={e => setTitleValue(e.target.value)}
+            onBlur={commitTitle}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); commitTitle() }
+              if (e.key === 'Escape') { setAddingTitle(false); setTitleValue(block.name ?? '') }
+            }}
+            placeholder="Section title…"
+            style={{
+              display: 'block', width: '100%', border: 'none', outline: 'none',
+              background: 'transparent', padding: '0 0 6px',
+              fontFamily: 'inherit', fontSize: 15, fontWeight: 700,
+              letterSpacing: '-0.01em',
+              color: isDark ? '#f1f5f9' : '#0f172a',
+              borderBottom: `1px solid ${isDark ? 'rgba(124,58,237,0.35)' : 'rgba(124,58,237,0.25)'}`,
+              marginBottom: 8,
+            }}
+          />
+        ) : (
+          <div
+            onClick={() => setAddingTitle(true)}
+            title="Click to edit title"
+            style={{
+              fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em',
+              color: isDark ? '#f1f5f9' : '#0f172a',
+              marginBottom: 6, cursor: 'text',
+              lineHeight: 1.3,
+            }}
+          >{block.name}</div>
+        )
+      ) : isSection ? (
+        /* Faint "+ Add Title" — only visible on hover via CSS */
+        <div
+          className="xp-j-add-title"
+          onClick={() => setAddingTitle(true)}
+          style={{
+            fontSize: 11, cursor: 'text', marginBottom: 4,
+            color: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.25)',
+            opacity: 0, transition: 'opacity 150ms',
+            userSelect: 'none',
+          }}
+        >+ Add Title</div>
+      ) : null}
 
       {/* Editor */}
       <div onClick={() => editor?.commands.focus()} style={{ cursor: 'text' }}>
         <EditorContent editor={editor} />
       </div>
+
+      {/* Section timestamp — bottom-right, quiet metadata */}
+      {isSection && (
+        <div style={{
+          position: 'absolute', bottom: 6, right: 8,
+          fontSize: 10, lineHeight: 1, userSelect: 'none', pointerEvents: 'none',
+          color: isDark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.20)',
+          letterSpacing: '0.01em',
+        }}>
+          {fmtBlockTime(block.createdAt)}
+        </div>
+      )}
 
       {/* ⋮ block menu */}
       {hasMenu && (
@@ -226,13 +320,17 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
               fontSize: 14, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
               transition: 'all 120ms',
             }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1'; (e.currentTarget as HTMLButtonElement).style.color = isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)' }}
-            onMouseLeave={e => { if (!menuOpen) { (e.currentTarget as HTMLButtonElement).style.color = isDark ? 'rgba(255,255,255,0.40)' : 'rgba(0,0,0,0.35)' } }}
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLButtonElement).style.color = isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)'
+            }}
+            onMouseLeave={e => {
+              if (!menuOpen) (e.currentTarget as HTMLButtonElement).style.color = isDark ? 'rgba(255,255,255,0.40)' : 'rgba(0,0,0,0.35)'
+            }}
           >⋮</button>
 
           {menuOpen && (
             <div style={{
-              position: 'absolute', top: 28, right: 0, zIndex: 40, minWidth: 148,
+              position: 'absolute', top: 28, right: 0, zIndex: 40, minWidth: 156,
               background: isDark ? '#1e1130' : '#fff',
               border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.12)'}`,
               borderRadius: 10,
@@ -240,20 +338,69 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
               padding: '4px 0', overflow: 'hidden',
             }}>
               {isSection ? (
-                <>
-                  <button onClick={() => { onMoveActivate?.(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
-                    ✥ Move
-                  </button>
-                  <button onClick={() => { editor?.commands.focus(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
-                    ✏ Edit Section
-                  </button>
-                  {!!onDelete && !isOnlyBlock && (
-                    <button onClick={() => { onDelete(); setMenuOpen(false) }} style={{ ...menuItemStyle(isDark), color: '#f87171' }}>
-                      🗑 Delete
+                showColorPick ? (
+                  /* Color picker sub-view */
+                  <>
+                    <div style={{ padding: '5px 12px 3px', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: isDark ? 'rgba(255,255,255,0.38)' : 'rgba(0,0,0,0.35)', userSelect: 'none' }}>
+                      Section Color
+                    </div>
+                    {SECTION_COLORS.map(c => {
+                      const swatchColor = c.key === 'plain'
+                        ? (isDark ? 'rgba(255,255,255,0.80)' : 'rgba(0,0,0,0.35)')
+                        : getSectionStyle(c.key, isDark).labelColor
+                      const isSelected = block.sectionColor === c.key
+                      return (
+                        <button
+                          key={c.key}
+                          onClick={() => { onColorChange?.(c.key as SectionColorKey); setMenuOpen(false) }}
+                          style={{ ...menuItemStyle(isDark), display: 'flex', alignItems: 'center', gap: 9, fontWeight: isSelected ? 600 : 400 }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(124,58,237,0.16)' : 'rgba(124,58,237,0.07)' }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                        >
+                          <span style={{
+                            width: 11, height: 11, borderRadius: '50%', flexShrink: 0,
+                            background: swatchColor,
+                            border: c.key === 'plain' ? `0.5px solid ${isDark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.22)'}` : 'none',
+                            boxShadow: c.key !== 'plain' ? `0 0 5px ${swatchColor}66` : 'none',
+                          }} />
+                          {c.label}
+                          {isSelected && <span style={{ marginLeft: 'auto', fontSize: 10, color: '#a78bfa' }}>✓</span>}
+                        </button>
+                      )
+                    })}
+                    <div style={{ height: 1, background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)', margin: '4px 0' }} />
+                    <button onClick={() => setShowColorPick(false)} style={{ ...menuItemStyle(isDark), fontSize: 11, color: isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.40)' }}>
+                      ← Back
                     </button>
-                  )}
-                </>
+                  </>
+                ) : (
+                  /* Section action menu */
+                  <>
+                    <button onClick={() => { onMoveActivate?.(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                      ✥ Move
+                    </button>
+                    <button onClick={() => { onResizeActivate?.(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                      ⤡ Resize
+                    </button>
+                    <button onClick={() => {
+                      if (!hasTitle) setAddingTitle(true)
+                      else editor?.commands.focus()
+                      setMenuOpen(false)
+                    }} style={menuItemStyle(isDark)}>
+                      ✏ Edit Section
+                    </button>
+                    <button onClick={() => setShowColorPick(true)} style={menuItemStyle(isDark)}>
+                      🎨 Change Color
+                    </button>
+                    {!!onDelete && !isOnlyBlock && (
+                      <button onClick={() => { onDelete(); setMenuOpen(false) }} style={{ ...menuItemStyle(isDark), color: '#f87171' }}>
+                        🗑 Delete
+                      </button>
+                    )}
+                  </>
+                )
               ) : (
+                /* Plain text block menu */
                 <>
                   {canMoveUp && (
                     <button onClick={() => { onMoveUp(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
@@ -383,6 +530,202 @@ function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete }: I
 
 // InsertRow component removed — new sections/content added via the bottom toolbar.
 
+// ─── Ghost slot — drop target preview during drag-move ────────────────────────
+
+function GhostSlot({ colSpan, blockH }: { colSpan: number; blockH?: number }) {
+  const rowSpan = blockH
+    ? Math.max(4, Math.ceil((blockH + GRID_GAP) / (ROW_PX + GRID_GAP)))
+    : 10
+  return (
+    <div
+      aria-hidden
+      style={{
+        gridColumn: `span ${colSpan}`,
+        gridRow: `span ${rowSpan}`,
+        background: 'rgba(124,58,237,0.07)',
+        border: '1.5px dashed rgba(124,58,237,0.38)',
+        borderRadius: 10,
+        boxShadow: 'inset 0 0 0 1px rgba(124,58,237,0.06)',
+        pointerEvents: 'none',
+        animation: 'xpGhostPulse 2s ease-in-out infinite',
+      }}
+    />
+  )
+}
+
+// ─── Floating text formatter — appears above text selection ──────────────────
+
+function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMRect }) {
+  const [showSize, setShowSize] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Close size menu on outside click
+  useEffect(() => {
+    if (!showSize) return
+    function outside(e: MouseEvent) {
+      if (ref.current?.contains(e.target as Node)) return
+      setShowSize(false)
+    }
+    document.addEventListener('mousedown', outside)
+    return () => document.removeEventListener('mousedown', outside)
+  }, [showSize])
+
+  if (!editor) return null
+
+  const isBold   = editor.isActive('bold')
+  const isItalic = editor.isActive('italic')
+  const isH2     = editor.isActive('heading', { level: 2 })
+  const isH3     = editor.isActive('heading', { level: 3 })
+  const sizeLabel = isH2 ? 'Heading' : isH3 ? 'Large' : 'Normal'
+
+  const top  = Math.max(8, rect.top - 46)
+  const left = rect.left + rect.width / 2
+
+  const fBtn = (active: boolean, extra?: React.CSSProperties): React.CSSProperties => ({
+    padding: '3px 8px', borderRadius: 5, border: 'none', cursor: 'pointer',
+    background: active ? 'rgba(124,58,237,0.40)' : 'transparent',
+    color: active ? '#c4b5fd' : 'rgba(255,255,255,0.82)',
+    fontSize: 12, fontWeight: active ? 700 : 500,
+    transition: 'background 80ms', ...extra,
+  })
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: 'fixed', top, left,
+        transform: 'translateX(-50%)',
+        zIndex: 9990,
+        background: 'rgba(10,6,30,0.97)',
+        border: '0.5px solid rgba(124,58,237,0.32)',
+        borderRadius: 9, padding: '4px 5px',
+        display: 'flex', alignItems: 'center', gap: 2,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.65), 0 0 0 0.5px rgba(124,58,237,0.10)',
+        backdropFilter: 'blur(8px)',
+        userSelect: 'none',
+      }}
+      onMouseDown={e => e.preventDefault()} // prevent editor blur
+    >
+      <button style={{ ...fBtn(isBold), fontWeight: 700, minWidth: 26, textAlign: 'center' }}
+        onMouseDown={e => { e.preventDefault(); editor.chain().focus().toggleBold().run() }}>B</button>
+      <button style={{ ...fBtn(isItalic), fontStyle: 'italic', minWidth: 26, textAlign: 'center' }}
+        onMouseDown={e => { e.preventDefault(); editor.chain().focus().toggleItalic().run() }}>I</button>
+      <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.14)', margin: '0 2px', flexShrink: 0 }} />
+      <div style={{ position: 'relative' }}>
+        <button
+          style={{ ...fBtn(false), display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, whiteSpace: 'nowrap' as const }}
+          onMouseDown={e => { e.preventDefault(); setShowSize(v => !v) }}
+        >
+          {sizeLabel} <span style={{ fontSize: 8, opacity: 0.65 }}>▾</span>
+        </button>
+        {showSize && (
+          <div style={{
+            position: 'absolute', bottom: 'calc(100% + 5px)', left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(10,6,30,0.97)',
+            border: '0.5px solid rgba(124,58,237,0.28)',
+            borderRadius: 8, padding: '4px 0',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.60)',
+            minWidth: 88, zIndex: 10,
+          }}>
+            {([
+              { label: 'Normal',  run: () => editor.chain().focus().setParagraph().run() },
+              { label: 'Large',   run: () => editor.chain().focus().toggleHeading({ level: 3 }).run() },
+              { label: 'Heading', run: () => editor.chain().focus().toggleHeading({ level: 2 }).run() },
+            ] as const).map(({ label, run }) => (
+              <button key={label}
+                onMouseDown={e => { e.preventDefault(); run(); setShowSize(false) }}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '5px 11px', border: 'none',
+                  background: label === sizeLabel ? 'rgba(124,58,237,0.18)' : 'transparent',
+                  cursor: 'pointer', fontSize: 11,
+                  color: label === sizeLabel ? '#c4b5fd' : 'rgba(255,255,255,0.78)',
+                  fontWeight: label === sizeLabel ? 600 : 400,
+                }}
+              >{label}</button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Unsaved-changes confirmation dialog ──────────────────────────────────────
+
+function UnsavedChangesDialog({
+  onKeepEditing, onExitWithoutSaving, onSaveAndExit,
+}: {
+  onKeepEditing: () => void
+  onExitWithoutSaving: () => void
+  onSaveAndExit: () => void
+}) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 99999,
+      background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: '#0f0a1e',
+        border: '0.5px solid rgba(124,58,237,0.30)',
+        borderRadius: 16,
+        boxShadow: '0 24px 80px rgba(0,0,0,0.80), 0 0 0 1px rgba(124,58,237,0.08)',
+        padding: '28px 32px',
+        maxWidth: 380, width: '100%',
+        display: 'flex', flexDirection: 'column', gap: 20,
+      }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#f1f5f9', marginBottom: 8, letterSpacing: '-0.01em' }}>
+            Unsaved changes
+          </div>
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.58)', lineHeight: 1.65 }}>
+            You have changes in this journal entry that haven&apos;t been saved yet.
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button
+            onClick={onSaveAndExit}
+            style={{
+              padding: '10px 16px', borderRadius: 9, border: 'none',
+              background: 'linear-gradient(135deg, #5b21b6 0%, #7c3aed 100%)',
+              color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              transition: 'opacity 120ms, transform 80ms',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.88' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
+          >Save &amp; Exit</button>
+          <button
+            onClick={onExitWithoutSaving}
+            style={{
+              padding: '10px 16px', borderRadius: 9,
+              border: '0.5px solid rgba(239,68,68,0.32)',
+              background: 'rgba(239,68,68,0.10)', color: '#fca5a5',
+              fontSize: 13, fontWeight: 500, cursor: 'pointer',
+              transition: 'all 120ms',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.18)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.10)' }}
+          >Exit Without Saving</button>
+          <button
+            onClick={onKeepEditing}
+            style={{
+              padding: '10px 16px', borderRadius: 9,
+              border: '0.5px solid rgba(255,255,255,0.10)',
+              background: 'transparent', color: 'rgba(255,255,255,0.55)',
+              fontSize: 13, fontWeight: 500, cursor: 'pointer',
+              transition: 'all 120ms',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.06)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+          >Keep Editing</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Shared style helpers ─────────────────────────────────────────────────────
 
 function menuItemStyle(isDark: boolean): React.CSSProperties {
@@ -466,8 +809,33 @@ export function JournalEditorContent({
     editingBlock: JournalBlock | null
   } | null>(null)
 
-  // ── Move mode state ──────────────────────────────────────────────────────────
-  const [moveModeId, setMoveModeId] = useState<string | null>(null)
+  // ── Floating formatter state ─────────────────────────────────────────────────
+  const [selectionRect, setSelectionRect] = useState<DOMRect | null>(null)
+
+  // ── Dirty / unsaved-changes state ───────────────────────────────────────────
+  const [isDirty, setIsDirty]           = useState(false)
+  const [showExitDialog, setShowExitDialog] = useState(false)
+  const isDirtyRef      = useRef(false)  // fast path — avoids closure staleness
+  const savedDocRef     = useRef('')     // doc string at last explicit Save Notes
+  const pendingNavRef   = useRef<(() => void) | null>(null)
+  const showExitDialogRef = useRef(false)  // for ESC handler stable closure
+
+  // ── Journal session timer ────────────────────────────────────────────────────
+  const [timerSessions,    setTimerSessions]    = useState<JournalTimerSession[]>([])
+  const [timerStartTs,     setTimerStartTs]     = useState<number | null>(null)
+  const [timerElapsedMs,   setTimerElapsedMs]   = useState(0)
+  const [showSessions,     setShowSessions]     = useState(false)
+  const [confirmDeleteIdx, setConfirmDeleteIdx] = useState<number | null>(null)
+  const timerSessionsRef  = useRef<JournalTimerSession[]>([])
+  const timerIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastActivityRef   = useRef(Date.now())
+  const timerStartTsRef   = useRef<number | null>(null)
+  const showSessionsRef   = useRef(false)
+  const timerWrapperRef   = useRef<HTMLDivElement>(null)
+
+  // ── Move / resize mode state ─────────────────────────────────────────────────
+  const [moveModeId,   setMoveModeId]   = useState<string | null>(null)
+  const [resizeModeId, setResizeModeId] = useState<string | null>(null)
   // dragPos: non-null while mouse is held down during a move drag
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
   const [dropIdx,  setDropIdx]  = useState(0)
@@ -489,8 +857,12 @@ export function JournalEditorContent({
   const dateKeyRef      = useRef(dateKey)
   const emojiBtnRef     = useRef<HTMLButtonElement>(null)
   const blockListRef    = useRef<HTMLDivElement>(null)
+  const onBackRef       = useRef(onBack)  // stable ref for ESC capture handler
 
-  dateKeyRef.current = dateKey
+  dateKeyRef.current        = dateKey
+  onBackRef.current         = onBack
+  showExitDialogRef.current = showExitDialog
+  showSessionsRef.current   = showSessions
 
   // Keep blocksRef in sync with blocks state
   useEffect(() => { blocksRef.current = blocks }, [blocks])
@@ -498,27 +870,41 @@ export function JournalEditorContent({
   // ── Init / date change ───────────────────────────────────────────────────────
   useEffect(() => {
     const doc = parseJournalDoc(rawContent)
-    // Ensure at least one text block
     const initialBlocks = doc.blocks.length > 0 ? doc.blocks : [createTextBlock()]
     setBlocks(initialBlocks)
     blocksRef.current = initialBlocks
     contentMapRef.current.clear()
-    // Pre-populate contentMap from loaded blocks
     initialBlocks.forEach(b => {
       if ((b.type === 'text' || b.type === 'section') && b.content) {
         contentMapRef.current.set(b.id, b.content)
       }
     })
+    // Load timer sessions for this date
+    const sessions = doc.timerSessions ?? []
+    setTimerSessions(sessions)
+    timerSessionsRef.current = sessions
+    // Stop any running timer from previous date
+    if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null }
+    setTimerStartTs(null)
+    timerStartTsRef.current = null
+    setTimerElapsedMs(0)
+    setShowSessions(false)
     setDrawState(null)
     setSelectedBlockId(null)
     setShowEmoji(false)
     setSaveStatus('idle')
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+    savedDocRef.current   = rawContent ?? ''
+    isDirtyRef.current    = false
+    setIsDirty(false)
+    setShowExitDialog(false)
+    pendingNavRef.current = null
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateKey])
 
   // ── Doc serialization ───────────────────────────────────────────────────────
   const buildDocStr = useCallback((): string => {
+    const sessions = timerSessionsRef.current
     const doc = {
       v: 1 as const,
       blocks: blocksRef.current.map(b => ({
@@ -527,16 +913,22 @@ export function JournalEditorContent({
           ? (contentMapRef.current.get(b.id) ?? b.content ?? '')
           : b.content,
       })),
+      ...(sessions.length > 0 ? { timerSessions: sessions } : {}),
     }
     return JSON.stringify(doc)
   }, [])
 
   // ── Autosave scheduler ──────────────────────────────────────────────────────
+  // Autosave writes to DB for safety but does NOT clear isDirty.
+  // Only an explicit "Save Notes" (handleManualSave) clears the dirty flag.
+  // This ensures the unsaved-changes dialog always shows when real changes exist.
   const scheduleSave = useCallback(() => {
+    if (!isDirtyRef.current) { isDirtyRef.current = true; setIsDirty(true) }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
       const serialized = buildDocStr()
       onPersist(dateKeyRef.current, serialized)
+      // Show brief "Saved" indicator but keep dirty — explicit Save Notes resets baseline
       setSaveStatus('saved')
       setTimeout(() => setSaveStatus(s => s === 'saved' ? 'idle' : s), 2200)
       saveTimerRef.current = null
@@ -558,6 +950,15 @@ export function JournalEditorContent({
 
   const onEditorSelectionUpdate = useCallback(() => {
     setFocusTick(t => t + 1)
+    const ed = focusedEditor.current
+    if (!ed || ed.state.selection.empty) { setSelectionRect(null); return }
+    try {
+      const sel = window.getSelection()
+      if (sel && sel.rangeCount > 0) {
+        const r = sel.getRangeAt(0).getBoundingClientRect()
+        setSelectionRect(r.width > 0 || r.height > 0 ? r : null)
+      }
+    } catch { setSelectionRect(null) }
   }, [])
 
   const isActive = (name: string) => focusedEditor.current?.isActive(name) ?? false
@@ -569,8 +970,59 @@ export function JournalEditorContent({
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
     const serialized = buildDocStr()
     onPersist(dateKeyRef.current, serialized)
+    savedDocRef.current = serialized
+    isDirtyRef.current  = false
+    setIsDirty(false)
     setSaveStatus('saved')
     setTimeout(() => setSaveStatus(s => s === 'saved' ? 'idle' : s), 2200)
+  }
+
+  // ── Unsaved-changes guard ────────────────────────────────────────────────────
+  function guardedNavigate(action: () => void) {
+    if (!isDirtyRef.current) { action(); return }
+    pendingNavRef.current = action
+    setShowExitDialog(true)
+  }
+
+  function commitExitWithoutSaving() {
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+    // Restore DB to last explicitly-saved baseline (undoes any autosaves since last Save Notes)
+    onPersist(dateKeyRef.current, savedDocRef.current)
+    // Reset in-memory state to match the restored content
+    const doc = parseJournalDoc(savedDocRef.current)
+    const restoredBlocks = doc.blocks.length > 0 ? doc.blocks : [createTextBlock()]
+    contentMapRef.current.clear()
+    restoredBlocks.forEach(b => {
+      if ((b.type === 'text' || b.type === 'section') && b.content) {
+        contentMapRef.current.set(b.id, b.content)
+      }
+    })
+    blocksRef.current = restoredBlocks
+    setBlocks(restoredBlocks)
+    // Restore timer sessions
+    setTimerSessions(doc.timerSessions ?? [])
+    timerSessionsRef.current = doc.timerSessions ?? []
+    isDirtyRef.current = false
+    setIsDirty(false)
+    setShowExitDialog(false)
+    const action = pendingNavRef.current
+    pendingNavRef.current = null
+    action?.()
+  }
+
+  function commitSaveAndExit() {
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+    const serialized = buildDocStr()
+    onPersist(dateKeyRef.current, serialized)
+    savedDocRef.current = serialized
+    isDirtyRef.current  = false
+    setIsDirty(false)
+    setSaveStatus('saved')
+    setTimeout(() => setSaveStatus(s => s === 'saved' ? 'idle' : s), 2200)
+    setShowExitDialog(false)
+    const action = pendingNavRef.current
+    pendingNavRef.current = null
+    action?.()
   }
 
   // ── Block structural operations ─────────────────────────────────────────────
@@ -606,6 +1058,14 @@ export function JournalEditorContent({
     next[idx]    = { ...next[idx],    content: contentMapRef.current.get(next[idx].id)    ?? next[idx].content    ?? '' }
     next[newIdx] = { ...next[newIdx], content: contentMapRef.current.get(next[newIdx].id) ?? next[newIdx].content ?? '' }
     ;[next[idx], next[newIdx]] = [next[newIdx], next[idx]]
+    blocksRef.current = next
+    setBlocks(next)
+    onContentChange(buildDocStr())
+    scheduleSave()
+  }
+
+  function updateBlock(id: string, updates: Partial<JournalBlock>) {
+    const next = blocksRef.current.map(b => b.id === id ? { ...b, ...updates, updatedAt: Date.now() } : b)
     blocksRef.current = next
     setBlocks(next)
     onContentChange(buildDocStr())
@@ -652,7 +1112,7 @@ export function JournalEditorContent({
     const SNAP_THRESHOLD = 5
     const MIN_W = 15
     const MAX_W = 100
-    const MIN_H = 60
+    const MIN_H = block.type === 'section' ? 80 : 60
 
     const onMove = (ev: MouseEvent) => {
       const dx = ev.clientX - startX
@@ -863,19 +1323,135 @@ export function JournalEditorContent({
     return () => document.removeEventListener('mousedown', outside)
   }, [showEmoji])
 
+  // ── Browser tab/window close protection ─────────────────────────────────────
+  useEffect(() => {
+    if (!isDirty) return
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isDirty])
+
+  // ── ESC key — capture phase so it fires before the parent's bubble handler ──
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      e.stopImmediatePropagation()
+      if (showExitDialogRef.current) {
+        setShowExitDialog(false)
+        pendingNavRef.current = null
+      } else if (showSessionsRef.current) {
+        setShowSessions(false)
+        setConfirmDeleteIdx(null)
+      } else {
+        guardedNavigate(onBackRef.current)
+      }
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── Sessions popover — outside-click dismissal ───────────────────────────────
+  useEffect(() => {
+    if (!showSessions) return
+    function onOutside(e: MouseEvent) {
+      if (timerWrapperRef.current?.contains(e.target as Node)) return
+      setShowSessions(false)
+      setConfirmDeleteIdx(null)
+    }
+    document.addEventListener('mousedown', onOutside)
+    return () => document.removeEventListener('mousedown', onOutside)
+  }, [showSessions])
+
+  // ── confirmDeleteIdx — reset when clicking outside the confirm button ─────────
+  useEffect(() => {
+    if (confirmDeleteIdx === null) return
+    function onAnyDown(e: MouseEvent) {
+      if ((e.target as Element).closest('[data-confirm-del]')) return
+      setConfirmDeleteIdx(null)
+    }
+    document.addEventListener('mousedown', onAnyDown)
+    return () => document.removeEventListener('mousedown', onAnyDown)
+  }, [confirmDeleteIdx])
+
+  // ── Journal timer logic ──────────────────────────────────────────────────────
+  const IDLE_PAUSE_MS = 30 * 60 * 1000  // auto-stop after 30min inactivity
+
+  function timerStart() {
+    const now = Date.now()
+    lastActivityRef.current = now
+    timerStartTsRef.current = now
+    setTimerStartTs(now)
+    setTimerElapsedMs(0)
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current)
+    timerIntervalRef.current = setInterval(() => {
+      const start = timerStartTsRef.current
+      if (!start) return
+      const elapsed = Date.now() - start
+      setTimerElapsedMs(elapsed)
+      // Idle auto-stop
+      if (Date.now() - lastActivityRef.current > IDLE_PAUSE_MS) {
+        timerStopAt(lastActivityRef.current)
+      }
+    }, 1000)
+  }
+
+  function timerStopAt(endTs: number) {
+    if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null }
+    const start = timerStartTsRef.current
+    if (!start) return
+    const newSession: JournalTimerSession = { startTs: start, endTs }
+    const next = [...timerSessionsRef.current, newSession]
+    timerSessionsRef.current = next
+    setTimerSessions(next)
+    timerStartTsRef.current = null
+    setTimerStartTs(null)
+    setTimerElapsedMs(0)
+    if (!isDirtyRef.current) { isDirtyRef.current = true; setIsDirty(true) }
+    scheduleSave()
+  }
+
+  function timerStop() { timerStopAt(Date.now()) }
+
+  function deleteTimerSession(idx: number) {
+    const next = timerSessionsRef.current.filter((_, i) => i !== idx)
+    timerSessionsRef.current = next
+    setTimerSessions(next)
+    setConfirmDeleteIdx(null)
+    if (!isDirtyRef.current) { isDirtyRef.current = true; setIsDirty(true) }
+    scheduleSave()
+  }
+
+  // Track user activity for idle detection
+  useEffect(() => {
+    function onActivity() { lastActivityRef.current = Date.now() }
+    document.addEventListener('mousemove', onActivity, { passive: true })
+    document.addEventListener('keydown',   onActivity, { passive: true })
+    document.addEventListener('click',     onActivity, { passive: true })
+    document.addEventListener('scroll',    onActivity, { passive: true })
+    return () => {
+      document.removeEventListener('mousemove', onActivity)
+      document.removeEventListener('keydown',   onActivity)
+      document.removeEventListener('click',     onActivity)
+      document.removeEventListener('scroll',    onActivity)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ── Styles ──────────────────────────────────────────────────────────────────
-  // Dock is a fixed premium deep navy/plum regardless of page theme
-  const dockBg  = 'rgba(10,5,26,0.98)'
-  const dockBdr = 'rgba(124,58,237,0.22)'
+  // Dock: deep navy blue — premium, complements XPadite purple, never black
+  const dockBg  = 'rgba(8,20,58,0.98)'
+  const dockBdr = 'rgba(124,58,237,0.20)'
   const dockDiv = 'rgba(255,255,255,0.08)'
 
+  // Utility buttons: subdued navy/lavender treatment (List, Upload, Camera, Draw)
   function dockBtn(active = false): React.CSSProperties {
     return {
       padding: '5px 11px', borderRadius: 7, cursor: 'pointer',
-      border: `0.5px solid ${active ? 'rgba(124,58,237,0.65)' : 'rgba(255,255,255,0.11)'}`,
-      background: active ? 'rgba(124,58,237,0.28)' : 'rgba(255,255,255,0.055)',
-      color: active ? '#c4b5fd' : 'rgba(255,255,255,0.78)',
-      fontSize: 12, fontWeight: active ? 600 : 500,
+      border: `0.5px solid ${active ? 'rgba(124,58,237,0.65)' : 'rgba(255,255,255,0.09)'}`,
+      background: active ? 'rgba(124,58,237,0.28)' : 'rgba(255,255,255,0.04)',
+      color: active ? '#c4b5fd' : 'rgba(255,255,255,0.60)',
+      fontSize: 12, fontWeight: active ? 600 : 400,
       transition: 'all 120ms', flexShrink: 0, whiteSpace: 'nowrap' as const,
     }
   }
@@ -896,10 +1472,11 @@ export function JournalEditorContent({
           background-size: 300% 300%;
           animation: xpJHdrFlow 14s ease infinite;
         }
+        /* Utility buttons: neutral hover (subdued, not purple) */
         .xp-jd-btn:hover:not(.xp-j-active):not(:disabled) {
-          border-color: rgba(124,58,237,0.55) !important;
-          background:   rgba(124,58,237,0.16) !important;
-          color: #c4b5fd !important;
+          border-color: rgba(255,255,255,0.18) !important;
+          background:   rgba(255,255,255,0.09) !important;
+          color: rgba(255,255,255,0.88) !important;
           transform: translateY(-1px);
         }
         .xp-jd-btn:active {
@@ -915,15 +1492,15 @@ export function JournalEditorContent({
         .xp-j-save-btn:hover { opacity: 0.88; transform: translateY(-1px); }
         .xp-j-save-btn:active { transform: scale(0.97); transition-duration: 60ms; }
         .xp-j-prose {
-          outline: none;
-          font-size: 14px;
-          line-height: 1.75;
-          font-family: inherit;
-          color: ${isDark ? '#f1f5f9' : '#0f172a'};
-          min-height: 32px;
+          outline: none; font-size: 14px; line-height: 1.75;
+          font-family: inherit; color: ${isDark ? '#f1f5f9' : '#0f172a'}; min-height: 32px;
         }
         .xp-j-prose p { margin: 0 0 6px; }
         .xp-j-prose p:last-child { margin-bottom: 0; }
+        .xp-j-prose strong { font-weight: 650; }
+        .xp-j-prose em { font-style: italic; }
+        .xp-j-prose h2 { font-size: 1.30em; font-weight: 700; margin: 0 0 8px; line-height: 1.3; letter-spacing: -0.01em; color: inherit; }
+        .xp-j-prose h3 { font-size: 1.12em; font-weight: 600; margin: 0 0 6px; line-height: 1.4; color: inherit; }
         .xp-j-prose ul:not([data-type="taskList"]) { padding-left: 20px; margin: 0 0 6px; list-style: disc; }
         .xp-j-prose ol { padding-left: 22px; margin: 0 0 6px; list-style: decimal; }
         .xp-j-prose li { margin-bottom: 3px; }
@@ -938,26 +1515,20 @@ export function JournalEditorContent({
           color: ${isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.30)'};
           float: left; pointer-events: none; height: 0;
         }
-        /* Selectable blocks: hover outline signals interactivity; handles appear on selection */
+        /* Selectable blocks */
         .xp-j-blk { cursor: pointer; }
         .xp-j-blk:hover { box-shadow: 0 0 0 1.5px rgba(124,58,237,0.22); border-radius: 10px; }
-        /* Responsive collapse: narrow viewports stack all blocks in a single column */
+        /* Section title: faint "Add Title" reveals on hover */
+        .xp-j-sec-wrap:hover .xp-j-add-title { opacity: 0.45 !important; }
+        /* Responsive collapse */
         @media (max-width: 640px) {
           .xp-j-grid { grid-template-columns: 1fr !important; grid-auto-rows: auto !important; }
           .xp-j-grid > * { grid-column: 1 / -1 !important; grid-row: auto !important; }
         }
-        /* Drop indicator lines — absolute positioned, no grid layout impact */
-        .xp-j-drop-before { position: relative; }
-        .xp-j-drop-before::before {
-          content: ''; position: absolute; top: -5px; left: 0; right: 0; height: 2px;
-          background: rgba(124,58,237,0.80); border-radius: 2px;
-          box-shadow: 0 0 6px rgba(124,58,237,0.50); z-index: 20; pointer-events: none;
-        }
-        .xp-j-drop-after { position: relative; }
-        .xp-j-drop-after::after {
-          content: ''; position: absolute; bottom: -5px; left: 0; right: 0; height: 2px;
-          background: rgba(124,58,237,0.80); border-radius: 2px;
-          box-shadow: 0 0 6px rgba(124,58,237,0.50); z-index: 20; pointer-events: none;
+        /* Ghost slot pulse during drag-move */
+        @keyframes xpGhostPulse {
+          0%, 100% { opacity: 0.85; }
+          50%       { opacity: 1; }
         }
       `}</style>
 
@@ -972,7 +1543,7 @@ export function JournalEditorContent({
         }}>
           {/* Left: back */}
           <button
-            onClick={onBack}
+            onClick={() => guardedNavigate(onBack)}
             style={{
               padding: '5px 10px', borderRadius: 8, border: '0.5px solid rgba(255,255,255,0.16)',
               background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.78)',
@@ -988,7 +1559,7 @@ export function JournalEditorContent({
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14, pointerEvents: 'auto' }}>
               <button
-                onClick={() => onNavigateDay(-1)}
+                onClick={() => guardedNavigate(() => onNavigateDay(-1))}
                 title="Previous day"
                 style={{
                   width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
@@ -1010,7 +1581,7 @@ export function JournalEditorContent({
                 {fmtEditorDate(dateKey)}
               </span>
               <button
-                onClick={() => onNavigateDay(1)}
+                onClick={() => guardedNavigate(() => onNavigateDay(1))}
                 title="Next day"
                 style={{
                   width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
@@ -1035,7 +1606,7 @@ export function JournalEditorContent({
           <div style={{ flex: 1 }} />
           {!isEditorOnToday && (
             <button
-              onClick={onNavigateToday}
+              onClick={() => guardedNavigate(onNavigateToday)}
               style={{
                 padding: '3px 8px', borderRadius: 20, border: '0.5px solid rgba(255,255,255,0.22)',
                 background: 'transparent', color: 'rgba(255,255,255,0.60)',
@@ -1044,7 +1615,7 @@ export function JournalEditorContent({
             >Today</button>
           )}
           <button
-            onClick={onClose}
+            onClick={() => guardedNavigate(onClose)}
             style={{
               padding: '5px 10px', borderRadius: 8,
               border: '0.5px solid rgba(239,68,68,0.28)',
@@ -1065,10 +1636,10 @@ export function JournalEditorContent({
         />
       ) : (
         <>
-          {/* Block list — flex-wrap; blocks sized by block.width % for free side-by-side layout */}
+          {/* Block list — masonry grid layout */}
           <div
             style={{ flex: 1, overflowY: 'auto', padding: '12px 20px 8px', minHeight: 0 }}
-            onClick={() => { setSelectedBlockId(null); setMoveModeId(null) }}
+            onClick={() => { setSelectedBlockId(null); setMoveModeId(null); setResizeModeId(null); setSelectionRect(null) }}
           >
             <div
               ref={blockListRef}
@@ -1081,84 +1652,120 @@ export function JournalEditorContent({
                 alignContent: 'start',
               }}
             >
-              {blocks.map((block, idx) => {
-                const w          = block.width ?? 100
-                const isSelected = selectedBlockId === block.id
-                const isSelectable = block.type !== 'text'
-                const isMoveMode = moveModeId === block.id
-                const isDragging = isMoveMode && dragPos !== null
-                const colSpan    = widthToColSpan(w)
-                // Drop indicator: show before this block, or after last block
-                const showDropBefore = dragPos !== null && !isDragging && dropIdx === idx
-                const showDropAfter  = dragPos !== null && !isDragging && idx === blocks.length - 1 && dropIdx >= blocks.length
-                const dropClass = showDropBefore ? 'xp-j-drop-before' : showDropAfter ? 'xp-j-drop-after' : ''
+              {(() => {
+                const ghostBlock = dragPos !== null && dragMoveRef.current
+                  ? blocks.find(b => b.id === dragMoveRef.current!.blockId)
+                  : null
+                const ghostColSpan = ghostBlock ? widthToColSpan(ghostBlock.width ?? 100) : 6
+                const ghostBlockH  = dragMoveRef.current?.blockH
 
-                return (
-                  <GridBlockItem
-                    key={block.id}
-                    blockId={block.id}
-                    colSpan={colSpan}
-                    className={dropClass || undefined}
-                    style={{
-                      opacity: isDragging ? 0.25 : 1,
-                      cursor: isMoveMode ? (isDragging ? 'grabbing' : 'grab') : undefined,
-                      transition: isDragging ? 'none' : 'opacity 150ms',
-                    }}
-                    onClick={isSelectable ? e => {
-                      e.stopPropagation()
-                      if (moveModeId && moveModeId !== block.id) setMoveModeId(null)
-                      setSelectedBlockId(block.id)
-                    } : undefined}
-                    onMouseDown={isMoveMode && !isDragging ? e => startBlockMove(block.id, e) : undefined}
-                  >
-                    {/* Block content with hover/selection outline */}
-                    <div
-                      className={isSelectable ? 'xp-j-blk' : ''}
+                return blocks.flatMap((block, idx) => {
+                  const w          = block.width ?? 100
+                  const isSelected = selectedBlockId === block.id
+                  const isSelectable = block.type !== 'text'
+                  const isMoveMode = moveModeId === block.id
+                  const isDragging = isMoveMode && dragPos !== null
+                  const colSpan    = widthToColSpan(w)
+                  const isDraggedBlock = dragMoveRef.current?.blockId === block.id
+
+                  const elements: React.ReactNode[] = []
+
+                  // Ghost slot before this block (marks where dragged block will land)
+                  if (dragPos !== null && !isDraggedBlock && dropIdx === idx) {
+                    elements.push(
+                      <GhostSlot key="__ghost__" colSpan={ghostColSpan} blockH={ghostBlockH} />
+                    )
+                  }
+
+                  elements.push(
+                    <GridBlockItem
+                      key={block.id}
+                      blockId={block.id}
+                      colSpan={colSpan}
                       style={{
-                        position: 'relative',
-                        outline: isSelected && isSelectable ? '1.5px solid rgba(124,58,237,0.55)' : '1.5px solid transparent',
-                        borderRadius: 10, transition: 'outline 120ms',
+                        opacity: isDragging ? 0.25 : 1,
+                        cursor: isMoveMode ? (isDragging ? 'grabbing' : 'grab') : undefined,
+                        transition: isDragging ? 'none' : 'opacity 150ms',
                       }}
+                      onClick={isSelectable ? e => {
+                        e.stopPropagation()
+                        if (moveModeId   && moveModeId   !== block.id) setMoveModeId(null)
+                        if (resizeModeId && resizeModeId !== block.id) setResizeModeId(null)
+                        setSelectedBlockId(block.id)
+                      } : undefined}
+                      onMouseDown={isMoveMode && !isDragging ? e => startBlockMove(block.id, e) : undefined}
                     >
-                      {(block.type === 'text' || block.type === 'section') ? (
-                        <JournalTextBlock
-                          block={block}
-                          isDark={isDark}
-                          isOnlyBlock={blocks.length === 1}
-                          onContentChange={onBlockContentChange}
-                          onFocus={onEditorFocus}
-                          onSelectionUpdate={onEditorSelectionUpdate}
-                          onDelete={blocks.length > 1 ? () => deleteBlock(block.id) : undefined}
-                          onMoveActivate={block.type === 'section' ? () => {
-                            setMoveModeId(block.id)
-                            setSelectedBlockId(block.id)
-                          } : undefined}
-                          canMoveUp={idx > 0}
-                          canMoveDown={idx < blocks.length - 1}
-                          onMoveUp={() => moveBlock(block.id, -1)}
-                          onMoveDown={() => moveBlock(block.id, 1)}
-                        />
-                      ) : (
-                        <InlineMediaBlock
-                          block={block}
-                          isDark={isDark}
-                          onEdit={() => setDrawState({ insertAt: idx, editingBlock: block })}
-                          onMoveActivate={() => {
-                            setMoveModeId(block.id)
-                            setSelectedBlockId(block.id)
-                          }}
-                          onDelete={() => deleteBlock(block.id)}
-                        />
-                      )}
-                    </div>
+                      {/* Block content with hover/selection outline */}
+                      <div
+                        className={isSelectable ? 'xp-j-blk' : ''}
+                        style={{
+                          position: 'relative',
+                          outline: isSelected && isSelectable ? '1.5px solid rgba(124,58,237,0.55)' : '1.5px solid transparent',
+                          borderRadius: 10, transition: 'outline 120ms',
+                        }}
+                      >
+                        {(block.type === 'text' || block.type === 'section') ? (
+                          <JournalTextBlock
+                            block={block}
+                            isDark={isDark}
+                            isOnlyBlock={blocks.length === 1}
+                            onContentChange={onBlockContentChange}
+                            onFocus={onEditorFocus}
+                            onSelectionUpdate={onEditorSelectionUpdate}
+                            onDelete={blocks.length > 1 ? () => deleteBlock(block.id) : undefined}
+                            onMoveActivate={block.type === 'section' ? () => {
+                              setMoveModeId(block.id)
+                              setSelectedBlockId(block.id)
+                            } : undefined}
+                            onResizeActivate={block.type === 'section' ? () => {
+                              setResizeModeId(block.id)
+                              setSelectedBlockId(block.id)
+                            } : undefined}
+                            onColorChange={block.type === 'section'
+                              ? (color) => updateBlock(block.id, { sectionColor: color })
+                              : undefined}
+                            onNameChange={block.type === 'section'
+                              ? (name) => updateBlock(block.id, { name })
+                              : undefined}
+                            canMoveUp={idx > 0}
+                            canMoveDown={idx < blocks.length - 1}
+                            onMoveUp={() => moveBlock(block.id, -1)}
+                            onMoveDown={() => moveBlock(block.id, 1)}
+                          />
+                        ) : (
+                          <InlineMediaBlock
+                            block={block}
+                            isDark={isDark}
+                            onEdit={() => setDrawState({ insertAt: idx, editingBlock: block })}
+                            onMoveActivate={() => {
+                              setMoveModeId(block.id)
+                              setSelectedBlockId(block.id)
+                            }}
+                            onDelete={() => deleteBlock(block.id)}
+                          />
+                        )}
+                      </div>
 
-                    {/* Resize handles: image/drawing only — sections are naturally sized by content */}
-                    {isSelected && (block.type === 'image' || block.type === 'drawing') && !isDragging && (
-                      <ResizeHandles onResizeStart={(dir, e) => startBlockResize(block.id, dir, e)} />
-                    )}
-                  </GridBlockItem>
-                )
-              })}
+                      {/* Resize handles: images/drawings when selected; sections in explicit resize mode */}
+                      {!isDragging && (
+                        (isSelected && (block.type === 'image' || block.type === 'drawing')) ||
+                        (resizeModeId === block.id && block.type === 'section')
+                      ) && (
+                        <ResizeHandles onResizeStart={(dir, e) => startBlockResize(block.id, dir, e)} />
+                      )}
+                    </GridBlockItem>
+                  )
+
+                  // Ghost slot after the last block
+                  if (dragPos !== null && !isDraggedBlock && idx === blocks.length - 1 && dropIdx >= blocks.length) {
+                    elements.push(
+                      <GhostSlot key="__ghost_end__" colSpan={ghostColSpan} blockH={ghostBlockH} />
+                    )
+                  }
+
+                  return elements
+                })
+              })()}
             </div>
           </div>
 
@@ -1232,6 +1839,124 @@ export function JournalEditorContent({
                 color: saveStatus === 'saved' ? '#16a34a' : 'transparent',
                 transition: 'color 200ms',
               }}>Saved ✓</span>
+
+              {/* ── Journal Session Timer ─────────────────────────────────── */}
+              {(() => {
+                const isRunning   = timerStartTs !== null
+                const totalMs     = calcTotalMs(timerSessions, timerElapsedMs)
+                const hasSessions = timerSessions.length > 0
+
+                return (
+                  <div ref={timerWrapperRef} style={{ position: 'relative' }}>
+                    {/* Timer button */}
+                    <button
+                      className="xp-jd-btn"
+                      onClick={() => isRunning ? timerStop() : timerStart()}
+                      title={isRunning ? 'Stop timer' : 'Start journaling timer'}
+                      style={{
+                        ...dockBtn(isRunning),
+                        fontVariantNumeric: 'tabular-nums',
+                        minWidth: isRunning ? 74 : hasSessions ? 60 : 76,
+                        textAlign: 'center',
+                        letterSpacing: isRunning ? '0.02em' : 'normal',
+                      }}
+                    >
+                      {isRunning
+                        ? `■ ${fmtTimerElapsed(timerElapsedMs)}`
+                        : hasSessions
+                          ? `▶ ${fmtTimerDuration(totalMs)}`
+                          : '▶ Timer'}
+                    </button>
+
+                    {/* Session count badge — toggle popover */}
+                    {hasSessions && !isRunning && (
+                      <button
+                        onClick={() => { setShowSessions(v => !v); setConfirmDeleteIdx(null) }}
+                        title="View journal sessions"
+                        style={{
+                          position: 'absolute', top: -6, right: -6,
+                          width: 14, height: 14, borderRadius: '50%', border: 'none',
+                          background: showSessions ? 'rgba(124,58,237,0.70)' : 'rgba(124,58,237,0.38)',
+                          color: '#fff', fontSize: 8, lineHeight: '14px', textAlign: 'center',
+                          cursor: 'pointer', fontWeight: 700, padding: 0,
+                        }}
+                      >{timerSessions.length}</button>
+                    )}
+
+                    {/* Session log popover */}
+                    {showSessions && (
+                      <div style={{
+                        position: 'absolute', bottom: 'calc(100% + 8px)', right: 0,
+                        minWidth: 240, zIndex: 60,
+                        background: 'rgba(10,6,30,0.98)',
+                        border: '0.5px solid rgba(124,58,237,0.28)',
+                        borderRadius: 10, padding: '10px 14px 12px',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.65)',
+                        animation: 'xpSecMenuIn 140ms cubic-bezier(0.16,1,0.3,1) both',
+                      }}>
+                        <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'rgba(255,255,255,0.38)', marginBottom: 10, userSelect: 'none' }}>
+                          Journal Time
+                        </div>
+                        {timerSessions.map((s, i) => {
+                          const isPending = confirmDeleteIdx === i
+                          return (
+                            <div key={i} style={{ marginBottom: 10 }}>
+                              {/* Session label row */}
+                              <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'rgba(255,255,255,0.28)', marginBottom: 3, userSelect: 'none' }}>
+                                Session {i + 1}
+                              </div>
+                              {/* Time + duration + delete row */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', whiteSpace: 'nowrap', flex: 1 }}>
+                                  {fmtBlockTime(s.startTs)} – {fmtBlockTime(s.endTs)}
+                                </span>
+                                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                                  {fmtTimerDuration(s.endTs - s.startTs)}
+                                </span>
+                                {isPending ? (
+                                  <button
+                                    data-confirm-del="1"
+                                    onClick={() => deleteTimerSession(i)}
+                                    title="Confirm — permanently delete this session"
+                                    style={{
+                                      padding: '1px 6px', borderRadius: 4, flexShrink: 0,
+                                      border: '0.5px solid rgba(239,68,68,0.55)',
+                                      background: 'rgba(239,68,68,0.18)', color: '#fca5a5',
+                                      fontSize: 10, cursor: 'pointer', whiteSpace: 'nowrap',
+                                    }}
+                                  >Delete?</button>
+                                ) : (
+                                  <button
+                                    onClick={() => setConfirmDeleteIdx(i)}
+                                    title="Delete session"
+                                    style={{
+                                      width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                                      border: 'none', background: 'transparent',
+                                      color: 'rgba(255,255,255,0.20)',
+                                      fontSize: 13, lineHeight: 1, cursor: 'pointer',
+                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                      padding: 0,
+                                    }}
+                                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#fca5a5' }}
+                                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.20)' }}
+                                  >×</button>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })}
+                        <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.08)', margin: '4px 0 8px' }} />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>Total</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#c4b5fd', fontVariantNumeric: 'tabular-nums' }}>
+                            {fmtTimerDuration(totalMs)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
 
               <button
                 ref={emojiBtnRef}
@@ -1335,6 +2060,11 @@ export function JournalEditorContent({
               }} />
             )
           ))}
+
+          {/* ── Floating text formatter ─────────────────────────────────────── */}
+          {selectionRect && focusedEditor.current && (
+            <FloatingFormatter editor={focusedEditor.current} rect={selectionRect} />
+          )}
         </>
       )}
 
@@ -1348,6 +2078,18 @@ export function JournalEditorContent({
           onClose={() => setCameraInsertAt(null)}
         />
       )}
+
+      {/* ── Unsaved-changes guard dialog ──────────────────────────────────── */}
+      {showExitDialog && (
+        <UnsavedChangesDialog
+          onKeepEditing={() => {
+            setShowExitDialog(false)
+            pendingNavRef.current = null
+          }}
+          onExitWithoutSaving={commitExitWithoutSaving}
+          onSaveAndExit={commitSaveAndExit}
+        />
+      )}
     </>
   )
 }
@@ -1356,6 +2098,7 @@ export function JournalEditorContent({
 
 function SectionPicker({ isDark, onPick }: { isDark: boolean; onPick: (c: SectionColorKey) => void }) {
   const [open, setOpen] = useState(false)
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -1391,21 +2134,43 @@ function SectionPicker({ isDark, onPick }: { isDark: boolean; onPick: (c: Sectio
           border: '0.5px solid rgba(124,58,237,0.32)',
           borderRadius: 10,
           boxShadow: '0 8px 32px rgba(0,0,0,0.65)',
-          padding: '4px 0', overflow: 'hidden', minWidth: 148,
+          padding: '6px', overflow: 'hidden', minWidth: 152,
+          display: 'flex', flexDirection: 'column', gap: 2,
         }}>
-          {SECTION_COLORS.map(c => (
-            <button
-              key={c.key}
-              onClick={() => { onPick(c.key as SectionColorKey); setOpen(false) }}
-              style={{ ...menuItemStyle(true), display: 'flex', alignItems: 'center', gap: 8 }}
-            >
-              <span style={{
-                width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
-                background: getSectionStyle(c.key, true).labelColor,
-              }} />
-              {c.label}
-            </button>
-          ))}
+          {SECTION_COLORS.map(c => {
+            const isHovered = hoveredKey === c.key
+            const swatch = getSectionStyle(c.key, true)
+            const isPlainSwatch = c.key === 'plain'
+            return (
+              <button
+                key={c.key}
+                onClick={() => { onPick(c.key as SectionColorKey); setOpen(false) }}
+                onMouseEnter={() => setHoveredKey(c.key)}
+                onMouseLeave={() => setHoveredKey(null)}
+                style={{
+                  ...menuItemStyle(true),
+                  display: 'flex', alignItems: 'center', gap: 9,
+                  borderRadius: 7,
+                  background: isHovered ? 'rgba(124,58,237,0.16)' : 'transparent',
+                  transform: isHovered ? 'translateY(-1px)' : 'none',
+                  transition: 'background 100ms, transform 100ms, box-shadow 100ms',
+                  boxShadow: isHovered ? '0 2px 8px rgba(124,58,237,0.18)' : 'none',
+                }}
+              >
+                <span style={{
+                  width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
+                  transition: 'transform 100ms, box-shadow 100ms',
+                  transform: isHovered ? 'scale(1.22)' : 'scale(1)',
+                  boxShadow: isHovered ? `0 0 6px ${swatch.labelColor}99` : 'none',
+                  ...(isPlainSwatch
+                    ? { background: 'rgba(255,255,255,0.12)', border: '1.5px solid rgba(255,255,255,0.32)' }
+                    : { background: swatch.labelColor }
+                  ),
+                }} />
+                {c.label}
+              </button>
+            )
+          })}
         </div>
       )}
     </div>

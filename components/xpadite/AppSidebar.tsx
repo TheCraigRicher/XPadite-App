@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useApp } from './AppContext'
 import { XpaditeLogo } from '@/components/auth/XpaditeLogo'
 import { createBrowserClient } from '@supabase/ssr'
+import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
 const CloseIcon = () => (
@@ -92,12 +93,31 @@ export function AppSidebar({
   const [avatarUrl, setAvatarUrl] = useState('')
   const [loadingMotivate, setLoadingMotivate] = useState(false)
 
-  useEffect(() => {
+  const loadAvatar = useCallback(async () => {
     try {
       const raw = localStorage.getItem('xp9-profile')
-      if (raw) setAvatarUrl(JSON.parse(raw).avatarUrl || '')
-    } catch {}
-  }, [sidebarOpen])
+      const path: string = raw ? (JSON.parse(raw).avatarUrl || '') : ''
+      if (!path) { setAvatarUrl(''); return }
+      // Legacy data: URI — use directly
+      if (path.startsWith('data:')) { setAvatarUrl(path); return }
+      // Storage path — generate a signed URL (bucket is private)
+      const sb = createClient()
+      const { data: signed, error } = await sb.storage.from('avatars').createSignedUrl(path, 3600)
+      if (error) { console.error('Sidebar avatar error:', error); setAvatarUrl(''); return }
+      setAvatarUrl(signed?.signedUrl ?? '')
+    } catch {
+      setAvatarUrl('')
+    }
+  }, [])
+
+  // Reload signed URL whenever sidebar opens
+  useEffect(() => { loadAvatar() }, [sidebarOpen, loadAvatar])
+
+  // Reload signed URL when ProfileModal saves/removes an avatar
+  useEffect(() => {
+    window.addEventListener('xp9-avatar-changed', loadAvatar)
+    return () => window.removeEventListener('xp9-avatar-changed', loadAvatar)
+  }, [loadAvatar])
 
   async function handleSignOut() {
     setSidebarOpen(false)

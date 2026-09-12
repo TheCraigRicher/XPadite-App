@@ -167,6 +167,16 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     }).catch(() => {})
   }, [hydrated])
 
+  // Sync activeTaskTimer.taskText when the user renames the task while clocked in
+  useEffect(() => {
+    if (!activeTaskTimer) return
+    const dayData = calData[activeTaskTimer.dateKey]
+    if (!dayData) return
+    const task = dayData.tasks.find(t => t.id === activeTaskTimer.taskId)
+    if (!task || task.text === activeTaskTimer.taskText) return
+    setActiveTaskTimer(prev => prev ? { ...prev, taskText: task.text } : null)
+  }, [calData]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ─── Core data mutations ─────────────────────────────────────────────────────
 
   const updateDay = useCallback((key: string, updater: (prev: DayData) => DayData) => {

@@ -119,6 +119,7 @@ function SelectMenu({
 }) {
   const [open, setOpen] = useState(false)
   const [dropPos, setDropPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const [trigHovered, setTrigHovered] = useState(false)
   const btnRef  = useRef<HTMLButtonElement>(null)
   const dropRef = useRef<HTMLDivElement>(null)
 
@@ -151,18 +152,27 @@ function SelectMenu({
   const items = options.map(o => typeof o === 'string' ? { value: o, label: o } : o)
   const selectedLabel = items.find(o => o.value === value)?.label ?? value
 
+  const isActive = open || trigHovered
   const triggerStyle: React.CSSProperties = {
     width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     padding: '11px 14px', borderRadius: 12,
-    border: `1px solid ${isDark ? 'rgba(255,255,255,0.13)' : 'rgba(0,0,0,0.10)'}`,
+    border: isActive ? '1.5px solid #7c3aed' : `1px solid ${isDark ? 'rgba(255,255,255,0.13)' : 'rgba(0,0,0,0.10)'}`,
     background: isDark ? 'rgba(255,255,255,0.07)' : '#ffffff',
     color: isDark ? 'rgba(255,255,255,0.85)' : '#374151',
     fontSize: 13, fontWeight: 500, cursor: 'pointer', outline: 'none', textAlign: 'left',
+    boxShadow: isActive ? '0 0 0 3px rgba(124,58,237,0.12)' : 'none',
+    transition: 'border 150ms, box-shadow 150ms',
   }
 
   return (
     <div style={{ position: 'relative' }}>
-      <button ref={btnRef} style={triggerStyle} onClick={handleToggle}>
+      <button
+        ref={btnRef}
+        style={triggerStyle}
+        onClick={handleToggle}
+        onMouseEnter={() => setTrigHovered(true)}
+        onMouseLeave={() => setTrigHovered(false)}
+      >
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedLabel}</span>
         <span style={{ color: isDark ? 'rgba(255,255,255,0.40)' : '#9ca3af', display: 'flex', flexShrink: 0, marginLeft: 8 }}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
@@ -226,6 +236,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     timezone !== initialRef.current.timezone
 
   const [showPrompt, setShowPrompt] = useState(false)
+  const [hoveredSwatch, setHoveredSwatch] = useState<string | null>(null)
 
   const handleClose = () => {
     if (hasChanges) { setShowPrompt(true) } else { onClose() }
@@ -300,8 +311,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         .xp-reset-txt { background: none; border: none; cursor: pointer; display: flex; align-items: center; gap: 5px; padding: 6px 2px; font-size: 12px; font-weight: 500; transition: color 150ms }
         .xp-reset-txt:hover { color: #7c3aed !important }
         .xp-set-default:hover:not(:disabled) { background: #6d28d9 !important }
-        .xp-swatch { transition: transform 150ms ease, outline-offset 150ms ease, box-shadow 150ms ease }
-        .xp-swatch:hover { transform: scale(1.18) !important }
+        .xp-swatch { transition: transform 220ms cubic-bezier(0.34,1.06,0.64,1), outline-offset 150ms ease, box-shadow 160ms ease }
+        .xp-swatch:hover { transform: scale(1.10) !important }
         .xp-cancel:hover { opacity: 0.75 }
         .xp-save:hover { opacity: 0.88 }
       `}</style>
@@ -533,15 +544,24 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
                     {PROGRESS_COLORS.map(({ name, value, darkCheck }) => {
                       const active      = progressColor === value
+                      const isHov       = hoveredSwatch === value
                       const isBW        = value === 'bw'
                       const swatchBg    = isBW ? 'linear-gradient(to right, #000000 50%, #ffffff 50%)' : value
                       const ringColor   = isBW ? '#7c3aed' : value
                       const checkStroke = isBW ? '#7c3aed' : darkCheck ? '#1a1a1a' : 'white'
+                      const glowColor   = isBW ? '#b0b7c3' : value
+                      // Glow: same hue, spread 14px, 52% opacity via 85 hex alpha
+                      const glowShadow  = `0 0 14px 4px ${glowColor}85`
+                      const baseShadow  = active
+                        ? `0 0 0 5px ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}, 0 4px 12px rgba(0,0,0,0.25)`
+                        : '0 2px 6px rgba(0,0,0,0.18)'
                       return (
                         <button
                           key={value}
                           className="xp-swatch"
                           onClick={() => setProgressColor(value)}
+                          onMouseEnter={() => setHoveredSwatch(value)}
+                          onMouseLeave={() => setHoveredSwatch(null)}
                           title={name}
                           style={{
                             width: 42, height: 42, borderRadius: '50%', cursor: 'pointer',
@@ -549,10 +569,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                             border: isBW ? `0.5px solid ${isDark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.15)'}` : 'none',
                             outline: active ? `2.5px solid ${ringColor}` : '2.5px solid transparent',
                             outlineOffset: active ? 3 : 0,
-                            boxShadow: active
-                              ? `0 0 0 5px ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}, 0 4px 12px rgba(0,0,0,0.25)`
-                              : '0 2px 6px rgba(0,0,0,0.18)',
-                            transform: active ? 'scale(1.12)' : 'scale(1)',
+                            boxShadow: isHov ? `${baseShadow}, ${glowShadow}` : baseShadow,
+                            transform: active ? 'scale(1.10)' : 'scale(1)',
                           }}
                         >
                           {active && (

@@ -314,7 +314,7 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
             </div>
 
             {/* CENTER: Clock In + (dropdown or active capsule) + Clock Out */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
               <button
                 onClick={clockIn}
                 disabled={!!activeSession}
@@ -324,26 +324,27 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
                 <PlayIcon /> <span>Clock In</span>
               </button>
 
-              {/* Capsule: activity dropdown when idle, active info when running */}
-              {isActive ? (
-                <div
-                  className="flex items-center"
-                  style={{
-                    gap: 8,
-                    padding: '4px 16px',
-                    borderRadius: 20,
-                    background: 'rgba(0,0,0,0.25)',
-                    border: '0.5px solid rgba(255,255,255,0.08)',
-                    minWidth: 260,
-                    maxWidth: 360,
-                    overflow: 'hidden',
-                  }}
-                >
-                  {ActiveCapsuleContent}
-                </div>
-              ) : (
-                <ActivityDropdown />
-              )}
+              {/* Fixed-width capsule wrapper — same width regardless of activity/task name */}
+              <div style={{ width: 285, flexShrink: 0 }}>
+                {isActive ? (
+                  <div
+                    className="flex items-center"
+                    style={{
+                      gap: 8,
+                      padding: '4px 16px',
+                      borderRadius: 20,
+                      background: 'rgba(0,0,0,0.25)',
+                      border: '0.5px solid rgba(255,255,255,0.08)',
+                      width: '100%',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {ActiveCapsuleContent}
+                  </div>
+                ) : (
+                  <ActivityDropdown fullWidth />
+                )}
+              </div>
 
               <button
                 onClick={clockOut}

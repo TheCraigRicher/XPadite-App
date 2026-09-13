@@ -34,6 +34,7 @@ type MenuAction =
   | 'gallery'
   | 'settings'
   | 'motivate'
+  | 'qotd'
   | 'journal-notes'
   | 'notifications'
   | 'tutorials'
@@ -56,6 +57,7 @@ const MENU_ITEMS: MenuItem[] = [
   { icon: '👥', label: 'Meetings',              action: 'meetings'                                                                   },
   { icon: '🖼️', label: 'Gallery',              action: 'gallery'                                                                     },
   { icon: '🔥', label: 'Motivate Me',           action: 'motivate',      dividerBefore: true                                         },
+  { icon: '💬', label: 'Quote of the Day',      action: 'qotd'                                                                       },
   { icon: '📝', label: 'Journal Notes',         action: 'journal-notes'                                                              },
   { icon: '🔔', label: 'Notifications',         action: 'notifications'                                                              },
   { icon: '🎓', label: 'XPadite Tutorials',     action: 'tutorials',     dividerBefore: true, href: 'https://www.youtube.com/@Xpadite' },
@@ -70,6 +72,7 @@ interface AppSidebarProps {
   onSettings?: () => void
   onAnalytics?: () => void
   onMotivate?: () => void
+  onQotd?: () => void
   onProfile?: () => void
   onActivities?: () => void
   onAICoach?: () => void
@@ -82,6 +85,7 @@ export function AppSidebar({
   onSettings,
   onAnalytics,
   onMotivate,
+  onQotd,
   onProfile,
   onActivities,
   onAICoach,
@@ -142,6 +146,7 @@ export function AppSidebar({
       case 'gallery':        onGallery?.(); break
       case 'settings':       onSettings?.(); break
       case 'motivate':       onMotivate?.(); break
+      case 'qotd':           onQotd?.(); break
       case 'ai-coach':       onAICoach?.(); break
       case 'journal-notes':  onJournalNotes?.(); break
       case 'notifications':  onNotifications?.(); break

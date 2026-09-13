@@ -552,6 +552,7 @@ function ThemedApp(_props: XpaditeAppProps) {
         onSettings={() => setSettingsOpen(true)}
         onAnalytics={() => setAnalyticsOpen(true)}
         onMotivate={() => { setAICoachMotivate(true); setAICoachOpen(true) }}
+        onQotd={triggerQotd}
         onProfile={() => setProfileOpen(true)}
         onActivities={() => setActivityManagerOpen(true)}
         onAICoach={() => setAICoachOpen(true)}

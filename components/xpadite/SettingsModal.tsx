@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useApp } from './AppContext'
 import { resolveProgressColor } from './utils'
 
@@ -28,21 +29,21 @@ const LANGUAGES = [
 ]
 
 const TIMEZONES: { value: string; label: string }[] = [
-  { value: 'Pacific/Auckland',    label: 'New Zealand — Auckland'           },
   { value: 'Australia/Sydney',    label: 'Australia — Sydney'               },
-  { value: 'Asia/Tokyo',          label: 'Japan — Tokyo'                    },
-  { value: 'Asia/Singapore',      label: 'Singapore'                        },
-  { value: 'Asia/Kolkata',        label: 'India — Kolkata'                  },
-  { value: 'Europe/Berlin',       label: 'Germany — Berlin'                 },
+  { value: 'America/Toronto',     label: 'Canada — Toronto'                 },
+  { value: 'America/Vancouver',   label: 'Canada — Vancouver'               },
   { value: 'Europe/Paris',        label: 'France — Paris'                   },
+  { value: 'Europe/Berlin',       label: 'Germany — Berlin'                 },
+  { value: 'Asia/Kolkata',        label: 'India — Kolkata'                  },
+  { value: 'Asia/Tokyo',          label: 'Japan — Tokyo'                    },
+  { value: 'Pacific/Auckland',    label: 'New Zealand — Auckland'           },
+  { value: 'Asia/Singapore',      label: 'Singapore'                        },
   { value: 'Europe/London',       label: 'United Kingdom — London'          },
-  { value: 'UTC',                 label: 'UTC (Coordinated Universal Time)' },
-  { value: 'America/New_York',    label: 'USA — New York (Eastern)'         },
   { value: 'America/Chicago',     label: 'USA — Chicago (Central)'          },
   { value: 'America/Denver',      label: 'USA — Denver (Mountain)'          },
   { value: 'America/Los_Angeles', label: 'USA — Los Angeles (Pacific)'      },
-  { value: 'America/Vancouver',   label: 'Canada — Vancouver'               },
-  { value: 'America/Toronto',     label: 'Canada — Toronto'                 },
+  { value: 'America/New_York',    label: 'USA — New York (Eastern)'         },
+  { value: 'UTC',                 label: 'UTC (Coordinated Universal Time)' },
 ]
 
 function getBrowserTimezone(): string {
@@ -82,6 +83,127 @@ function Chevron({ open }: { open: boolean }) {
   )
 }
 
+function DropItem({ label, selected, isDark, hasDivider, onSelect }: {
+  label: string; selected: boolean; isDark: boolean; hasDivider: boolean; onSelect: () => void
+}) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <button
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onClick={onSelect}
+      style={{
+        width: '100%', padding: '9px 14px', textAlign: 'left',
+        background: hovered
+          ? '#7c3aed'
+          : selected ? (isDark ? 'rgba(124,58,237,0.22)' : 'rgba(124,58,237,0.08)') : 'transparent',
+        border: 'none',
+        borderBottom: hasDivider
+          ? `0.5px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}`
+          : 'none',
+        cursor: 'pointer', fontSize: 12.5, fontWeight: 500,
+        color: hovered ? 'white' : selected ? '#7c3aed' : (isDark ? 'rgba(255,255,255,0.80)' : '#374151'),
+        transition: 'background 120ms, color 120ms',
+      }}
+    >{label}</button>
+  )
+}
+
+function SelectMenu({
+  value, onChange, options, isDark,
+}: {
+  value: string
+  onChange: (v: string) => void
+  options: { value: string; label: string }[] | string[]
+  isDark: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [dropPos, setDropPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  const btnRef  = useRef<HTMLButtonElement>(null)
+  const dropRef = useRef<HTMLDivElement>(null)
+
+  // Close on outside click — must check both trigger and the portaled dropdown
+  useEffect(() => {
+    if (!open) return
+    function handler(e: MouseEvent) {
+      const t = e.target as Node
+      if (
+        btnRef.current  && !btnRef.current.contains(t) &&
+        dropRef.current && !dropRef.current.contains(t)
+      ) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const handleToggle = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      const maxH = 210
+      const spaceBelow = window.innerHeight - r.bottom
+      // Flip upward if not enough room below
+      const top = spaceBelow >= maxH + 8 ? r.bottom + 4 : r.top - maxH - 4
+      setDropPos({ top, left: r.left, width: r.width })
+    }
+    setOpen(v => !v)
+  }
+
+  const items = options.map(o => typeof o === 'string' ? { value: o, label: o } : o)
+  const selectedLabel = items.find(o => o.value === value)?.label ?? value
+
+  const triggerStyle: React.CSSProperties = {
+    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '11px 14px', borderRadius: 12,
+    border: `1px solid ${isDark ? 'rgba(255,255,255,0.13)' : 'rgba(0,0,0,0.10)'}`,
+    background: isDark ? 'rgba(255,255,255,0.07)' : '#ffffff',
+    color: isDark ? 'rgba(255,255,255,0.85)' : '#374151',
+    fontSize: 13, fontWeight: 500, cursor: 'pointer', outline: 'none', textAlign: 'left',
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button ref={btnRef} style={triggerStyle} onClick={handleToggle}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedLabel}</span>
+        <span style={{ color: isDark ? 'rgba(255,255,255,0.40)' : '#9ca3af', display: 'flex', flexShrink: 0, marginLeft: 8 }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+            style={{ width: 14, height: 14, transition: 'transform 200ms', transform: open ? 'rotate(180deg)' : 'none' }}>
+            <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+      </button>
+
+      {open && dropPos && createPortal(
+        <div
+          ref={dropRef}
+          style={{
+            position: 'fixed',
+            top: dropPos.top, left: dropPos.left, width: dropPos.width,
+            zIndex: 9999,
+            background: isDark ? '#1a0e38' : '#ffffff',
+            border: `1px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}`,
+            borderRadius: 12,
+            boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.55)' : '0 8px 28px rgba(0,0,0,0.16)',
+            overflow: 'hidden',
+            maxHeight: 210, overflowY: 'auto',
+          }}
+        >
+          {items.map((o, i) => (
+            <DropItem
+              key={o.value}
+              label={o.label}
+              selected={o.value === value}
+              isDark={isDark}
+              hasDivider={i < items.length - 1}
+              onSelect={() => { onChange(o.value); setOpen(false) }}
+            />
+          ))}
+        </div>,
+        document.body
+      )}
+    </div>
+  )
+}
+
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const { isDark, setIsDark, progressColor, setProgressColor } = useApp()
   const pc = resolveProgressColor(progressColor, isDark)
@@ -92,13 +214,45 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [openLocale, setOpenLocale] = useState(true)
 
   const [language, setLanguage] = useState('English (US)')
-  const [timezone, setTimezone] = useState('America/Vancouver')
+  const [timezone, setTimezone] = useState(() => getBrowserTimezone())
+
+  // Capture committed state when modal opens
+  const initialRef = useRef({ isDark, progressColor, language: 'English (US)', timezone: getBrowserTimezone() })
+
+  const hasChanges =
+    isDark !== initialRef.current.isDark ||
+    progressColor !== initialRef.current.progressColor ||
+    language !== initialRef.current.language ||
+    timezone !== initialRef.current.timezone
+
+  const [showPrompt, setShowPrompt] = useState(false)
+
+  const handleClose = () => {
+    if (hasChanges) { setShowPrompt(true) } else { onClose() }
+  }
+
+  const handleSaveAndClose = () => {
+    initialRef.current = { isDark, progressColor, language, timezone }
+    setShowPrompt(false)
+    onClose()
+  }
+
+  const handleDiscardAndClose = () => {
+    setIsDark(initialRef.current.isDark)
+    setProgressColor(initialRef.current.progressColor)
+    setLanguage(initialRef.current.language)
+    setTimezone(initialRef.current.timezone)
+    setShowPrompt(false)
+    onClose()
+  }
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') { if (showPrompt) setShowPrompt(false); else handleClose() }
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [showPrompt, hasChanges])
 
   // ── Design tokens ──────────────────────────────────────────────────────────
   const modalBg       = isDark ? '#15102a'                  : '#f0ecff'
@@ -109,18 +263,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const subtitleColor = isDark ? 'rgba(255,255,255,0.42)'   : '#6b7280'
   const chevronColor  = isDark ? 'rgba(255,255,255,0.32)'   : '#9ca3af'
   const footerBg      = isDark ? 'rgba(0,0,0,0.15)'         : 'rgba(255,255,255,0.70)'
-
-  const selectStyle: React.CSSProperties = {
-    width: '100%',
-    appearance: 'none',
-    WebkitAppearance: 'none',
-    padding: '11px 36px 11px 14px',
-    borderRadius: 12,
-    border: `1px solid ${isDark ? 'rgba(255,255,255,0.13)' : 'rgba(124,58,237,0.22)'}`,
-    background: isDark ? 'rgba(255,255,255,0.07)' : '#f5f0ff',
-    color: isDark ? 'rgba(255,255,255,0.85)' : '#111827',
-    fontSize: 13, fontWeight: 500, cursor: 'pointer', outline: 'none',
-  }
 
   return (
     <>
@@ -159,6 +301,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         .xp-reset-txt:hover { color: #7c3aed !important }
         .xp-set-default:hover:not(:disabled) { background: #6d28d9 !important }
         .xp-swatch { transition: transform 150ms ease, outline-offset 150ms ease, box-shadow 150ms ease }
+        .xp-swatch:hover { transform: scale(1.18) !important }
         .xp-cancel:hover { opacity: 0.75 }
         .xp-save:hover { opacity: 0.88 }
       `}</style>
@@ -172,7 +315,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           WebkitBackdropFilter: 'blur(8px)',
           animation: 'xp-set-backdrop 200ms ease forwards',
         }}
-        onClick={onClose}
+        onClick={handleClose}
       >
 
         {/*
@@ -236,7 +379,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
             <button
               className="xp-set-close"
-              onClick={onClose}
+              onClick={handleClose}
               style={{
                 width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -387,7 +530,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 22px 24px 36px' }}>
 
                   {/* Color swatches */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
                     {PROGRESS_COLORS.map(({ name, value, darkCheck }) => {
                       const active      = progressColor === value
                       const isBW        = value === 'bw'
@@ -443,14 +586,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 20px 22px 36px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
 
-                    <div className="xp-plan-card xp-plan-purple" style={{
-                      background: 'linear-gradient(to right, #7c3aed, #6d28d9)',
+                    {/* Pro Monthly — gray (matches website Basic/Pro gray tier) */}
+                    <div className="xp-plan-card" style={{
+                      background: 'linear-gradient(135deg, #64748b 0%, #475569 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
-                      boxShadow: '0 4px 18px rgba(124,58,237,0.32)',
+                      boxShadow: '0 4px 18px rgba(71,85,105,0.38)',
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
+                      transition: 'transform 160ms ease, box-shadow 160ms ease, filter 160ms ease', cursor: 'pointer',
                     }}>
                       <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Monthly Plan $7</p>
-                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.80)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.88)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
                         <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" style={{ width: 11, height: 11, flexShrink: 0 }}>
                           <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
@@ -458,34 +603,38 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       </p>
                     </div>
 
+                    {/* Pro Yearly — purple */}
                     <div className="xp-plan-card xp-plan-purple" style={{
-                      background: 'linear-gradient(to right, #7c3aed, #4c1d95)',
+                      background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
-                      boxShadow: '0 4px 18px rgba(124,58,237,0.22)',
+                      boxShadow: '0 4px 18px rgba(124,58,237,0.32)',
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
                     }}>
                       <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Yearly Plan $59.99</p>
-                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.58)', marginTop: 6 }}>Upgrade</p>
-                    </div>
-
-                    <div className="xp-plan-card xp-plan-green" style={{
-                      background: 'linear-gradient(to right, #22c55e, #16a34a)',
-                      borderRadius: 14, padding: '20px 16px', textAlign: 'center',
-                      boxShadow: '0 4px 18px rgba(22,163,74,0.24)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
-                    }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Premium Monthly Plan $10</p>
                       <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.65)', marginTop: 6 }}>Upgrade</p>
                     </div>
 
-                    <div className="xp-plan-card xp-plan-orange" style={{
-                      background: 'linear-gradient(to right, #f97316, #d97706)',
+                    {/* Premium Monthly — green */}
+                    <div className="xp-plan-card xp-plan-green" style={{
+                      background: 'linear-gradient(135deg, #22c55e 0%, #15803d 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
-                      boxShadow: '0 4px 18px rgba(234,88,12,0.24)',
+                      boxShadow: '0 4px 18px rgba(22,163,74,0.30)',
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
                     }}>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Premium Monthly Plan $10</p>
+                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.70)', marginTop: 6 }}>Upgrade</p>
+                    </div>
+
+                    {/* Premium Yearly — gold */}
+                    <div className="xp-plan-card" style={{
+                      background: 'linear-gradient(135deg, #f59e0b 0%, #b45309 100%)',
+                      borderRadius: 14, padding: '20px 16px', textAlign: 'center',
+                      boxShadow: '0 4px 18px rgba(245,158,11,0.34)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
+                      transition: 'transform 160ms ease, box-shadow 160ms ease, filter 160ms ease', cursor: 'pointer',
+                    }}>
                       <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Premium Yearly Plan $89.99</p>
-                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.68)', marginTop: 6 }}>Upgrade</p>
+                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.75)', marginTop: 6 }}>Upgrade</p>
                     </div>
 
                   </div>
@@ -523,38 +672,22 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
                     <div>
                       <p style={{ fontSize: 11.5, fontWeight: 600, color: subtitleColor, marginBottom: 9 }}>Language</p>
-                      <div style={{ position: 'relative' }}>
-                        <select value={language} onChange={e => setLanguage(e.target.value)} style={selectStyle}>
-                          {LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
-                        </select>
-                        <span style={{
-                          position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
-                          pointerEvents: 'none', display: 'flex',
-                          color: isDark ? 'rgba(255,255,255,0.45)' : '#9ca3af',
-                        }}>
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 14, height: 14 }}>
-                            <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        </span>
-                      </div>
+                      <SelectMenu
+                        value={language}
+                        onChange={setLanguage}
+                        options={LANGUAGES}
+                        isDark={isDark}
+                      />
                     </div>
 
                     <div>
                       <p style={{ fontSize: 11.5, fontWeight: 600, color: subtitleColor, marginBottom: 9 }}>Time Zone</p>
-                      <div style={{ position: 'relative' }}>
-                        <select value={timezone} onChange={e => setTimezone(e.target.value)} style={selectStyle}>
-                          {TIMEZONES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                        </select>
-                        <span style={{
-                          position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
-                          pointerEvents: 'none', display: 'flex',
-                          color: isDark ? 'rgba(255,255,255,0.45)' : '#9ca3af',
-                        }}>
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 14, height: 14 }}>
-                            <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        </span>
-                      </div>
+                      <SelectMenu
+                        value={timezone}
+                        onChange={setTimezone}
+                        options={TIMEZONES}
+                        isDark={isDark}
+                      />
                     </div>
 
                   </div>
@@ -597,7 +730,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
               <button
                 className="xp-cancel"
-                onClick={onClose}
+                onClick={handleClose}
                 style={{
                   fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
                   color: isDark ? 'rgba(255,255,255,0.55)' : '#4b5563',
@@ -611,7 +744,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               </button>
               <button
                 className="xp-save"
-                onClick={onClose}
+                onClick={handleSaveAndClose}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 7,
                   fontSize: 12.5, fontWeight: 700, cursor: 'pointer', color: 'white',
@@ -631,6 +764,91 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
         </div>
       </div>
+
+      {/* ── Unsaved Changes Confirmation Dialog ──────────────────────────── */}
+      {showPrompt && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center"
+          style={{ background: 'rgba(10,4,24,0.55)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)' }}
+          onClick={() => setShowPrompt(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: 340, borderRadius: 20, overflow: 'hidden',
+              background: isDark ? '#1a0e38' : '#ffffff',
+              border: `1px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(124,58,237,0.16)'}`,
+              boxShadow: isDark ? '0 24px 64px rgba(0,0,0,0.60)' : '0 24px 64px rgba(124,58,237,0.18)',
+            }}
+          >
+            {/* Dialog header */}
+            <div style={{
+              padding: '20px 22px 16px',
+              borderBottom: `0.5px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'}`,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                  background: 'rgba(124,58,237,0.12)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2" style={{ width: 15, height: 15 }}>
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" strokeLinecap="round" strokeLinejoin="round"/>
+                    <line x1="12" y1="9" x2="12" y2="13" strokeLinecap="round"/>
+                    <line x1="12" y1="17" x2="12.01" y2="17" strokeLinecap="round"/>
+                  </svg>
+                </div>
+                <p style={{ fontSize: 15, fontWeight: 700, color: isDark ? 'rgba(255,255,255,0.92)' : '#111827' }}>Unsaved Changes</p>
+              </div>
+              <p style={{ fontSize: 12.5, lineHeight: 1.6, color: isDark ? 'rgba(255,255,255,0.48)' : '#6b7280', paddingLeft: 42 }}>
+                You have unsaved changes. Would you like to save them before closing?
+              </p>
+            </div>
+
+            {/* Dialog actions */}
+            <div style={{ padding: '14px 18px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button
+                onClick={handleSaveAndClose}
+                style={{
+                  width: '100%', padding: '11px 16px', borderRadius: 12, cursor: 'pointer',
+                  background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                  border: 'none', color: 'white', fontSize: 13, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                  boxShadow: '0 4px 14px rgba(124,58,237,0.40)',
+                }}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" style={{ width: 13, height: 13 }}>
+                  <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Save Changes
+              </button>
+              <button
+                onClick={handleDiscardAndClose}
+                style={{
+                  width: '100%', padding: '11px 16px', borderRadius: 12, cursor: 'pointer',
+                  background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                  border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}`,
+                  color: isDark ? 'rgba(255,255,255,0.60)' : '#6b7280',
+                  fontSize: 13, fontWeight: 600,
+                }}
+              >
+                Discard &amp; Close
+              </button>
+              <button
+                onClick={() => setShowPrompt(false)}
+                style={{
+                  width: '100%', padding: '9px 16px', borderRadius: 12, cursor: 'pointer',
+                  background: 'transparent', border: 'none',
+                  color: isDark ? 'rgba(255,255,255,0.35)' : '#9ca3af',
+                  fontSize: 12.5, fontWeight: 500,
+                }}
+              >
+                Keep Editing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

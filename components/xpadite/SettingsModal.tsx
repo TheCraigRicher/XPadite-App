@@ -189,9 +189,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <div
           className="w-full max-w-[600px]"
           style={{
-            display: 'flex',
-            flexDirection: 'column',
-            maxHeight: 'calc(92vh - 32px)',
+            display: 'grid',
+            gridTemplateRows: 'auto 1fr auto',
+            maxHeight: 'calc(90vh - 32px)',
             background: modalBg,
             border: `1px solid ${isDark ? 'rgba(124,58,237,0.36)' : 'rgba(124,58,237,0.18)'}`,
             borderRadius: 24,
@@ -273,7 +273,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           >
 
             {/* ══ THEME MODE ══════════════════════════════════════════════════ */}
-            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden' }}>
+            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden', flexShrink: 0 }}>
 
               {/* Section header — clickable to toggle */}
               <button className="xp-sec-btn" onClick={() => setOpenTheme(v => !v)}>
@@ -353,7 +353,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
 
             {/* ══ THEME COLOR ═════════════════════════════════════════════════ */}
-            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden' }}>
+            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden', flexShrink: 0 }}>
 
               {/* Section header — div (not button) because it contains a nested button */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '18px 22px' }}>
@@ -454,7 +454,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
 
             {/* ══ SUBSCRIPTION PLAN ═══════════════════════════════════════════ */}
-            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden' }}>
+            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden', flexShrink: 0 }}>
 
               <button className="xp-sec-btn" onClick={() => setOpenPlan(v => !v)}>
                 <SectionIcon emoji="💎" />
@@ -531,7 +531,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
 
             {/* ══ LANGUAGE & REGION ═══════════════════════════════════════════ */}
-            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden' }}>
+            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden', flexShrink: 0 }}>
 
               <button className="xp-sec-btn" onClick={() => setOpenLocale(v => !v)}>
                 <SectionIcon emoji="🌐" />

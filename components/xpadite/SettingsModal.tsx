@@ -66,7 +66,7 @@ const PRO_CORE_FEATURES = [
 const AI_FEATURES = [
   'XPadite AI Coach',
   'AI-powered productivity insights',
-  'Turn plans & journal entries into actionable tasks',
+  'AI plan & journal-to-task conversion',
   'AI-powered Motivate Me',
 ]
 
@@ -95,18 +95,18 @@ const PLAN_CONFIGS: Record<string, PlanConfig> = {
   'pro-monthly': {
     title: 'Pro Plan',
     subtitle: 'Everything you need to plan, execute and track your progress.',
-    badge: 'Most Popular',
-    badgeIcon: '👑',
+    badge: 'Current Plan',
+    badgeIcon: '✓',
     price: '$7',
     priceLabel: '/ month',
-    headerGradient: 'linear-gradient(135deg, #4c1d95 0%, #6d28d9 45%, #7c3aed 100%)',
-    accentColor: '#7c3aed',
-    accentGlow: 'rgba(124,58,237,0.22)',
-    interiorLight: '#fdf9ff',
-    interiorDark: '#100a22',
+    headerGradient: 'linear-gradient(135deg, #6b7280 0%, #9ca3af 55%, #d1d5db 100%)',
+    accentColor: '#6b7280',
+    accentGlow: 'rgba(107,114,128,0.20)',
+    interiorLight: '#f9fafb',
+    interiorDark: '#111318',
     ctaLabel: 'Get Pro Monthly',
-    ctaBg: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
-    ctaGlow: 'rgba(124,58,237,0.44)',
+    ctaBg: 'linear-gradient(135deg, #6b7280 0%, #9ca3af 55%, #d1d5db 100%)',
+    ctaGlow: 'rgba(107,114,128,0.40)',
     includedFeatures: PRO_CORE_FEATURES,
     excludedFeatures: AI_FEATURES,
   },
@@ -155,14 +155,14 @@ const PLAN_CONFIGS: Record<string, PlanConfig> = {
     price: '$89.99',
     priceLabel: '/ year',
     savings: 'Save $30 vs monthly',
-    headerGradient: 'linear-gradient(135deg, #14532d 0%, #15803d 45%, #22c55e 100%)',
-    accentColor: '#16a34a',
-    accentGlow: 'rgba(22,163,74,0.22)',
-    interiorLight: '#f0fdf4',
-    interiorDark: '#071a10',
+    headerGradient: 'linear-gradient(135deg, #b45309 0%, #d97706 45%, #f59e0b 75%, #fbbf24 100%)',
+    accentColor: '#b45309',
+    accentGlow: 'rgba(180,83,9,0.18)',
+    interiorLight: '#fffbeb',
+    interiorDark: '#1c0f00',
     ctaLabel: 'Get Premium Yearly',
-    ctaBg: 'linear-gradient(135deg, #15803d 0%, #22c55e 100%)',
-    ctaGlow: 'rgba(22,163,74,0.40)',
+    ctaBg: 'linear-gradient(135deg, #b45309 0%, #d97706 55%, #fbbf24 100%)',
+    ctaGlow: 'rgba(217,119,6,0.48)',
     includedFeatures: [...PRO_CORE_FEATURES, ...AI_FEATURES],
     excludedFeatures: [],
   },
@@ -399,7 +399,7 @@ function PlanPopup({ planId, isDark, onClose }: {
         <div style={{ background: cfg.headerGradient, padding: '22px 22px 20px', position: 'relative', flexShrink: 0 }}>
 
           {/* Badge — top right */}
-          <div style={{
+          <div className="xp-badge-pill" style={{
             position: 'absolute', top: 16, right: 52,
             display: 'inline-flex', alignItems: 'center', gap: 5,
             background: 'rgba(255,255,255,0.22)',
@@ -443,25 +443,38 @@ function PlanPopup({ planId, isDark, onClose }: {
         >
 
           {/* Pricing */}
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 44, fontWeight: 800, color: textPrimary, lineHeight: 1, letterSpacing: '-0.03em' }}>
-              {cfg.price}
-            </span>
-            <span style={{ fontSize: 14, color: textSecondary, fontWeight: 500 }}>
-              {cfg.priceLabel}
-            </span>
-            {cfg.savings && (
-              <span style={{
-                fontSize: 11, fontWeight: 700, color: cfg.accentColor,
-                background: cfg.accentGlow, padding: '3px 9px', borderRadius: 8,
-              }}>{cfg.savings}</span>
-            )}
-          </div>
+          {cfg.savings ? (
+            /* Yearly plans (gold & purple): price + /year + savings badge — centered as a group, inline */
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 6 }}>
+              <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 44, fontWeight: 800, color: textPrimary, lineHeight: 1, letterSpacing: '-0.03em' }}>
+                  {cfg.price}
+                </span>
+                <span style={{ fontSize: 14, color: textSecondary, fontWeight: 500 }}>
+                  {cfg.priceLabel}
+                </span>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, color: cfg.accentColor,
+                  background: cfg.accentGlow, padding: '4px 11px', borderRadius: 8,
+                }}>{cfg.savings}</span>
+              </div>
+            </div>
+          ) : (
+            /* Non-yearly plans: price + label centered, no savings badge */
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+              <span style={{ fontSize: 44, fontWeight: 800, color: textPrimary, lineHeight: 1, letterSpacing: '-0.03em' }}>
+                {cfg.price}
+              </span>
+              <span style={{ fontSize: 14, color: textSecondary, fontWeight: 500 }}>
+                {cfg.priceLabel}
+              </span>
+            </div>
+          )}
 
           <div style={{ height: 1, background: divider, margin: '14px 0' }} />
 
-          {/* Feature list */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 9, paddingBottom: 4 }}>
+          {/* Feature list — centered block, items left-aligned within */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9, paddingBottom: 4, maxWidth: 360, margin: '0 auto' }}>
             {cfg.includedFeatures.map((feat, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{
@@ -474,9 +487,6 @@ function PlanPopup({ planId, isDark, onClose }: {
                   </svg>
                 </div>
                 <span style={{ fontSize: 12.5, color: textPrimary, lineHeight: 1.4, flex: 1 }}>{feat}</span>
-                <svg viewBox="0 0 24 24" fill="none" stroke={cfg.accentColor} strokeWidth="2.5" style={{ width: 14, height: 14, flexShrink: 0, opacity: 0.90 }}>
-                  <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
               </div>
             ))}
 
@@ -496,10 +506,6 @@ function PlanPopup({ planId, isDark, onClose }: {
                       </svg>
                     </div>
                     <span style={{ fontSize: 12.5, color: textSecondary, lineHeight: 1.4, flex: 1 }}>{feat}</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" style={{ width: 14, height: 14, flexShrink: 0 }}>
-                      <line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" />
-                      <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
-                    </svg>
                   </div>
                 ))}
               </>
@@ -514,21 +520,17 @@ function PlanPopup({ planId, isDark, onClose }: {
           background: isDark ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.95)',
           borderTop: `1px solid ${divider}`,
         }}>
-          <button style={{
+          <button className="xp-plan-cta" style={{
             width: '100%', padding: '14px 20px', borderRadius: 14, cursor: 'pointer',
             background: cfg.ctaBg, border: 'none', color: 'white',
             fontSize: 14.5, fontWeight: 700, letterSpacing: '0.01em',
-            boxShadow: `0 4px 20px ${cfg.ctaGlow}`, transition: 'opacity 150ms',
+            boxShadow: `0 4px 20px ${cfg.ctaGlow}`,
           }}>
             {cfg.ctaLabel}
           </button>
-          {cfg.note ? (
+          {cfg.note && (
             <p style={{ textAlign: 'center', fontSize: 10.5, color: textSecondary, marginTop: 10, lineHeight: 1.5 }}>
               {cfg.note}
-            </p>
-          ) : (
-            <p style={{ textAlign: 'center', fontSize: 11, color: textSecondary, marginTop: 10 }}>
-              Cancel anytime
             </p>
           )}
         </div>
@@ -645,7 +647,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         .xp-swatch:hover { transform: scale(1.10) !important }
         .xp-cancel:hover { opacity: 0.75 }
         .xp-save:hover { opacity: 0.88 }
-        .xp-plan-cta:hover { opacity: 0.88 }
+        .xp-plan-cta { transition: opacity 160ms, transform 180ms cubic-bezier(0.34,1.06,0.64,1), box-shadow 200ms, filter 160ms }
+        .xp-plan-cta:hover { opacity: 0.93; transform: translateY(-2px) scale(1.013); filter: brightness(1.10) }
+        .xp-plan-cta:active { transform: scale(0.965) translateY(0px) !important; opacity: 0.80; filter: brightness(0.92) }
+        .xp-badge-pill { transition: transform 180ms cubic-bezier(0.34,1.06,0.64,1); transform-origin: center; cursor: default }
+        .xp-badge-pill:hover { transform: scale(1.14) }
       `}</style>
 
       {/* ── Backdrop ─────────────────────────────────────────────────────────── */}
@@ -935,11 +941,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 20px 22px 36px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
 
-                    {/* Pro Monthly — gray */}
+                    {/* Pro Monthly — light gray */}
                     <div className="xp-plan-card" onClick={() => setActivePlanPopup('pro-monthly')} style={{
-                      background: 'linear-gradient(135deg, #64748b 0%, #475569 100%)',
+                      background: 'linear-gradient(135deg, #6b7280 0%, #9ca3af 60%, #d1d5db 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
-                      boxShadow: '0 4px 18px rgba(71,85,105,0.38)',
+                      boxShadow: '0 4px 18px rgba(107,114,128,0.34)',
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
                       transition: 'transform 160ms ease, box-shadow 160ms ease, filter 160ms ease', cursor: 'pointer',
                     }}>
@@ -974,11 +980,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.70)', marginTop: 6 }}>Upgrade</p>
                     </div>
 
-                    {/* Premium Yearly — gold */}
+                    {/* Premium Yearly — true gold */}
                     <div className="xp-plan-card" onClick={() => setActivePlanPopup('premium-yearly')} style={{
-                      background: 'linear-gradient(135deg, #f59e0b 0%, #b45309 100%)',
+                      background: 'linear-gradient(135deg, #92400e 0%, #d97706 50%, #fbbf24 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
-                      boxShadow: '0 4px 18px rgba(245,158,11,0.34)',
+                      boxShadow: '0 4px 18px rgba(217,119,6,0.42)',
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
                       transition: 'transform 160ms ease, box-shadow 160ms ease, filter 160ms ease', cursor: 'pointer',
                     }}>
@@ -995,7 +1001,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       boxShadow: '0 4px 18px rgba(6,182,212,0.28)',
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
                     }}>
-                      <p style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>LTD – Life Time Deal $99</p>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>LTD – Lifetime Deal $99</p>
                       <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.68)', marginTop: 6 }}>Upgrade</p>
                     </div>
                   </div>

@@ -663,7 +663,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           WebkitBackdropFilter: 'blur(8px)',
           animation: 'xp-set-backdrop 200ms ease forwards',
         }}
-        onClick={handleClose}
       >
 
         {/*
@@ -883,7 +882,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       const active      = progressColor === value
                       const isHov       = hoveredSwatch === value
                       const isBW        = value === 'bw'
-                      const swatchBg    = isBW ? 'linear-gradient(to right, #000000 50%, #ffffff 50%)' : value
+                      const swatchBg    = isBW ? 'conic-gradient(#000000 0turn 0.5turn, #f0f0f0 0.5turn 1turn)' : value
                       const ringColor   = isBW ? '#7c3aed' : value
                       const checkStroke = isBW ? '#7c3aed' : darkCheck ? '#1a1a1a' : 'white'
                       const glowColor   = isBW ? '#b0b7c3' : value
@@ -901,18 +900,19 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                           onMouseLeave={() => setHoveredSwatch(null)}
                           title={name}
                           style={{
-                            width: 42, height: 42, borderRadius: '50%', cursor: 'pointer',
+                            width: 36, height: 36, borderRadius: '50%', cursor: 'pointer',
                             background: swatchBg, flexShrink: 0, position: 'relative', overflow: 'hidden',
-                            border: isBW ? `0.5px solid ${isDark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.15)'}` : 'none',
+                            border: isBW ? `0.5px solid ${isDark ? 'rgba(255,255,255,0.18)' : 'transparent'}` : 'none',
                             outline: active ? `2.5px solid ${ringColor}` : '2.5px solid transparent',
                             outlineOffset: active ? 3 : 0,
                             boxShadow: isHov ? `${baseShadow}, ${glowShadow}` : baseShadow,
                             transform: active ? 'scale(1.10)' : 'scale(1)',
+                            clipPath: isBW ? 'circle(49%)' : undefined,
                           }}
                         >
                           {active && (
                             <svg viewBox="0 0 24 24" fill="none" stroke={checkStroke} strokeWidth="3"
-                              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', padding: '9px' }}>
+                              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', padding: '7px' }}>
                               <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
                           )}

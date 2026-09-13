@@ -324,8 +324,8 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
             gap: 8,
           }}
         >
-          {/* LEFT: session controls */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {/* LEFT: burger only */}
+          <div style={{ display: 'flex', alignItems: 'center' }}>
             <button
               onClick={() => setSidebarOpen(true)}
               className="p-1.5 rounded-md transition-colors hover:bg-white/10 flex-shrink-0"
@@ -334,20 +334,10 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
             >
               <BurgerIcon />
             </button>
+          </div>
 
-            <div className="w-px h-4 flex-shrink-0" style={{ background: 'rgba(255,255,255,0.12)' }} />
-
-            <span
-              className="inline-flex text-xs font-mono px-2 py-1 rounded-md flex-shrink-0"
-              style={{
-                background: activeSession ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.07)',
-                color: activeSession ? '#86efac' : 'rgba(255,255,255,0.4)',
-                border: `0.5px solid ${activeSession ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.08)'}`,
-              }}
-            >
-              {formatHMS(elapsed)}
-            </span>
-
+          {/* CENTER: Clock In + active capsule + Clock Out — all tightly grouped */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <button
               onClick={clockIn}
               disabled={!!activeSession}
@@ -357,6 +347,40 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
               <PlayIcon /> <span>Clock In</span>
             </button>
 
+            <div
+              className="flex items-center"
+              style={{
+                gap: 8,
+                padding: '4px 16px',
+                borderRadius: 20,
+                background: (activeTaskTimer || activeSession) ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.04)',
+                border: `0.5px solid ${(activeTaskTimer || activeSession) ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.05)'}`,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {activeTaskTimer ? (
+                <>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444', display: 'inline-block', flexShrink: 0, animation: 'xp-blink 1.4s ease-in-out infinite' }} />
+                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontWeight: 700, letterSpacing: '0.08em' }}>ACTIVE</span>
+                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.55)', fontWeight: 600 }}>Task {activeTaskTimer.taskIndex + 1}</span>
+                  <span style={{ fontSize: 10, color: '#93c5fd', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeTaskTimer.taskText}</span>
+                  <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#86efac', fontWeight: 700 }}>{formatHMS(taskElapsed)}</span>
+                </>
+              ) : activeSession ? (
+                <>
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444', display: 'inline-block', flexShrink: 0, animation: 'xp-blink 1.4s ease-in-out infinite' }} />
+                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontWeight: 700, letterSpacing: '0.08em' }}>ACTIVE</span>
+                  <span style={{ fontSize: 10, color: activeSession.actColor, fontWeight: 600, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeSession.actName}</span>
+                  <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#86efac', fontWeight: 700 }}>{formatHMS(elapsed)}</span>
+                </>
+              ) : (
+                <>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'inline-block', flexShrink: 0 }} />
+                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontWeight: 500 }}>No Active Task</span>
+                </>
+              )}
+            </div>
+
             <button
               onClick={clockOut}
               disabled={!activeSession}
@@ -365,50 +389,9 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
             >
               <StopIcon /> <span>Clock Out</span>
             </button>
-
-            {activeSession && (
-              <span className="text-[11px] truncate" style={{ color: '#93c5fd', maxWidth: 100 }}>
-                ● {activeSession.actName}
-              </span>
-            )}
           </div>
 
-          {/* CENTER: Active task / session indicator */}
-          <div
-            className="flex items-center"
-            style={{
-              gap: 8,
-              padding: '4px 16px',
-              borderRadius: 20,
-              background: (activeTaskTimer || activeSession) ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.04)',
-              border: `0.5px solid ${(activeTaskTimer || activeSession) ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.05)'}`,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {activeTaskTimer ? (
-              <>
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444', display: 'inline-block', flexShrink: 0, animation: 'xp-blink 1.4s ease-in-out infinite' }} />
-                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontWeight: 700, letterSpacing: '0.08em' }}>ACTIVE</span>
-                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.55)', fontWeight: 600 }}>Task {activeTaskTimer.taskIndex + 1}</span>
-                <span style={{ fontSize: 10, color: '#93c5fd', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeTaskTimer.taskText}</span>
-                <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#86efac', fontWeight: 700 }}>{formatHMS(taskElapsed)}</span>
-              </>
-            ) : activeSession ? (
-              <>
-                <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444', display: 'inline-block', flexShrink: 0, animation: 'xp-blink 1.4s ease-in-out infinite' }} />
-                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', fontWeight: 700, letterSpacing: '0.08em' }}>ACTIVE</span>
-                <span style={{ fontSize: 10, color: activeSession.actColor, fontWeight: 600, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>{activeSession.actName}</span>
-                <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#86efac', fontWeight: 700 }}>{formatHMS(elapsed)}</span>
-              </>
-            ) : (
-              <>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'inline-block', flexShrink: 0 }} />
-                <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontWeight: 500 }}>No Active Task</span>
-              </>
-            )}
-          </div>
-
-          {/* RIGHT: action buttons */}
+          {/* RIGHT: toggle + QOTD */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
             {ThemeToggle}
           </div>

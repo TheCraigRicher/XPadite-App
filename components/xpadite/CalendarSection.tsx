@@ -59,20 +59,6 @@ export function CalendarSection({ onDayDoubleClick, onMonthZoom, activeMonth }: 
 
   return (
     <div className="px-3 pb-6">
-      {/* Controls row: hint + today button */}
-      <div className="flex items-center justify-between mb-3 px-1">
-        <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>
-          Single click to mark productive &middot; Double-click to add notes
-        </p>
-        <button
-          onClick={jumpToToday}
-          className="text-[10px] px-2.5 py-1 rounded-full border transition-colors hover:border-violet-400 hover:text-violet-500"
-          style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt3)' }}
-        >
-          Today
-        </button>
-      </div>
-
       {/* Floating card container */}
       <div
         className="rounded-2xl overflow-hidden"

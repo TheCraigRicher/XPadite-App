@@ -26,23 +26,22 @@ const StopIcon = () => (
   </svg>
 )
 
-const SunIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-3 h-3">
-    <circle cx="12" cy="12" r="4" />
-    <line x1="12" y1="2" x2="12" y2="5" strokeLinecap="round" />
-    <line x1="12" y1="19" x2="12" y2="22" strokeLinecap="round" />
-    <line x1="4.22" y1="4.22" x2="6.34" y2="6.34" strokeLinecap="round" />
-    <line x1="17.66" y1="17.66" x2="19.78" y2="19.78" strokeLinecap="round" />
-    <line x1="2" y1="12" x2="5" y2="12" strokeLinecap="round" />
-    <line x1="19" y1="12" x2="22" y2="12" strokeLinecap="round" />
-    <line x1="4.22" y1="19.78" x2="6.34" y2="17.66" strokeLinecap="round" />
-    <line x1="17.66" y1="6.34" x2="19.78" y2="4.22" strokeLinecap="round" />
+const FilledViewIcon = () => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
+    <circle cx="6" cy="6" r="3" />
+    <circle cx="18" cy="6" r="3" />
+    <circle cx="6" cy="18" r="3" />
+    <circle cx="18" cy="18" r="3" />
+    <circle cx="12" cy="12" r="2.5" opacity="0.6" />
   </svg>
 )
 
-const MoonIcon = () => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
-    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+const CleanViewIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3">
+    <rect x="3" y="3" width="8" height="8" rx="1.5" />
+    <rect x="13" y="3" width="8" height="8" rx="1.5" />
+    <rect x="3" y="13" width="8" height="8" rx="1.5" />
+    <rect x="13" y="13" width="8" height="8" rx="1.5" />
   </svg>
 )
 
@@ -54,6 +53,7 @@ interface AppHeaderProps {
 export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
   const {
     isDark, setIsDark,
+    calendarClean, setCalendarClean,
     activeSession, setActiveSession,
     activeTaskTimer, setActiveTaskTimer,
     addSession,
@@ -128,33 +128,27 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
   const elapsed = activeSession ? now - activeSession.startTs : 0
   const taskElapsed = activeTaskTimer ? now - activeTaskTimer.startTs : 0
 
-  // Theme toggle — shared between mobile and desktop
+  // Calendar view toggle — filled (all markers) vs clean (plain grid)
   const ThemeToggle = (
     <button
-      onClick={() => setIsDark(!isDark)}
-      aria-label="Toggle dark mode"
-      className="flex items-center gap-1.5 flex-shrink-0"
+      onClick={() => setCalendarClean(!calendarClean)}
+      aria-label={calendarClean ? 'Switch to filled calendar view' : 'Switch to clean calendar view'}
+      className="flex items-center flex-shrink-0"
     >
-      <span style={{ color: isDark ? 'rgba(255,255,255,0.3)' : '#fbbf24', transition: 'color 0.25s' }}>
-        <SunIcon />
-      </span>
       <div
         className="relative rounded-full transition-colors duration-300"
         style={{
           width: 36,
           height: 20,
-          background: isDark ? '#4f46e5' : 'rgba(255,255,255,0.2)',
+          background: calendarClean ? 'rgba(255,255,255,0.2)' : '#7c3aed',
           border: '0.5px solid rgba(255,255,255,0.2)',
         }}
       >
         <div
           className="absolute top-[2px] w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-300"
-          style={{ transform: isDark ? 'translateX(18px)' : 'translateX(2px)' }}
+          style={{ transform: calendarClean ? 'translateX(18px)' : 'translateX(2px)' }}
         />
       </div>
-      <span style={{ color: isDark ? '#a78bfa' : 'rgba(255,255,255,0.3)', transition: 'color 0.25s' }}>
-        <MoonIcon />
-      </span>
     </button>
   )
 
@@ -181,33 +175,27 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
             <XpaditeLogo variant="light" size={28} />
           </div>
 
-          {/* Theme toggle — sun + pill + moon */}
+          {/* Calendar view toggle — filled vs clean */}
           <button
-            onClick={() => setIsDark(!isDark)}
-            aria-label="Toggle dark mode"
-            className="flex items-center gap-1.5 flex-shrink-0"
+            onClick={() => setCalendarClean(!calendarClean)}
+            aria-label={calendarClean ? 'Switch to filled calendar view' : 'Switch to clean calendar view'}
+            className="flex items-center flex-shrink-0"
             style={{ marginLeft: 'auto', position: 'relative', zIndex: 1 }}
           >
-            <span style={{ color: isDark ? 'rgba(255,255,255,0.3)' : '#fbbf24', transition: 'color 0.25s', display: 'flex', alignItems: 'center' }}>
-              <SunIcon />
-            </span>
             <div
               className="relative rounded-full transition-colors duration-300"
               style={{
                 width: 30,
                 height: 17,
-                background: isDark ? '#4f46e5' : 'rgba(255,255,255,0.2)',
+                background: calendarClean ? 'rgba(255,255,255,0.2)' : '#7c3aed',
                 border: '0.5px solid rgba(255,255,255,0.2)',
               }}
             >
               <div
                 className="absolute top-[2px] w-[13px] h-[13px] rounded-full bg-white shadow-sm transition-transform duration-300"
-                style={{ transform: isDark ? 'translateX(15px)' : 'translateX(2px)' }}
+                style={{ transform: calendarClean ? 'translateX(15px)' : 'translateX(2px)' }}
               />
             </div>
-            <span style={{ color: isDark ? '#a78bfa' : 'rgba(255,255,255,0.3)', transition: 'color 0.25s', display: 'flex', alignItems: 'center' }}>
-              <MoonIcon />
-            </span>
           </button>
         </div>
 

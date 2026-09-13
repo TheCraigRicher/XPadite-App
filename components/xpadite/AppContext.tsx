@@ -63,6 +63,8 @@ interface AppContextValue {
   setSelectedActId: (id: string) => void
   isDark: boolean
   setIsDark: (v: boolean) => void
+  calendarClean: boolean
+  setCalendarClean: (v: boolean) => void
   activeSession: ActiveSession | null
   setActiveSession: (s: ActiveSession | null) => void
   activeTaskTimer: ActiveTaskTimer | null
@@ -97,6 +99,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const [activities, setActivitiesState] = useState<Activity[]>(DEFAULT_ACTIVITIES)
   const [selectedActId, setSelectedActId] = useState<string>(DEFAULT_ACTIVITIES[0].id)
   const [isDark, setIsDark] = useState(false)
+  const [calendarClean, setCalendarClean] = useState(false)
   const [activeSession, setActiveSession] = useState<ActiveSession | null>(null)
   const [activeTaskTimer, setActiveTaskTimer] = useState<ActiveTaskTimer | null>(null)
   const [removingMode, setRemovingMode] = useState(false)
@@ -359,6 +362,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       activities, addActivity, removeActivity, updateActivity,
       selectedActId, setSelectedActId,
       isDark, setIsDark,
+      calendarClean, setCalendarClean,
       activeSession, setActiveSession,
       activeTaskTimer, setActiveTaskTimer,
       removingMode, setRemovingMode,

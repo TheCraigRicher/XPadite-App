@@ -231,7 +231,7 @@ export function MonthCard({
   onDayDoubleClick,
   onMonthZoom,
 }: MonthCardProps) {
-  const { calData, updateDay, setToast, isDark, progressColor: _rawColor, reminders } = useApp();
+  const { calData, updateDay, setToast, isDark, progressColor: _rawColor, reminders, calendarClean } = useApp();
   const progressColor = resolveProgressColor(_rawColor, isDark);
   const reminderDates = useUpcomingReminderDates(reminders, calData);
   // Match the actual card surface so the productive-circle inner ring blends in
@@ -540,11 +540,11 @@ export function MonthCard({
             }
 
             const dayData = calData[cell.key];
-            const streak = isStreakDay(dayData);
-            const productive = !!dayData?.productive;
-            const hyper = !!dayData?.hyper;
-            const milestone = !!dayData?.milestone;
-            const goal = !!dayData?.goal;
+            const streak = !calendarClean && isStreakDay(dayData);
+            const productive = !calendarClean && !!dayData?.productive;
+            const hyper = !calendarClean && !!dayData?.hyper;
+            const milestone = !calendarClean && !!dayData?.milestone;
+            const goal = !calendarClean && !!dayData?.goal;
             const todayCell = isToday(APP_YEAR, month, cell.day);
             const isSun = cell.dayOfWeek === 0;
             const reminderCount = reminderDates.get(cell.key) ?? 0;
@@ -833,28 +833,6 @@ export function MonthCard({
           })}
         </div>
 
-        {/* Spacer: absorbs remaining height so Share button sits at the bottom without stretching the calendar */}
-        <div className="flex-1" />
-
-        {/* Share button — pinned to bottom of card via flex-col layout */}
-        <div className="flex justify-center pt-1 pb-1 sm:pt-3 sm:pb-2">
-          <button
-            onClick={openPanel}
-            onMouseEnter={() => setShareHov(true)}
-            onMouseLeave={() => setShareHov(false)}
-            className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full text-[9px] font-semibold active:scale-95"
-            style={{
-              background: shareHov ? "#7c3aed" : "rgba(124,58,237,0.08)",
-              color:      shareHov ? "white"   : "#7c3aed",
-              border:     shareHov ? "1px solid transparent" : "1px solid rgba(124,58,237,0.30)",
-              boxShadow:  shareHov ? "0 1px 4px rgba(124,58,237,0.3)" : "none",
-              transition: "background 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease",
-            }}
-          >
-            <ShareIcon />
-            Share
-          </button>
-        </div>
       </div>
 
       {/* ── Share panel — fixed bottom sheet, spring slide-up ────────────────── */}

@@ -46,6 +46,147 @@ const TIMEZONES: { value: string; label: string }[] = [
   { value: 'UTC',                 label: 'UTC (Coordinated Universal Time)' },
 ]
 
+// ── Plan popup data ────────────────────────────────────────────────────────
+
+const PRO_CORE_FEATURES = [
+  'Productivity Calendar & history',
+  'Productive / Hyper-Productive / Milestone tracking',
+  'Streak tracking',
+  'Performance Analytics — Today, Weekly, Monthly, Yearly',
+  'Full Task Manager',
+  'Task timers & session history',
+  'Activities',
+  'Planner / Journal Notes',
+  'Notifications & Reminders',
+  'Gallery / Photos',
+  'Calendar & meeting integrations',
+  'Sharing features',
+]
+
+const AI_FEATURES = [
+  'XPadite AI Coach',
+  'AI-powered productivity insights',
+  'Turn plans & journal entries into actionable tasks',
+  'AI-powered Motivate Me',
+]
+
+type PlanConfig = {
+  title: string
+  subtitle: string
+  badge: string
+  badgeIcon: string
+  price: string
+  priceLabel: string
+  savings?: string
+  headerGradient: string
+  accentColor: string
+  accentGlow: string
+  interiorLight: string
+  interiorDark: string
+  ctaLabel: string
+  ctaBg: string
+  ctaGlow: string
+  includedFeatures: string[]
+  excludedFeatures: string[]
+  note?: string
+}
+
+const PLAN_CONFIGS: Record<string, PlanConfig> = {
+  'pro-monthly': {
+    title: 'Pro Plan',
+    subtitle: 'Everything you need to plan, execute and track your progress.',
+    badge: 'Most Popular',
+    badgeIcon: '👑',
+    price: '$7',
+    priceLabel: '/ month',
+    headerGradient: 'linear-gradient(135deg, #4c1d95 0%, #6d28d9 45%, #7c3aed 100%)',
+    accentColor: '#7c3aed',
+    accentGlow: 'rgba(124,58,237,0.22)',
+    interiorLight: '#fdf9ff',
+    interiorDark: '#100a22',
+    ctaLabel: 'Get Pro Monthly',
+    ctaBg: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+    ctaGlow: 'rgba(124,58,237,0.44)',
+    includedFeatures: PRO_CORE_FEATURES,
+    excludedFeatures: AI_FEATURES,
+  },
+  'pro-yearly': {
+    title: 'Pro Plan',
+    subtitle: 'Everything you need to plan, execute and track your progress.',
+    badge: 'Save 29%',
+    badgeIcon: '⭐',
+    price: '$59.99',
+    priceLabel: '/ year',
+    savings: 'Save $24 vs monthly',
+    headerGradient: 'linear-gradient(135deg, #4c1d95 0%, #6d28d9 45%, #7c3aed 100%)',
+    accentColor: '#7c3aed',
+    accentGlow: 'rgba(124,58,237,0.22)',
+    interiorLight: '#fdf9ff',
+    interiorDark: '#100a22',
+    ctaLabel: 'Get Pro Yearly',
+    ctaBg: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+    ctaGlow: 'rgba(124,58,237,0.44)',
+    includedFeatures: PRO_CORE_FEATURES,
+    excludedFeatures: AI_FEATURES,
+  },
+  'premium-monthly': {
+    title: 'Premium Plan',
+    subtitle: 'Everything in Pro, powered up with XPadite AI.',
+    badge: 'Best Value',
+    badgeIcon: '✦',
+    price: '$10',
+    priceLabel: '/ month',
+    headerGradient: 'linear-gradient(135deg, #14532d 0%, #15803d 45%, #22c55e 100%)',
+    accentColor: '#16a34a',
+    accentGlow: 'rgba(22,163,74,0.22)',
+    interiorLight: '#f0fdf4',
+    interiorDark: '#071a10',
+    ctaLabel: 'Get Premium Monthly',
+    ctaBg: 'linear-gradient(135deg, #15803d 0%, #22c55e 100%)',
+    ctaGlow: 'rgba(22,163,74,0.40)',
+    includedFeatures: [...PRO_CORE_FEATURES, ...AI_FEATURES],
+    excludedFeatures: [],
+  },
+  'premium-yearly': {
+    title: 'Premium Plan',
+    subtitle: 'Everything in Pro, powered up with XPadite AI.',
+    badge: 'Save 25%',
+    badgeIcon: '✦',
+    price: '$89.99',
+    priceLabel: '/ year',
+    savings: 'Save $30 vs monthly',
+    headerGradient: 'linear-gradient(135deg, #14532d 0%, #15803d 45%, #22c55e 100%)',
+    accentColor: '#16a34a',
+    accentGlow: 'rgba(22,163,74,0.22)',
+    interiorLight: '#f0fdf4',
+    interiorDark: '#071a10',
+    ctaLabel: 'Get Premium Yearly',
+    ctaBg: 'linear-gradient(135deg, #15803d 0%, #22c55e 100%)',
+    ctaGlow: 'rgba(22,163,74,0.40)',
+    includedFeatures: [...PRO_CORE_FEATURES, ...AI_FEATURES],
+    excludedFeatures: [],
+  },
+  'ltd': {
+    title: 'Lifetime Deal',
+    subtitle: "Get XPadite's core productivity system for life with one payment.",
+    badge: 'Limited Time',
+    badgeIcon: '💎',
+    price: '$99',
+    priceLabel: 'one-time payment',
+    headerGradient: 'linear-gradient(135deg, #0c4a6e 0%, #0891b2 45%, #22d3ee 100%)',
+    accentColor: '#0891b2',
+    accentGlow: 'rgba(6,182,212,0.22)',
+    interiorLight: '#ecfeff',
+    interiorDark: '#031a22',
+    ctaLabel: 'Get Lifetime Deal',
+    ctaBg: 'linear-gradient(135deg, #0891b2 0%, #22d3ee 100%)',
+    ctaGlow: 'rgba(6,182,212,0.38)',
+    includedFeatures: PRO_CORE_FEATURES,
+    excludedFeatures: AI_FEATURES,
+    note: 'AI features are not included. XPadite AI Coach and other Premium AI functionality require a separate Premium subscription.',
+  },
+}
+
 function getBrowserTimezone(): string {
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -214,6 +355,190 @@ function SelectMenu({
   )
 }
 
+function PlanPopup({ planId, isDark, onClose }: {
+  planId: string
+  isDark: boolean
+  onClose: () => void
+}) {
+  const cfg = PLAN_CONFIGS[planId]
+  if (!cfg) return null
+
+  const popupBg    = isDark ? cfg.interiorDark : '#ffffff'
+  const bodyBg     = isDark ? cfg.interiorDark : cfg.interiorLight
+  const textPrimary   = isDark ? 'rgba(255,255,255,0.90)' : '#111827'
+  const textSecondary = isDark ? 'rgba(255,255,255,0.42)' : '#6b7280'
+  const divider    = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'
+
+  return createPortal(
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 9900,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+        background: isDark ? 'rgba(5,2,15,0.74)' : 'rgba(15,5,40,0.46)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        animation: 'xp-set-backdrop 200ms ease forwards',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 480,
+          borderRadius: 24, overflow: 'hidden',
+          background: popupBg,
+          border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}`,
+          boxShadow: '0 32px 80px rgba(0,0,0,0.50)',
+          display: 'flex', flexDirection: 'column',
+          maxHeight: 'calc(90vh - 32px)',
+          animation: 'xp-set-card 240ms cubic-bezier(0.34,1.06,0.64,1) forwards',
+        }}
+      >
+
+        {/* ── Gradient Header ── */}
+        <div style={{ background: cfg.headerGradient, padding: '22px 22px 20px', position: 'relative', flexShrink: 0 }}>
+
+          {/* Badge — top right */}
+          <div style={{
+            position: 'absolute', top: 16, right: 52,
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            background: 'rgba(255,255,255,0.22)',
+            border: '1px solid rgba(255,255,255,0.32)',
+            borderRadius: 20, padding: '4px 11px',
+            fontSize: 10.5, fontWeight: 700, color: 'white', letterSpacing: '0.02em',
+          }}>
+            {cfg.badgeIcon} {cfg.badge}
+          </div>
+
+          {/* Close button */}
+          <button
+            onClick={onClose}
+            style={{
+              position: 'absolute', top: 14, right: 14,
+              width: 30, height: 30, borderRadius: '50%',
+              background: 'rgba(255,255,255,0.18)',
+              border: '1px solid rgba(255,255,255,0.28)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', color: 'white', flexShrink: 0,
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 12, height: 12 }}>
+              <line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" />
+              <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
+            </svg>
+          </button>
+
+          {/* Plan name */}
+          <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.60)', marginBottom: 2, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>XPadite</p>
+          <h2 style={{ fontSize: 28, fontWeight: 800, color: 'white', letterSpacing: '-0.025em', lineHeight: 1.1, marginBottom: 8 }}>
+            {cfg.title}
+          </h2>
+          <p style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.70)', lineHeight: 1.5, maxWidth: 360 }}>{cfg.subtitle}</p>
+        </div>
+
+        {/* ── Scrollable Body ── */}
+        <div
+          className="xp-set-body"
+          style={{ flex: 1, minHeight: 0, overflowY: 'auto', background: bodyBg, padding: '20px 22px 4px' }}
+        >
+
+          {/* Pricing */}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 44, fontWeight: 800, color: textPrimary, lineHeight: 1, letterSpacing: '-0.03em' }}>
+              {cfg.price}
+            </span>
+            <span style={{ fontSize: 14, color: textSecondary, fontWeight: 500 }}>
+              {cfg.priceLabel}
+            </span>
+            {cfg.savings && (
+              <span style={{
+                fontSize: 11, fontWeight: 700, color: cfg.accentColor,
+                background: cfg.accentGlow, padding: '3px 9px', borderRadius: 8,
+              }}>{cfg.savings}</span>
+            )}
+          </div>
+
+          <div style={{ height: 1, background: divider, margin: '14px 0' }} />
+
+          {/* Feature list */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 9, paddingBottom: 4 }}>
+            {cfg.includedFeatures.map((feat, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
+                  background: cfg.accentGlow,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke={cfg.accentColor} strokeWidth="2.8" style={{ width: 11, height: 11 }}>
+                    <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+                <span style={{ fontSize: 12.5, color: textPrimary, lineHeight: 1.4, flex: 1 }}>{feat}</span>
+                <svg viewBox="0 0 24 24" fill="none" stroke={cfg.accentColor} strokeWidth="2.5" style={{ width: 14, height: 14, flexShrink: 0, opacity: 0.90 }}>
+                  <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
+            ))}
+
+            {cfg.excludedFeatures.length > 0 && (
+              <>
+                <div style={{ height: 1, background: divider, margin: '6px 0' }} />
+                {cfg.excludedFeatures.map((feat, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{
+                      width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
+                      background: 'rgba(239,68,68,0.10)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.8" style={{ width: 11, height: 11 }}>
+                        <line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" />
+                        <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
+                      </svg>
+                    </div>
+                    <span style={{ fontSize: 12.5, color: textSecondary, lineHeight: 1.4, flex: 1 }}>{feat}</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" style={{ width: 14, height: 14, flexShrink: 0 }}>
+                      <line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" />
+                      <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
+                    </svg>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+
+        </div>
+
+        {/* ── CTA Footer ── */}
+        <div style={{
+          padding: '16px 22px 20px', flexShrink: 0,
+          background: isDark ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.95)',
+          borderTop: `1px solid ${divider}`,
+        }}>
+          <button style={{
+            width: '100%', padding: '14px 20px', borderRadius: 14, cursor: 'pointer',
+            background: cfg.ctaBg, border: 'none', color: 'white',
+            fontSize: 14.5, fontWeight: 700, letterSpacing: '0.01em',
+            boxShadow: `0 4px 20px ${cfg.ctaGlow}`, transition: 'opacity 150ms',
+          }}>
+            {cfg.ctaLabel}
+          </button>
+          {cfg.note ? (
+            <p style={{ textAlign: 'center', fontSize: 10.5, color: textSecondary, marginTop: 10, lineHeight: 1.5 }}>
+              {cfg.note}
+            </p>
+          ) : (
+            <p style={{ textAlign: 'center', fontSize: 11, color: textSecondary, marginTop: 10 }}>
+              Cancel anytime
+            </p>
+          )}
+        </div>
+
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const { isDark, setIsDark, progressColor, setProgressColor } = useApp()
   const pc = resolveProgressColor(progressColor, isDark)
@@ -237,6 +562,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const [showPrompt, setShowPrompt] = useState(false)
   const [hoveredSwatch, setHoveredSwatch] = useState<string | null>(null)
+  const [activePlanPopup, setActivePlanPopup] = useState<string | null>(null)
 
   const handleClose = () => {
     if (hasChanges) { setShowPrompt(true) } else { onClose() }
@@ -259,11 +585,15 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { if (showPrompt) setShowPrompt(false); else handleClose() }
+      if (e.key === 'Escape') {
+        if (activePlanPopup) { setActivePlanPopup(null) }
+        else if (showPrompt) { setShowPrompt(false) }
+        else { handleClose() }
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [showPrompt, hasChanges])
+  }, [showPrompt, hasChanges, activePlanPopup])
 
   // ── Design tokens ──────────────────────────────────────────────────────────
   const modalBg       = isDark ? '#15102a'                  : '#f0ecff'
@@ -315,6 +645,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         .xp-swatch:hover { transform: scale(1.10) !important }
         .xp-cancel:hover { opacity: 0.75 }
         .xp-save:hover { opacity: 0.88 }
+        .xp-plan-cta:hover { opacity: 0.88 }
       `}</style>
 
       {/* ── Backdrop ─────────────────────────────────────────────────────────── */}
@@ -604,8 +935,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 20px 22px 36px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
 
-                    {/* Pro Monthly — gray (matches website Basic/Pro gray tier) */}
-                    <div className="xp-plan-card" style={{
+                    {/* Pro Monthly — gray */}
+                    <div className="xp-plan-card" onClick={() => setActivePlanPopup('pro-monthly')} style={{
                       background: 'linear-gradient(135deg, #64748b 0%, #475569 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(71,85,105,0.38)',
@@ -622,7 +953,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     </div>
 
                     {/* Pro Yearly — purple */}
-                    <div className="xp-plan-card xp-plan-purple" style={{
+                    <div className="xp-plan-card xp-plan-purple" onClick={() => setActivePlanPopup('pro-yearly')} style={{
                       background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(124,58,237,0.32)',
@@ -633,7 +964,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     </div>
 
                     {/* Premium Monthly — green */}
-                    <div className="xp-plan-card xp-plan-green" style={{
+                    <div className="xp-plan-card xp-plan-green" onClick={() => setActivePlanPopup('premium-monthly')} style={{
                       background: 'linear-gradient(135deg, #22c55e 0%, #15803d 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(22,163,74,0.30)',
@@ -644,7 +975,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     </div>
 
                     {/* Premium Yearly — gold */}
-                    <div className="xp-plan-card" style={{
+                    <div className="xp-plan-card" onClick={() => setActivePlanPopup('premium-yearly')} style={{
                       background: 'linear-gradient(135deg, #f59e0b 0%, #b45309 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(245,158,11,0.34)',
@@ -658,7 +989,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   </div>
 
                   <div style={{ marginTop: 12 }}>
-                    <div className="xp-plan-card xp-plan-cyan" style={{
+                    <div className="xp-plan-card xp-plan-cyan" onClick={() => setActivePlanPopup('ltd')} style={{
                       background: 'linear-gradient(to right, #22d3ee, #0891b2)',
                       borderRadius: 14, padding: '20px 18px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(6,182,212,0.28)',
@@ -782,6 +1113,15 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
         </div>
       </div>
+
+      {/* ── Plan Detail Popup ────────────────────────────────────────────── */}
+      {activePlanPopup && (
+        <PlanPopup
+          planId={activePlanPopup}
+          isDark={isDark}
+          onClose={() => setActivePlanPopup(null)}
+        />
+      )}
 
       {/* ── Unsaved Changes Confirmation Dialog ──────────────────────────── */}
       {showPrompt && (

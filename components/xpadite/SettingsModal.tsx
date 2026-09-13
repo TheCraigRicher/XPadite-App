@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useApp } from './AppContext'
-import { hexToRgba, resolveProgressColor } from './utils'
+import { resolveProgressColor } from './utils'
 
 const PROGRESS_COLORS: { name: string; value: string; darkCheck?: boolean }[] = [
   { name: 'Green',            value: '#16a34a' },
@@ -102,7 +102,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   // ── Design tokens ──────────────────────────────────────────────────────────
   const modalBg       = isDark ? '#15102a'                  : '#f0ecff'
-  const cardBg        = isDark ? 'rgba(255,255,255,0.044)'  : '#ffffff'
+  const cardBg        = isDark ? 'rgba(255,255,255,0.044)'  : '#f8f7fc'
   const cardBorder    = isDark ? 'rgba(255,255,255,0.085)'  : 'rgba(0,0,0,0.075)'
   const dividerColor  = isDark ? 'rgba(255,255,255,0.07)'   : 'rgba(0,0,0,0.07)'
   const titleColor    = isDark ? 'rgba(255,255,255,0.92)'   : '#111827'
@@ -273,7 +273,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           >
 
             {/* ══ THEME MODE ══════════════════════════════════════════════════ */}
-            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden', flexShrink: 0 }}>
+            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden', flexShrink: 0, boxShadow: openTheme ? (isDark ? '0 4px 20px rgba(124,58,237,0.14)' : '0 4px 20px rgba(124,58,237,0.10)') : 'none', transition: 'box-shadow 220ms' }}>
 
               {/* Section header — clickable to toggle */}
               <button className="xp-sec-btn" onClick={() => setOpenTheme(v => !v)}>
@@ -287,32 +287,31 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
               {/* Section content — full natural height, no maxHeight cap */}
               {openTheme && (
-                <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '20px 22px 24px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 20px 22px 36px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
 
                     {/* Light */}
                     <button
                       onClick={() => setIsDark(false)}
                       style={{
-                        borderRadius: 14, padding: '20px 16px', cursor: 'pointer', textAlign: 'left',
-                        display: 'flex', flexDirection: 'column', gap: 14, transition: 'all 180ms',
+                        borderRadius: 14, padding: '14px 14px', cursor: 'pointer', textAlign: 'left',
+                        display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12,
+                        transition: 'all 180ms',
                         background: !isDark ? 'rgba(124,58,237,0.08)' : isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
                         border: !isDark ? '1.5px solid #7c3aed' : `1px solid ${cardBorder}`,
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: 26 }}>☀️</span>
-                        <div style={{
-                          width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
-                          border: `2px solid ${!isDark ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)'}`,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}>
-                          {!isDark && <div style={{ width: 9, height: 9, borderRadius: '50%', background: '#7c3aed' }} />}
-                        </div>
+                      <span style={{ fontSize: 22, flexShrink: 0 }}>☀️</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 2, color: !isDark ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.50)' : '#374151' }}>Light</p>
+                        <p style={{ fontSize: 10.5, lineHeight: 1.4, color: isDark ? 'rgba(255,255,255,0.28)' : '#9ca3af' }}>Clean, bright and focused</p>
                       </div>
-                      <div>
-                        <p style={{ fontSize: 14, fontWeight: 700, marginBottom: 5, color: !isDark ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.50)' : '#374151' }}>Light</p>
-                        <p style={{ fontSize: 11.5, lineHeight: 1.5, color: isDark ? 'rgba(255,255,255,0.28)' : '#9ca3af' }}>Clean, bright and focused</p>
+                      <div style={{
+                        width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                        border: `2px solid ${!isDark ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.18)'}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {!isDark && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#7c3aed' }} />}
                       </div>
                     </button>
 
@@ -320,30 +319,29 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     <button
                       onClick={() => setIsDark(true)}
                       style={{
-                        borderRadius: 14, padding: '20px 16px', cursor: 'pointer', textAlign: 'left',
-                        display: 'flex', flexDirection: 'column', gap: 14, transition: 'all 180ms',
+                        borderRadius: 14, padding: '14px 14px', cursor: 'pointer', textAlign: 'left',
+                        display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12,
+                        transition: 'all 180ms',
                         background: isDark ? 'linear-gradient(135deg, #1e0a3c 0%, #2d1060 100%)' : 'rgba(0,0,0,0.035)',
                         border: isDark ? '1.5px solid rgba(124,58,237,0.58)' : `1px solid ${cardBorder}`,
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: 26 }}>🌙</span>
-                        <div style={{
-                          width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
-                          background: isDark ? '#7c3aed' : 'transparent',
-                          border: `2px solid ${isDark ? '#a78bfa' : 'rgba(0,0,0,0.18)'}`,
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}>
-                          {isDark && (
-                            <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5" style={{ width: 11, height: 11 }}>
-                              <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                          )}
-                        </div>
+                      <span style={{ fontSize: 22, flexShrink: 0 }}>🌙</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 2, color: isDark ? 'white' : '#374151' }}>Dark</p>
+                        <p style={{ fontSize: 10.5, lineHeight: 1.4, color: isDark ? 'rgba(255,255,255,0.48)' : '#9ca3af' }}>Easy on the eyes</p>
                       </div>
-                      <div>
-                        <p style={{ fontSize: 14, fontWeight: 700, marginBottom: 5, color: isDark ? 'white' : '#374151' }}>Dark</p>
-                        <p style={{ fontSize: 11.5, lineHeight: 1.5, color: isDark ? 'rgba(255,255,255,0.48)' : '#9ca3af' }}>Easy on the eyes</p>
+                      <div style={{
+                        width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                        background: isDark ? '#7c3aed' : 'transparent',
+                        border: `2px solid ${isDark ? '#a78bfa' : 'rgba(0,0,0,0.18)'}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {isDark && (
+                          <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5" style={{ width: 10, height: 10 }}>
+                            <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
                       </div>
                     </button>
 
@@ -353,7 +351,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
 
             {/* ══ THEME COLOR ═════════════════════════════════════════════════ */}
-            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden', flexShrink: 0 }}>
+            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden', flexShrink: 0, boxShadow: openColor ? (isDark ? '0 4px 20px rgba(124,58,237,0.14)' : '0 4px 20px rgba(124,58,237,0.10)') : 'none', transition: 'box-shadow 220ms' }}>
 
               {/* Section header — div (not button) because it contains a nested button */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '18px 22px' }}>
@@ -386,7 +384,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               </div>
 
               {openColor && (
-                <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '20px 24px 26px' }}>
+                <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 22px 24px 36px' }}>
 
                   {/* Color swatches */}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
@@ -425,36 +423,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     })}
                   </div>
 
-                  {/* Live preview */}
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 14, marginTop: 22,
-                    padding: '14px 18px', borderRadius: 13,
-                    background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
-                    border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}`,
-                  }}>
-                    <div style={{
-                      width: 36, height: 36, borderRadius: '50%', background: pc, flexShrink: 0,
-                      boxShadow: `0 0 0 2.5px ${isDark ? '#15102a' : '#f0ecff'}, 0 0 0 5px ${hexToRgba(pc, 0.60)}`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 9.5, fontWeight: 700, color: pc === '#ffffff' ? '#000000' : 'white',
-                    }}>12</div>
-                    <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                      {[0, 1, 2].map(i => (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center' }}>
-                          <div style={{ width: 13, height: 13, borderRadius: '50%', background: pc, boxShadow: `0 0 0 1.5px ${hexToRgba(pc, 0.35)}`, flexShrink: 0 }} />
-                          {i < 2 && <div style={{ width: 18, height: 2.5, background: pc, flexShrink: 0 }} />}
-                        </div>
-                      ))}
-                    </div>
-                    <p style={{ fontSize: 11.5, color: isDark ? 'rgba(255,255,255,0.38)' : '#9ca3af' }}>Live preview</p>
-                  </div>
-
                 </div>
               )}
             </div>
 
             {/* ══ SUBSCRIPTION PLAN ═══════════════════════════════════════════ */}
-            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden', flexShrink: 0 }}>
+            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden', flexShrink: 0, boxShadow: openPlan ? (isDark ? '0 4px 20px rgba(124,58,237,0.14)' : '0 4px 20px rgba(124,58,237,0.10)') : 'none', transition: 'box-shadow 220ms' }}>
 
               <button className="xp-sec-btn" onClick={() => setOpenPlan(v => !v)}>
                 <SectionIcon emoji="💎" />
@@ -466,31 +440,29 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               </button>
 
               {openPlan && (
-                <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '20px 22px 24px' }}>
+                <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 20px 22px 36px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
 
                     <div className="xp-plan-card xp-plan-purple" style={{
                       background: 'linear-gradient(to right, #7c3aed, #6d28d9)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(124,58,237,0.32)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
                     }}>
-                      <div style={{
-                        width: 26, height: 26, borderRadius: '50%', margin: '0 auto 12px',
-                        background: 'rgba(255,255,255,0.22)', border: '1.5px solid rgba(255,255,255,0.58)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" style={{ width: 12, height: 12 }}>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Monthly Plan $7</p>
+                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.80)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" style={{ width: 11, height: 11, flexShrink: 0 }}>
                           <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
                         </svg>
-                      </div>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Monthly Plan $7</p>
-                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.62)', marginTop: 6 }}>Current Plan</p>
+                        Current Plan
+                      </p>
                     </div>
 
                     <div className="xp-plan-card xp-plan-purple" style={{
                       background: 'linear-gradient(to right, #7c3aed, #4c1d95)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(124,58,237,0.22)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
                     }}>
                       <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Yearly Plan $59.99</p>
                       <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.58)', marginTop: 6 }}>Upgrade</p>
@@ -500,6 +472,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       background: 'linear-gradient(to right, #22c55e, #16a34a)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(22,163,74,0.24)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
                     }}>
                       <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Premium Monthly Plan $10</p>
                       <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.65)', marginTop: 6 }}>Upgrade</p>
@@ -509,6 +482,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       background: 'linear-gradient(to right, #f97316, #d97706)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(234,88,12,0.24)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
                     }}>
                       <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Premium Yearly Plan $89.99</p>
                       <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.68)', marginTop: 6 }}>Upgrade</p>
@@ -521,6 +495,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       background: 'linear-gradient(to right, #22d3ee, #0891b2)',
                       borderRadius: 14, padding: '20px 18px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(6,182,212,0.28)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
                     }}>
                       <p style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>LTD – Life Time Deal $99</p>
                       <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.68)', marginTop: 6 }}>Upgrade</p>
@@ -531,7 +506,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             </div>
 
             {/* ══ LANGUAGE & REGION ═══════════════════════════════════════════ */}
-            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden', flexShrink: 0 }}>
+            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden', flexShrink: 0, boxShadow: openLocale ? (isDark ? '0 4px 20px rgba(124,58,237,0.14)' : '0 4px 20px rgba(124,58,237,0.10)') : 'none', transition: 'box-shadow 220ms' }}>
 
               <button className="xp-sec-btn" onClick={() => setOpenLocale(v => !v)}>
                 <SectionIcon emoji="🌐" />
@@ -543,7 +518,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               </button>
 
               {openLocale && (
-                <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '20px 22px 24px' }}>
+                <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 20px 22px 36px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
 
                     <div>

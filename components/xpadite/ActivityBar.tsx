@@ -190,7 +190,7 @@ function ColorPicker({ color, onChange, takenColors, duplicateError }: ColorPick
 
 // ─── Add modal ────────────────────────────────────────────────────────────────
 
-function AddActivityModal({ onClose }: { onClose: () => void }) {
+export function AddActivityModal({ onClose }: { onClose: () => void }) {
   const { addActivity, setSelectedActId, activities } = useApp();
   const [name, setName] = useState("");
   const [color, setColor] = useState<string>(COLOR_PALETTE[0]);
@@ -300,12 +300,12 @@ function AddActivityModal({ onClose }: { onClose: () => void }) {
 
 // ─── Edit modal ───────────────────────────────────────────────────────────────
 
-interface EditActivityModalProps {
+export interface EditActivityModalProps {
   activity: Activity;
   onClose: () => void;
 }
 
-function EditActivityModal({ activity, onClose }: EditActivityModalProps) {
+export function EditActivityModal({ activity, onClose }: EditActivityModalProps) {
   const { updateActivity, activities } = useApp();
   const [name, setName] = useState(activity.name);
   const [color, setColor] = useState(activity.color);
@@ -417,7 +417,7 @@ function EditActivityModal({ activity, onClose }: EditActivityModalProps) {
 
 // ─── Dropdown ─────────────────────────────────────────────────────────────────
 
-export function ActivityDropdown() {
+export function ActivityDropdown({ fullWidth = false }: { fullWidth?: boolean } = {}) {
   const { activities, selectedActId, setSelectedActId, activeSession, setToast } = useApp();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -455,10 +455,10 @@ export function ActivityDropdown() {
   const displayName = (a: Activity) => (a.emoji ? a.emoji + ' ' : '') + a.name;
 
   return (
-    <div ref={ref} className="relative flex-shrink-0">
+    <div ref={ref} className={`relative ${fullWidth ? 'w-full' : 'flex-shrink-0'}`}>
       <button
         onClick={handleTrigger}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all duration-150 hover:border-violet-400"
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all duration-150 hover:border-violet-400${fullWidth ? ' w-full' : ''}`}
         style={{
           borderColor: selected.color + "60",
           background: selected.color + "15",
@@ -468,9 +468,15 @@ export function ActivityDropdown() {
         }}
       >
         <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: selected.color }} />
-        {displayName(selected)}
+        {fullWidth ? (
+          <span className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-left">
+            {displayName(selected)}
+          </span>
+        ) : (
+          displayName(selected)
+        )}
         {activeSession ? (
-          <svg viewBox="0 0 12 12" fill="currentColor" className="w-2.5 h-2.5 opacity-60">
+          <svg viewBox="0 0 12 12" fill="currentColor" className="w-2.5 h-2.5 opacity-60 flex-shrink-0">
             <path d="M9 5V4a3 3 0 0 0-6 0v1H2v6h8V5H9zm-5-1a2 2 0 1 1 4 0v1H4V4zm2 5.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2z"/>
           </svg>
         ) : (
@@ -503,13 +509,13 @@ export function ActivityDropdown() {
 
 // ─── ConfirmRemoveModal ───────────────────────────────────────────────────────
 
-interface ConfirmRemoveModalProps {
+export interface ConfirmRemoveModalProps {
   activityName: string
   onConfirm: () => void
   onCancel: () => void
 }
 
-function ConfirmRemoveModal({ activityName, onConfirm, onCancel }: ConfirmRemoveModalProps) {
+export function ConfirmRemoveModal({ activityName, onConfirm, onCancel }: ConfirmRemoveModalProps) {
   const { isDark } = useApp()
   const [hoverCancel, setHoverCancel] = useState(false)
   const [hoverRemove, setHoverRemove] = useState(false)
@@ -630,6 +636,62 @@ function ConfirmRemoveModal({ activityName, onConfirm, onCancel }: ConfirmRemove
           </div>
         </div>
       </div>
+    </>
+  )
+}
+
+// ─── ActivityButtons — centered row of +/−/edit, rendered below the navbar ───
+
+export function ActivityButtons() {
+  const { activities, selectedActId, removeActivity } = useApp()
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [editActivity, setEditAct] = useState<Activity | null>(null)
+  const [confirmRemove, setConfirmRemove] = useState(false)
+
+  const selectedAct = activities.find(a => a.id === selectedActId) ?? activities[0] ?? null
+
+  return (
+    <>
+      <div
+        className="hidden sm:flex items-center justify-center gap-6 py-2"
+      >
+        <button
+          onClick={() => setShowAddModal(true)}
+          title="Add activity"
+          className="w-7 h-7 rounded-full flex items-center justify-center transition-opacity duration-150 hover:opacity-70"
+          style={{ background: 'rgba(124,58,237,0.08)', color: '#7c3aed', border: '0.5px solid rgba(124,58,237,0.25)' }}
+        >
+          <PlusIcon />
+        </button>
+        <button
+          onClick={() => selectedAct && setConfirmRemove(true)}
+          disabled={!selectedAct}
+          title="Remove selected activity"
+          className="w-7 h-7 rounded-full flex items-center justify-center transition-opacity duration-150 hover:opacity-70 disabled:opacity-30"
+          style={{ background: 'rgba(124,58,237,0.08)', color: '#7c3aed', border: '0.5px solid rgba(124,58,237,0.25)' }}
+        >
+          <MinusIcon />
+        </button>
+        <button
+          onClick={() => selectedAct && setEditAct(selectedAct)}
+          disabled={!selectedAct}
+          title="Edit selected activity"
+          className="w-7 h-7 rounded-full flex items-center justify-center transition-opacity duration-150 hover:opacity-70 disabled:opacity-30"
+          style={{ background: 'rgba(124,58,237,0.08)', color: '#7c3aed', border: '0.5px solid rgba(124,58,237,0.25)' }}
+        >
+          <EditIcon />
+        </button>
+      </div>
+
+      {showAddModal && <AddActivityModal onClose={() => setShowAddModal(false)} />}
+      {editActivity && <EditActivityModal activity={editActivity} onClose={() => setEditAct(null)} />}
+      {confirmRemove && selectedAct && (
+        <ConfirmRemoveModal
+          activityName={selectedAct.name}
+          onConfirm={() => { removeActivity(selectedAct.id); setConfirmRemove(false) }}
+          onCancel={() => setConfirmRemove(false)}
+        />
+      )}
     </>
   )
 }

@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useApp, AppProvider } from './AppContext'
 import { AppHeader } from './AppHeader'
 import { AppSidebar } from './AppSidebar'
-import { ActivityBar } from './ActivityBar'
+import { ActivityButtons } from './ActivityBar'
 import { StatsRow } from './StatsRow'
 import { LegendRow } from './LegendRow'
 import { CalendarSection } from './CalendarSection'
@@ -599,14 +599,14 @@ function ThemedApp(_props: XpaditeAppProps) {
         onAICoach={() => setAICoachOpen(true)}
       />
 
+      {/* +/-/edit buttons — centered strip just below navbar */}
+      <ActivityButtons />
+
       {/* ── MAIN CONTENT ─────────────────────────────────────────────────── */}
       <div
         className="xp-main-content"
         style={{ maxWidth: 1360, width: '100%', margin: '0 auto', paddingLeft: 16, paddingRight: 16, flex: 1, display: 'flex', flexDirection: 'column' }}
       >
-        {/* ActivityBar — always shown (add/edit/remove hidden on mobile via CSS) */}
-        <ActivityBar onQotdTrigger={triggerQotd} />
-
         {/* ── Overview / Calendar view (always shown on desktop; shown on 'overview' tab on mobile) */}
         <main
           className={mobileTab === 'overview' || mobileTab === 'analytics' ? '' : 'hidden sm:flex'}

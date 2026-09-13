@@ -191,6 +191,7 @@ interface TaskRowProps {
   task: Task
   index: number
   isActive: boolean
+  blockedByOtherTimer: boolean
   now: number
   isEditing: boolean
   onEditStart: () => void
@@ -218,7 +219,7 @@ interface TaskRowProps {
 }
 
 function TaskRow({
-  task, index, isActive, now, isEditing, onEditStart, onEditEnd, dateKey,
+  task, index, isActive, blockedByOtherTimer, now, isEditing, onEditStart, onEditEnd, dateKey,
   expanded, onExpandToggle,
   onToggle, onDelete, onDuplicate, onStartTimer, onStopTimer,
   draftJournal, onNotesDraftChange, onNotesSave,
@@ -508,13 +509,13 @@ function TaskRow({
             {multiSession && !isActive && totalMs > 0 && <span style={{ fontSize: 8, color: 'var(--xp-txt3)', opacity: 0.45 }}>all</span>}
           </span>
 
-          {/* Play — green; disabled when active or session is locked */}
+          {/* Play — green; disabled when active, blocked by another timer, or session is locked */}
           <button
             onClick={onStartTimer}
-            disabled={isActive || sessionLocked}
-            className={`p-1 rounded-md flex-shrink-0 transition-colors ${!isActive && !sessionLocked ? 'hover:bg-green-500/15 cursor-pointer' : 'cursor-not-allowed'}`}
-            style={{ color: '#16a34a', opacity: isActive || sessionLocked ? 0.25 : 1 }}
-            title={isActive ? 'Timer is running' : sessionLocked ? 'Session completed. Duplicate this task to continue working.' : 'Start timer'}
+            disabled={isActive || blockedByOtherTimer || sessionLocked}
+            className={`p-1 rounded-md flex-shrink-0 transition-colors ${!isActive && !blockedByOtherTimer && !sessionLocked ? 'hover:bg-green-500/15 cursor-pointer' : 'cursor-not-allowed'}`}
+            style={{ color: '#16a34a', opacity: isActive || blockedByOtherTimer || sessionLocked ? 0.25 : 1 }}
+            title={isActive ? 'Timer is running' : blockedByOtherTimer ? 'An active task is already running. Clock out first to start a new timer.' : sessionLocked ? 'Session completed. Duplicate this task to continue working.' : 'Start timer'}
           >
             <PlayIcon />
           </button>
@@ -1315,11 +1316,16 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
 
   function startTimer(taskId: string, taskIndex: number) {
     const task = dayData.tasks.find(t => t.id === taskId); if (!task) return
-    if (activeTaskTimer?.dateKey === dateKey && activeTaskTimer.taskId !== taskId) stopTimer(activeTaskTimer.taskId)
+    // Global mutual exclusion: block if any other timer is already running
+    if (activeTaskTimer && activeTaskTimer.taskId !== taskId) {
+      setToast('~An active task is already running.\nClock out first to start a new timer.')
+      return
+    }
     const sessionId  = 'sess' + Date.now()
     const newSession: TaskSession = { id: sessionId, startTs: Date.now(), endTs: null, note: '', tags: [] }
     updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, timerStart: t.timerStart ?? Date.now(), sessions: [...(t.sessions ?? []), newSession] } : t) }))
-    setActiveTaskTimer({ taskId, dateKey, sessionId, startTs: Date.now(), taskText: task.text, taskIndex })
+    // Always store a non-empty taskText so the navbar capsule can distinguish Task Manager timers from Calendar Clock In
+    setActiveTaskTimer({ taskId, dateKey, sessionId, startTs: Date.now(), taskText: task.text || `Task ${taskIndex + 1}`, taskIndex })
     setNow(Date.now())
     if (!activeSession) {
       const act = activities.find(a => a.id === (task.actId || selectedActId)) ?? activities[0]
@@ -1476,6 +1482,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
                   task={task}
                   index={index}
                   isActive={activeTaskTimer?.taskId === task.id && activeTaskTimer.dateKey === dateKey}
+                  blockedByOtherTimer={!!activeTaskTimer && activeTaskTimer.taskId !== task.id}
                   now={now}
                   isEditing={editingTaskId === task.id}
                   onEditStart={() => setEditingTaskId(task.id)}

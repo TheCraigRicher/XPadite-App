@@ -422,24 +422,6 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
 
           {/* RIGHT: action buttons */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-            {onAICoach && (
-              <button
-                onClick={onAICoach}
-                className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150 hover:opacity-85 flex-shrink-0"
-                style={{ background: 'rgba(109,40,217,0.2)', color: '#c4b5fd', border: '0.5px solid rgba(167,139,250,0.3)' }}
-              >
-                🤖 AI Coach
-              </button>
-            )}
-
-            <button
-              onClick={onAnalytics}
-              className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all duration-150 hover:bg-white/10 flex-shrink-0"
-              style={{ color: 'rgba(255,255,255,0.65)', border: '0.5px solid rgba(255,255,255,0.12)' }}
-            >
-              📈 Analytics
-            </button>
-
             {ThemeToggle}
           </div>
         </div>

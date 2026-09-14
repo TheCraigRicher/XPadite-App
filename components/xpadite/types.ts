@@ -97,6 +97,7 @@ export interface JournalTimerSession {
 
 export interface JournalDoc {
   v: 1
+  title?: string
   blocks: JournalBlock[]
   timerSessions?: JournalTimerSession[]
 }

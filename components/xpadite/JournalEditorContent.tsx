@@ -172,7 +172,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
       Placeholder.configure({
         placeholder: block.type === 'section'
           ? 'Add section content…'
-          : 'What made today great? Reflections, insights, gratitude…',
+          : 'Write your plans, reflections, gratitude, journal entries, brain dumps, ideas, or mind maps here…',
       }),
       Underline,
       TextStyle,
@@ -185,7 +185,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
 
   useEffect(() => {
     if (!editor) return
-    editor.commands.setContent(parseJournalContent(block.content || ''))
+    editor.commands.setContent(parseJournalContent(block.content || ''), { emitUpdate: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, block.id])
 
@@ -890,6 +890,9 @@ interface JournalEditorContentProps {
   onNavigateToday: () => void
   onBack: () => void
   onClose: () => void
+  onJournalCalendar?: () => void
+  onLibrary?: () => void
+  onEditor?: () => void
   // Legacy props — accepted for backward compat; attachments now live as inline blocks
   attachments?: TaskAttachment[]
   onAttachmentsChange?: (atts: TaskAttachment[]) => void
@@ -901,6 +904,7 @@ export function JournalEditorContent({
   dateKey, rawContent, isDark, isEditorOnToday,
   onContentChange, onPersist,
   onNavigateDay, onNavigateToday, onBack, onClose,
+  onJournalCalendar, onLibrary, onEditor,
 }: JournalEditorContentProps) {
 
   // ── State ───────────────────────────────────────────────────────────────────
@@ -917,6 +921,10 @@ export function JournalEditorContent({
 
   // ── Floating formatter state ─────────────────────────────────────────────────
   const [selectionRect, setSelectionRect] = useState<DOMRect | null>(null)
+
+  // ── Document title ────────────────────────────────────────────────────────────
+  const [title, setTitle] = useState('')
+  const titleRef          = useRef('')
 
   // ── Dirty / unsaved-changes state ───────────────────────────────────────────
   const [isDirty, setIsDirty]           = useState(false)
@@ -1000,6 +1008,8 @@ export function JournalEditorContent({
     setShowEmoji(false)
     setSaveStatus('idle')
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+    titleRef.current      = doc.title ?? ''
+    setTitle(doc.title ?? '')
     savedDocRef.current   = rawContent ?? ''
     isDirtyRef.current    = false
     setIsDirty(false)
@@ -1013,6 +1023,7 @@ export function JournalEditorContent({
     const sessions = timerSessionsRef.current
     const doc = {
       v: 1 as const,
+      ...(titleRef.current ? { title: titleRef.current } : {}),
       blocks: blocksRef.current.map(b => ({
         ...b,
         content: (b.type === 'text' || b.type === 'section')
@@ -1747,6 +1758,40 @@ export function JournalEditorContent({
             style={{ flex: 1, overflowY: 'auto', padding: '12px 20px 8px', minHeight: 0 }}
             onClick={() => { setSelectedBlockId(null); setMoveModeId(null); setResizeModeId(null); setSelectionRect(null) }}
           >
+            {/* ── Document title ──────────────────────────────────────────────── */}
+            <style>{`.xp-j-title::placeholder{color:${isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.28)'}}`}</style>
+            <input
+              className="xp-j-title"
+              type="text"
+              value={title}
+              onChange={e => {
+                const v = e.target.value.slice(0, 80)
+                titleRef.current = v
+                setTitle(v)
+                if (!isDirtyRef.current) { isDirtyRef.current = true; setIsDirty(true) }
+              }}
+              placeholder="Add a title..."
+              maxLength={80}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  const firstProse = blockListRef.current?.querySelector('.xp-j-prose') as HTMLElement | null
+                  firstProse?.focus()
+                }
+              }}
+              onClick={e => e.stopPropagation()}
+              style={{
+                width: '100%', display: 'block',
+                fontSize: 20, fontWeight: 700, lineHeight: 1.3,
+                background: 'transparent', border: 'none', outline: 'none',
+                color: isDark ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.86)',
+                padding: '2px 0 10px',
+                marginBottom: 14,
+                borderBottom: `0.5px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.09)'}`,
+                boxSizing: 'border-box',
+              }}
+            />
+
             <div
               ref={blockListRef}
               className="xp-j-grid"
@@ -1936,6 +1981,34 @@ export function JournalEditorContent({
               <SectionPicker isDark={isDark} onPick={color => {
                 insertBlock(createSectionBlock(color), blocks.length - 1)
               }} />
+
+              {(onJournalCalendar || onLibrary || onEditor) && (
+                <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
+              )}
+              {onJournalCalendar && (
+                <button
+                  className="xp-jd-btn"
+                  style={dockBtn()}
+                  onClick={() => guardedNavigate(onJournalCalendar)}
+                  title="Journal Calendar"
+                >📅 Journal Calendar</button>
+              )}
+              {onLibrary && (
+                <button
+                  className="xp-jd-btn"
+                  style={dockBtn()}
+                  onClick={() => guardedNavigate(onLibrary)}
+                  title="Library"
+                >📚 Library</button>
+              )}
+              {onEditor && (
+                <button
+                  className="xp-jd-btn"
+                  style={dockBtn(true)}
+                  onClick={onEditor}
+                  title="Planner/Journal Editor"
+                >✏️ Editor</button>
+              )}
             </div>
 
             {/* Right cluster */}

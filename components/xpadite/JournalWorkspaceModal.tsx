@@ -342,11 +342,24 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
   const todayDate = useMemo(() => new Date(), [])
   const todayKey  = useMemo(getTodayKey, [])
 
-  const [view, setView]             = useState<'calendar' | 'editor'>('calendar')
+  const [view, setView]             = useState<'calendar' | 'editor' | 'library'>('editor')
   const [calYear, setCalYear]       = useState(todayDate.getFullYear())
   const [openQ, setOpenQ]           = useState<Record<string, boolean>>({ Q1: true, Q2: true, Q3: true, Q4: true })
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [editorDate, setEditorDate] = useState(todayKey)
+  const [selectedLibEntry, setSelectedLibEntry] = useState<string | null>(null)
+  const [renamingEntry, setRenamingEntry]       = useState<string | null>(null)
+  const [renameValue, setRenameValue]           = useState('')
+  const [draggingKey, setDraggingKey]           = useState<string | null>(null)
+  const [dropZoneOver, setDropZoneOver]         = useState(false)
+  const [deleteConfirmKey, setDeleteConfirmKey] = useState<string | null>(null)
+  const libTouchRef      = useRef<{ key: string; time: number } | null>(null)
+  const dropZoneRef      = useRef<HTMLDivElement>(null)
+  const longPressRef     = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const touchDragKeyRef  = useRef<string | null>(null)
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null)
+  const [libViewMode, setLibViewMode]   = useState<'compact' | 'detail' | 'tile' | 'thumbnail'>('compact')
+  const [libSortOrder, setLibSortOrder] = useState<'newer' | 'older'>('newer')
 
   // ── ESC key — calendar view only; editor ESC is owned by JournalEditorContent ─
   const escRef = useRef<() => void>(() => {})
@@ -376,6 +389,47 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
   function doGoCalendar() { setView('calendar') }
   function doClose()      { onClose() }
 
+  // ── Library rename + open handlers ───────────────────────────────────────────
+  function handleLibClick(dateKey: string, title: string) {
+    setSelectedLibEntry(dateKey)
+    setRenamingEntry(dateKey)
+    setRenameValue(title)
+  }
+  function handleLibDoubleClick(dateKey: string) {
+    setRenamingEntry(null)
+    doOpenEditor(dateKey)
+  }
+  function handleLibTouchEnd(dateKey: string, title: string) {
+    const now = Date.now()
+    const last = libTouchRef.current
+    if (last?.key === dateKey && now - last.time < 350) {
+      libTouchRef.current = null
+      setRenamingEntry(null)
+      doOpenEditor(dateKey)
+    } else {
+      libTouchRef.current = { key: dateKey, time: now }
+      setSelectedLibEntry(dateKey)
+      setRenamingEntry(dateKey)
+      setRenameValue(title)
+    }
+  }
+  function commitLibRename(dateKey: string) {
+    const trimmed = renameValue.trim()
+    const existingDoc = parseJournalDoc(calData[dateKey]?.notes)
+    const updated = { ...existingDoc }
+    if (trimmed) updated.title = trimmed
+    else delete updated.title
+    updateDay(dateKey, prev => ({ ...prev, notes: JSON.stringify(updated) }))
+    setRenamingEntry(null)
+  }
+
+  function commitDelete(dateKey: string) {
+    updateDay(dateKey, prev => ({ ...prev, notes: '' }))
+    if (renamingEntry === dateKey) setRenamingEntry(null)
+    if (selectedLibEntry === dateKey) setSelectedLibEntry(null)
+    setDeleteConfirmKey(null)
+  }
+
   function navigateDay(delta: number) {
     const key = shiftDay(editorDate, delta)
     setEditorDate(key)
@@ -402,6 +456,21 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
   const getEntrySummaries = useCallback((dateKey: string): JournalEntrySummary[] => {
     return getJournalEntrySummaries(calData[dateKey]?.notes)
   }, [calData])
+
+  // ── Library entries — all dates with journal content ────────────────────────
+  const libraryEntries = useMemo(() => {
+    const entries = Object.entries(calData)
+      .filter(([, d]) => d.notes?.trim())
+      .map(([key]) => {
+        const [y, m, d] = fromKey(key)
+        const parsedDoc = parseJournalDoc(calData[key]?.notes)
+        const title = parsedDoc.title?.trim() || extractFirstLine(calData[key]?.notes) || 'Untitled'
+        return { dateKey: key, year: y, month: m, day: d, title }
+      })
+    return libSortOrder === 'newer'
+      ? entries.sort((a, b) => b.dateKey.localeCompare(a.dateKey))
+      : entries.sort((a, b) => a.dateKey.localeCompare(b.dateKey))
+  }, [calData, libSortOrder])
 
   // ── Scroll to today's quarter on calendar open ────────────────────────────────
   const calContentRef = useRef<HTMLDivElement>(null)
@@ -472,7 +541,7 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
             </button>
 
             <span style={{ color: '#fff', fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em', lineHeight: 1 }}>
-              📝 Journal {calYear}
+              📋 Planner/Journal {calYear}
             </span>
 
             <button
@@ -575,6 +644,642 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
           </span>
         </div>
       </div>
+
+      {/* ── Bottom view-nav bar ───────────────────────────────────────────── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        padding: '10px 16px', flexShrink: 0,
+        borderTop: `0.5px solid ${bdr}`,
+        background: isDark ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.35)',
+      }}>
+        {([
+          { key: 'calendar' as const, icon: '📅', label: 'Journal Calendar', action: () => setView('calendar') },
+          { key: 'library'  as const, icon: '📚', label: 'Library',          action: () => setView('library')  },
+          { key: 'editor'   as const, icon: '✏️', label: 'Editor',           action: () => setView('editor')   },
+        ]).map(item => {
+          const active = view === item.key
+          return (
+            <button
+              key={item.key}
+              onClick={item.action}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '6px 14px', borderRadius: 8,
+                fontSize: 12, fontWeight: active ? 600 : 400,
+                cursor: 'pointer',
+                background: active ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.06)',
+                border: `0.5px solid ${active ? 'rgba(124,58,237,0.40)' : 'rgba(124,58,237,0.16)'}`,
+                color: active ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.50)',
+                transition: 'background 120ms',
+              }}
+            >
+              {item.icon} {item.label}
+            </button>
+          )
+        })}
+      </div>
+    </>
+  )
+
+  // ── Shared drag-event factory used by all 4 library card modes ──────────────
+  function mkDragHandlers(dateKey: string, title: string, isRen: boolean) {
+    return {
+      draggable: !isRen,
+      onDragStart: !isRen ? () => setDraggingKey(dateKey) : undefined,
+      onDragEnd: () => { setDraggingKey(null); setDropZoneOver(false) },
+      onTouchStart: (e: React.TouchEvent) => {
+        if (isRen) return
+        touchStartPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+        longPressRef.current = setTimeout(() => {
+          touchDragKeyRef.current = dateKey
+          setDraggingKey(dateKey)
+          setSelectedLibEntry(dateKey)
+          if (navigator.vibrate) navigator.vibrate(50)
+        }, 600)
+      },
+      onTouchMove: (e: React.TouchEvent) => {
+        const t = e.touches[0]
+        if (longPressRef.current && touchStartPosRef.current) {
+          if (Math.hypot(t.clientX - touchStartPosRef.current.x, t.clientY - touchStartPosRef.current.y) > 10) {
+            clearTimeout(longPressRef.current); longPressRef.current = null
+          }
+        }
+        if (touchDragKeyRef.current) {
+          e.preventDefault()
+          setDropZoneOver(dropZoneRef.current?.contains(document.elementFromPoint(t.clientX, t.clientY)) ?? false)
+        }
+      },
+      onTouchEnd: (e: React.TouchEvent) => {
+        if (longPressRef.current) { clearTimeout(longPressRef.current); longPressRef.current = null }
+        if (touchDragKeyRef.current) {
+          const t = e.changedTouches[0]
+          if (dropZoneRef.current?.contains(document.elementFromPoint(t.clientX, t.clientY))) {
+            setDeleteConfirmKey(touchDragKeyRef.current)
+          }
+          touchDragKeyRef.current = null; setDraggingKey(null); setDropZoneOver(false)
+          e.preventDefault(); return
+        }
+        e.preventDefault(); handleLibTouchEnd(dateKey, title)
+      },
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // LIBRARY VIEW
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const libraryView = (
+    <>
+      {/* Header */}
+      <div
+        className="xp-j-hdr"
+        style={{
+          height: 64,
+          display: 'flex', alignItems: 'center',
+          padding: '0 20px',
+          flexShrink: 0,
+          position: 'relative',
+          borderBottom: '0.5px solid rgba(255,255,255,0.06)',
+        }}
+      >
+        <button
+          onClick={() => setView('calendar')}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0"
+          style={{ position: 'absolute', left: 20, background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.80)' }}
+        >
+          ← Back
+        </button>
+
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span style={{ color: '#fff', fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>
+            📚 Library
+          </span>
+        </div>
+
+        <button
+          onClick={doClose}
+          className="text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
+          style={{ position: 'absolute', right: 20, background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}
+        >
+          × Close
+        </button>
+      </div>
+
+      {/* Controls bar — view mode + sort order */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '8px 20px', flexShrink: 0,
+        borderBottom: `0.5px solid ${bdr}`,
+        background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)',
+        gap: 12,
+      }}>
+        {/* View mode toggles */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 10, color: muted, marginRight: 4, whiteSpace: 'nowrap' }}>View:</span>
+          {([
+            { key: 'compact'   as const, label: '⊡ Default'   , title: 'Default (compact) mode' },
+            { key: 'detail'    as const, label: '≡ Detail'    , title: 'Detail mode'    },
+            { key: 'tile'      as const, label: '⊞ Tile'      , title: 'Tile mode'      },
+            { key: 'thumbnail' as const, label: '⊟ Thumbnail' , title: 'Thumbnail mode' },
+          ]).map(opt => (
+            <button
+              key={opt.key}
+              onClick={() => setLibViewMode(opt.key)}
+              title={opt.title}
+              style={{
+                padding: '3px 10px', borderRadius: 6, fontSize: 11,
+                fontWeight: libViewMode === opt.key ? 600 : 400,
+                cursor: 'pointer',
+                background: libViewMode === opt.key ? 'rgba(124,58,237,0.18)' : 'transparent',
+                border: `0.5px solid ${libViewMode === opt.key ? 'rgba(124,58,237,0.40)' : 'rgba(124,58,237,0.14)'}`,
+                color: libViewMode === opt.key ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.50)' : 'rgba(0,0,0,0.45)',
+                transition: 'background 120ms',
+              }}
+            >{opt.label}</button>
+          ))}
+        </div>
+
+        {/* Sort order toggles */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 10, color: muted, marginRight: 4, whiteSpace: 'nowrap' }}>Sort:</span>
+          {([
+            { key: 'newer' as const, label: '↓ Newer' },
+            { key: 'older' as const, label: '↑ Older' },
+          ]).map(opt => (
+            <button
+              key={opt.key}
+              onClick={() => setLibSortOrder(opt.key)}
+              style={{
+                padding: '3px 10px', borderRadius: 6, fontSize: 11,
+                fontWeight: libSortOrder === opt.key ? 600 : 400,
+                cursor: 'pointer',
+                background: libSortOrder === opt.key ? 'rgba(124,58,237,0.18)' : 'transparent',
+                border: `0.5px solid ${libSortOrder === opt.key ? 'rgba(124,58,237,0.40)' : 'rgba(124,58,237,0.14)'}`,
+                color: libSortOrder === opt.key ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.50)' : 'rgba(0,0,0,0.45)',
+                transition: 'background 120ms',
+              }}
+            >{opt.label}</button>
+          ))}
+        </div>
+
+        {/* Trash drop zone */}
+        <div
+          ref={dropZoneRef}
+          onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropZoneOver(true) }}
+          onDragLeave={() => setDropZoneOver(false)}
+          onDrop={e => {
+            e.preventDefault(); setDropZoneOver(false)
+            if (draggingKey) { setDeleteConfirmKey(draggingKey); setDraggingKey(null) }
+          }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+            userSelect: 'none', transition: 'all 180ms',
+            border: `1.5px dashed ${dropZoneOver ? 'rgba(239,68,68,0.85)' : draggingKey ? 'rgba(239,68,68,0.50)' : 'rgba(239,68,68,0.25)'}`,
+            background: dropZoneOver ? 'rgba(239,68,68,0.18)' : draggingKey ? 'rgba(239,68,68,0.07)' : 'transparent',
+            color: dropZoneOver ? '#fca5a5' : draggingKey ? 'rgba(239,68,68,0.75)' : 'rgba(239,68,68,0.45)',
+            cursor: draggingKey ? 'copy' : 'default',
+            transform: dropZoneOver ? 'scale(1.05)' : 'scale(1)',
+          }}
+        >
+          🗑️ {dropZoneOver ? 'Release to delete' : draggingKey ? 'Drop here to delete' : 'Delete'}
+        </div>
+      </div>
+
+      {/* Entry list */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+        {libraryEntries.length === 0 ? (
+          <div style={{ textAlign: 'center', paddingTop: 48, color: muted, fontSize: 13 }}>
+            No journal entries yet. Start writing in the Editor.
+          </div>
+        ) : libViewMode === 'compact' ? (
+          /* ── Compact/Default mode: desktop-folder style tight grid ────── */
+          <div style={{
+            display: 'flex', flexWrap: 'wrap',
+            gap: 6, alignContent: 'flex-start',
+          }}>
+            {libraryEntries.map(entry => {
+              const isSel = selectedLibEntry === entry.dateKey
+              const isRen = renamingEntry === entry.dateKey
+              const renInput = (fontSize: number, width?: string) => (
+                <input
+                  autoFocus
+                  type="text"
+                  value={renameValue}
+                  maxLength={80}
+                  onChange={e => setRenameValue(e.target.value)}
+                  onBlur={() => commitLibRename(entry.dateKey)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.preventDefault(); commitLibRename(entry.dateKey) }
+                    if (e.key === 'Escape') { e.stopPropagation(); setRenamingEntry(null) }
+                  }}
+                  onClick={e => e.stopPropagation()}
+                  onTouchEnd={e => e.stopPropagation()}
+                  style={{
+                    fontSize, fontWeight: 500, lineHeight: 1.3, width: width ?? '100%',
+                    background: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)',
+                    border: '1px solid rgba(124,58,237,0.55)', borderRadius: 4, outline: 'none',
+                    color: isDark ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.85)',
+                    padding: '1px 5px', boxSizing: 'border-box',
+                  }}
+                />
+              )
+              const isDragThis = draggingKey === entry.dateKey
+              return (
+                <div
+                  key={entry.dateKey}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleLibClick(entry.dateKey, entry.title)}
+                  onDoubleClick={() => handleLibDoubleClick(entry.dateKey)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey) }}
+                  {...mkDragHandlers(entry.dateKey, entry.title, isRen)}
+                  title={`${entry.title} — ${MONTH_NAMES[entry.month]} ${entry.day}, ${entry.year}\nClick/tap to rename · Double-click/tap to open\nDrag / long-press to delete zone to remove`}
+                  style={{
+                    width: 110, flexShrink: 0,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center',
+                    padding: '10px 8px 8px', borderRadius: 10, textAlign: 'center',
+                    cursor: isDragThis ? 'grabbing' : 'pointer', userSelect: 'none',
+                    background: isSel
+                      ? (isDark ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.14)')
+                      : 'transparent',
+                    border: isSel
+                      ? '1.5px solid rgba(124,58,237,0.55)'
+                      : '1.5px solid transparent',
+                    transition: 'background 130ms, border-color 130ms, opacity 150ms, transform 150ms',
+                    opacity: isDragThis ? 0.40 : 1,
+                    transform: isDragThis ? 'scale(0.92)' : undefined,
+                    gap: 5,
+                  }}
+                >
+                  <div style={{
+                    width: 52, height: 60, borderRadius: 6,
+                    background: isSel
+                      ? (isDark ? 'rgba(124,58,237,0.30)' : 'rgba(124,58,237,0.15)')
+                      : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(124,58,237,0.07)'),
+                    border: `0.5px solid ${isSel ? 'rgba(124,58,237,0.45)' : isDark ? 'rgba(255,255,255,0.10)' : 'rgba(124,58,237,0.14)'}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 24, flexShrink: 0, position: 'relative',
+                  }}>
+                    📝
+                    <div style={{
+                      position: 'absolute', top: 0, right: 0, width: 0, height: 0,
+                      borderStyle: 'solid', borderWidth: '0 10px 10px 0',
+                      borderColor: `transparent ${isDark ? 'rgba(0,0,0,0.40)' : 'rgba(124,58,237,0.18)'} transparent transparent`,
+                    }} />
+                  </div>
+                  {isRen ? renInput(11) : (
+                    <span style={{
+                      fontSize: 11, fontWeight: 500, lineHeight: 1.3,
+                      color: isSel ? (isDark ? '#c4b5fd' : '#7c3aed') : isDark ? 'rgba(255,255,255,0.82)' : 'rgba(0,0,0,0.75)',
+                      overflow: 'hidden', textOverflow: 'ellipsis',
+                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                      width: '100%',
+                    }}>{entry.title}</span>
+                  )}
+                  <span style={{ fontSize: 9, lineHeight: 1.2, color: isSel ? 'rgba(167,139,250,0.75)' : muted }}>
+                    {MONTH_SHORT[entry.month]} {entry.day}, {entry.year}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        ) : libViewMode === 'detail' ? (
+          /* ── Detail mode: one row per entry ───────────────────────────── */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {libraryEntries.map(entry => {
+              const isSel = selectedLibEntry === entry.dateKey
+              const isRen = renamingEntry === entry.dateKey
+              const isDragThis = draggingKey === entry.dateKey
+              return (
+                <div
+                  key={entry.dateKey}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleLibClick(entry.dateKey, entry.title)}
+                  onDoubleClick={() => handleLibDoubleClick(entry.dateKey)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey) }}
+                  {...mkDragHandlers(entry.dateKey, entry.title, isRen)}
+                  title="Click/tap to rename · Double-click/tap to open · Drag to 🗑️ to delete"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '12px 16px', borderRadius: 10, textAlign: 'left',
+                    cursor: isDragThis ? 'grabbing' : 'pointer', userSelect: 'none',
+                    background: isSel
+                      ? (isDark ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.10)')
+                      : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.70)'),
+                    border: isSel
+                      ? '1.5px solid rgba(124,58,237,0.50)'
+                      : `0.5px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'}`,
+                    transition: 'background 140ms, border-color 140ms, opacity 150ms, transform 150ms',
+                    opacity: isDragThis ? 0.40 : 1,
+                    transform: isDragThis ? 'scale(0.98)' : undefined,
+                    minWidth: 0,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
+                    <span style={{ fontSize: 18, flexShrink: 0 }}>📝</span>
+                    {isRen ? (
+                      <input
+                        autoFocus
+                        type="text"
+                        value={renameValue}
+                        maxLength={80}
+                        onChange={e => setRenameValue(e.target.value)}
+                        onBlur={() => commitLibRename(entry.dateKey)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { e.preventDefault(); commitLibRename(entry.dateKey) }
+                          if (e.key === 'Escape') { e.stopPropagation(); setRenamingEntry(null) }
+                        }}
+                        onClick={e => e.stopPropagation()}
+                        onTouchEnd={e => e.stopPropagation()}
+                        style={{
+                          flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500,
+                          background: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)',
+                          border: '1px solid rgba(124,58,237,0.55)', borderRadius: 4, outline: 'none',
+                          color: isDark ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.85)',
+                          padding: '1px 5px', boxSizing: 'border-box',
+                        }}
+                      />
+                    ) : (
+                      <span style={{
+                        fontSize: 13, fontWeight: 500,
+                        color: isSel ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.88)' : 'rgba(0,0,0,0.80)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        minWidth: 0,
+                      }}>{entry.title}</span>
+                    )}
+                  </div>
+                  <span style={{
+                    fontSize: 11, flexShrink: 0, marginLeft: 12,
+                    color: isSel ? 'rgba(167,139,250,0.80)' : muted,
+                    whiteSpace: 'nowrap',
+                  }}>{MONTH_NAMES[entry.month]} {entry.day}, {entry.year}</span>
+                </div>
+              )
+            })}
+          </div>
+        ) : libViewMode === 'tile' ? (
+          /* ── Tile mode: 2-column grid ──────────────────────────────────── */
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+            {libraryEntries.map(entry => {
+              const isSel = selectedLibEntry === entry.dateKey
+              const isRen = renamingEntry === entry.dateKey
+              const isDragThis = draggingKey === entry.dateKey
+              return (
+                <div
+                  key={entry.dateKey}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleLibClick(entry.dateKey, entry.title)}
+                  onDoubleClick={() => handleLibDoubleClick(entry.dateKey)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey) }}
+                  {...mkDragHandlers(entry.dateKey, entry.title, isRen)}
+                  title="Click/tap to rename · Double-click/tap to open · Drag to 🗑️ to delete"
+                  style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+                    padding: '14px 16px', borderRadius: 12, textAlign: 'left',
+                    cursor: isDragThis ? 'grabbing' : 'pointer', userSelect: 'none',
+                    background: isSel
+                      ? (isDark ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.10)')
+                      : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.80)'),
+                    border: isSel
+                      ? '1.5px solid rgba(124,58,237,0.50)'
+                      : `0.5px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'}`,
+                    transition: 'background 140ms, border-color 140ms, opacity 150ms, transform 150ms',
+                    opacity: isDragThis ? 0.40 : 1,
+                    transform: isDragThis ? 'scale(0.96)' : undefined,
+                    gap: 8, minWidth: 0,
+                  }}
+                >
+                  <span style={{ fontSize: 22 }}>📝</span>
+                  {isRen ? (
+                    <input
+                      autoFocus
+                      type="text"
+                      value={renameValue}
+                      maxLength={80}
+                      onChange={e => setRenameValue(e.target.value)}
+                      onBlur={() => commitLibRename(entry.dateKey)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') { e.preventDefault(); commitLibRename(entry.dateKey) }
+                        if (e.key === 'Escape') { e.stopPropagation(); setRenamingEntry(null) }
+                      }}
+                      onClick={e => e.stopPropagation()}
+                      onTouchEnd={e => e.stopPropagation()}
+                      style={{
+                        width: '100%', fontSize: 13, fontWeight: 600,
+                        background: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)',
+                        border: '1px solid rgba(124,58,237,0.55)', borderRadius: 4, outline: 'none',
+                        color: isDark ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.85)',
+                        padding: '1px 5px', boxSizing: 'border-box',
+                      }}
+                    />
+                  ) : (
+                    <span style={{
+                      fontSize: 13, fontWeight: 600, lineHeight: 1.3,
+                      color: isSel ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.90)' : 'rgba(0,0,0,0.82)',
+                      overflow: 'hidden', textOverflow: 'ellipsis',
+                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                      width: '100%',
+                    }}>{entry.title}</span>
+                  )}
+                  <span style={{ fontSize: 10, marginTop: 2, color: isSel ? 'rgba(167,139,250,0.80)' : muted }}>
+                    {MONTH_NAMES[entry.month]} {entry.day}, {entry.year}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          /* ── Thumbnail mode: 3-column grid, larger cards ───────────────── */
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+            {libraryEntries.map(entry => {
+              const isSel = selectedLibEntry === entry.dateKey
+              const isRen = renamingEntry === entry.dateKey
+              const isDragThis = draggingKey === entry.dateKey
+              return (
+                <div
+                  key={entry.dateKey}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleLibClick(entry.dateKey, entry.title)}
+                  onDoubleClick={() => handleLibDoubleClick(entry.dateKey)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey) }}
+                  {...mkDragHandlers(entry.dateKey, entry.title, isRen)}
+                  title="Click/tap to rename · Double-click/tap to open · Drag to 🗑️ to delete"
+                  style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center',
+                    padding: '20px 14px 16px', borderRadius: 14, textAlign: 'center',
+                    cursor: isDragThis ? 'grabbing' : 'pointer', userSelect: 'none',
+                    background: isSel
+                      ? (isDark ? 'rgba(124,58,237,0.22)' : 'rgba(124,58,237,0.12)')
+                      : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.85)'),
+                    border: isSel
+                      ? '1.5px solid rgba(124,58,237,0.55)'
+                      : `0.5px solid ${isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.07)'}`,
+                    transition: 'background 140ms, border-color 140ms, opacity 150ms, transform 150ms',
+                    opacity: isDragThis ? 0.40 : 1,
+                    transform: isDragThis ? 'scale(0.96)' : undefined,
+                    gap: 10, minWidth: 0,
+                  }}
+                >
+                  <div style={{
+                    width: '100%', height: 70, borderRadius: 8,
+                    background: isSel ? 'rgba(124,58,237,0.15)' : isDark ? 'rgba(124,58,237,0.08)' : 'rgba(124,58,237,0.06)',
+                    border: `0.5px solid rgba(124,58,237,0.15)`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 28, marginBottom: 2,
+                  }}>📝</div>
+                  {isRen ? (
+                    <input
+                      autoFocus
+                      type="text"
+                      value={renameValue}
+                      maxLength={80}
+                      onChange={e => setRenameValue(e.target.value)}
+                      onBlur={() => commitLibRename(entry.dateKey)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') { e.preventDefault(); commitLibRename(entry.dateKey) }
+                        if (e.key === 'Escape') { e.stopPropagation(); setRenamingEntry(null) }
+                      }}
+                      onClick={e => e.stopPropagation()}
+                      onTouchEnd={e => e.stopPropagation()}
+                      style={{
+                        width: '100%', fontSize: 12, fontWeight: 600,
+                        background: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)',
+                        border: '1px solid rgba(124,58,237,0.55)', borderRadius: 4, outline: 'none',
+                        color: isDark ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.85)',
+                        padding: '1px 5px', boxSizing: 'border-box', textAlign: 'center',
+                      }}
+                    />
+                  ) : (
+                    <span style={{
+                      fontSize: 12, fontWeight: 600, lineHeight: 1.3,
+                      color: isSel ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.90)' : 'rgba(0,0,0,0.82)',
+                      overflow: 'hidden', textOverflow: 'ellipsis',
+                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                      width: '100%',
+                    }}>{entry.title}</span>
+                  )}
+                  <span style={{ fontSize: 10, color: isSel ? 'rgba(167,139,250,0.80)' : muted }}>
+                    {MONTH_SHORT[entry.month]} {entry.day}, {entry.year}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {libraryEntries.length > 0 && (
+          <div style={{ textAlign: 'center', paddingTop: 14 }}>
+            <span style={{ fontSize: 11, color: muted }}>
+              Click / tap to rename · Double-click / double-tap to open in editor
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* ── Delete confirmation dialog ───────────────────────────────────── */}
+      {deleteConfirmKey && (() => {
+        const entry = libraryEntries.find(e => e.dateKey === deleteConfirmKey)
+        return (
+          <div
+            style={{
+              position: 'absolute', inset: 0, zIndex: 80,
+              background: 'rgba(0,0,0,0.55)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              borderRadius: 'inherit',
+            }}
+            onClick={() => setDeleteConfirmKey(null)}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{
+                background: isDark ? '#1e1b2e' : '#ffffff',
+                border: `1px solid ${isDark ? 'rgba(239,68,68,0.35)' : 'rgba(239,68,68,0.25)'}`,
+                borderRadius: 14, padding: '24px 28px', maxWidth: 320, width: '90%',
+                boxShadow: '0 8px 40px rgba(0,0,0,0.45)',
+                display: 'flex', flexDirection: 'column', gap: 16,
+              }}
+            >
+              <div style={{ fontSize: 15, fontWeight: 600, color: isDark ? 'rgba(255,255,255,0.90)' : 'rgba(0,0,0,0.85)' }}>
+                Delete this document?
+              </div>
+              {entry && (
+                <div style={{ fontSize: 13, color: muted, lineHeight: 1.4 }}>
+                  <strong style={{ color: isDark ? 'rgba(255,255,255,0.80)' : 'rgba(0,0,0,0.75)' }}>{entry.title}</strong>
+                  <br />
+                  {MONTH_NAMES[entry.month]} {entry.day}, {entry.year}
+                </div>
+              )}
+              <div style={{ fontSize: 12, color: muted }}>
+                This action cannot be undone.
+              </div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => setDeleteConfirmKey(null)}
+                  style={{
+                    padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                    cursor: 'pointer',
+                    background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                    border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`,
+                    color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => commitDelete(deleteConfirmKey)}
+                  style={{
+                    padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer',
+                    background: 'rgba(239,68,68,0.88)',
+                    border: '0.5px solid rgba(239,68,68,0.60)',
+                    color: '#fff',
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── Bottom view-nav bar ───────────────────────────────────────────── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        padding: '10px 16px', flexShrink: 0,
+        borderTop: `0.5px solid ${bdr}`,
+        background: isDark ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.35)',
+      }}>
+        {([
+          { key: 'calendar' as const, icon: '📅', label: 'Journal Calendar', action: () => setView('calendar') },
+          { key: 'library'  as const, icon: '📚', label: 'Library',          action: () => setView('library')  },
+          { key: 'editor'   as const, icon: '✏️', label: 'Editor',           action: () => setView('editor')   },
+        ]).map(item => {
+          const active = view === item.key
+          return (
+            <button
+              key={item.key}
+              onClick={item.action}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '6px 14px', borderRadius: 8,
+                fontSize: 12, fontWeight: active ? 600 : 400,
+                cursor: 'pointer',
+                background: active ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.06)',
+                border: `0.5px solid ${active ? 'rgba(124,58,237,0.40)' : 'rgba(124,58,237,0.16)'}`,
+                color: active ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.50)',
+                transition: 'background 120ms',
+              }}
+            >
+              {item.icon} {item.label}
+            </button>
+          )
+        })}
+      </div>
     </>
   )
 
@@ -596,6 +1301,9 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
       onClose={doClose}
       attachments={calData[editorDate]?.attachments ?? []}
       onAttachmentsChange={atts => updateDay(editorDate, prev => ({ ...prev, attachments: atts }))}
+      onJournalCalendar={() => setView('calendar')}
+      onLibrary={() => setView('library')}
+      onEditor={() => setView('editor')}
     />
   )
 
@@ -638,7 +1346,7 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
           }}
           onClick={e => e.stopPropagation()}
         >
-          {view === 'calendar' ? calendarView : editorView}
+          {view === 'calendar' ? calendarView : view === 'library' ? libraryView : editorView}
         </div>
       </div>
     </>

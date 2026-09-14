@@ -1064,7 +1064,10 @@ export function JournalEditorContent({
   const lastActivityRef   = useRef(Date.now())
   const timerStartTsRef   = useRef<number | null>(null)
   const showSessionsRef   = useRef(false)
-  const timerWrapperRef   = useRef<HTMLDivElement>(null)
+  const timerWrapperRef    = useRef<HTMLDivElement>(null)
+  const toolbarScrollRef   = useRef<HTMLDivElement>(null)
+  const [canScrollLeft,  setCanScrollLeft]  = useState(false)
+  const [canScrollRight, setCanScrollRight] = useState(false)
 
   // ── Move / resize mode state ─────────────────────────────────────────────────
   const [moveModeId,   setMoveModeId]   = useState<string | null>(null)
@@ -1081,6 +1084,12 @@ export function JournalEditorContent({
     offsetX: number; offsetY: number
     blockW: number;  blockH: number
   } | null>(null)
+
+  // ── Voice-to-notes state ────────────────────────────────────────────────────
+  const [isRecording, setIsRecording] = useState(false)
+  const [voiceError,  setVoiceError]  = useState<string | null>(null)
+  const isRecordingRef = useRef(false)
+  const recognitionRef = useRef<any>(null)
 
   // ── Refs ────────────────────────────────────────────────────────────────────
   const contentMapRef   = useRef<Map<string, string>>(new Map())
@@ -1100,8 +1109,43 @@ export function JournalEditorContent({
   // Keep blocksRef in sync with blocks state
   useEffect(() => { blocksRef.current = blocks }, [blocks])
 
+  // ── Toolbar scroll arrows ────────────────────────────────────────────────────
+  const updateScrollArrows = useCallback(() => {
+    const el = toolbarScrollRef.current
+    if (!el) return
+    setCanScrollLeft(el.scrollLeft > 2)
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2)
+  }, [])
+
+  useEffect(() => {
+    const el = toolbarScrollRef.current
+    if (!el) return
+    updateScrollArrows()
+    const ro = new ResizeObserver(updateScrollArrows)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [updateScrollArrows])
+
+  // ── Unmount cleanup — stop voice recording ──────────────────────────────────
+  useEffect(() => () => {
+    if (isRecordingRef.current) {
+      isRecordingRef.current = false
+      try { recognitionRef.current?.stop() } catch {}
+      recognitionRef.current = null
+    }
+  }, [])
+
   // ── Init / date change ───────────────────────────────────────────────────────
   useEffect(() => {
+    // Stop any active voice recording when navigating to a new date
+    if (isRecordingRef.current) {
+      isRecordingRef.current = false
+      setIsRecording(false)
+      try { recognitionRef.current?.stop() } catch {}
+      recognitionRef.current = null
+    }
+    setVoiceError(null)
+
     const doc = parseJournalDoc(rawContent)
     const initialBlocks = doc.blocks.length > 0 ? doc.blocks : [createTextBlock()]
     setBlocks(initialBlocks)
@@ -1547,6 +1591,77 @@ export function JournalEditorContent({
     focusedEditor.current?.chain().focus().insertContent(data.emoji).run()
     setShowEmoji(false)
   }
+
+  // Indent — nests list items; no-op for plain paragraphs (no arbitrary block indent)
+  function handleIndent() {
+    const ed = focusedEditor.current
+    if (!ed) return
+    if (ed.isActive('taskList')) {
+      ed.chain().focus().sinkListItem('taskItem').run()
+    } else {
+      ed.chain().focus().sinkListItem('listItem').run()
+    }
+  }
+
+  // Voice-to-notes
+  function handleVoiceToggle() {
+    if (isRecordingRef.current) {
+      isRecordingRef.current = false
+      setIsRecording(false)
+      try { recognitionRef.current?.stop() } catch {}
+      recognitionRef.current = null
+      return
+    }
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    if (!SR) {
+      setVoiceError('Voice recognition is not supported in this browser. Try Chrome or Edge.')
+      return
+    }
+    const rec = new SR()
+    rec.continuous = true
+    rec.interimResults = false
+    rec.lang = navigator.language || 'en-US'
+    rec.onresult = (e: any) => {
+      let transcript = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) transcript += e.results[i][0].transcript
+      }
+      if (transcript.trim()) {
+        const ed = focusedEditor.current
+        if (ed) ed.chain().focus().insertContent(transcript.trim() + ' ').run()
+      }
+    }
+    rec.onerror = (e: any) => {
+      if (e.error === 'not-allowed') {
+        setVoiceError('Microphone access denied. Allow microphone access in your browser settings and try again.')
+      } else if (e.error !== 'no-speech') {
+        setVoiceError(`Voice error (${e.error}). Please try again.`)
+      }
+      isRecordingRef.current = false
+      setIsRecording(false)
+      recognitionRef.current = null
+    }
+    rec.onend = () => {
+      // Auto-restart if user hasn't stopped — handles browser's silence timeout
+      if (isRecordingRef.current) {
+        try { rec.start() } catch {
+          isRecordingRef.current = false
+          setIsRecording(false)
+          recognitionRef.current = null
+        }
+      }
+    }
+    recognitionRef.current = rec
+    try {
+      rec.start()
+      isRecordingRef.current = true
+      setIsRecording(true)
+      setVoiceError(null)
+    } catch {
+      setVoiceError('Could not start voice recognition. Please check your microphone.')
+      recognitionRef.current = null
+    }
+  }
   useEffect(() => {
     if (!showEmoji) return
     function outside(e: MouseEvent) {
@@ -1766,6 +1881,13 @@ export function JournalEditorContent({
           0%, 100% { opacity: 0.85; }
           50%       { opacity: 1; }
         }
+        /* Mic recording pulse */
+        @keyframes xpMicPulse {
+          0%   { box-shadow: 0 0 0 0   rgba(239,68,68,0.65); }
+          70%  { box-shadow: 0 0 0 7px rgba(239,68,68,0);    }
+          100% { box-shadow: 0 0 0 0   rgba(239,68,68,0);    }
+        }
+        .xp-j-mic-rec { animation: xpMicPulse 1.5s ease-out infinite; }
       `}</style>
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
@@ -2039,71 +2161,337 @@ export function JournalEditorContent({
             </div>
           </div>
 
-          {/* ── Tool dock ─────────────────────────────────────────────────── */}
+          {/* ── Editor tools bar (single row, horizontally scrollable) ──── */}
           <div style={{
             background: dockBg, borderTop: `0.5px solid ${dockBdr}`,
-            boxShadow: 'inset 0 1px 0 rgba(124,58,237,0.10), 0 -6px 24px rgba(0,0,0,0.40)',
-            padding: '10px 16px 12px', flexShrink: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            gap: 6, flexWrap: 'wrap', position: 'relative',
+            boxShadow: 'inset 0 1px 0 rgba(124,58,237,0.10), 0 -4px 16px rgba(0,0,0,0.30)',
+            flexShrink: 0, position: 'relative',
+            display: 'flex', alignItems: 'stretch',
           }}>
-            {/* Left cluster */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-              <button
-                className={`xp-jd-btn${isActive('bulletList') ? ' xp-j-active' : ''}`}
-                style={dockBtn(isActive('bulletList'))}
-                onClick={() => focusedEditor.current?.chain().focus().toggleBulletList().run()}
-                title="Bulleted list"
-              >• List</button>
-              <button
-                className={`xp-jd-btn${isActive('orderedList') ? ' xp-j-active' : ''}`}
-                style={dockBtn(isActive('orderedList'))}
-                onClick={() => focusedEditor.current?.chain().focus().toggleOrderedList().run()}
-                title="Numbered list"
-              >1. List</button>
-              <button
-                className={`xp-jd-btn${isActive('taskList') ? ' xp-j-active' : ''}`}
-                style={dockBtn(isActive('taskList'))}
-                onClick={() => focusedEditor.current?.chain().focus().toggleTaskList().run()}
-                title="Interactive checklist"
-              >☐ Check</button>
+            {/* Scroll wrapper — clips arrows and fills space left of Save Notes */}
+            <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
 
-              <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
+              {/* Left fade + arrow */}
+              <div style={{
+                position: 'absolute', left: 0, top: 0, bottom: 0, width: 28, zIndex: 3,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: `linear-gradient(90deg, ${dockBg} 50%, transparent)`,
+                opacity: canScrollLeft ? 1 : 0, pointerEvents: canScrollLeft ? 'auto' : 'none',
+                transition: 'opacity 160ms',
+              }}>
+                <button
+                  onMouseDown={e => { e.preventDefault(); toolbarScrollRef.current?.scrollBy({ left: -130, behavior: 'smooth' }) }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.70)', fontSize: 16, padding: '0 4px', lineHeight: 1 }}
+                >‹</button>
+              </div>
 
-              {/* Upload */}
-              <label style={{ ...dockBtn(), cursor: 'pointer' }} title="Upload image" className="xp-jd-btn">
-                📎 Upload
-                <input
-                  type="file" multiple accept={ATTACHMENT_ACCEPT}
-                  style={{ display: 'none' }}
-                  onChange={e => { handleUploadAtEnd(e.target.files); e.currentTarget.value = '' }}
-                />
-              </label>
-              <button
-                className="xp-jd-btn"
-                style={dockBtn()}
-                onClick={() => setCameraInsertAt(blocks.length - 1)}
-                title="Take a photo"
-              >📷 Camera</button>
+              {/* Scrollable tools row */}
+              <div
+                ref={toolbarScrollRef}
+                onScroll={updateScrollArrows}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  overflowX: 'auto', padding: '8px 10px',
+                  scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch',
+                } as React.CSSProperties}
+              >
+                {/* • List */}
+                <button
+                  className={`xp-jd-btn${isActive('bulletList') ? ' xp-j-active' : ''}`}
+                  style={dockBtn(isActive('bulletList'))}
+                  onClick={() => focusedEditor.current?.chain().focus().toggleBulletList().run()}
+                  title="Bulleted list"
+                >• List</button>
+                {/* 1. List */}
+                <button
+                  className={`xp-jd-btn${isActive('orderedList') ? ' xp-j-active' : ''}`}
+                  style={dockBtn(isActive('orderedList'))}
+                  onClick={() => focusedEditor.current?.chain().focus().toggleOrderedList().run()}
+                  title="Numbered list"
+                >1. List</button>
+                {/* ☐ Check */}
+                <button
+                  className={`xp-jd-btn${isActive('taskList') ? ' xp-j-active' : ''}`}
+                  style={dockBtn(isActive('taskList'))}
+                  onClick={() => focusedEditor.current?.chain().focus().toggleTaskList().run()}
+                  title="Interactive checklist"
+                >☐ Check</button>
 
-              <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
-
-              {/* Draw */}
-              <button
-                className="xp-jd-btn"
-                style={dockBtn()}
-                onClick={() => setDrawState({ insertAt: blocks.length - 1, editingBlock: null })}
-                title="Open draw canvas"
-              >✏️ Draw</button>
-
-              {/* + New Section */}
-              <SectionPicker isDark={isDark} onPick={color => {
-                insertBlock(createSectionBlock(color), blocks.length - 1)
-              }} />
-
-              {(onJournalCalendar || onLibrary || onEditor) && (
                 <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
-              )}
+
+                {/* ⇥ Indent */}
+                <button
+                  className="xp-jd-btn"
+                  style={dockBtn()}
+                  onClick={handleIndent}
+                  title="Indent (nest into sub-item)"
+                >⇥ Indent</button>
+                {/* ↩ Undo */}
+                <button
+                  className="xp-jd-btn"
+                  style={dockBtn()}
+                  onClick={() => focusedEditor.current?.chain().focus().undo().run()}
+                  title="Undo last change"
+                >↩ Undo</button>
+
+                <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
+
+                {/* Upload */}
+                <label style={{ ...dockBtn(), cursor: 'pointer' }} title="Upload image" className="xp-jd-btn">
+                  📎 Upload
+                  <input
+                    type="file" multiple accept={ATTACHMENT_ACCEPT}
+                    style={{ display: 'none' }}
+                    onChange={e => { handleUploadAtEnd(e.target.files); e.currentTarget.value = '' }}
+                  />
+                </label>
+                {/* Camera */}
+                <button
+                  className="xp-jd-btn"
+                  style={dockBtn()}
+                  onClick={() => setCameraInsertAt(blocks.length - 1)}
+                  title="Take a photo"
+                >📷 Camera</button>
+
+                <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
+
+                {/* Draw */}
+                <button
+                  className="xp-jd-btn"
+                  style={dockBtn()}
+                  onClick={() => setDrawState({ insertAt: blocks.length - 1, editingBlock: null })}
+                  title="Open draw canvas"
+                >✏️ Draw</button>
+
+                {/* + Section */}
+                <SectionPicker isDark={isDark} onPick={color => {
+                  insertBlock(createSectionBlock(color), blocks.length - 1)
+                }} />
+
+                <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
+
+                {/* Saved ✓ indicator */}
+                <span style={{
+                  fontSize: 11, whiteSpace: 'nowrap', userSelect: 'none', flexShrink: 0,
+                  color: saveStatus === 'saved' ? '#16a34a' : 'transparent',
+                  transition: 'color 200ms',
+                }}>Saved ✓</span>
+
+                {/* ── Journal Session Timer ─────────────────────────────── */}
+                {(() => {
+                  const isRunning   = timerStartTs !== null
+                  const totalMs     = calcTotalMs(timerSessions, timerElapsedMs)
+                  const hasSessions = timerSessions.length > 0
+                  return (
+                    <div ref={timerWrapperRef} style={{ position: 'relative', flexShrink: 0 }}>
+                      <button
+                        className="xp-jd-btn"
+                        onClick={() => isRunning ? timerStop() : timerStart()}
+                        title={isRunning ? 'Stop timer' : 'Start journaling timer'}
+                        style={{
+                          ...dockBtn(isRunning),
+                          fontVariantNumeric: 'tabular-nums',
+                          minWidth: isRunning ? 74 : hasSessions ? 60 : 76,
+                          textAlign: 'center',
+                          letterSpacing: isRunning ? '0.02em' : 'normal',
+                        }}
+                      >
+                        {isRunning
+                          ? `■ ${fmtTimerElapsed(timerElapsedMs)}`
+                          : hasSessions
+                            ? `▶ ${fmtTimerDuration(totalMs)}`
+                            : '▶ Timer'}
+                      </button>
+                      {hasSessions && !isRunning && (
+                        <button
+                          onClick={() => { setShowSessions(v => !v); setConfirmDeleteIdx(null) }}
+                          title="View journal sessions"
+                          style={{
+                            position: 'absolute', top: -6, right: -6,
+                            width: 14, height: 14, borderRadius: '50%', border: 'none',
+                            background: showSessions ? 'rgba(124,58,237,0.70)' : 'rgba(124,58,237,0.38)',
+                            color: '#fff', fontSize: 8, lineHeight: '14px', textAlign: 'center',
+                            cursor: 'pointer', fontWeight: 700, padding: 0,
+                          }}
+                        >{timerSessions.length}</button>
+                      )}
+                      {showSessions && (
+                        <div style={{
+                          position: 'absolute', bottom: 'calc(100% + 8px)', right: 0,
+                          minWidth: 240, zIndex: 60,
+                          background: 'rgba(10,6,30,0.98)',
+                          border: '0.5px solid rgba(124,58,237,0.28)',
+                          borderRadius: 10, padding: '10px 14px 12px',
+                          boxShadow: '0 8px 32px rgba(0,0,0,0.65)',
+                          animation: 'xpSecMenuIn 140ms cubic-bezier(0.16,1,0.3,1) both',
+                        }}>
+                          <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'rgba(255,255,255,0.38)', marginBottom: 10, userSelect: 'none' }}>
+                            Journal Time
+                          </div>
+                          {timerSessions.map((s, i) => {
+                            const isPending = confirmDeleteIdx === i
+                            return (
+                              <div key={i} style={{ marginBottom: 10 }}>
+                                <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'rgba(255,255,255,0.28)', marginBottom: 3, userSelect: 'none' }}>
+                                  Session {i + 1}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', whiteSpace: 'nowrap', flex: 1 }}>
+                                    {fmtBlockTime(s.startTs)} – {fmtBlockTime(s.endTs)}
+                                  </span>
+                                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                                    {fmtTimerDuration(s.endTs - s.startTs)}
+                                  </span>
+                                  {isPending ? (
+                                    <button
+                                      data-confirm-del="1"
+                                      onClick={() => deleteTimerSession(i)}
+                                      title="Confirm — permanently delete this session"
+                                      style={{
+                                        padding: '1px 6px', borderRadius: 4, flexShrink: 0,
+                                        border: '0.5px solid rgba(239,68,68,0.55)',
+                                        background: 'rgba(239,68,68,0.18)', color: '#fca5a5',
+                                        fontSize: 10, cursor: 'pointer', whiteSpace: 'nowrap',
+                                      }}
+                                    >Delete?</button>
+                                  ) : (
+                                    <button
+                                      onClick={() => setConfirmDeleteIdx(i)}
+                                      title="Delete session"
+                                      style={{
+                                        width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                                        border: 'none', background: 'transparent',
+                                        color: 'rgba(255,255,255,0.20)',
+                                        fontSize: 13, lineHeight: 1, cursor: 'pointer',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        padding: 0,
+                                      }}
+                                      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#fca5a5' }}
+                                      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.20)' }}
+                                    >×</button>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                          <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.08)', margin: '4px 0 8px' }} />
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>Total</span>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: '#c4b5fd', fontVariantNumeric: 'tabular-nums' }}>
+                              {fmtTimerDuration(totalMs)}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+
+                {/* Mic */}
+                <button
+                  className={`xp-jd-btn${isRecording ? ' xp-j-mic-rec' : ''}`}
+                  onClick={handleVoiceToggle}
+                  title={isRecording ? 'Recording… Tap to stop' : 'Voice to Notes'}
+                  style={{
+                    ...dockBtn(isRecording),
+                    flexShrink: 0,
+                    ...(isRecording ? {
+                      background: 'rgba(239,68,68,0.22)',
+                      border: '0.5px solid rgba(239,68,68,0.65)',
+                      color: '#fca5a5',
+                    } : {}),
+                  }}
+                >🎙 {isRecording ? 'Stop' : 'Mic'}</button>
+
+                {/* 😊 */}
+                <button
+                  ref={emojiBtnRef}
+                  className="xp-jd-btn"
+                  onClick={() => setShowEmoji(v => !v)}
+                  title="Add emoji"
+                  style={{ ...dockBtn(), flexShrink: 0, fontSize: 16, padding: '4px 9px', lineHeight: 1, borderRadius: 8 }}
+                >😊</button>
+              </div>
+
+              {/* Right fade + arrow */}
+              <div style={{
+                position: 'absolute', right: 0, top: 0, bottom: 0, width: 28, zIndex: 3,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: `linear-gradient(270deg, ${dockBg} 50%, transparent)`,
+                opacity: canScrollRight ? 1 : 0, pointerEvents: canScrollRight ? 'auto' : 'none',
+                transition: 'opacity 160ms',
+              }}>
+                <button
+                  onMouseDown={e => { e.preventDefault(); toolbarScrollRef.current?.scrollBy({ left: 130, behavior: 'smooth' }) }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.70)', fontSize: 16, padding: '0 4px', lineHeight: 1 }}
+                >›</button>
+              </div>
+            </div>
+
+            {/* Save Notes — always pinned on right */}
+            <div style={{
+              flexShrink: 0, display: 'flex', alignItems: 'center',
+              padding: '8px 12px', borderLeft: `0.5px solid ${dockDiv}`,
+              background: dockBg,
+            }}>
+              <button
+                className="xp-j-save-btn"
+                onClick={handleManualSave}
+                style={{
+                  padding: '6px 18px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                  background: 'linear-gradient(135deg, #7c3aed, #6d28d9)',
+                  color: '#fff', fontSize: 12, fontWeight: 700,
+                  boxShadow: '0 2px 10px rgba(124,58,237,0.45)',
+                  whiteSpace: 'nowrap',
+                }}
+              >Save Notes</button>
+            </div>
+
+            {/* Voice error toast */}
+            {voiceError && (
+              <div style={{
+                position: 'absolute', bottom: 'calc(100% + 6px)', right: 16,
+                background: 'rgba(30,6,10,0.97)', border: '0.5px solid rgba(239,68,68,0.50)',
+                color: '#fca5a5', fontSize: 11, padding: '7px 10px 7px 12px',
+                borderRadius: 8, maxWidth: 300, zIndex: 61,
+                boxShadow: '0 4px 16px rgba(0,0,0,0.55)',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <span style={{ flex: 1, lineHeight: 1.45 }}>{voiceError}</span>
+                <button
+                  onMouseDown={e => { e.preventDefault(); setVoiceError(null) }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(252,165,165,0.70)', fontSize: 14, flexShrink: 0, padding: 0 }}
+                >✕</button>
+              </div>
+            )}
+
+            {/* Emoji picker */}
+            {showEmoji && (
+              <div id="xp-j-emoji" style={{
+                position: 'absolute', bottom: 'calc(100% + 8px)', right: 130, zIndex: 100,
+                borderRadius: 12, overflow: 'hidden',
+                boxShadow: `0 8px 32px rgba(0,0,0,${isDark ? '0.50' : '0.20'})`,
+              }}>
+                <EmojiPicker
+                  onEmojiClick={handleEmojiClick}
+                  theme={isDark ? Theme.DARK : Theme.LIGHT}
+                  width={300} height={360}
+                  searchPlaceHolder="Search emoji…"
+                  lazyLoadEmojis
+                />
+              </div>
+            )}
+          </div>
+
+          {/* ── Navigation bar ─────────────────────────────────────────────── */}
+          {(onJournalCalendar || onLibrary || onEditor) && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              padding: '10px 16px', flexShrink: 0,
+              borderTop: '0.5px solid rgba(124,58,237,0.20)',
+              background: 'rgba(8,20,58,0.98)',
+              boxShadow: 'inset 0 1px 0 rgba(124,58,237,0.10), 0 -6px 24px rgba(0,0,0,0.40)',
+            }}>
               {onJournalCalendar && (
                 <button
                   className="xp-jd-btn"
@@ -2129,171 +2517,7 @@ export function JournalEditorContent({
                 >✏️ Editor</button>
               )}
             </div>
-
-            {/* Right cluster */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-              <span style={{
-                fontSize: 11, whiteSpace: 'nowrap', userSelect: 'none',
-                color: saveStatus === 'saved' ? '#16a34a' : 'transparent',
-                transition: 'color 200ms',
-              }}>Saved ✓</span>
-
-              {/* ── Journal Session Timer ─────────────────────────────────── */}
-              {(() => {
-                const isRunning   = timerStartTs !== null
-                const totalMs     = calcTotalMs(timerSessions, timerElapsedMs)
-                const hasSessions = timerSessions.length > 0
-
-                return (
-                  <div ref={timerWrapperRef} style={{ position: 'relative' }}>
-                    {/* Timer button */}
-                    <button
-                      className="xp-jd-btn"
-                      onClick={() => isRunning ? timerStop() : timerStart()}
-                      title={isRunning ? 'Stop timer' : 'Start journaling timer'}
-                      style={{
-                        ...dockBtn(isRunning),
-                        fontVariantNumeric: 'tabular-nums',
-                        minWidth: isRunning ? 74 : hasSessions ? 60 : 76,
-                        textAlign: 'center',
-                        letterSpacing: isRunning ? '0.02em' : 'normal',
-                      }}
-                    >
-                      {isRunning
-                        ? `■ ${fmtTimerElapsed(timerElapsedMs)}`
-                        : hasSessions
-                          ? `▶ ${fmtTimerDuration(totalMs)}`
-                          : '▶ Timer'}
-                    </button>
-
-                    {/* Session count badge — toggle popover */}
-                    {hasSessions && !isRunning && (
-                      <button
-                        onClick={() => { setShowSessions(v => !v); setConfirmDeleteIdx(null) }}
-                        title="View journal sessions"
-                        style={{
-                          position: 'absolute', top: -6, right: -6,
-                          width: 14, height: 14, borderRadius: '50%', border: 'none',
-                          background: showSessions ? 'rgba(124,58,237,0.70)' : 'rgba(124,58,237,0.38)',
-                          color: '#fff', fontSize: 8, lineHeight: '14px', textAlign: 'center',
-                          cursor: 'pointer', fontWeight: 700, padding: 0,
-                        }}
-                      >{timerSessions.length}</button>
-                    )}
-
-                    {/* Session log popover */}
-                    {showSessions && (
-                      <div style={{
-                        position: 'absolute', bottom: 'calc(100% + 8px)', right: 0,
-                        minWidth: 240, zIndex: 60,
-                        background: 'rgba(10,6,30,0.98)',
-                        border: '0.5px solid rgba(124,58,237,0.28)',
-                        borderRadius: 10, padding: '10px 14px 12px',
-                        boxShadow: '0 8px 32px rgba(0,0,0,0.65)',
-                        animation: 'xpSecMenuIn 140ms cubic-bezier(0.16,1,0.3,1) both',
-                      }}>
-                        <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'rgba(255,255,255,0.38)', marginBottom: 10, userSelect: 'none' }}>
-                          Journal Time
-                        </div>
-                        {timerSessions.map((s, i) => {
-                          const isPending = confirmDeleteIdx === i
-                          return (
-                            <div key={i} style={{ marginBottom: 10 }}>
-                              {/* Session label row */}
-                              <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'rgba(255,255,255,0.28)', marginBottom: 3, userSelect: 'none' }}>
-                                Session {i + 1}
-                              </div>
-                              {/* Time + duration + delete row */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', whiteSpace: 'nowrap', flex: 1 }}>
-                                  {fmtBlockTime(s.startTs)} – {fmtBlockTime(s.endTs)}
-                                </span>
-                                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-                                  {fmtTimerDuration(s.endTs - s.startTs)}
-                                </span>
-                                {isPending ? (
-                                  <button
-                                    data-confirm-del="1"
-                                    onClick={() => deleteTimerSession(i)}
-                                    title="Confirm — permanently delete this session"
-                                    style={{
-                                      padding: '1px 6px', borderRadius: 4, flexShrink: 0,
-                                      border: '0.5px solid rgba(239,68,68,0.55)',
-                                      background: 'rgba(239,68,68,0.18)', color: '#fca5a5',
-                                      fontSize: 10, cursor: 'pointer', whiteSpace: 'nowrap',
-                                    }}
-                                  >Delete?</button>
-                                ) : (
-                                  <button
-                                    onClick={() => setConfirmDeleteIdx(i)}
-                                    title="Delete session"
-                                    style={{
-                                      width: 18, height: 18, borderRadius: 4, flexShrink: 0,
-                                      border: 'none', background: 'transparent',
-                                      color: 'rgba(255,255,255,0.20)',
-                                      fontSize: 13, lineHeight: 1, cursor: 'pointer',
-                                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                      padding: 0,
-                                    }}
-                                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#fca5a5' }}
-                                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.20)' }}
-                                  >×</button>
-                                )}
-                              </div>
-                            </div>
-                          )
-                        })}
-                        <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.08)', margin: '4px 0 8px' }} />
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>Total</span>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: '#c4b5fd', fontVariantNumeric: 'tabular-nums' }}>
-                            {fmtTimerDuration(totalMs)}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })()}
-
-              <button
-                ref={emojiBtnRef}
-                className="xp-jd-btn"
-                onClick={() => setShowEmoji(v => !v)}
-                title="Add emoji"
-                style={{ ...dockBtn(), fontSize: 16, padding: '4px 9px', lineHeight: 1, borderRadius: 8 }}
-              >😊</button>
-
-              <button
-                className="xp-j-save-btn"
-                onClick={handleManualSave}
-                style={{
-                  padding: '6px 18px', borderRadius: 8, border: 'none', cursor: 'pointer',
-                  background: 'linear-gradient(135deg, #7c3aed, #6d28d9)',
-                  color: '#fff', fontSize: 12, fontWeight: 700,
-                  boxShadow: '0 2px 10px rgba(124,58,237,0.45)',
-                  whiteSpace: 'nowrap',
-                }}
-              >Save Notes</button>
-            </div>
-
-            {/* Emoji picker */}
-            {showEmoji && (
-              <div id="xp-j-emoji" style={{
-                position: 'absolute', bottom: 'calc(100% + 8px)', right: 16, zIndex: 100,
-                borderRadius: 12, overflow: 'hidden',
-                boxShadow: `0 8px 32px rgba(0,0,0,${isDark ? '0.50' : '0.20'})`,
-              }}>
-                <EmojiPicker
-                  onEmojiClick={handleEmojiClick}
-                  theme={isDark ? Theme.DARK : Theme.LIGHT}
-                  width={300} height={360}
-                  searchPlaceHolder="Search emoji…"
-                  lazyLoadEmojis
-                />
-              </div>
-            )}
-          </div>
+          )}
 
           {/* ── Floating clone: follows mouse during drag-move ─────────────── */}
           {dragPos !== null && dragMoveRef.current && (() => {
@@ -2397,21 +2621,37 @@ export function JournalEditorContent({
 function SectionPicker({ isDark, onPick }: { isDark: boolean; onPick: (c: SectionColorKey) => void }) {
   const [open, setOpen] = useState(false)
   const [hoveredKey, setHoveredKey] = useState<string | null>(null)
+  const [popPos, setPopPos] = useState<{ left: number; bottom: number } | null>(null)
   const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     if (!open) return
-    function outside(e: MouseEvent) {
+    function outside(e: MouseEvent | TouchEvent) {
       if (ref.current?.contains(e.target as Node)) return
       setOpen(false)
     }
     document.addEventListener('mousedown', outside)
-    return () => document.removeEventListener('mousedown', outside)
+    document.addEventListener('touchstart', outside)
+    return () => {
+      document.removeEventListener('mousedown', outside)
+      document.removeEventListener('touchstart', outside)
+    }
   }, [open])
 
+  function handleToggle() {
+    if (open) { setOpen(false); return }
+    const rect = btnRef.current?.getBoundingClientRect()
+    if (rect) {
+      setPopPos({ left: rect.left, bottom: window.innerHeight - rect.top + 6 })
+    }
+    setOpen(true)
+  }
+
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
       <button
+        ref={btnRef}
         className="xp-jd-btn"
         style={{
           padding: '5px 11px', borderRadius: 7, cursor: 'pointer',
@@ -2421,13 +2661,13 @@ function SectionPicker({ isDark, onPick }: { isDark: boolean; onPick: (c: Sectio
           fontSize: 12, fontWeight: open ? 600 : 500,
           transition: 'all 120ms', flexShrink: 0, whiteSpace: 'nowrap' as const,
         }}
-        onClick={() => setOpen(v => !v)}
+        onClick={handleToggle}
         title="Add a colored section"
       >+ Section</button>
 
-      {open && (
+      {open && popPos && (
         <div className="xp-j-sec-menu" style={{
-          position: 'absolute', bottom: 'calc(100% + 6px)', left: 0, zIndex: 50,
+          position: 'fixed', bottom: popPos.bottom, left: popPos.left, zIndex: 9999,
           background: '#160a30',
           border: '0.5px solid rgba(124,58,237,0.32)',
           borderRadius: 10,

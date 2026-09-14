@@ -649,8 +649,9 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         padding: '10px 16px', flexShrink: 0,
-        borderTop: `0.5px solid ${bdr}`,
-        background: isDark ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.35)',
+        borderTop: '0.5px solid rgba(124,58,237,0.20)',
+        background: 'rgba(8,20,58,0.98)',
+        boxShadow: 'inset 0 1px 0 rgba(124,58,237,0.10), 0 -6px 24px rgba(0,0,0,0.40)',
       }}>
         {([
           { key: 'calendar' as const, icon: '📅', label: 'Journal Calendar', action: () => setView('calendar') },
@@ -669,7 +670,7 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
                 cursor: 'pointer',
                 background: active ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.06)',
                 border: `0.5px solid ${active ? 'rgba(124,58,237,0.40)' : 'rgba(124,58,237,0.16)'}`,
-                color: active ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.50)',
+                color: active ? '#a78bfa' : 'rgba(255,255,255,0.55)',
                 transition: 'background 120ms',
               }}
             >
@@ -773,7 +774,7 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
         background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)',
         gap: 12,
       }}>
-        {/* View mode toggles */}
+        {/* View mode toggles + sort order inline */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <span style={{ fontSize: 10, color: muted, marginRight: 4, whiteSpace: 'nowrap' }}>View:</span>
           {([
@@ -797,11 +798,11 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
               }}
             >{opt.label}</button>
           ))}
-        </div>
 
-        {/* Sort order toggles */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ fontSize: 10, color: muted, marginRight: 4, whiteSpace: 'nowrap' }}>Sort:</span>
+          {/* Divider */}
+          <span style={{ width: 1, height: 14, background: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)', margin: '0 4px', flexShrink: 0 }} />
+
+          {/* Sort toggles — inline after view buttons */}
           {([
             { key: 'newer' as const, label: '↓ Newer' },
             { key: 'older' as const, label: '↑ Older' },
@@ -823,26 +824,38 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
         </div>
 
         {/* Trash drop zone */}
-        <div
-          ref={dropZoneRef}
-          onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropZoneOver(true) }}
-          onDragLeave={() => setDropZoneOver(false)}
-          onDrop={e => {
-            e.preventDefault(); setDropZoneOver(false)
-            if (draggingKey) { setDeleteConfirmKey(draggingKey); setDraggingKey(null) }
-          }}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 4,
-            padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 500,
-            userSelect: 'none', transition: 'all 180ms',
-            border: `1.5px dashed ${dropZoneOver ? 'rgba(239,68,68,0.85)' : draggingKey ? 'rgba(239,68,68,0.50)' : 'rgba(239,68,68,0.25)'}`,
-            background: dropZoneOver ? 'rgba(239,68,68,0.18)' : draggingKey ? 'rgba(239,68,68,0.07)' : 'transparent',
-            color: dropZoneOver ? '#fca5a5' : draggingKey ? 'rgba(239,68,68,0.75)' : 'rgba(239,68,68,0.45)',
-            cursor: draggingKey ? 'copy' : 'default',
-            transform: dropZoneOver ? 'scale(1.05)' : 'scale(1)',
-          }}
-        >
-          🗑️ {dropZoneOver ? 'Release to delete' : draggingKey ? 'Drop here to delete' : 'Delete'}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+          <div
+            ref={dropZoneRef}
+            onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropZoneOver(true) }}
+            onDragLeave={() => setDropZoneOver(false)}
+            onDrop={e => {
+              e.preventDefault(); setDropZoneOver(false)
+              if (draggingKey) { setDeleteConfirmKey(draggingKey); setDraggingKey(null) }
+            }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+              userSelect: 'none', transition: 'all 180ms',
+              border: `1.5px dashed ${dropZoneOver ? 'rgba(239,68,68,0.85)' : draggingKey ? 'rgba(239,68,68,0.50)' : 'rgba(239,68,68,0.25)'}`,
+              background: dropZoneOver ? 'rgba(239,68,68,0.18)' : draggingKey ? 'rgba(239,68,68,0.07)' : 'transparent',
+              color: dropZoneOver ? '#fca5a5' : draggingKey ? 'rgba(239,68,68,0.75)' : 'rgba(239,68,68,0.45)',
+              cursor: draggingKey ? 'copy' : 'default',
+              transform: dropZoneOver ? 'scale(1.05)' : 'scale(1)',
+            }}
+          >
+            🗑️ {dropZoneOver ? 'Release to delete' : draggingKey ? 'Drop here to delete' : 'Delete'}
+          </div>
+          {!draggingKey && !dropZoneOver && (
+            <span style={{
+              fontSize: 9, color: 'rgba(239,68,68,0.28)', fontStyle: 'italic',
+              whiteSpace: 'nowrap', lineHeight: 1, userSelect: 'none',
+            }}>
+              {typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0
+                ? 'Long-press & drag a document here to delete'
+                : 'Drag a document here to delete'}
+            </span>
+          )}
         </div>
       </div>
 
@@ -1251,8 +1264,9 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         padding: '10px 16px', flexShrink: 0,
-        borderTop: `0.5px solid ${bdr}`,
-        background: isDark ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.35)',
+        borderTop: '0.5px solid rgba(124,58,237,0.20)',
+        background: 'rgba(8,20,58,0.98)',
+        boxShadow: 'inset 0 1px 0 rgba(124,58,237,0.10), 0 -6px 24px rgba(0,0,0,0.40)',
       }}>
         {([
           { key: 'calendar' as const, icon: '📅', label: 'Journal Calendar', action: () => setView('calendar') },
@@ -1271,7 +1285,7 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
                 cursor: 'pointer',
                 background: active ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.06)',
                 border: `0.5px solid ${active ? 'rgba(124,58,237,0.40)' : 'rgba(124,58,237,0.16)'}`,
-                color: active ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.50)',
+                color: active ? '#a78bfa' : 'rgba(255,255,255,0.55)',
                 transition: 'background 120ms',
               }}
             >

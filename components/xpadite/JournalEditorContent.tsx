@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import type { Editor } from '@tiptap/react'
+import { Mark, mergeAttributes } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
@@ -177,6 +178,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
       Underline,
       TextStyle,
       Color,
+      XpHighlight,
     ],
     content: { type: 'doc', content: [{ type: 'paragraph' }] },
     editorProps: { attributes: { class: 'xp-j-prose' } },
@@ -561,6 +563,54 @@ function GhostSlot({ colSpan, blockH }: { colSpan: number; blockH?: number }) {
 
 // ─── Floating text formatter — appears above text selection ──────────────────
 
+// ── XpHighlight: custom inline mark for text background highlight ─────────────
+declare module '@tiptap/core' {
+  interface Commands<ReturnType> {
+    xpHighlight: {
+      setXpHighlight: (color: string) => ReturnType
+      unsetXpHighlight: () => ReturnType
+    }
+  }
+}
+
+const XpHighlight = Mark.create({
+  name: 'xpHighlight',
+  addAttributes() {
+    return {
+      color: {
+        default: null,
+        parseHTML: el => (el as HTMLElement).getAttribute('data-xp-hl') || null,
+        renderHTML: attrs => attrs.color ? { 'data-xp-hl': attrs.color } : {},
+      },
+    }
+  },
+  parseHTML() { return [{ tag: 'mark[data-xp-hl]' }] },
+  renderHTML({ HTMLAttributes }) {
+    return ['mark', mergeAttributes(HTMLAttributes, {
+      style: `background-color:${HTMLAttributes['data-xp-hl']};border-radius:2px;padding:0 1px;`,
+    }), 0]
+  },
+  addCommands() {
+    return {
+      setXpHighlight: (color: string) => ({ commands }) => commands.setMark(this.name, { color }),
+      unsetXpHighlight: () => ({ commands }) => commands.unsetMark(this.name),
+    }
+  },
+})
+
+const HIGHLIGHT_COLORS: Array<{ label: string; value: string | null; swatch: string }> = [
+  { label: 'None',        value: null,      swatch: 'transparent' },
+  { label: 'Yellow',      value: '#fef08a', swatch: '#fef08a' },
+  { label: 'Lavender',    value: '#e9d5ff', swatch: '#e9d5ff' },
+  { label: 'Light Green', value: '#bbf7d0', swatch: '#bbf7d0' },
+  { label: 'Light Red',   value: '#fecaca', swatch: '#fecaca' },
+  { label: 'Purple',      value: '#ddd6fe', swatch: '#ddd6fe' },
+  { label: 'Teal',        value: '#99f6e4', swatch: '#99f6e4' },
+  { label: 'Peach',       value: '#fed7aa', swatch: '#fed7aa' },
+  { label: 'Light Gray',  value: '#e5e7eb', swatch: '#e5e7eb' },
+  { label: 'Light Blue',  value: '#bfdbfe', swatch: '#bfdbfe' },
+]
+
 const TEXT_COLORS: Array<{ label: string; value: string | null; swatch: string }> = [
   { label: 'Default',  value: null,      swatch: 'linear-gradient(135deg,rgba(255,255,255,0.55) 0%,rgba(255,255,255,0.20) 100%)' },
   { label: 'Purple',   value: '#a78bfa', swatch: '#a78bfa' },
@@ -575,21 +625,23 @@ const TEXT_COLORS: Array<{ label: string; value: string | null; swatch: string }
 ]
 
 function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMRect }) {
-  const [showSize,  setShowSize]  = useState(false)
-  const [showColor, setShowColor] = useState(false)
+  const [showSize,      setShowSize]      = useState(false)
+  const [showColor,     setShowColor]     = useState(false)
+  const [showHighlight, setShowHighlight] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   // Close sub-menus on outside click
   useEffect(() => {
-    if (!showSize && !showColor) return
+    if (!showSize && !showColor && !showHighlight) return
     function outside(e: MouseEvent) {
       if (ref.current?.contains(e.target as Node)) return
       setShowSize(false)
       setShowColor(false)
+      setShowHighlight(false)
     }
     document.addEventListener('mousedown', outside)
     return () => document.removeEventListener('mousedown', outside)
-  }, [showSize, showColor])
+  }, [showSize, showColor, showHighlight])
 
   if (!editor) return null
 
@@ -603,6 +655,10 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
   // Active color: what the current selection has (null = default)
   const activeColor: string | null = (editor.getAttributes('textStyle').color as string | undefined) ?? null
   const hasCustomColor = activeColor !== null
+
+  // Active highlight color
+  const activeHighlight: string | null = (editor.getAttributes('xpHighlight').color as string | undefined) ?? null
+  const hasHighlight = activeHighlight !== null
 
   const top  = Math.max(8, rect.top - 50)
   const left = rect.left + rect.width / 2
@@ -656,7 +712,7 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
       <div style={{ position: 'relative' }}>
         <button
           style={{ ...fBtn(hasCustomColor || showColor), minWidth: 26, textAlign: 'center', padding: '3px 6px', position: 'relative' }}
-          onMouseDown={e => { e.preventDefault(); setShowColor(v => !v); setShowSize(false) }}
+          onMouseDown={e => { e.preventDefault(); setShowColor(v => !v); setShowSize(false); setShowHighlight(false) }}
           title="Text color"
         >
           <span style={{ fontSize: 12, fontWeight: 700, lineHeight: 1 }}>A</span>
@@ -714,13 +770,76 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
         )}
       </div>
 
+      {/* Highlight — H with colored underbar */}
+      <div style={{ position: 'relative' }}>
+        <button
+          style={{ ...fBtn(hasHighlight || showHighlight), minWidth: 26, textAlign: 'center', padding: '3px 6px', position: 'relative' }}
+          onMouseDown={e => { e.preventDefault(); setShowHighlight(v => !v); setShowColor(false); setShowSize(false) }}
+          title="Text highlight"
+        >
+          <span style={{ fontSize: 12, fontWeight: 700, lineHeight: 1 }}>H</span>
+          <span style={{
+            display: 'block', height: 3, borderRadius: 1, marginTop: 1,
+            background: activeHighlight ?? 'linear-gradient(90deg,#fef08a,#bbf7d0,#bfdbfe,#e9d5ff)',
+            width: '100%',
+          }} />
+        </button>
+
+        {showHighlight && (
+          <div style={{
+            position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(10,6,30,0.98)',
+            border: '0.5px solid rgba(124,58,237,0.28)',
+            borderRadius: 10, padding: '8px 9px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.65)',
+            zIndex: 10, minWidth: 152,
+          }}>
+            <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'rgba(255,255,255,0.35)', marginBottom: 7, userSelect: 'none' }}>
+              Highlight
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 5 }}>
+              {HIGHLIGHT_COLORS.map(({ label, value, swatch }) => {
+                const isSelected = value === activeHighlight
+                return (
+                  <button
+                    key={label}
+                    title={label}
+                    onMouseDown={e => {
+                      e.preventDefault()
+                      if (value === null) {
+                        editor.chain().focus().unsetXpHighlight().run()
+                      } else {
+                        editor.chain().focus().setXpHighlight(value).run()
+                      }
+                      setShowHighlight(false)
+                    }}
+                    style={{
+                      width: 22, height: 22, borderRadius: 5, border: 'none', cursor: 'pointer', padding: 0,
+                      background: value === null ? 'rgba(255,255,255,0.06)' : swatch,
+                      outline: isSelected ? '2px solid #a78bfa' : value === null ? '1.5px solid rgba(255,255,255,0.25)' : '1.5px solid rgba(0,0,0,0.10)',
+                      outlineOffset: isSelected ? 2 : 0,
+                      transition: 'transform 80ms, outline 80ms',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11, color: 'rgba(255,255,255,0.70)',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.18)' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
+                  >{value === null ? '✕' : ''}</button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
       {divider}
 
       {/* Size ▼ */}
       <div style={{ position: 'relative' }}>
         <button
           style={{ ...fBtn(false), display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, whiteSpace: 'nowrap' as const }}
-          onMouseDown={e => { e.preventDefault(); setShowSize(v => !v); setShowColor(false) }}
+          onMouseDown={e => { e.preventDefault(); setShowSize(v => !v); setShowColor(false); setShowHighlight(false) }}
         >
           {sizeLabel} <span style={{ fontSize: 8, opacity: 0.65 }}>▾</span>
         </button>

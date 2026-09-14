@@ -643,7 +643,7 @@ export function ConfirmRemoveModal({ activityName, onConfirm, onCancel }: Confir
 // ─── ActivityButtons — centered row of +/−/edit, rendered below the navbar ───
 
 export function ActivityButtons() {
-  const { activities, selectedActId, removeActivity } = useApp()
+  const { activities, selectedActId, removeActivity, legendVisible, setLegendVisible } = useApp()
   const [showAddModal, setShowAddModal] = useState(false)
   const [editActivity, setEditAct] = useState<Activity | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
@@ -680,6 +680,16 @@ export function ActivityButtons() {
           style={{ background: 'rgba(124,58,237,0.08)', color: '#7c3aed', border: '0.5px solid rgba(124,58,237,0.25)' }}
         >
           <EditIcon />
+        </button>
+        <button
+          onClick={() => setLegendVisible(!legendVisible)}
+          title="Statistics Legend"
+          className="w-7 h-7 rounded-full flex items-center justify-center transition-opacity duration-150 hover:opacity-70"
+          style={{ background: 'rgba(124,58,237,0.08)', color: '#7c3aed', border: '0.5px solid rgba(124,58,237,0.25)' }}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="w-3.5 h-3.5" style={{ transition: 'transform 220ms ease', transform: legendVisible ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+            <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </button>
       </div>
 

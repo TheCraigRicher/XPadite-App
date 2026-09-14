@@ -446,7 +446,7 @@ function MobileMoreView({ onGallery, onSettings }: { onGallery: () => void; onSe
 interface ModalDay { key: string; month: number; day: number }
 
 function ThemedApp(_props: XpaditeAppProps) {
-  const { isDark, toast, setToast } = useApp()
+  const { isDark, toast, setToast, legendVisible } = useApp()
 
   const [toastExiting, setToastExiting]             = useState(false)
   const [modalDay, setModalDay]                     = useState<ModalDay | null>(null)
@@ -639,13 +639,27 @@ function ThemedApp(_props: XpaditeAppProps) {
             </button>
           </div>
 
-          {/* Stats + Legend — collapsible on mobile, always visible on desktop */}
+          {/* Mobile: statsCollapsed toggle controls both StatsRow and LegendRow */}
           <div
-            className="xp-stats-collapse"
+            className="sm:hidden"
             style={{
               overflow: 'hidden',
               maxHeight: statsCollapsed ? 0 : 480,
               opacity: statsCollapsed ? 0 : 1,
+              transition: 'max-height 260ms ease-in-out, opacity 200ms ease',
+            }}
+          >
+            <StatsRow />
+            <LegendRow />
+          </div>
+
+          {/* Desktop: chevron button (legendVisible) controls both StatsRow and LegendRow */}
+          <div
+            className="hidden sm:block"
+            style={{
+              overflow: legendVisible ? 'visible' : 'hidden',
+              maxHeight: legendVisible ? 480 : 0,
+              opacity: legendVisible ? 1 : 0,
               transition: 'max-height 260ms ease-in-out, opacity 200ms ease',
             }}
           >

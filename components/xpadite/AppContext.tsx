@@ -77,6 +77,8 @@ interface AppContextValue {
   setToast: (msg: string | null) => void
   progressColor: string
   setProgressColor: (c: string) => void
+  legendVisible: boolean
+  setLegendVisible: (v: boolean) => void
   // Reminders
   reminders: Reminder[]
   userEmail: string
@@ -106,6 +108,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [progressColor, setProgressColorRaw] = useState<string>('#7c3aed')
+  const [legendVisible, setLegendVisible] = useState(false)
   const [hydrated, setHydrated] = useState(false)
 
   const [reminders, setReminders] = useState<Reminder[]>([])
@@ -369,6 +372,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       sidebarOpen, setSidebarOpen,
       toast, setToast,
       progressColor, setProgressColor,
+      legendVisible, setLegendVisible,
       reminders, userEmail,
       upsertReminderCtx, removeReminderCtx, fireReminderCtx,
     }}>

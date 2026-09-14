@@ -416,15 +416,6 @@ body {
   }
 }
 
-/* Stats panel: on sm+ always fully visible, overriding JS-driven inline maxHeight */
-@media (min-width: 640px) {
-  .xp-stats-collapse {
-    max-height: none !important;
-    overflow: visible !important;
-    opacity: 1 !important;
-    transition: none !important;
-  }
-}
 
 /* Ensure body doesn't produce horizontal scroll on mobile */
 html, body {

@@ -653,7 +653,7 @@ export function ActivityButtons() {
   return (
     <>
       <div
-        className="hidden sm:flex items-center justify-center gap-6 py-2"
+        className="flex items-center justify-center gap-6 py-2"
       >
         <button
           onClick={() => setShowAddModal(true)}

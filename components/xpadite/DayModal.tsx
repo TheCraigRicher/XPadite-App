@@ -1381,7 +1381,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-50 flex items-stretch sm:items-center sm:justify-center sm:p-4"
       style={{
         background: isDark
           ? `rgba(4,0,14,${visible ? 0.72 : 0})`
@@ -1407,11 +1407,10 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
         </div>
       )}
       <div
-        className="w-full max-w-[520px] rounded-2xl flex flex-col overflow-hidden"
+        className="w-full sm:max-w-[520px] rounded-none sm:rounded-2xl flex flex-col overflow-hidden flex-1 sm:flex-none max-h-full sm:max-h-[93vh]"
         style={{
           background: 'var(--xp-card)',
           border: '0.5px solid var(--xp-bdr2)',
-          maxHeight: '93vh',
           boxShadow: '0 20px 48px rgba(0,0,0,0.18), 0 6px 16px rgba(0,0,0,0.08), 0 0 80px rgba(124,58,237,0.13), 0 0 140px rgba(139,92,246,0.07)',
           opacity: visible ? 1 : 0,
           transform: visible ? 'scale(1)' : 'scale(0.98)',
@@ -1427,7 +1426,6 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
           <button onClick={attemptClose} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)', color: 'rgba(255,255,255,0.92)' }}>← Back</button>
           <div className="text-center px-3">
             <p className="text-sm font-semibold" style={{ color: '#ffffff' }}>{dateLabel}</p>
-            <p className="text-[9px] mt-0.5" style={{ color: 'rgba(255,255,255,0.55)' }}>Single click = toggle productive · Double click = notes</p>
           </div>
           <button onClick={attemptClose} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(239,68,68,0.30)', border: '1px solid rgba(239,68,68,0.40)', color: 'rgba(255,255,255,0.92)' }}>× Close</button>
         </div>

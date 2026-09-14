@@ -613,49 +613,8 @@ function ThemedApp(_props: XpaditeAppProps) {
           className={mobileTab === 'overview' || mobileTab === 'analytics' ? '' : 'hidden sm:flex'}
           style={{ flex: 1, display: mobileTab === 'overview' || mobileTab === 'analytics' ? 'flex' : undefined, flexDirection: 'column' }}
         >
-          {/* Mobile collapsible stats toggle */}
-          <div className="sm:hidden flex items-center gap-2 py-2 px-1">
-            <button
-              onClick={toggleStats}
-              className="flex items-center gap-2 transition-opacity hover:opacity-70"
-              aria-label={statsCollapsed ? 'Expand statistics' : 'Collapse statistics'}
-            >
-              <span
-                style={{
-                  display: 'inline-block',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: 'var(--xp-acc)',
-                  transform: statsCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
-                  transition: 'transform 220ms ease',
-                  lineHeight: 1,
-                }}
-              >
-                ▶
-              </span>
-              <span className="text-[11px] font-medium" style={{ color: 'var(--xp-txt3)' }}>
-                Statistics
-              </span>
-            </button>
-          </div>
-
-          {/* Mobile: statsCollapsed toggle controls both StatsRow and LegendRow */}
+          {/* Stats + Legend — chevron button controls on all screen sizes */}
           <div
-            className="sm:hidden"
-            style={{
-              overflow: 'hidden',
-              maxHeight: statsCollapsed ? 0 : 480,
-              opacity: statsCollapsed ? 0 : 1,
-              transition: 'max-height 260ms ease-in-out, opacity 200ms ease',
-            }}
-          >
-            <StatsRow />
-            <LegendRow />
-          </div>
-
-          {/* Desktop: chevron button (legendVisible) controls both StatsRow and LegendRow */}
-          <div
-            className="hidden sm:block"
             style={{
               overflow: legendVisible ? 'visible' : 'hidden',
               maxHeight: legendVisible ? 480 : 0,
@@ -704,6 +663,11 @@ function ThemedApp(_props: XpaditeAppProps) {
       <MobileBottomNav
         activeTab={mobileTab}
         onTabChange={tab => {
+          if (tab === 'tasks') {
+            const today = new Date()
+            setModalDay({ key: dateKey(today.getFullYear(), today.getMonth(), today.getDate()), month: today.getMonth(), day: today.getDate() })
+            return
+          }
           setMobileTab(tab)
           if (tab === 'analytics') setAnalyticsOpen(true)
         }}

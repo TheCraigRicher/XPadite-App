@@ -1625,29 +1625,6 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
             </svg>
             Export
           </button>
-          {/* Fit to Screen / Restore — desktop only */}
-          <button
-            onClick={() => setFitMode(m => !m)}
-            data-export-exclude="true"
-            className="hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-90 transition-opacity flex-shrink-0"
-            style={{
-              background: fitMode ? 'rgba(167,139,250,0.20)' : 'rgba(167,139,250,0.10)',
-              border: '0.5px solid rgba(167,139,250,0.26)',
-              color: '#c4b5fd',
-            }}
-            title={fitMode ? 'Restore normal layout' : 'Fit dashboard to viewport'}
-            aria-label={fitMode ? 'Restore layout' : 'Fit to Screen'}>
-            {fitMode ? (
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M6 15V9H2M14 9H8V3M2 15l5-5M14 3l-5 5"/>
-              </svg>
-            ) : (
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M10 2h4v4M2 10v4h4M14 2l-5 5M2 14l5-5"/>
-              </svg>
-            )}
-            {fitMode ? 'Restore' : 'Fit to Screen'}
-          </button>
           <button onClick={onClose} data-export-exclude="true"
             className="text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
             style={{ background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}>

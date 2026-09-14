@@ -18,6 +18,12 @@ const MFP_STYLES = `
   @keyframes xp-mfp-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
   @keyframes xp-from-right{from{opacity:0;transform:translateX(52px)}to{opacity:1;transform:translateX(0)}}
   @keyframes xp-from-left{from{opacity:0;transform:translateX(-52px)}to{opacity:1;transform:translateX(0)}}
+  @media(max-width:640px){
+    .xp-mfp-overlay{bottom:56px!important;}
+    .xp-mfp-wrap{align-items:flex-start!important;padding-top:8px!important;padding-bottom:8px!important;}
+    .xp-mfp-box{max-height:calc(100svh - 72px)!important;}
+  }
+
   .xp-mfp-back{
     display:inline-flex;align-items:center;gap:6px;
     padding:7px 20px;border-radius:24px;font-size:11px;font-weight:700;
@@ -350,7 +356,7 @@ function MonthCalendarLarge({
               <ReminderRing count={reminderCount} />
               <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
                 <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 46, lineHeight: 1, userSelect: 'none' }}>🔥</span>
-                <span style={{ position: 'absolute', top: '66%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 2, pointerEvents: 'none' }}>{cell.day}</span>
+                <span style={{ position: 'absolute', top: '65%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 2, pointerEvents: 'none' }}>{cell.day}</span>
               </div>
             </div>
           )
@@ -363,7 +369,7 @@ function MonthCalendarLarge({
               <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
                 <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 38, color: 'rgba(167,139,250,0.20)', filter: 'drop-shadow(0 0 6px rgba(167,139,250,0.55))', lineHeight: 1, userSelect: 'none', zIndex: 0 }}>★</span>
                 <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 42, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🏆</span>
-                <span style={{ position: 'absolute', top: '68%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 2, pointerEvents: 'none' }}>{cell.day}</span>
+                <span style={{ position: 'absolute', top: '37%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 2, pointerEvents: 'none' }}>{cell.day}</span>
               </div>
             </div>
           )
@@ -375,7 +381,7 @@ function MonthCalendarLarge({
               <ReminderRing count={reminderCount} />
               <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
                 <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 48, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🎯</span>
-                <span style={{ position: 'absolute', top: '64%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 2, pointerEvents: 'none' }}>{cell.day}</span>
+                <span style={{ position: 'absolute', top: '52%', left: '46%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 2, pointerEvents: 'none' }}>{cell.day}</span>
               </div>
             </div>
           )
@@ -744,8 +750,57 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
     return { currentStreak: current, longestStreak: longest }
   }, [calData, currentMonth])
 
+  const monthTaskStats = useMemo(() => {
+    let totalTasks = 0, completedTasks = 0
+    for (const key of monthKeys) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const day = calData[key] as any
+      if (!day) continue
+      const tasks = day.tasks ?? []
+      totalTasks += tasks.length
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      completedTasks += tasks.filter((t: any) => t.done).length
+    }
+    return { totalTasks, completedTasks }
+  }, [calData, monthKeys])
+
+  const monthTopSessions = useMemo(() => {
+    const result: { actName: string; actColor: string; durationMs: number }[] = []
+    for (const key of monthKeys) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const day = calData[key] as any
+      if (!day) continue
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const task of (day.tasks ?? [])) {
+        const act = activities.find(a => a.id === task.actId)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const s of (task.sessions ?? [])) {
+          if (s.endTs !== null) {
+            result.push({ actName: act?.name ?? 'Other', actColor: act?.color ?? '#94a3b8', durationMs: s.endTs - s.startTs })
+          }
+        }
+      }
+    }
+    return result.sort((a, b) => b.durationMs - a.durationMs).slice(0, 10)
+  }, [calData, monthKeys, activities])
+
   const stopProp = useCallback((e: React.MouseEvent) => e.stopPropagation(), [])
   const animName = animType === 'right' ? 'xp-from-right' : animType === 'left' ? 'xp-from-left' : 'xp-mfp-in'
+
+  const S1  = isDark ? 'rgba(15,8,36,0.99)'  : '#ffffff'
+  const S2  = isDark ? 'rgba(20,11,46,0.98)' : 'var(--xp-card)'
+  const BDR = isDark ? 'rgba(124,58,237,0.22)' : 'rgba(0,0,0,0.09)'
+  const card1: React.CSSProperties = { background: S1, border: `0.5px solid ${BDR}`, boxShadow: isDark ? '0 2px 20px rgba(0,0,0,0.42)' : '0 1px 10px rgba(0,0,0,0.07)' }
+  const card2: React.CSSProperties = { background: S2, border: `0.5px solid ${BDR}`, boxShadow: isDark ? '0 2px 18px rgba(0,0,0,0.38)' : '0 1px 6px rgba(0,0,0,0.05)' }
+
+  const mKpis = [
+    { label: 'Productive Days', value: `${stats.productiveDays}/${stats.totalDays}`, sub: stats.totalDays > 0 ? `${Math.round((stats.productiveDays / stats.totalDays) * 100)}% rate` : null, icon: '✅', bg: isDark ? 'linear-gradient(135deg, #047857 0%, #15803D 52%, #4D7C0F 100%)' : 'linear-gradient(135deg, #059669 0%, #22C55E 52%, #84CC16 100%)', border: isDark ? 'rgba(21,128,61,0.46)' : 'rgba(34,197,94,0.44)' },
+    { label: 'Total Focus', value: formatMs(totalMs), sub: null, icon: '⏱', bg: isDark ? 'linear-gradient(135deg, #5B21B6 0%, #7E22CE 50%, #A21CAF 100%)' : 'linear-gradient(135deg, #7C3AED 0%, #A855F7 50%, #D946EF 100%)', border: isDark ? 'rgba(162,28,175,0.46)' : 'rgba(126,34,206,0.45)' },
+    { label: 'Hyper Days', value: String(stats.hyperDays), sub: stats.hyperDays > 0 ? '🔥 On fire' : null, icon: '🔥', bg: isDark ? 'linear-gradient(135deg, #92400E 0%, #B45309 50%, #D97706 100%)' : 'linear-gradient(135deg, #F59E0B 0%, #F97316 50%, #EF4444 100%)', border: isDark ? 'rgba(217,119,6,0.46)' : 'rgba(249,115,22,0.46)' },
+    { label: 'Tasks Done', value: `${monthTaskStats.completedTasks}/${monthTaskStats.totalTasks}`, sub: monthTaskStats.totalTasks > 0 ? `${Math.round((monthTaskStats.completedTasks / monthTaskStats.totalTasks) * 100)}% complete` : null, icon: '✓', bg: isDark ? 'linear-gradient(135deg, #1D4ED8 0%, #0369A1 52%, #0891B2 100%)' : 'linear-gradient(135deg, #2563EB 0%, #0EA5E9 52%, #22D3EE 100%)', border: isDark ? 'rgba(8,145,178,0.46)' : 'rgba(14,165,233,0.45)' },
+    { label: 'Avg Focus/Day', value: stats.productiveDays > 0 ? formatMs(Math.round(totalMs / stats.productiveDays)) : '—', sub: null, icon: '📈', bg: isDark ? 'linear-gradient(135deg, #0E7490 0%, #0F766E 54%, #0D9488 100%)' : 'linear-gradient(135deg, #06B6D4 0%, #14B8A6 54%, #2DD4BF 100%)', border: isDark ? 'rgba(13,148,136,0.46)' : 'rgba(20,184,166,0.44)' },
+    { label: 'Best Streak', value: `${longestStreak}d`, sub: currentStreak > 0 ? `${currentStreak}d current` : null, icon: '🔗', bg: isDark ? 'linear-gradient(135deg, #9D174D 0%, #BE185D 48%, #86198F 100%)' : 'linear-gradient(135deg, #DB2777 0%, #EC4899 48%, #C026D3 100%)', border: isDark ? 'rgba(190,24,93,0.46)' : 'rgba(219,39,119,0.46)' },
+  ]
 
   const navBtnStyle: React.CSSProperties = {
     width: 34, height: 34, borderRadius: '50%',
@@ -761,13 +816,13 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
     <>
       <style>{MFP_STYLES}</style>
       <div
-        className="fixed inset-0 z-50 overflow-y-auto"
+        className="fixed inset-0 z-50 overflow-y-auto xp-mfp-overlay"
         style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(15,23,42,0.60)' }}
         onClick={onClose}
       >
-        <div className="min-h-full flex items-center justify-center py-8 px-4">
+        <div className="min-h-full flex items-center justify-center py-8 px-4 xp-mfp-wrap">
           <div
-            className="w-full rounded-2xl"
+            className="w-full rounded-2xl xp-mfp-box"
             style={{
               maxWidth: 'min(86vw, 1280px)', background: 'var(--xp-card)',
               border: '0.5px solid rgba(124,58,237,0.30)', overflowX: 'hidden', overflowY: 'auto',
@@ -869,80 +924,222 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
 
               {/* ── DASHBOARD VIEW ─────────────────────────────────────────────── */}
               {view === 'dashboard' && (
-                <div className="p-6" style={{ maxWidth: 1200, margin: '0 auto' }}>
+                <div className="p-3 sm:p-4 lg:p-5 space-y-3 lg:space-y-4" style={{ background: isDark ? 'rgba(9,4,22,0.99)' : 'var(--xp-bg3)' }}>
 
-                  {/* Row 1: Performance | Productivity */}
-                  <div className="grid grid-cols-2 gap-5 mb-5">
-                    <div className="rounded-2xl p-5" style={{ background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
-                      <SectionDivider title="Performance" />
+                  {/* Month context label */}
+                  <div style={{ textAlign: 'center', paddingBottom: 2 }}>
+                    <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? 'rgba(167,139,250,0.70)' : '#7c3aed', letterSpacing: '0.04em' }}>
+                      {MONTHS[currentMonth]} {APP_YEAR} · Monthly Dashboard
+                    </p>
+                  </div>
+
+                  {/* ROW 1 — KPI Cards | Gauge | Achievement */}
+                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.52fr)_minmax(0,1.36fr)_minmax(0,0.70fr)] items-stretch gap-3 lg:gap-4">
+
+                    {/* LEFT: 6 KPI cards + Monthly Summary */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {mKpis.map(m => (
+                          <div key={m.label} className="rounded-2xl flex flex-col relative overflow-hidden p-2.5"
+                            style={{ background: m.bg, border: `0.5px solid ${m.border}`, minHeight: 80 }}>
+                            <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none', background: 'linear-gradient(165deg,rgba(255,255,255,0.22) 0%,rgba(255,255,255,0.06) 38%,rgba(255,255,255,0) 100%)' }} />
+                            <div style={{ width: 20, height: 20, borderRadius: 5, marginBottom: 5, background: 'rgba(255,255,255,0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}>{m.icon}</div>
+                            <p className="text-base sm:text-lg font-bold leading-none tabular-nums mb-1" style={{ color: '#FFFFFF' }}>{m.value}</p>
+                            <p className="text-[8.5px] font-medium mt-auto leading-tight" style={{ color: 'rgba(255,255,255,0.72)' }}>{m.label}</p>
+                            {m.sub && <p className="text-[8px] mt-0.5 font-semibold" style={{ color: 'rgba(255,255,255,0.86)' }}>{m.sub}</p>}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Monthly Summary compact panel */}
+                      <div className="rounded-2xl p-3" style={card2}>
+                        <p className="text-[10px] font-semibold mb-2" style={{ color: isDark ? 'rgba(255,255,255,0.70)' : 'var(--xp-txt2)', letterSpacing: '0.03em' }}>Monthly Summary</p>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 0', rowGap: 4 }}>
+                          {([
+                            { label: `${stats.productiveDays} Productive Days`, col: '#22c55e' },
+                            { label: `${stats.hyperDays} Hyper 🔥`, col: '#f97316' },
+                            { label: `${formatMs(totalMs)} Focus`, col: '#a78bfa' },
+                            { label: `${monthTaskStats.completedTasks} Tasks ✓`, col: '#38bdf8' },
+                            ...(stats.goalDays > 0 ? [{ label: `${stats.goalDays} Goals 🎯`, col: '#22c55e' }] : []),
+                            ...(stats.milestoneDays > 0 ? [{ label: `${stats.milestoneDays} Milestones 🏆`, col: '#a855f7' }] : []),
+                          ] as { label: string; col: string }[]).map((item, i) => (
+                            <span key={i} style={{ fontSize: 10, fontWeight: 600, color: item.col, whiteSpace: 'nowrap' }}>
+                              {i > 0 && <span style={{ color: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.28)', margin: '0 6px' }}>·</span>}
+                              {item.label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* CENTER: Performance Analytics Gauge */}
+                    <div className="rounded-2xl overflow-hidden flex flex-col" style={{ background: isDark ? 'linear-gradient(145deg,rgba(16,7,44,0.99) 0%,rgba(7,3,18,0.99) 100%)' : 'var(--xp-card)', border: isDark ? '0.5px solid rgba(124,58,237,0.35)' : '0.5px solid var(--xp-bdr2)', boxShadow: isDark ? '0 4px 36px rgba(80,0,220,0.22),0 2px 16px rgba(0,0,0,0.55)' : '0 2px 12px rgba(0,0,0,0.08)', minHeight: 280 }}>
                       <GaugeMeter score={monthScore} />
                     </div>
-                    <div className="rounded-2xl p-5" style={{ background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
-                      <SectionDivider title="Productivity" />
-                      <div className="grid grid-cols-2 gap-3">
-                        <StatTile emoji="✅" label="Productive Days" value={`${stats.productiveDays}/${stats.totalDays}`} />
-                        <StatTile emoji="🔥" label="Hyper Days"      value={String(stats.hyperDays)}     accent="#f97316" />
-                        <StatTile emoji="🏆" label="Milestones"      value={String(stats.milestoneDays)} accent="#a855f7" />
-                        <StatTile emoji="🎯" label="Goals Achieved"  value={String(stats.goalDays)}      accent="#22c55e" />
+
+                    {/* RIGHT: Monthly Achievement summary */}
+                    <div className="rounded-2xl p-3 flex flex-col" style={card1}>
+                      <p className="text-[11px] font-bold mb-3" style={{ color: isDark ? '#a78bfa' : '#7c3aed' }}>Monthly Achievement</p>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
+                        {([
+                          { emoji: '📅', label: 'Days in Month', value: String(stats.totalDays) },
+                          { emoji: '⭐', label: 'Productive', value: String(stats.productiveDays) },
+                          { emoji: '🔥', label: 'Current Streak', value: `${currentStreak}d` },
+                          { emoji: '⚡', label: 'Best Streak', value: `${longestStreak}d` },
+                          { emoji: '📊', label: 'Performance', value: `${monthScore}%` },
+                          { emoji: '🎯', label: 'Goals', value: String(stats.goalDays) },
+                          { emoji: '🏆', label: 'Milestones', value: String(stats.milestoneDays) },
+                        ] as { emoji: string; label: string; value: string }[]).map(item => (
+                          <div key={item.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 8px', borderRadius: 8, background: isDark ? 'rgba(124,58,237,0.07)' : 'rgba(124,58,237,0.04)', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.10)'}` }}>
+                            <span style={{ fontSize: 10, color: isDark ? 'rgba(203,213,225,0.65)' : 'var(--xp-txt3)' }}>{item.emoji} {item.label}</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: isDark ? 'rgba(255,255,255,0.90)' : 'var(--xp-txt)' }}>{item.value}</span>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   </div>
 
-                  {/* Row 2: Time | Progress */}
-                  <div className="grid grid-cols-2 gap-5 mb-5">
-                    <div className="rounded-2xl p-5" style={{ background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
-                      <SectionDivider title="Time" />
-                      <div className="flex items-center justify-between px-3 py-3 rounded-xl mb-4" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr)' }}>
-                        <span className="text-sm font-medium" style={{ color: 'var(--xp-txt2)' }}>⏱ Total Hours</span>
-                        <span className="text-lg font-bold" style={{ color: 'var(--xp-acc)' }}>{formatMs(totalMs)}</span>
-                      </div>
-                      <MonthWeeklyBars month={currentMonth} sessions={monthSessions} />
-                    </div>
-                    <div className="rounded-2xl p-5" style={{ background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
-                      <SectionDivider title="Progress" />
-                      <div className="grid grid-cols-3 gap-3">
-                        <StatTile emoji="📈" label="Completion"  value={`${stats.completionRate}%`} />
-                        <StatTile emoji="🔗" label="Cur Streak"  value={`${currentStreak}d`} />
-                        <StatTile emoji="⚡" label="Best Streak" value={`${longestStreak}d`} />
-                      </div>
-                    </div>
-                  </div>
+                  {/* ROW 2 — Monthly Progress | Activity Breakdown */}
+                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)] items-stretch gap-3 lg:gap-4">
 
-                  {/* Row 3: Activities full width */}
-                  <div className="rounded-2xl p-5" style={{ background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
-                    <SectionDivider title="Activities" />
-                    {actBreakdown.length > 0 ? (
-                      <div className="grid gap-6" style={{ gridTemplateColumns: '220px 1fr' }}>
-                        <div className="flex flex-col items-center justify-center">
-                          <ActivityPieChart breakdown={actBreakdown} totalMs={totalMs} />
-                          <p className="text-[9px] font-medium mt-2" style={{ color: 'var(--xp-txt3)' }}>Hover slice for details</p>
+                    {/* Monthly Progress — WeeklyBars */}
+                    <div className="rounded-2xl p-4 sm:p-5 flex flex-col" style={card1}>
+                      <div className="flex items-start justify-between flex-shrink-0 mb-3">
+                        <div>
+                          <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Monthly Progress</p>
+                          <p className="text-[9px] mt-0.5" style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>Weekly focus time breakdown</p>
                         </div>
-                        <div className="flex flex-col gap-3 justify-center">
+                        {totalMs > 0 && (
+                          <div className="text-right">
+                            <p className="text-[14px] font-bold tabular-nums" style={{ color: '#a78bfa' }}>{formatMs(totalMs)}</p>
+                            <p className="text-[9px]" style={{ color: isDark ? 'rgba(148,163,184,0.45)' : 'var(--xp-txt3)' }}>total</p>
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ flex: 1, minHeight: 180 }}>
+                        <MonthWeeklyBars month={currentMonth} sessions={monthSessions} />
+                      </div>
+                    </div>
+
+                    {/* Activity Overview */}
+                    <div className="rounded-2xl p-4 sm:p-5" style={card2}>
+                      <p className="text-[11px] font-semibold tracking-wide mb-3" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Activity Breakdown</p>
+                      {actBreakdown.length > 0 ? (
+                        <div className="flex flex-col items-center">
+                          <ActivityPieChart breakdown={actBreakdown} totalMs={totalMs} />
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center h-24">
+                          <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No activity data this month</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* ROW 3 — Activity List | Session Log | Task Stats */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4">
+
+                    {/* Activity distribution list */}
+                    <div className="rounded-2xl p-3.5" style={card1}>
+                      <p className="text-[11px] font-semibold tracking-wide mb-2.5" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Activities</p>
+                      {actBreakdown.length > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                           {actBreakdown.map(a => {
                             const pct = totalMs > 0 ? Math.round((a.ms / totalMs) * 100) : 0
-                            const hrs = (a.ms / 3_600_000).toFixed(1)
                             return (
                               <div key={a.name}>
-                                <div className="flex items-center gap-2 mb-1.5">
-                                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: a.color }} />
-                                  <span className="text-sm font-semibold flex-1 truncate" style={{ color: 'var(--xp-txt)' }}>{a.name}</span>
-                                  <span className="text-xs font-bold flex-shrink-0" style={{ color: a.color }}>{pct}%</span>
-                                  <span className="text-[10px] flex-shrink-0 w-10 text-right" style={{ color: 'var(--xp-txt3)' }}>{hrs}h</span>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(80px,1fr) 52px 32px', alignItems: 'center', gap: 4, marginBottom: 5 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+                                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: a.color }} />
+                                    <span className="text-[9px] truncate" style={{ color: isDark ? 'rgba(203,213,225,0.78)' : 'var(--xp-txt2)' }}>{a.name}</span>
+                                  </div>
+                                  <span className="text-[9px] tabular-nums font-semibold text-right" style={{ color: isDark ? 'rgba(255,255,255,0.72)' : 'var(--xp-txt)' }}>{formatMs(a.ms)}</span>
+                                  <span className="text-[8px] tabular-nums text-right" style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>{pct}%</span>
                                 </div>
-                                <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'var(--xp-card)' }}>
+                                <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }}>
                                   <div className="h-full rounded-full" style={{ width: `${pct}%`, background: a.color, transition: 'width 600ms ease' }} />
                                 </div>
                               </div>
                             )
                           })}
                         </div>
+                      ) : (
+                        <div className="flex items-center justify-center h-20">
+                          <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No activity data</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Top sessions this month */}
+                    <div className="rounded-2xl overflow-hidden" style={card2}>
+                      <div className="px-4 py-2.5" style={{ borderBottom: isDark ? '0.5px solid rgba(124,58,237,0.12)' : '0.5px solid rgba(0,0,0,0.08)' }}>
+                        <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Session Log</p>
                       </div>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center py-8">
-                        <p className="text-2xl mb-2">⏱</p>
-                        <p className="text-xs" style={{ color: 'var(--xp-txt3)' }}>Start a work timer to see activity analytics</p>
+                      {monthTopSessions.length > 0 ? (
+                        <div>
+                          {monthTopSessions.slice(0, 8).map((s, i) => {
+                            const deep = s.durationMs >= 45 * 60_000
+                            return (
+                              <div key={i} style={{ display: 'grid', gridTemplateColumns: 'minmax(86px,1fr) 44px 54px', alignItems: 'center', gap: 6, padding: '5px 14px', borderBottom: i < Math.min(monthTopSessions.length, 8) - 1 ? isDark ? '0.5px solid rgba(124,58,237,0.08)' : '0.5px solid var(--xp-bdr)' : 'none' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: s.actColor }} />
+                                  <span className="text-[10px] font-semibold truncate" style={{ color: isDark ? 'rgba(255,255,255,0.85)' : 'var(--xp-txt)' }}>{s.actName}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                                  {deep && <span className="text-[7px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(124,58,237,0.15)', color: '#a78bfa', border: '0.5px solid rgba(124,58,237,0.22)', whiteSpace: 'nowrap' }}>Deep</span>}
+                                </div>
+                                <span className="text-[10px] font-bold tabular-nums text-right" style={{ color: deep ? '#a78bfa' : isDark ? 'rgba(203,213,225,0.72)' : 'var(--xp-txt2)' }}>{formatMs(s.durationMs)}</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <div className="px-4 py-6 text-center">
+                          <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No sessions recorded this month</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Task completion stats */}
+                    <div className="rounded-2xl p-3.5" style={card1}>
+                      <div className="flex items-center justify-between mb-2.5">
+                        <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Tasks</p>
+                        {monthTaskStats.totalTasks > 0 && (
+                          <span className="text-[8px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(124,58,237,0.16)', color: '#a78bfa', border: '0.5px solid rgba(124,58,237,0.26)' }}>
+                            {monthTaskStats.completedTasks}/{monthTaskStats.totalTasks} done
+                          </span>
+                        )}
                       </div>
-                    )}
+                      {monthTaskStats.totalTasks > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                              <p className="text-[9px]" style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>Completion Rate</p>
+                              <p className="text-[9px] font-bold" style={{ color: '#a78bfa' }}>{monthTaskStats.totalTasks > 0 ? Math.round((monthTaskStats.completedTasks / monthTaskStats.totalTasks) * 100) : 0}%</p>
+                            </div>
+                            <div className="h-2 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }}>
+                              <div className="h-full rounded-full" style={{ width: `${monthTaskStats.totalTasks > 0 ? Math.round((monthTaskStats.completedTasks / monthTaskStats.totalTasks) * 100) : 0}%`, background: 'linear-gradient(90deg,#7c3aed 0%,#a855f7 50%,#d946ef 100%)', transition: 'width 600ms ease' }} />
+                            </div>
+                          </div>
+                          {([
+                            { icon: '📋', label: 'Total Tasks', val: String(monthTaskStats.totalTasks) },
+                            { icon: '✅', label: 'Completed', val: String(monthTaskStats.completedTasks), col: '#22c55e' },
+                            { icon: '📅', label: 'Productive Days', val: String(stats.productiveDays) },
+                            { icon: '🎯', label: 'Goals', val: String(stats.goalDays) },
+                            { icon: '🏆', label: 'Milestones', val: String(stats.milestoneDays) },
+                          ] as { icon: string; label: string; val: string; col?: string }[]).map(item => (
+                            <div key={item.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 6, borderBottom: isDark ? '0.5px solid rgba(255,255,255,0.05)' : '0.5px solid var(--xp-bdr)' }}>
+                              <span style={{ fontSize: 9, color: isDark ? 'rgba(148,163,184,0.60)' : 'var(--xp-txt3)' }}>{item.icon} {item.label}</span>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: item.col ?? (isDark ? 'rgba(255,255,255,0.85)' : 'var(--xp-txt)') }}>{item.val}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center h-20">
+                          <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No tasks this month</p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}

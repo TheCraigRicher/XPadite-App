@@ -502,7 +502,44 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [qotdIn, setQotdIn] = useState(false)
   const qotdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  useEffect(() => () => { if (qotdTimerRef.current) clearTimeout(qotdTimerRef.current) }, [])
+  // Mobile pan-once scroll state
+  const qotdInnerRef     = useRef<HTMLDivElement>(null)
+  const qotdTrackRef     = useRef<HTMLDivElement>(null)
+  const qotdScrollTimer  = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [qotdTranslate,  setQotdTranslate]  = useState(0)
+  const [qotdTransDur,   setQotdTransDur]   = useState(0)
+  const [qotdTransActive,setQotdTransActive]= useState(false)
+
+  useEffect(() => () => {
+    if (qotdTimerRef.current)   clearTimeout(qotdTimerRef.current)
+    if (qotdScrollTimer.current) clearTimeout(qotdScrollTimer.current)
+  }, [])
+
+  // Reset scroll state whenever banner hides; trigger pan on mobile when it shows
+  useEffect(() => {
+    if (!qotdIn) {
+      if (qotdScrollTimer.current) { clearTimeout(qotdScrollTimer.current); qotdScrollTimer.current = null }
+      setQotdTranslate(0)
+      setQotdTransDur(0)
+      setQotdTransActive(false)
+      return
+    }
+    // Wait for the 300 ms slide-in + 500 ms reading pause before measuring
+    qotdScrollTimer.current = setTimeout(() => {
+      if (window.innerWidth > 768) return  // desktop: unchanged
+      const inner = qotdInnerRef.current
+      const track = qotdTrackRef.current
+      if (!inner || !track) return
+      const overflow = track.offsetWidth - inner.clientWidth
+      if (overflow <= 4) return  // fits — nothing to do
+      // 60 px/s speed, clamped to 3–5 s
+      const dur = Math.min(5000, Math.max(3000, (overflow / 60) * 1000))
+      setQotdTransDur(dur)
+      setQotdTranslate(-overflow)
+      setQotdTransActive(true)
+    }, 800)
+    return () => { if (qotdScrollTimer.current) { clearTimeout(qotdScrollTimer.current); qotdScrollTimer.current = null } }
+  }, [qotdIn])
 
   useEffect(() => {
     if (!qotdIn) return
@@ -573,24 +610,36 @@ function ThemedApp(_props: XpaditeAppProps) {
         }}
       >
         <div
+          ref={qotdInnerRef}
           style={{
             background: 'linear-gradient(90deg, #4c1d95 0%, #5b21b6 50%, #4c1d95 100%)',
             padding: '9px 24px',
             textAlign: 'center',
             whiteSpace: 'nowrap',
             overflow: 'hidden',
-            textOverflow: 'ellipsis',
           }}
         >
-          <span style={{ fontSize: 10, color: 'rgba(216,180,254,0.7)', fontWeight: 600, letterSpacing: '0.08em', marginRight: 8 }}>
-            QUOTE OF THE DAY
-          </span>
-          <span style={{ fontSize: 11.5, color: 'white', fontStyle: 'italic', fontWeight: 400 }}>
-            &ldquo;{_qotdToday.quote}&rdquo;
-          </span>
-          <span style={{ fontSize: 10, color: 'rgba(216,180,254,0.55)', marginLeft: 8 }}>
-            — {_qotdToday.author}
-          </span>
+          {/* Single inline track — slides left on mobile when quote overflows */}
+          <div
+            ref={qotdTrackRef}
+            style={{
+              display: 'inline-block',
+              whiteSpace: 'nowrap',
+              transform: `translateX(${qotdTranslate}px)`,
+              transition: qotdTransActive ? `transform ${qotdTransDur}ms ease-in-out` : 'none',
+              willChange: qotdTransActive ? 'transform' : 'auto',
+            }}
+          >
+            <span style={{ fontSize: 10, color: 'rgba(216,180,254,0.7)', fontWeight: 600, letterSpacing: '0.08em', marginRight: 8 }}>
+              QUOTE OF THE DAY
+            </span>
+            <span style={{ fontSize: 11.5, color: 'white', fontStyle: 'italic', fontWeight: 400 }}>
+              &ldquo;{_qotdToday.quote}&rdquo;
+            </span>
+            <span style={{ fontSize: 10, color: 'rgba(216,180,254,0.55)', marginLeft: 8 }}>
+              — {_qotdToday.author}
+            </span>
+          </div>
         </div>
       </div>
 

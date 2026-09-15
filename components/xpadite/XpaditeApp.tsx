@@ -21,8 +21,11 @@ import { SettingsModal } from './SettingsModal'
 import { MobileBottomNav } from './MobileBottomNav'
 import { ProfileModal } from './ProfileModal'
 import { ActivityManagerModal } from './ActivityManagerModal'
-import { dateKey } from './utils'
+import { dateKey, todayKey } from './utils'
 import type { MobileTab } from './MobileBottomNav'
+import type { XpaditeNotification } from './NotificationsModal'
+import { loadStoredNotifications, saveStoredNotifications } from './NotificationsModal'
+import type { DayData, WorkSession } from './types'
 
 interface XpaditeAppProps {
   email: string
@@ -214,6 +217,158 @@ function ReminderChecker() {
     }
     check()
     const id = setInterval(check, 30_000)
+    return () => clearInterval(id)
+  }, [])
+
+  return null
+}
+
+// ─── Missing-Time Reminder helpers ───────────────────────────────────────────
+
+function computeTotalFocusMs(dayData: DayData, daySessions: WorkSession[]): number {
+  let ms = 0
+  for (const task of dayData.tasks ?? []) {
+    for (const s of task.sessions ?? []) {
+      if (s.endTs != null) ms += s.endTs - s.startTs
+    }
+  }
+  for (const s of daySessions) {
+    if (s.endTs != null) ms += s.endTs - s.startTs
+  }
+  return ms
+}
+
+function mtrId(key: string): string {
+  return `mtr-${key}`
+}
+
+// ─── Missing-Time Reminder checker ───────────────────────────────────────────
+
+function MissingTimeChecker() {
+  const { calData, sessions } = useApp()
+
+  const calDataRef = useRef(calData)
+  calDataRef.current = calData
+  const sessionsRef = useRef(sessions)
+  sessionsRef.current = sessions
+
+  // Auto-resolve when focus time is added while the app is open
+  useEffect(() => {
+    const key = todayKey()
+    const dayData = calData[key]
+    if (!dayData) return
+    const focusMs = computeTotalFocusMs(dayData, sessions.filter(s => s.dateKey === key))
+    if (focusMs <= 0) return
+    const id = mtrId(key)
+    const stored = loadStoredNotifications()
+    const existing = stored.find(n => n.id === id)
+    if (!existing) return
+    if (existing.lifecycle === 'dismissed' || existing.lifecycle === 'resolved') return
+    saveStoredNotifications(
+      stored.map(n => n.id === id ? { ...n, lifecycle: 'resolved' as const, read: true } : n),
+    )
+  }, [calData, sessions])
+
+  // Scheduled checker: 8 PM trigger + 10 AM snooze follow-up
+  useEffect(() => {
+    function check() {
+      const now = new Date()
+      const hour = now.getHours()
+      const is8PM  = hour === 20
+      const is10AM = hour === 10
+      if (!is8PM && !is10AM) return
+
+      const key = dateKey(now.getFullYear(), now.getMonth(), now.getDate())
+      const dayData = calDataRef.current[key]
+      const hasStatus = !!(dayData && (dayData.productive || dayData.hyper || dayData.milestone || dayData.goal))
+
+      const id = mtrId(key)
+      const stored = loadStoredNotifications()
+      const existing = stored.find(n => n.id === id)
+
+      // Auto-resolve if qualifying status was removed
+      if (!hasStatus) {
+        if (existing && existing.lifecycle !== 'dismissed' && existing.lifecycle !== 'resolved') {
+          saveStoredNotifications(
+            stored.map(n => n.id === id ? { ...n, lifecycle: 'resolved' as const, read: true } : n),
+          )
+        }
+        return
+      }
+
+      const focusMs = computeTotalFocusMs(
+        dayData,
+        sessionsRef.current.filter(s => s.dateKey === key),
+      )
+
+      // Auto-resolve if time was recorded
+      if (focusMs > 0) {
+        if (existing && existing.lifecycle !== 'dismissed' && existing.lifecycle !== 'resolved') {
+          saveStoredNotifications(
+            stored.map(n => n.id === id ? { ...n, lifecycle: 'resolved' as const, read: true } : n),
+          )
+        }
+        return
+      }
+
+      // Handle existing notification
+      if (existing) {
+        if (existing.lifecycle === 'dismissed' || existing.lifecycle === 'resolved') return
+        if (existing.lifecycle === 'snoozed') {
+          // Re-activate only at 10 AM on the follow-up day
+          if (!is10AM) return
+          if (existing.snoozeUntil && now.getTime() < existing.snoozeUntil) return
+          saveStoredNotifications(
+            stored.map(n => n.id === id ? {
+              ...n,
+              lifecycle: 'active' as const,
+              read: false,
+              timestamp: Date.now(),
+              // Final follow-up: no snooze action
+              actions: [
+                { label: '+ Add Time', actionType: 'add-time', payload: { dateKey: key } },
+                { label: 'Dismiss', actionType: 'dismiss', payload: {} },
+              ],
+            } : n),
+          )
+          return
+        }
+        // Already active — no duplicate
+        return
+      }
+
+      // Create new notification only at 8 PM
+      if (!is8PM) return
+
+      const statusLabel =
+        dayData.hyper      ? 'Hyper-Productive' :
+        dayData.milestone  ? 'Milestone'         :
+        dayData.goal       ? 'Goal Day'          :
+                             'Productive'
+
+      const newNotif: XpaditeNotification = {
+        id,
+        title: 'No Focus Time Recorded',
+        message: `You marked today as ${statusLabel} but haven't logged any focus time. Add time to keep your progress accurate.`,
+        timestamp: Date.now(),
+        read: false,
+        category: 'missed-task',
+        tags: ['Today'],
+        actions: [
+          { label: '+ Add Time',      actionType: 'add-time',        payload: { dateKey: key } },
+          { label: 'Remind Tomorrow', actionType: 'snooze-tomorrow', payload: { dateKey: key } },
+          { label: 'Dismiss',         actionType: 'dismiss',         payload: {} },
+        ],
+        lifecycle: 'active',
+        snoozeUntil: null,
+        snoozeCount: 0,
+        targetDateKey: key,
+      }
+      saveStoredNotifications([...stored, newNotif])
+    }
+
+    check()
+    const id = setInterval(check, 60_000)
     return () => clearInterval(id)
   }, [])
 
@@ -465,23 +620,17 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [notificationsOpen, setNotificationsOpen]       = useState(false)
 
   // ── Mobile tab ────────────────────────────────────────────────────────────────
-  const [mobileTab, setMobileTab] = useState<MobileTab>('overview')
-
-  // When Analytics tab selected → auto-open analytics hub
-  useEffect(() => {
-    if (mobileTab === 'analytics') setAnalyticsOpen(true)
-    if (mobileTab === 'ai-coach') setAICoachOpen(true)
-  }, [mobileTab])
+  const [mobileTab, setMobileTab] = useState<MobileTab>('calendar')
 
   function handleAnalyticsClose() {
     setAnalyticsOpen(false)
-    if (mobileTab === 'analytics') setMobileTab('overview')
+    if (mobileTab === 'analytics') setMobileTab('calendar')
   }
 
   function handleAICoachClose() {
     setAICoachOpen(false)
     setAICoachMotivate(false)
-    if (mobileTab === 'ai-coach') setMobileTab('overview')
+    if (mobileTab === 'ai-coach') setMobileTab('calendar')
   }
 
   // ── Mobile collapsible stats ──────────────────────────────────────────────────
@@ -569,7 +718,7 @@ function ThemedApp(_props: XpaditeAppProps) {
   // ── Helpers ───────────────────────────────────────────────────────────────────
   function openDayModal(key: string, month: number, day: number) {
     setModalDay({ key, month, day })
-    if (mobileTab === 'tasks') setMobileTab('overview')
+    if (mobileTab === 'tasks') setMobileTab('calendar')
   }
 
   return (
@@ -584,6 +733,7 @@ function ThemedApp(_props: XpaditeAppProps) {
       }}
     >
       <ReminderChecker />
+      <MissingTimeChecker />
       <AppSidebar
         onGallery={() => setGalleryOpen(true)}
         onSettings={() => setSettingsOpen(true)}
@@ -649,18 +799,20 @@ function ThemedApp(_props: XpaditeAppProps) {
         onAICoach={() => setAICoachOpen(true)}
       />
 
-      {/* +/-/edit buttons — centered strip just below navbar */}
-      <ActivityButtons />
+      {/* +/-/edit buttons — centered strip just below navbar — desktop only */}
+      <div className="hidden sm:block">
+        <ActivityButtons />
+      </div>
 
       {/* ── MAIN CONTENT ─────────────────────────────────────────────────── */}
       <div
-        className="xp-main-content"
-        style={{ maxWidth: 1360, width: '100%', margin: '0 auto', paddingLeft: 16, paddingRight: 16, flex: 1, display: 'flex', flexDirection: 'column' }}
+        className="xp-main-content px-2 sm:px-4"
+        style={{ maxWidth: 1360, width: '100%', margin: '0 auto', flex: 1, display: 'flex', flexDirection: 'column' }}
       >
         {/* ── Overview / Calendar view (always shown on desktop; shown on 'overview' tab on mobile) */}
         <main
-          className={mobileTab === 'overview' || mobileTab === 'analytics' ? '' : 'hidden sm:flex'}
-          style={{ flex: 1, display: mobileTab === 'overview' || mobileTab === 'analytics' ? 'flex' : undefined, flexDirection: 'column' }}
+          className={mobileTab === 'calendar' ? '' : 'hidden sm:flex'}
+          style={{ flex: 1, display: mobileTab === 'calendar' ? 'flex' : undefined, flexDirection: 'column' }}
         >
           {/* Stats + Legend — chevron button controls on all screen sizes */}
           <div
@@ -690,20 +842,33 @@ function ThemedApp(_props: XpaditeAppProps) {
           </div>
         )}
 
-        {/* ── AI Coach tab (mobile only) */}
-        {mobileTab === 'ai-coach' && (
-          <div className="flex flex-col flex-1 sm:hidden">
-            <MobileAICoachView />
+        {/* ── Mobile Analytics tab — inline, nav persistent */}
+        {mobileTab === 'analytics' && (
+          <div
+            className="sm:hidden"
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 56, zIndex: 49, transform: 'translateZ(0)', overflow: 'hidden' }}
+          >
+            <AnalyticsPage onClose={() => setMobileTab('calendar')} />
           </div>
         )}
 
-        {/* ── More tab (mobile only) */}
-        {mobileTab === 'more' && (
-          <div className="flex flex-col flex-1 sm:hidden">
-            <MobileMoreView
-              onGallery={() => setGalleryOpen(true)}
-              onSettings={() => setSettingsOpen(true)}
-            />
+        {/* ── Mobile Planner tab — inline, nav persistent */}
+        {mobileTab === 'planner' && (
+          <div
+            className="sm:hidden"
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 56, zIndex: 49, transform: 'translateZ(0)', overflow: 'hidden' }}
+          >
+            <JournalWorkspaceModal onClose={() => setMobileTab('calendar')} />
+          </div>
+        )}
+
+        {/* ── Mobile AI Coach tab — inline, nav persistent */}
+        {mobileTab === 'ai-coach' && (
+          <div
+            className="sm:hidden"
+            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 56, zIndex: 49, transform: 'translateZ(0)', overflow: 'hidden' }}
+          >
+            <AICoachPage onClose={() => setMobileTab('calendar')} startWithMotivate={false} />
           </div>
         )}
       </div>
@@ -712,13 +877,20 @@ function ThemedApp(_props: XpaditeAppProps) {
       <MobileBottomNav
         activeTab={mobileTab}
         onTabChange={tab => {
+          if (tab === 'calendar') {
+            setFullPageMonth(null)
+            setAnalyticsOpen(false)
+            setAICoachOpen(false)
+            setAICoachMotivate(false)
+            setMobileTab('calendar')
+            return
+          }
           if (tab === 'tasks') {
             const today = new Date()
             setModalDay({ key: dateKey(today.getFullYear(), today.getMonth(), today.getDate()), month: today.getMonth(), day: today.getDate() })
             return
           }
           setMobileTab(tab)
-          if (tab === 'analytics') setAnalyticsOpen(true)
         }}
       />
 
@@ -777,7 +949,21 @@ function ThemedApp(_props: XpaditeAppProps) {
 
       {journalNotesOpen && <JournalWorkspaceModal onClose={() => setJournalNotesOpen(false)} />}
 
-      {notificationsOpen && <NotificationsModal onClose={() => setNotificationsOpen(false)} />}
+      {notificationsOpen && (
+        <NotificationsModal
+          onClose={() => setNotificationsOpen(false)}
+          onAction={(actionType, notif) => {
+            if (actionType === 'add-time') {
+              const dKey = notif.targetDateKey ?? todayKey()
+              const parts = dKey.split('-')
+              const month = parseInt(parts[1], 10) - 1  // 0-indexed
+              const day   = parseInt(parts[2], 10)
+              setModalDay({ key: dKey, month, day })
+              setNotificationsOpen(false)
+            }
+          }}
+        />
+      )}
 
       {/* Toast — above bottom nav on mobile */}
       {toast && (

@@ -14,7 +14,13 @@ type NotificationCategory =
   | 'milestone'
   | 'productivity'
   | 'general'
-  | 'missed-task'   // reserved for future AI Coach / task scheduling integration
+  | 'missed-task'
+
+export interface NotificationAction {
+  label: string
+  actionType: string
+  payload?: Record<string, unknown>
+}
 
 export interface XpaditeNotification {
   id: string
@@ -23,7 +29,14 @@ export interface XpaditeNotification {
   timestamp: number
   read: boolean
   category: NotificationCategory
-  tags?: string[]   // supplementary badges e.g. 'Daily', 'Weekly', 'AI Coach'
+  tags?: string[]
+  // Action buttons rendered inline (e.g. missing-time reminder)
+  actions?: NotificationAction[]
+  // Lifecycle for stateful notifications (missing-time reminder)
+  lifecycle?: 'active' | 'snoozed' | 'dismissed' | 'resolved'
+  snoozeUntil?: number | null
+  snoozeCount?: number
+  targetDateKey?: string
 }
 
 type FilterMode = 'all' | 'unread' | 'read' | 'reminders'
@@ -32,7 +45,7 @@ type FilterMode = 'all' | 'unread' | 'read' | 'reminders'
 
 const LS_KEY = 'xp9-notifications'
 
-function loadNotifications(): XpaditeNotification[] {
+export function loadStoredNotifications(): XpaditeNotification[] {
   if (typeof window === 'undefined') return []
   try {
     const raw = localStorage.getItem(LS_KEY)
@@ -40,9 +53,13 @@ function loadNotifications(): XpaditeNotification[] {
   } catch { return [] }
 }
 
-function saveNotifications(items: XpaditeNotification[]) {
+export function saveStoredNotifications(items: XpaditeNotification[]): void {
   try { localStorage.setItem(LS_KEY, JSON.stringify(items)) } catch {}
 }
+
+// Internal aliases kept for backwards compat within this file
+const loadNotifications = loadStoredNotifications
+const saveNotifications = saveStoredNotifications
 
 // ── Category metadata ─────────────────────────────────────────────────────────
 
@@ -159,10 +176,12 @@ function NotificationItem({
   notification,
   isDark,
   onMarkRead,
+  onAction,
 }: {
   notification: XpaditeNotification
   isDark: boolean
   onMarkRead: () => void
+  onAction?: (actionType: string, notification: XpaditeNotification) => void
 }) {
   const [hovered, setHovered] = useState(false)
   const meta = CATEGORY_META[notification.category]
@@ -263,6 +282,40 @@ function NotificationItem({
         <p className="text-[10.5px] mt-1.5" style={{ color: 'var(--xp-txt3)', opacity: 0.5 }}>
           {fmtTime(notification.timestamp)}
         </p>
+
+        {/* Action buttons — for stateful notifications like missing-time reminders */}
+        {notification.actions && notification.actions.length > 0 && (
+          <div style={{ display: 'flex', gap: 5, marginTop: 9, flexWrap: 'wrap' as const }}>
+            {notification.actions.map(action => (
+              <button
+                key={action.actionType}
+                onClick={e => {
+                  e.stopPropagation()
+                  onAction?.(action.actionType, notification)
+                }}
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: '0.02em',
+                  padding: '3px 9px 4px',
+                  borderRadius: 6,
+                  border: `0.5px solid ${action.actionType === 'add-time' ? meta.color : `${meta.color}35`}`,
+                  background: action.actionType === 'add-time'
+                    ? meta.color
+                    : isDark ? `${meta.color}18` : `${meta.color}0d`,
+                  color: action.actionType === 'add-time' ? '#fff' : meta.color,
+                  cursor: 'pointer',
+                  transition: 'opacity 120ms',
+                  lineHeight: 1.4,
+                }}
+                onMouseEnter={e => { e.currentTarget.style.opacity = '0.72' }}
+                onMouseLeave={e => { e.currentTarget.style.opacity = '1' }}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -292,6 +345,7 @@ function GroupHeader({ label }: { label: string }) {
 
 interface NotificationsModalProps {
   onClose: () => void
+  onAction?: (actionType: string, notification: XpaditeNotification) => void
 }
 
 const FILTERS: { key: FilterMode; label: string }[] = [
@@ -308,9 +362,8 @@ const EMPTY_MESSAGES: Record<FilterMode, { heading: string; body: string }> = {
   reminders: { heading: 'No reminder notifications yet', body: 'Reminders that have fired will appear here.'                                              },
 }
 
-export function NotificationsModal({ onClose }: NotificationsModalProps) {
+export function NotificationsModal({ onClose, onAction }: NotificationsModalProps) {
   const { isDark, reminders } = useApp()
-  // stored = manually-persisted notifications + reminder notifications whose read state was saved
   const [stored, setStored] = useState<XpaditeNotification[]>(loadNotifications)
   const [filter, setFilter] = useState<FilterMode>('all')
   const [bellAnimating, setBellAnimating] = useState(false)
@@ -345,10 +398,13 @@ export function NotificationsModal({ onClose }: NotificationsModalProps) {
   [reminders, readMap])
 
   // Full merged list: stored entries + reminder-derived entries not already in stored
+  // Dismissed and resolved notifications are hidden from the list
   const notifications = useMemo((): XpaditeNotification[] => {
     const storedIds = new Set(stored.map(n => n.id))
     const reminderOnly = reminderNotifs.filter(n => !storedIds.has(n.id))
-    return [...stored, ...reminderOnly].sort((a, b) => b.timestamp - a.timestamp)
+    return [...stored, ...reminderOnly]
+      .filter(n => n.lifecycle !== 'dismissed' && n.lifecycle !== 'resolved')
+      .sort((a, b) => b.timestamp - a.timestamp)
   }, [stored, reminderNotifs])
 
   const unreadCount = useMemo(() => notifications.filter(n => !n.read).length, [notifications])
@@ -409,6 +465,44 @@ export function NotificationsModal({ onClose }: NotificationsModalProps) {
       saveNotifications(next)
       return next
     })
+  }
+
+  // Handle action buttons on stateful notifications (e.g. missing-time reminder)
+  function handleAction(actionType: string, notif: XpaditeNotification) {
+    if (actionType === 'dismiss') {
+      setStored(prev => {
+        const alreadyStored = prev.find(n => n.id === notif.id)
+        const next = alreadyStored
+          ? prev.map(n => n.id === notif.id ? { ...n, lifecycle: 'dismissed' as const, read: true } : n)
+          : [...prev, { ...notif, lifecycle: 'dismissed' as const, read: true }]
+        saveNotifications(next)
+        return next
+      })
+      return
+    }
+    if (actionType === 'snooze-tomorrow') {
+      const d = new Date()
+      d.setDate(d.getDate() + 1)
+      d.setHours(10, 0, 0, 0)
+      const snoozeUntil = d.getTime()
+      setStored(prev => {
+        const alreadyStored = prev.find(n => n.id === notif.id)
+        const next = alreadyStored
+          ? prev.map(n => n.id === notif.id ? {
+              ...n,
+              lifecycle: 'snoozed' as const,
+              snoozeUntil,
+              snoozeCount: (n.snoozeCount ?? 0) + 1,
+              read: true,
+            } : n)
+          : [...prev, { ...notif, lifecycle: 'snoozed' as const, snoozeUntil, snoozeCount: 1, read: true }]
+        saveNotifications(next)
+        return next
+      })
+      return
+    }
+    // 'add-time' and any unknown types propagate to parent
+    onAction?.(actionType, notif)
   }
 
   const empty = EMPTY_MESSAGES[filter]
@@ -634,6 +728,7 @@ export function NotificationsModal({ onClose }: NotificationsModalProps) {
                     notification={n}
                     isDark={isDark}
                     onMarkRead={() => markRead(n.id)}
+                    onAction={handleAction}
                   />
                 ))}
               </div>

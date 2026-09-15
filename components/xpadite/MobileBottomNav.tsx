@@ -2,16 +2,25 @@
 
 import React from 'react'
 
-export type MobileTab = 'overview' | 'tasks' | 'analytics' | 'ai-coach' | 'more'
+export type MobileTab = 'calendar' | 'tasks' | 'analytics' | 'planner' | 'ai-coach'
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
-const OverviewIcon = ({ active }: { active: boolean }) => (
+const CalendarIcon = ({ active }: { active: boolean }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2 : 1.6} style={{ width: 20, height: 20 }}>
     <rect x="3" y="3" width="8" height="8" rx="1.5" />
     <rect x="13" y="3" width="8" height="8" rx="1.5" />
     <rect x="3" y="13" width="8" height="8" rx="1.5" />
     <rect x="13" y="13" width="8" height="8" rx="1.5" />
+  </svg>
+)
+
+const PlannerIcon = ({ active }: { active: boolean }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2 : 1.6} style={{ width: 20, height: 20 }}>
+    <rect x="4" y="3" width="14" height="18" rx="2" strokeLinejoin="round" />
+    <line x1="8" y1="8" x2="16" y2="8" strokeLinecap="round" />
+    <line x1="8" y1="12" x2="16" y2="12" strokeLinecap="round" />
+    <line x1="8" y1="16" x2="12" y2="16" strokeLinecap="round" />
   </svg>
 )
 
@@ -38,22 +47,15 @@ const AICoachIcon = ({ active }: { active: boolean }) => (
   </svg>
 )
 
-const MoreIcon = ({ active }: { active: boolean }) => (
-  <svg viewBox="0 0 24 24" fill="none" style={{ width: 20, height: 20 }}>
-    <circle cx="12" cy="12" r="1.5" fill={active ? '#a78bfa' : 'rgba(255,255,255,0.40)'} />
-    <circle cx="6"  cy="12" r="1.5" fill={active ? '#a78bfa' : 'rgba(255,255,255,0.40)'} />
-    <circle cx="18" cy="12" r="1.5" fill={active ? '#a78bfa' : 'rgba(255,255,255,0.40)'} />
-  </svg>
-)
 
 type NavIcon = React.FC<{ active: boolean }>
 
 const NAV_ITEMS: { tab: MobileTab; label: string; Icon: NavIcon }[] = [
-  { tab: 'overview',  label: 'Overview',  Icon: OverviewIcon  },
+  { tab: 'calendar',  label: 'Calendar',  Icon: CalendarIcon  },
   { tab: 'tasks',     label: 'Tasks',     Icon: TasksIcon     },
   { tab: 'analytics', label: 'Analytics', Icon: AnalyticsIcon },
+  { tab: 'planner',   label: 'Planner',   Icon: PlannerIcon   },
   { tab: 'ai-coach',  label: 'AI Coach',  Icon: AICoachIcon   },
-  { tab: 'more',      label: 'More',      Icon: MoreIcon      },
 ]
 
 // ─── Component ────────────────────────────────────────────────────────────────

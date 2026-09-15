@@ -58,11 +58,6 @@ const MFP_STYLES = `
     /* Calendar circles slightly larger on mobile */
     .xp-cal-circle{inset:20%!important;}
 
-    /* Align fire + goal visual centers with purple circle centerline (mobile only) */
-    .xp-fire-emoji{top:53%!important;}
-    .xp-fire-date{top:60%!important;}
-    .xp-goal-emoji{top:52%!important;}
-    .xp-goal-date{top:56%!important;}
   }
 
   .xp-mfp-back{
@@ -432,31 +427,37 @@ function MonthCalendarLarge({
 
               {/* 🔥 Hyper — kept in DOM, fades via xp-cal-fade + opacity */}
               {rawHyper && (
-                <div className="absolute inset-0 xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none' }}>
-                  <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
-                    <span className="xp-fire-emoji" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 40, lineHeight: 1, userSelect: 'none' }}>🔥</span>
-                    <span className="xp-fire-date" style={{ position: 'absolute', top: '57%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
+                <div className="absolute inset-[25%] xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none', overflow: 'visible' }}>
+                  <div className="absolute inset-0 flex items-center justify-center transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
+                    <span style={{ position: 'relative', display: 'inline-block', lineHeight: 1 }}>
+                      <span className="xp-fire-emoji" style={{ fontSize: 40, lineHeight: 1, userSelect: 'none', display: 'block' }}>🔥</span>
+                      <span className="xp-fire-date" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
+                    </span>
                   </div>
                 </div>
               )}
 
               {/* 🏆 Milestone — kept in DOM, fades */}
               {!rawHyper && rawMil && (
-                <div className="absolute inset-0 xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none' }}>
-                  <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
-                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 30, color: 'rgba(167,139,250,0.20)', filter: 'drop-shadow(0 0 6px rgba(167,139,250,0.55))', lineHeight: 1, userSelect: 'none', zIndex: 0 }}>★</span>
-                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 36, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🏆</span>
-                    <span style={{ position: 'absolute', top: '42%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
+                <div className="absolute inset-[25%] xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none', overflow: 'visible' }}>
+                  <div className="absolute inset-0 flex items-center justify-center transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
+                    <span style={{ position: 'relative', display: 'inline-block', lineHeight: 1 }}>
+                      <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 30, color: 'rgba(167,139,250,0.20)', filter: 'drop-shadow(0 0 6px rgba(167,139,250,0.55))', lineHeight: 1, userSelect: 'none', zIndex: 0, pointerEvents: 'none' }}>★</span>
+                      <span style={{ fontSize: 36, lineHeight: 1, userSelect: 'none', display: 'block', position: 'relative', zIndex: 1 }}>🏆</span>
+                      <span style={{ position: 'absolute', top: '42%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
+                    </span>
                   </div>
                 </div>
               )}
 
               {/* 🎯 Goal — kept in DOM, fades */}
               {!rawHyper && !rawMil && rawGoal && (
-                <div className="absolute inset-0 xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none' }}>
-                  <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
-                    <span className="xp-goal-emoji" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 42, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🎯</span>
-                    <span className="xp-goal-date" style={{ position: 'absolute', top: '54%', left: '48%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
+                <div className="absolute inset-[25%] xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none', overflow: 'visible' }}>
+                  <div className="absolute inset-0 flex items-center justify-center transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
+                    <span style={{ position: 'relative', display: 'inline-block', lineHeight: 1 }}>
+                      <span className="xp-goal-emoji" style={{ fontSize: 42, lineHeight: 1, userSelect: 'none', display: 'block', position: 'relative', zIndex: 1 }}>🎯</span>
+                      <span className="xp-goal-date" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
+                    </span>
                   </div>
                 </div>
               )}

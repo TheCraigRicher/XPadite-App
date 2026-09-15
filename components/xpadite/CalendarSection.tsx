@@ -58,7 +58,7 @@ export function CalendarSection({ onDayDoubleClick, onMonthZoom, activeMonth }: 
   }
 
   return (
-    <div className="px-3 pb-6">
+    <div className="px-1 sm:px-3 pb-20 sm:pb-6">
       {/* Floating card container */}
       <div
         className="rounded-2xl overflow-hidden"
@@ -88,7 +88,7 @@ export function CalendarSection({ onDayDoubleClick, onMonthZoom, activeMonth }: 
             </button>
 
             {open[q.label] && (
-              <div className="grid grid-cols-3 gap-1 sm:gap-3 p-1.5 sm:p-3 pt-0">
+              <div className="grid grid-cols-3 gap-1 sm:gap-3 p-1 sm:p-3 pt-0">
                 {q.months.map(m => (
                   <div
                     key={m}

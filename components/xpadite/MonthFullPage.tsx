@@ -39,8 +39,8 @@ const MFP_STYLES = `
     /* Dashboard pill: absolutely centered in the full modal width */
     .xp-mfp-hdr .xp-mfp-dash-pill{position:absolute!important;left:50%!important;top:10px!important;transform:translateX(-50%)!important;}
 
-    /* ROW 2 (bottom): ‹ Month Year › centered full-width */
-    .xp-mfp-hdr-c{order:2;width:100%;display:flex!important;align-items:center;gap:6px!important;justify-content:center!important;padding-top:6px;}
+    /* ROW 2 (bottom): ‹ Month Year › centered full-width — increased gap for breathing room */
+    .xp-mfp-hdr-c{order:2;width:100%;display:flex!important;align-items:center;gap:18px!important;justify-content:center!important;padding-top:6px;}
 
     .xp-mfp-hdr-title{min-width:0!important;font-size:12px!important;}
 
@@ -52,11 +52,17 @@ const MFP_STYLES = `
     /* Calendar content padding */
     .xp-mfp-cal-body{padding:10px 6px!important;}
 
-    /* Calendar week row vertical spacing — slightly more breathing room */
-    .xp-mfp-cal-grid{row-gap:14px!important;}
+    /* Calendar week row vertical spacing */
+    .xp-mfp-cal-grid{row-gap:18px!important;}
 
     /* Calendar circles slightly larger on mobile */
     .xp-cal-circle{inset:20%!important;}
+
+    /* Align fire + goal visual centers with purple circle centerline (mobile only) */
+    .xp-fire-emoji{top:53%!important;}
+    .xp-fire-date{top:60%!important;}
+    .xp-goal-emoji{top:52%!important;}
+    .xp-goal-date{top:56%!important;}
   }
 
   .xp-mfp-back{
@@ -428,8 +434,8 @@ function MonthCalendarLarge({
               {rawHyper && (
                 <div className="absolute inset-0 xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none' }}>
                   <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
-                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 40, lineHeight: 1, userSelect: 'none' }}>🔥</span>
-                    <span style={{ position: 'absolute', top: '57%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
+                    <span className="xp-fire-emoji" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 40, lineHeight: 1, userSelect: 'none' }}>🔥</span>
+                    <span className="xp-fire-date" style={{ position: 'absolute', top: '57%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
                   </div>
                 </div>
               )}
@@ -449,8 +455,8 @@ function MonthCalendarLarge({
               {!rawHyper && !rawMil && rawGoal && (
                 <div className="absolute inset-0 xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none' }}>
                   <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
-                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 42, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🎯</span>
-                    <span style={{ position: 'absolute', top: '54%', left: '48%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
+                    <span className="xp-goal-emoji" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 42, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🎯</span>
+                    <span className="xp-goal-date" style={{ position: 'absolute', top: '54%', left: '48%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
                   </div>
                 </div>
               )}

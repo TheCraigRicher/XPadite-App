@@ -20,20 +20,43 @@ const MFP_STYLES = `
   @keyframes xp-from-left{from{opacity:0;transform:translateX(-52px)}to{opacity:1;transform:translateX(0)}}
   /* Desktop: header title fixed min-width */
   .xp-mfp-hdr-title{min-width:260px;}
+
   @media(max-width:640px){
-    .xp-mfp-overlay{bottom:56px!important;}
-    .xp-mfp-wrap{align-items:flex-start!important;padding-top:8px!important;padding-bottom:8px!important;}
-    .xp-mfp-box{max-height:calc(100svh - 72px)!important;max-width:none!important;}
+    /* Overlay: true flex column from top to just above bottom nav */
+    .xp-mfp-overlay{bottom:56px!important;overflow:hidden!important;display:flex!important;flex-direction:column!important;padding:0!important;}
+    /* Wrap: fills overlay, zero padding */
+    .xp-mfp-wrap{flex:1!important;min-height:0!important;padding:0!important;display:flex!important;flex-direction:column!important;align-items:stretch!important;justify-content:flex-start!important;}
+    /* Modal box: fills all remaining space, zero border-radius */
+    .xp-mfp-box{flex:1!important;height:auto!important;max-height:none!important;max-width:none!important;width:100%!important;border-radius:0!important;margin:0!important;}
 
-    /* Mobile header: 2-row flex reflow */
-    .xp-mfp-hdr{display:flex!important;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:10px 12px!important;}
-    .xp-mfp-hdr-l{order:1;flex-shrink:0;}
-    .xp-mfp-hdr-c{order:2;flex:1;min-width:0;display:flex!important;align-items:center;gap:6px!important;justify-content:flex-end;}
-    .xp-mfp-hdr-r{order:3;width:100%;display:flex!important;justify-content:flex-end;align-items:center;gap:10px!important;}
-    .xp-mfp-hdr-title{min-width:0!important;font-size:11px!important;}
+    /* Mobile header: flex-wrap — row ordering via CSS order */
+    .xp-mfp-hdr{display:flex!important;flex-wrap:wrap!important;align-items:center;gap:0;padding:10px 14px 8px!important;position:relative;}
 
-    /* Reduce calendar content padding on mobile */
-    .xp-mfp-cal-body{padding:12px 8px!important;}
+    /* ROW 1 (top): ← back(left) | pill(absolute center) | toggle(right) */
+    .xp-mfp-hdr-l{order:1;flex:0 0 auto;align-self:center;}
+    .xp-mfp-hdr-r{order:1;flex:0 0 auto;margin-left:auto;display:flex!important;justify-content:flex-end;align-items:center;gap:0!important;}
+
+    /* Dashboard pill: absolutely centered in the full modal width */
+    .xp-mfp-hdr .xp-mfp-dash-pill{position:absolute!important;left:50%!important;top:10px!important;transform:translateX(-50%)!important;}
+
+    /* ROW 2 (bottom): ‹ Month Year › centered full-width */
+    .xp-mfp-hdr-c{order:2;width:100%;display:flex!important;align-items:center;gap:6px!important;justify-content:center!important;padding-top:6px;}
+
+    .xp-mfp-hdr-title{min-width:0!important;font-size:12px!important;}
+
+    /* Back button: plain arrow on mobile — no capsule, no border, no bg */
+    .xp-mfp-hdr .xp-mfp-back{background:transparent!important;border:none!important;box-shadow:none!important;padding:4px 10px 4px 0!important;font-size:22px!important;line-height:1!important;border-radius:0!important;}
+    .xp-mfp-hdr .xp-mfp-back:hover{background:transparent!important;transform:none!important;box-shadow:none!important;}
+    .xp-back-txt{display:none;}
+
+    /* Calendar content padding */
+    .xp-mfp-cal-body{padding:10px 6px!important;}
+
+    /* Calendar week row vertical spacing — slightly more breathing room */
+    .xp-mfp-cal-grid{row-gap:14px!important;}
+
+    /* Calendar circles slightly larger on mobile */
+    .xp-cal-circle{inset:20%!important;}
   }
 
   .xp-mfp-back{
@@ -361,7 +384,7 @@ function MonthCalendarLarge({
       </div>
 
       {/* Calendar cells */}
-      <div className="grid grid-cols-7 gap-x-2 gap-y-1">
+      <div className="grid grid-cols-7 gap-x-2 gap-y-1 xp-mfp-cal-grid">
         {cells.map((cell, idx) => {
           if (cell.isGhost) return (
             <div key={idx} className="aspect-square flex items-center justify-center" style={{ fontSize: 11, color: isDark ? 'rgba(255,255,255,0.22)' : '#b0bac6' }}>
@@ -405,7 +428,7 @@ function MonthCalendarLarge({
               {rawHyper && (
                 <div className="absolute inset-0 xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none' }}>
                   <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
-                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 46, lineHeight: 1, userSelect: 'none' }}>🔥</span>
+                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 40, lineHeight: 1, userSelect: 'none' }}>🔥</span>
                     <span style={{ position: 'absolute', top: '57%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
                   </div>
                 </div>
@@ -415,8 +438,8 @@ function MonthCalendarLarge({
               {!rawHyper && rawMil && (
                 <div className="absolute inset-0 xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none' }}>
                   <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
-                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 38, color: 'rgba(167,139,250,0.20)', filter: 'drop-shadow(0 0 6px rgba(167,139,250,0.55))', lineHeight: 1, userSelect: 'none', zIndex: 0 }}>★</span>
-                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 42, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🏆</span>
+                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 30, color: 'rgba(167,139,250,0.20)', filter: 'drop-shadow(0 0 6px rgba(167,139,250,0.55))', lineHeight: 1, userSelect: 'none', zIndex: 0 }}>★</span>
+                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 36, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🏆</span>
                     <span style={{ position: 'absolute', top: '42%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
                   </div>
                 </div>
@@ -426,7 +449,7 @@ function MonthCalendarLarge({
               {!rawHyper && !rawMil && rawGoal && (
                 <div className="absolute inset-0 xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none' }}>
                   <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
-                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 48, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🎯</span>
+                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 42, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🎯</span>
                     <span style={{ position: 'absolute', top: '54%', left: '48%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
                   </div>
                 </div>
@@ -434,7 +457,7 @@ function MonthCalendarLarge({
 
               {/* Purple productive circle — kept in DOM, fades in clean mode */}
               {rawProd && !rawHyper && !rawMil && !rawGoal && (
-                <div className="absolute inset-[30%] rounded-full flex items-center justify-center group-hover:scale-105 transition-transform duration-150 xp-cal-fade" style={{
+                <div className="absolute inset-[25%] rounded-full flex items-center justify-center group-hover:scale-105 transition-transform duration-150 xp-cal-fade xp-cal-circle" style={{
                   zIndex: 2, pointerEvents: 'none',
                   background: progressColor,
                   color: progressColor === '#ffffff' ? '#000000' : 'white',
@@ -447,7 +470,7 @@ function MonthCalendarLarge({
               )}
 
               {/* Base circle — always visible; shows plain date (+ today ring if applicable) */}
-              <div className="absolute inset-[30%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-105" style={{
+              <div className="absolute inset-[25%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-105 xp-cal-circle" style={{
                 zIndex: 1,
                 color: todayCell ? 'var(--xp-acc)' : cell.dow === 0 ? '#f97316' : isDark ? 'rgba(255,255,255,0.70)' : '#374151',
                 fontSize: 14,
@@ -1172,7 +1195,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
             >
               {/* Left: Back */}
               <div className="xp-mfp-hdr-l">
-                <button onClick={view === 'dashboard' ? () => { setAnimType('fade'); setView('calendar') } : onClose} className="xp-mfp-back">← Back</button>
+                <button onClick={view === 'dashboard' ? () => { setAnimType('fade'); setView('calendar') } : onClose} className="xp-mfp-back"><span className="xp-back-arrow">←</span><span className="xp-back-txt"> Back</span></button>
               </div>
 
               {/* Center: ‹ Month Year [· Monthly Dashboard] › */}
@@ -1228,6 +1251,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                   </button>
                 )}
               </div>
+
             </div>
 
             {/* ── Scroll body — scrollbar clipped within modal rounded corners ── */}

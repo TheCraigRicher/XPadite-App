@@ -18,10 +18,22 @@ const MFP_STYLES = `
   @keyframes xp-mfp-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
   @keyframes xp-from-right{from{opacity:0;transform:translateX(52px)}to{opacity:1;transform:translateX(0)}}
   @keyframes xp-from-left{from{opacity:0;transform:translateX(-52px)}to{opacity:1;transform:translateX(0)}}
+  /* Desktop: header title fixed min-width */
+  .xp-mfp-hdr-title{min-width:260px;}
   @media(max-width:640px){
     .xp-mfp-overlay{bottom:56px!important;}
     .xp-mfp-wrap{align-items:flex-start!important;padding-top:8px!important;padding-bottom:8px!important;}
-    .xp-mfp-box{max-height:calc(100svh - 72px)!important;}
+    .xp-mfp-box{max-height:calc(100svh - 72px)!important;max-width:none!important;}
+
+    /* Mobile header: 2-row flex reflow */
+    .xp-mfp-hdr{display:flex!important;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:10px 12px!important;}
+    .xp-mfp-hdr-l{order:1;flex-shrink:0;}
+    .xp-mfp-hdr-c{order:2;flex:1;min-width:0;display:flex!important;align-items:center;gap:6px!important;justify-content:flex-end;}
+    .xp-mfp-hdr-r{order:3;width:100%;display:flex!important;justify-content:flex-end;align-items:center;gap:10px!important;}
+    .xp-mfp-hdr-title{min-width:0!important;font-size:11px!important;}
+
+    /* Reduce calendar content padding on mobile */
+    .xp-mfp-cal-body{padding:12px 8px!important;}
   }
 
   .xp-mfp-back{
@@ -1139,8 +1151,8 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
             className="w-full rounded-2xl xp-mfp-box"
             style={{
               maxWidth: 'min(86vw, 1280px)', background: 'var(--xp-card)',
-              border: '0.5px solid rgba(124,58,237,0.30)', overflowX: 'hidden', overflowY: 'auto',
-              maxHeight: '92vh',
+              border: '0.5px solid rgba(124,58,237,0.30)', overflow: 'hidden',
+              maxHeight: '92vh', display: 'flex', flexDirection: 'column',
               boxShadow: `0 24px 64px rgba(0,0,0,0.52), 0 0 80px 20px ${hexToRgba(progressColor, 0.10)}`,
             }}
             onClick={stopProp}
@@ -1151,7 +1163,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
               style={{
                 display: 'grid', gridTemplateColumns: '1fr auto 1fr',
                 gap: 16, padding: '14px 20px',
-                position: 'sticky', top: 0, zIndex: 10,
+                flexShrink: 0, zIndex: 10,
                 background: 'linear-gradient(135deg, #3b0764 0%, #7c3aed 50%, #6d28d9 100%)',
                 borderBottom: '0.5px solid rgba(167,139,250,0.28)',
                 boxShadow: '0 4px 20px rgba(0,0,0,0.30)',
@@ -1159,12 +1171,12 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
               }}
             >
               {/* Left: Back */}
-              <div>
+              <div className="xp-mfp-hdr-l">
                 <button onClick={view === 'dashboard' ? () => { setAnimType('fade'); setView('calendar') } : onClose} className="xp-mfp-back">← Back</button>
               </div>
 
               {/* Center: ‹ Month Year [· Monthly Dashboard] › */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div className="xp-mfp-hdr-c" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button
                   onClick={goPrev}
                   disabled={currentMonth === 0}
@@ -1172,7 +1184,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                   style={navBtnStyle}
                   title="Previous month"
                 ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(-2px)' }}>‹</span></button>
-                <h1 style={{ fontSize: 13, fontWeight: 700, color: 'white', minWidth: 260, textAlign: 'center', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)' }}>
+                <h1 className="xp-mfp-hdr-title" style={{ fontSize: 13, fontWeight: 700, color: 'white', textAlign: 'center', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)' }}>
                   {view === 'dashboard' ? `${MONTHS[currentMonth]} ${APP_YEAR} · Monthly Dashboard` : `${MONTHS[currentMonth]} ${APP_YEAR}`}
                 </h1>
                 <button
@@ -1185,7 +1197,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
               </div>
 
               {/* Right: Calendar toggle + Dashboard pill */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
+              <div className="xp-mfp-hdr-r" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
                 {/* Calendar view toggle — switch only, no label */}
                 {view === 'calendar' && (
                   <button
@@ -1218,12 +1230,15 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
               </div>
             </div>
 
+            {/* ── Scroll body — scrollbar clipped within modal rounded corners ── */}
+            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+
             {/* ── Animated body ──────────────────────────────────────────────── */}
             <div key={`${view}-${currentMonth}`} style={{ animation: `${animName} 270ms ease` }}>
 
               {/* ── CALENDAR VIEW ─────────────────────────────────────────────── */}
               {view === 'calendar' && (
-                <div className="p-6" style={{ background: 'var(--xp-bg)' }}>
+                <div className="p-6 xp-mfp-cal-body" style={{ background: 'var(--xp-bg)' }}>
                   <div style={{ maxWidth: 860, margin: '0 auto' }}>
                     <MonthCalendarLarge
                       month={currentMonth}
@@ -1505,6 +1520,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                 </div>
               )}
             </div>
+            </div>{/* ── /scroll body ── */}
           </div>
         </div>
       </div>

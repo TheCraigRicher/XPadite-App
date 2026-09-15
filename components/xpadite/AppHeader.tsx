@@ -120,7 +120,7 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
       <div
         className="relative rounded-full transition-colors duration-300"
         style={{
-          width: 36,
+          width: 42,
           height: 20,
           background: calendarClean ? 'rgba(255,255,255,0.2)' : '#7c3aed',
           border: '0.5px solid rgba(255,255,255,0.2)',
@@ -128,7 +128,7 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
       >
         <div
           className="absolute top-[2px] w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-300"
-          style={{ transform: calendarClean ? 'translateX(18px)' : 'translateX(2px)' }}
+          style={{ transform: calendarClean ? 'translateX(24px)' : 'translateX(2px)' }}
         />
       </div>
     </button>
@@ -198,7 +198,7 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
               <div
                 className="relative rounded-full transition-colors duration-300"
                 style={{
-                  width: 30,
+                  width: 36,
                   height: 17,
                   background: calendarClean ? 'rgba(255,255,255,0.2)' : '#7c3aed',
                   border: '0.5px solid rgba(255,255,255,0.2)',
@@ -206,7 +206,7 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
               >
                 <div
                   className="absolute top-[2px] w-[13px] h-[13px] rounded-full bg-white shadow-sm transition-transform duration-300"
-                  style={{ transform: calendarClean ? 'translateX(15px)' : 'translateX(2px)' }}
+                  style={{ transform: calendarClean ? 'translateX(21px)' : 'translateX(2px)' }}
                 />
               </div>
             </button>

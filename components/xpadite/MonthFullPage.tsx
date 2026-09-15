@@ -337,7 +337,7 @@ function MonthCalendarLarge({
   return (
     <div className="w-full">
       {/* Day-of-week headers — segmented translucent capsule */}
-      <div className="grid grid-cols-7 mb-3" style={{ borderRadius: 10, overflow: 'hidden', background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)', border: isDark ? '0.5px solid rgba(255,255,255,0.09)' : '0.5px solid rgba(0,0,0,0.08)' }}>
+      <div className="grid grid-cols-7 mb-3" style={{ borderRadius: 10, overflow: 'hidden', background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)', border: isDark ? '0.5px solid rgba(255,255,255,0.09)' : '0.5px solid rgba(0,0,0,0.08)' }}>
         {DAY_HEADERS.map((d, i) => (
           <div key={d} className="text-center py-2" style={{ fontSize: 11, fontWeight: 600, color: i === 0 ? '#f97316' : 'var(--xp-txt3)', letterSpacing: '0.02em', position: 'relative' }}>
             {d}
@@ -415,7 +415,7 @@ function MonthCalendarLarge({
                 <div className="absolute inset-0 xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none' }}>
                   <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
                     <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 48, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🎯</span>
-                    <span style={{ position: 'absolute', top: '54%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
+                    <span style={{ position: 'absolute', top: '54%', left: '48%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
                   </div>
                 </div>
               )}
@@ -1111,7 +1111,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
   const navBtnStyle: React.CSSProperties = {
     width: 34, height: 34, borderRadius: '50%',
     display: 'grid', placeItems: 'center',
-    fontSize: 20, fontWeight: 400, lineHeight: 1, cursor: 'pointer',
+    fontSize: 22, fontWeight: 400, lineHeight: 1, cursor: 'pointer',
     background: 'rgba(255,255,255,0.13)', color: 'white',
     border: '1px solid rgba(255,255,255,0.28)',
     boxShadow: '0 1px 5px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.14)',
@@ -1133,7 +1133,6 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
       <div
         className="fixed inset-0 z-50 overflow-y-auto xp-mfp-overlay"
         style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(15,23,42,0.60)' }}
-        onClick={onClose}
       >
         <div className="min-h-full flex items-center justify-center py-8 px-4 xp-mfp-wrap">
           <div
@@ -1161,7 +1160,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
             >
               {/* Left: Back */}
               <div>
-                <button onClick={onClose} className="xp-mfp-back">← Back</button>
+                <button onClick={view === 'dashboard' ? () => { setAnimType('fade'); setView('calendar') } : onClose} className="xp-mfp-back">← Back</button>
               </div>
 
               {/* Center: ‹ Month Year [· Monthly Dashboard] › */}
@@ -1172,7 +1171,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                   className="xp-mfp-nav"
                   style={navBtnStyle}
                   title="Previous month"
-                ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(1px)' }}>‹</span></button>
+                ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(-2px)' }}>‹</span></button>
                 <h1 style={{ fontSize: 13, fontWeight: 700, color: 'white', minWidth: 260, textAlign: 'center', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)' }}>
                   {view === 'dashboard' ? `${MONTHS[currentMonth]} ${APP_YEAR} · Monthly Dashboard` : `${MONTHS[currentMonth]} ${APP_YEAR}`}
                 </h1>
@@ -1182,11 +1181,11 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                   className="xp-mfp-nav"
                   style={navBtnStyle}
                   title="Next month"
-                ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(1px)' }}>›</span></button>
+                ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(-2px)' }}>›</span></button>
               </div>
 
               {/* Right: Calendar toggle + Dashboard pill */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 16 }}>
                 {/* Calendar view toggle — switch only, no label */}
                 {view === 'calendar' && (
                   <button
@@ -1194,8 +1193,8 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                     aria-label={calendarClean ? 'Switch to Normal Calendar' : 'Switch to Clean Calendar'}
                     style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0 }}
                   >
-                    <div style={{ position: 'relative', width: 36, height: 20, borderRadius: 10, background: calendarClean ? 'rgba(255,255,255,0.22)' : '#7c3aed', border: '0.5px solid rgba(255,255,255,0.25)', flexShrink: 0, transition: 'background 280ms ease', boxShadow: '0 1px 5px rgba(0,0,0,0.25)' }}>
-                      <div style={{ position: 'absolute', top: 3, width: 14, height: 14, borderRadius: '50%', background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.28)', transition: 'transform 280ms ease', transform: calendarClean ? 'translateX(19px)' : 'translateX(3px)' }} />
+                    <div style={{ position: 'relative', width: 42, height: 20, borderRadius: 10, background: calendarClean ? 'rgba(255,255,255,0.22)' : '#7c3aed', border: '0.5px solid rgba(255,255,255,0.25)', flexShrink: 0, transition: 'background 280ms ease', boxShadow: '0 1px 5px rgba(0,0,0,0.25)' }}>
+                      <div style={{ position: 'absolute', top: 3, width: 14, height: 14, borderRadius: '50%', background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.28)', transition: 'transform 280ms ease', transform: calendarClean ? 'translateX(25px)' : 'translateX(3px)' }} />
                     </div>
                   </button>
                 )}

@@ -80,9 +80,15 @@ const MFP_STYLES = `
   }
 
   .xp-mfp-nav:not(:disabled):hover{
-    background:#7c3aed!important;color:#fff!important;
-    border-color:#7c3aed!important;
-    box-shadow:0 2px 10px rgba(124,58,237,0.38)!important;
+    background:rgba(255,255,255,0.26)!important;
+    border-color:rgba(255,255,255,0.50)!important;
+    box-shadow:0 2px 12px rgba(0,0,0,0.30),inset 0 1px 0 rgba(255,255,255,0.22)!important;
+  }
+  .xp-mfp-nav:not(:disabled):active{
+    background:rgba(255,255,255,0.16)!important;
+    border-color:rgba(255,255,255,0.35)!important;
+    transform:scale(0.94)!important;
+    transition-duration:80ms!important;
   }
   .xp-mfp-nav:disabled{opacity:0.2!important;cursor:default!important;}
 
@@ -91,6 +97,27 @@ const MFP_STYLES = `
     border-color:#7c3aed!important;
     box-shadow:0 4px 14px rgba(124,58,237,0.40)!important;
     transform:translateY(-1px);
+  }
+
+  /* Clean-view fade transition for calendar indicators */
+  .xp-cal-fade{transition:opacity 200ms ease;}
+  @media(prefers-reduced-motion:reduce){.xp-cal-fade{transition:none!important;}}
+
+  /* Monthly Dashboard pill micro-interactions */
+  .xp-mfp-dash-pill{transition:background 180ms ease,border-color 180ms ease,box-shadow 180ms ease,transform 180ms ease;}
+  .xp-mfp-dash-pill:hover{
+    background:rgba(255,255,255,0.22)!important;
+    border-color:rgba(255,255,255,0.42)!important;
+    box-shadow:0 2px 12px rgba(0,0,0,0.24),0 0 0 1px rgba(255,255,255,0.14)!important;
+    transform:translateY(-1px);
+  }
+  .xp-mfp-dash-pill:active{
+    transform:translateY(0) scale(0.97)!important;
+    transition-duration:80ms!important;
+  }
+  @media(prefers-reduced-motion:reduce){
+    .xp-mfp-dash-pill{transition:background 180ms ease,border-color 180ms ease!important;}
+    .xp-mfp-dash-pill:hover,.xp-mfp-dash-pill:active{transform:none!important;}
   }
 `
 
@@ -253,7 +280,7 @@ function MonthCalendarLarge({
   calData: Record<string, unknown>
   onDayDoubleClick?: (key: string, month: number, day: number) => void
 }) {
-  const { progressColor: _rawColor, isDark, updateDay, setToast, reminders, calData: appCalData } = useApp()
+  const { progressColor: _rawColor, isDark, updateDay, setToast, reminders, calData: appCalData, calendarClean } = useApp()
   const progressColor = resolveProgressColor(_rawColor, isDark)
   const gapColor = isDark ? '#1a1a28' : '#ffffff'
   const reminderDates = useUpcomingReminderDates(reminders, appCalData)
@@ -309,11 +336,14 @@ function MonthCalendarLarge({
 
   return (
     <div className="w-full">
-      {/* Day-of-week headers */}
-      <div className="grid grid-cols-7 mb-2">
+      {/* Day-of-week headers — segmented translucent capsule */}
+      <div className="grid grid-cols-7 mb-3" style={{ borderRadius: 10, overflow: 'hidden', background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)', border: isDark ? '0.5px solid rgba(255,255,255,0.09)' : '0.5px solid rgba(0,0,0,0.08)' }}>
         {DAY_HEADERS.map((d, i) => (
-          <div key={d} className="text-center font-semibold py-1.5" style={{ fontSize: 10, color: i === 0 ? '#f97316' : 'var(--xp-txt3)' }}>
+          <div key={d} className="text-center py-2" style={{ fontSize: 11, fontWeight: 600, color: i === 0 ? '#f97316' : 'var(--xp-txt3)', letterSpacing: '0.02em', position: 'relative' }}>
             {d}
+            {i < 6 && (
+              <div style={{ position: 'absolute', right: 0, top: '22%', bottom: '22%', width: '0.5px', background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.09)', pointerEvents: 'none' }} />
+            )}
           </div>
         ))}
       </div>
@@ -328,20 +358,25 @@ function MonthCalendarLarge({
           )
 
           const data = cd[cell.key]
-          const productive = !!data?.productive
-          const hyper      = !!data?.hyper
-          const milestone  = !!data?.milestone
-          const goal       = !!data?.goal
-          const streak     = productive || hyper || milestone || goal
-          const todayCell  = isToday(APP_YEAR, month, cell.day)
+          const rawProd  = !!data?.productive
+          const rawHyper = !!data?.hyper
+          const rawMil   = !!data?.milestone
+          const rawGoal  = !!data?.goal
+          const rawStreak = rawProd || rawHyper || rawMil || rawGoal
+
+          // Connectors hidden in clean mode; raw streak for click toast
+          const visStreak = !calendarClean && rawStreak
+          const streak    = rawStreak
+
+          const todayCell     = isToday(APP_YEAR, month, cell.day)
           const reminderCount = reminderDates.get(cell.key) ?? 0
 
           const prevKey = cell.day > 1 ? dateKey(APP_YEAR, month, cell.day - 1) : null
           const nextKey = cell.day < totalDays ? dateKey(APP_YEAR, month, cell.day + 1) : null
-          const connL = streak && cell.dow !== 0 && !!prevKey && (() => { const d = cd[prevKey]; return !!(d?.productive || d?.hyper || d?.milestone || d?.goal) })()
-          const connR = streak && cell.dow !== 6 && !!nextKey && (() => { const d = cd[nextKey]; return !!(d?.productive || d?.hyper || d?.milestone || d?.goal) })()
+          const connL = visStreak && cell.dow !== 0 && !!prevKey && (() => { const d = cd[prevKey]; return !!(d?.productive || d?.hyper || d?.milestone || d?.goal) })()
+          const connR = visStreak && cell.dow !== 6 && !!nextKey && (() => { const d = cd[nextKey]; return !!(d?.productive || d?.hyper || d?.milestone || d?.goal) })()
 
-          const connEdge = hyper || milestone || goal ? '50%' : '70%'
+          const connEdge = (rawHyper || rawMil || rawGoal) && !calendarClean ? '50%' : '70%'
           const connLeft = connL && (
             <div style={{ position: 'absolute', left: 0, right: connEdge, top: '50%', height: 2.5, background: progressColor, boxShadow: connGlow, transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
           )
@@ -349,62 +384,63 @@ function MonthCalendarLarge({
             <div style={{ position: 'absolute', left: connEdge, right: -8, top: '50%', height: 2.5, background: progressColor, boxShadow: connGlow, transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
           )
 
-          // ── Hyper Productive (🔥) ────────────────────────────────────────────
-          if (hyper) return (
-            <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)} title="Hyper Productive">
-              {connLeft}{connRight}
-              <ReminderRing count={reminderCount} />
-              <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
-                <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 46, lineHeight: 1, userSelect: 'none' }}>🔥</span>
-                <span style={{ position: 'absolute', top: '65%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 2, pointerEvents: 'none' }}>{cell.day}</span>
-              </div>
-            </div>
-          )
-
-          // ── Milestone (🏆) ───────────────────────────────────────────────────
-          if (milestone) return (
-            <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)} title="Milestone">
-              {connLeft}{connRight}
-              <ReminderRing count={reminderCount} />
-              <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
-                <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 38, color: 'rgba(167,139,250,0.20)', filter: 'drop-shadow(0 0 6px rgba(167,139,250,0.55))', lineHeight: 1, userSelect: 'none', zIndex: 0 }}>★</span>
-                <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 42, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🏆</span>
-                <span style={{ position: 'absolute', top: '37%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 2, pointerEvents: 'none' }}>{cell.day}</span>
-              </div>
-            </div>
-          )
-
-          // ── Goal Achieved (🎯) ───────────────────────────────────────────────
-          if (goal) return (
-            <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)} title="Goal Achieved">
-              {connLeft}{connRight}
-              <ReminderRing count={reminderCount} />
-              <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
-                <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 48, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🎯</span>
-                <span style={{ position: 'absolute', top: '52%', left: '46%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 2, pointerEvents: 'none' }}>{cell.day}</span>
-              </div>
-            </div>
-          )
-
-          // ── Productive / Today / Default ─────────────────────────────────────
-          let circleStyle: React.CSSProperties = {
-            color: cell.dow === 0 ? '#f97316' : isDark ? 'rgba(255,255,255,0.70)' : '#374151',
-            fontSize: 14,
-          }
-          if (productive) circleStyle = {
-            background: progressColor, color: progressColor === '#ffffff' ? '#000000' : 'white', fontWeight: 700, fontSize: 14,
-            boxShadow: `0 0 0 2.5px ${gapColor}, 0 0 0 5.5px ${hexToRgba(progressColor, 0.7)}`,
-          }
-          else if (todayCell) circleStyle = {
-            color: 'var(--xp-acc)', background: 'rgba(124,58,237,0.08)',
-            outline: '2px solid var(--xp-acc)', outlineOffset: '-1px', fontSize: 14,
-          }
-
           return (
             <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)}>
               {connLeft}{connRight}
               <ReminderRing count={reminderCount} />
-              <div className="absolute inset-[30%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-105" style={{ zIndex: 1, ...circleStyle }}>
+
+              {/* 🔥 Hyper — kept in DOM, fades via xp-cal-fade + opacity */}
+              {rawHyper && (
+                <div className="absolute inset-0 xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none' }}>
+                  <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
+                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 46, lineHeight: 1, userSelect: 'none' }}>🔥</span>
+                    <span style={{ position: 'absolute', top: '57%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* 🏆 Milestone — kept in DOM, fades */}
+              {!rawHyper && rawMil && (
+                <div className="absolute inset-0 xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none' }}>
+                  <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
+                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 38, color: 'rgba(167,139,250,0.20)', filter: 'drop-shadow(0 0 6px rgba(167,139,250,0.55))', lineHeight: 1, userSelect: 'none', zIndex: 0 }}>★</span>
+                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 42, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🏆</span>
+                    <span style={{ position: 'absolute', top: '42%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* 🎯 Goal — kept in DOM, fades */}
+              {!rawHyper && !rawMil && rawGoal && (
+                <div className="absolute inset-0 xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none' }}>
+                  <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
+                    <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 48, lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🎯</span>
+                    <span style={{ position: 'absolute', top: '54%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Purple productive circle — kept in DOM, fades in clean mode */}
+              {rawProd && !rawHyper && !rawMil && !rawGoal && (
+                <div className="absolute inset-[30%] rounded-full flex items-center justify-center group-hover:scale-105 transition-transform duration-150 xp-cal-fade" style={{
+                  zIndex: 2, pointerEvents: 'none',
+                  background: progressColor,
+                  color: progressColor === '#ffffff' ? '#000000' : 'white',
+                  fontWeight: 700, fontSize: 14,
+                  boxShadow: `0 0 0 2.5px ${gapColor}, 0 0 0 5.5px ${hexToRgba(progressColor, 0.7)}`,
+                  opacity: calendarClean ? 0 : 1,
+                }}>
+                  {cell.day}
+                </div>
+              )}
+
+              {/* Base circle — always visible; shows plain date (+ today ring if applicable) */}
+              <div className="absolute inset-[30%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-105" style={{
+                zIndex: 1,
+                color: todayCell ? 'var(--xp-acc)' : cell.dow === 0 ? '#f97316' : isDark ? 'rgba(255,255,255,0.70)' : '#374151',
+                fontSize: 14,
+                ...(todayCell ? { background: 'rgba(124,58,237,0.08)', outline: '2px solid var(--xp-acc)', outlineOffset: '-1px' } : {}),
+              }}>
                 {cell.day}
               </div>
             </div>
@@ -804,7 +840,7 @@ interface MonthFullPageProps {
 }
 
 export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPageProps) {
-  const { calData, sessions, activities, isDark, progressColor: _rawColor2, setToast } = useApp()
+  const { calData, sessions, activities, isDark, progressColor: _rawColor2, setToast, calendarClean, setCalendarClean } = useApp()
   const progressColor = resolveProgressColor(_rawColor2, isDark)
   const [view, setView]               = useState<'calendar' | 'dashboard'>('calendar')
   const [currentMonth, setCurrentMonth] = useState(month)
@@ -1074,11 +1110,11 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
 
   const navBtnStyle: React.CSSProperties = {
     width: 34, height: 34, borderRadius: '50%',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: 22, fontWeight: 300, lineHeight: 1, cursor: 'pointer',
-    background: 'rgba(255,255,255,0.12)', color: 'white',
-    border: '1px solid rgba(255,255,255,0.22)',
-    boxShadow: '0 1px 5px rgba(0,0,0,0.18)',
+    display: 'grid', placeItems: 'center',
+    fontSize: 20, fontWeight: 400, lineHeight: 1, cursor: 'pointer',
+    background: 'rgba(255,255,255,0.13)', color: 'white',
+    border: '1px solid rgba(255,255,255,0.28)',
+    boxShadow: '0 1px 5px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.14)',
     transition: 'all 180ms ease', flexShrink: 0,
   }
 
@@ -1129,14 +1165,14 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
               </div>
 
               {/* Center: ‹ Month Year [· Monthly Dashboard] › */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button
                   onClick={goPrev}
                   disabled={currentMonth === 0}
                   className="xp-mfp-nav"
                   style={navBtnStyle}
                   title="Previous month"
-                >‹</button>
+                ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(1px)' }}>‹</span></button>
                 <h1 style={{ fontSize: 13, fontWeight: 700, color: 'white', minWidth: 260, textAlign: 'center', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)' }}>
                   {view === 'dashboard' ? `${MONTHS[currentMonth]} ${APP_YEAR} · Monthly Dashboard` : `${MONTHS[currentMonth]} ${APP_YEAR}`}
                 </h1>
@@ -1146,14 +1182,28 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                   className="xp-mfp-nav"
                   style={navBtnStyle}
                   title="Next month"
-                >›</button>
+                ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(1px)' }}>›</span></button>
               </div>
 
-              {/* Right: Dashboard toggle — calendar view only */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              {/* Right: Calendar toggle + Dashboard pill */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
+                {/* Calendar view toggle — switch only, no label */}
+                {view === 'calendar' && (
+                  <button
+                    onClick={() => setCalendarClean(!calendarClean)}
+                    aria-label={calendarClean ? 'Switch to Normal Calendar' : 'Switch to Clean Calendar'}
+                    style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', flexShrink: 0 }}
+                  >
+                    <div style={{ position: 'relative', width: 36, height: 20, borderRadius: 10, background: calendarClean ? 'rgba(255,255,255,0.22)' : '#7c3aed', border: '0.5px solid rgba(255,255,255,0.25)', flexShrink: 0, transition: 'background 280ms ease', boxShadow: '0 1px 5px rgba(0,0,0,0.25)' }}>
+                      <div style={{ position: 'absolute', top: 3, width: 14, height: 14, borderRadius: '50%', background: 'white', boxShadow: '0 1px 4px rgba(0,0,0,0.28)', transition: 'transform 280ms ease', transform: calendarClean ? 'translateX(19px)' : 'translateX(3px)' }} />
+                    </div>
+                  </button>
+                )}
+                {/* Monthly Dashboard pill */}
                 {view === 'calendar' && (
                   <button
                     onClick={toggleView}
+                    className="xp-mfp-dash-pill"
                     style={{
                       display: 'flex', alignItems: 'center', gap: 5,
                       padding: '5px 14px', borderRadius: 20, fontSize: 11, fontWeight: 600,

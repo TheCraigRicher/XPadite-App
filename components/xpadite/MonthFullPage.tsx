@@ -644,38 +644,152 @@ function WeeklyFocusChart({ month, sessions, isDark }: {
   sessions: { dateKey: string; startTs: number; endTs: number | null }[]
   isDark: boolean
 }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const animRafRef   = useRef<number>(0)
+  const animDoneRef  = useRef(false)
+  const [animProgress, setAnimProgress] = useState(0)
+
   const weeks = useMemo(() => {
     const td = new Date(APP_YEAR, month + 1, 0).getDate()
-    const result: { label: string; days: string; ms: number }[] = []
+    const now = new Date()
+    const isCurrentMonth = now.getMonth() === month && now.getFullYear() === APP_YEAR
+    const todayDate = now.getDate()
+    const result: { label: string; days: string; ms: number; isCurrentWeek: boolean; isFutureWeek: boolean }[] = []
     let wk = 1
     for (let start = 1; start <= td; start += 7) {
       const end = Math.min(start + 6, td)
       const keys = new Set<string>()
       for (let d = start; d <= end; d++) keys.add(dateKey(APP_YEAR, month, d))
       const ms = sessions.filter(s => s.endTs !== null && keys.has(s.dateKey)).reduce((sum, s) => sum + (s.endTs! - s.startTs), 0)
-      result.push({ label: `Week ${wk++}`, days: start === end ? `${start}` : `${start}–${end}`, ms })
+      const isCurrentWeek = isCurrentMonth && todayDate >= start && todayDate <= end
+      const isFutureWeek  = isCurrentMonth && todayDate < start
+      result.push({ label: `Week ${wk++}`, days: start === end ? `${start}` : `${start}–${end}`, ms, isCurrentWeek, isFutureWeek })
     }
     return result
   }, [month, sessions])
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const obs = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting || animDoneRef.current) return
+      animDoneRef.current = true
+      obs.disconnect()
+      const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      if (prefersReduced) { setAnimProgress(1); return }
+      const DURATION = 700
+      const start = performance.now()
+      function tick(now: number) {
+        const t = Math.min((now - start) / DURATION, 1)
+        setAnimProgress(t)
+        if (t < 1) animRafRef.current = requestAnimationFrame(tick)
+      }
+      animRafRef.current = requestAnimationFrame(tick)
+    }, { threshold: 0.25 })
+    obs.observe(el)
+    return () => { obs.disconnect(); cancelAnimationFrame(animRafRef.current) }
+  }, [])
+
+  function getBarFrac(i: number): number {
+    const STAGGER = 0.09
+    const barStart = i * STAGGER
+    const t = Math.max(0, Math.min((animProgress - barStart) / (1 - barStart), 1))
+    return 1 - Math.pow(1 - t, 3)
+  }
+
   const maxMs = Math.max(...weeks.map(w => w.ms), 1)
   const COLORS = ['#7c3aed', '#6366f1', '#0ea5e9', '#14b8a6', '#f97316']
+  const W = 480, H = 180
+  const PAD = { top: 28, bottom: 44, left: 10, right: 10 }
+  const cW = W - PAD.left - PAD.right
+  const cH = H - PAD.top - PAD.bottom
+  const slotW = cW / weeks.length
+  const barW = Math.min(Math.max(slotW * 0.46, 28), 54)
+
   return (
-    <div className="flex items-end gap-3" style={{ height: 160, paddingTop: 4 }}>
-      {weeks.map((w, i) => {
-        const pct = (w.ms / maxMs) * 100
-        return (
-          <div key={w.label} className="flex flex-col items-center flex-1 gap-1">
-            <span style={{ fontSize: 9, fontWeight: 700, color: w.ms > 0 ? COLORS[i % COLORS.length] : 'transparent', whiteSpace: 'nowrap', minHeight: 14, display: 'flex', alignItems: 'center' }}>
-              {w.ms > 0 ? formatMs(w.ms) : '—'}
-            </span>
-            <div className="w-full flex-1 flex items-end">
-              <div className="w-full rounded-t-md" style={{ height: `${Math.max(pct, w.ms > 0 ? 4 : 0)}%`, background: COLORS[i % COLORS.length], opacity: w.ms > 0 ? 1 : 0.12, minHeight: w.ms > 0 ? 4 : 0, transition: 'height 600ms ease' }} />
-            </div>
-            <span style={{ fontSize: 9, color: isDark ? 'rgba(203,213,225,0.65)' : 'var(--xp-txt2)' }}>{w.label}</span>
-            <span style={{ fontSize: 7.5, color: isDark ? 'rgba(148,163,184,0.40)' : 'var(--xp-txt3)' }}>{w.days}</span>
-          </div>
-        )
-      })}
+    <div ref={containerRef} style={{ flex: 1 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+        <defs>
+          {weeks.map((w, i) => (
+            <linearGradient key={i} id={`wfc${month}_${i}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%"   stopColor={COLORS[i % COLORS.length]} stopOpacity={0.92} />
+              <stop offset="100%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0.55} />
+            </linearGradient>
+          ))}
+        </defs>
+
+        {/* Baseline */}
+        <line x1={PAD.left} x2={W - PAD.right} y1={PAD.top + cH} y2={PAD.top + cH}
+          stroke={isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'} strokeWidth={1} />
+
+        {weeks.map((w, i) => {
+          const frac   = getBarFrac(i)
+          const fullH  = maxMs > 0 ? (w.ms / maxMs) * cH : 0
+          const barH   = fullH * frac
+          const cx     = PAD.left + i * slotW + slotW / 2
+          const x      = cx - barW / 2
+          const y      = PAD.top + cH - barH
+          const baseY  = PAD.top + cH
+          const color  = COLORS[i % COLORS.length]
+
+          return (
+            <g key={w.label}>
+              {/* Ghost placeholder for future/empty weeks */}
+              {(w.isFutureWeek || (w.ms === 0 && !w.isCurrentWeek)) && (
+                <rect x={x} y={PAD.top} width={barW} height={cH} rx={5}
+                  fill={isDark ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.025)'}
+                  stroke={isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'} strokeWidth={0.75} strokeDasharray="3 3"
+                />
+              )}
+
+              {/* Ghost height placeholder for current week with 0 ms */}
+              {w.isCurrentWeek && w.ms === 0 && (
+                <rect x={x} y={PAD.top} width={barW} height={cH} rx={5}
+                  fill={isDark ? 'rgba(124,58,237,0.06)' : 'rgba(124,58,237,0.04)'}
+                  stroke={isDark ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.12)'} strokeWidth={0.75} strokeDasharray="3 3"
+                />
+              )}
+
+              {/* Main bar */}
+              {w.ms > 0 && barH > 0 && (
+                <rect x={x} y={y} width={barW} height={Math.max(barH, 3)} rx={5}
+                  fill={`url(#wfc${month}_${i})`}
+                  style={{ filter: w.isCurrentWeek ? `drop-shadow(0 0 8px ${color}66)` : 'none' }}
+                />
+              )}
+
+              {/* WIP label — current week */}
+              {w.isCurrentWeek && (
+                w.ms > 0 && barH > 22
+                  ? <text x={cx} y={y + barH / 2 + 4} textAnchor="middle" fontSize={8.5} fontWeight="800"
+                      fill="rgba(255,255,255,0.88)" letterSpacing="0.10em">WIP</text>
+                  : <text x={cx} y={PAD.top + cH / 2 + 4} textAnchor="middle" fontSize={8.5} fontWeight="800"
+                      fill={color} letterSpacing="0.10em" opacity={0.65}>WIP</text>
+              )}
+
+              {/* Focus time label above bar */}
+              {w.ms > 0 && !w.isFutureWeek && barH > 0 && (
+                <text x={cx} y={y - 6} textAnchor="middle" fontSize={8.5} fontWeight="700" fill={color}>
+                  {formatMs(w.ms)}
+                </text>
+              )}
+
+              {/* Week label */}
+              <text x={cx} y={baseY + 15} textAnchor="middle" fontSize={9}
+                fontWeight={w.isCurrentWeek ? 700 : 500}
+                fill={w.isCurrentWeek ? color : isDark ? 'rgba(203,213,225,0.65)' : 'var(--xp-txt2)'}>
+                {w.label}
+              </text>
+
+              {/* Day range */}
+              <text x={cx} y={baseY + 28} textAnchor="middle" fontSize={7.5}
+                fill={isDark ? 'rgba(148,163,184,0.40)' : 'rgba(100,116,139,0.55)'}>
+                {w.days}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
     </div>
   )
 }
@@ -695,6 +809,33 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
   const [view, setView]               = useState<'calendar' | 'dashboard'>('calendar')
   const [currentMonth, setCurrentMonth] = useState(month)
   const [animType, setAnimType]        = useState<'fade' | 'right' | 'left'>('fade')
+
+  // Monthly Achievement fill-bar animation
+  const achRef         = useRef<HTMLDivElement>(null)
+  const achRafRef      = useRef<number>(0)
+  const achAnimDoneRef = useRef(false)
+  const [achFrac, setAchFrac] = useState(0)
+  useEffect(() => {
+    const el = achRef.current
+    if (!el) return
+    const obs = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting || achAnimDoneRef.current) return
+      achAnimDoneRef.current = true
+      obs.disconnect()
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setAchFrac(1); return }
+      const DURATION = 600
+      const start = performance.now()
+      function tick(now: number) {
+        const t = Math.min((now - start) / DURATION, 1)
+        const eased = 1 - Math.pow(1 - t, 3)
+        setAchFrac(eased)
+        if (t < 1) achRafRef.current = requestAnimationFrame(tick)
+      }
+      achRafRef.current = requestAnimationFrame(tick)
+    }, { threshold: 0.3 })
+    obs.observe(el)
+    return () => { obs.disconnect(); cancelAnimationFrame(achRafRef.current) }
+  }, [])
 
   // Share panel state
   const [panelOpen, setPanelOpen]         = useState(false)
@@ -923,12 +1064,12 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
   const card2: React.CSSProperties = { background: S2, border: `0.5px solid ${BDR}`, boxShadow: isDark ? '0 2px 18px rgba(0,0,0,0.38)' : '0 1px 6px rgba(0,0,0,0.05)' }
 
   const mKpis = [
-    { label: 'Productive Days', value: `${stats.productiveDays}/${stats.totalDays}`, sub: stats.totalDays > 0 ? `${Math.round((stats.productiveDays / stats.totalDays) * 100)}% rate` : null, icon: '✅', bg: isDark ? 'linear-gradient(135deg, #047857 0%, #15803D 52%, #4D7C0F 100%)' : 'linear-gradient(135deg, #059669 0%, #22C55E 52%, #84CC16 100%)', border: isDark ? 'rgba(21,128,61,0.46)' : 'rgba(34,197,94,0.44)' },
-    { label: 'Total Focus', value: formatMs(totalMs), sub: null, icon: '⏱', bg: isDark ? 'linear-gradient(135deg, #5B21B6 0%, #7E22CE 50%, #A21CAF 100%)' : 'linear-gradient(135deg, #7C3AED 0%, #A855F7 50%, #D946EF 100%)', border: isDark ? 'rgba(162,28,175,0.46)' : 'rgba(126,34,206,0.45)' },
-    { label: 'Hyper Days', value: String(stats.hyperDays), sub: stats.hyperDays > 0 ? '🔥 On fire' : null, icon: '🔥', bg: isDark ? 'linear-gradient(135deg, #92400E 0%, #B45309 50%, #D97706 100%)' : 'linear-gradient(135deg, #F59E0B 0%, #F97316 50%, #EF4444 100%)', border: isDark ? 'rgba(217,119,6,0.46)' : 'rgba(249,115,22,0.46)' },
-    { label: 'Tasks Done', value: `${monthTaskStats.completedTasks}/${monthTaskStats.totalTasks}`, sub: monthTaskStats.totalTasks > 0 ? `${Math.round((monthTaskStats.completedTasks / monthTaskStats.totalTasks) * 100)}% complete` : null, icon: '✓', bg: isDark ? 'linear-gradient(135deg, #1D4ED8 0%, #0369A1 52%, #0891B2 100%)' : 'linear-gradient(135deg, #2563EB 0%, #0EA5E9 52%, #22D3EE 100%)', border: isDark ? 'rgba(8,145,178,0.46)' : 'rgba(14,165,233,0.45)' },
-    { label: 'Avg Focus/Day', value: stats.productiveDays > 0 ? formatMs(Math.round(totalMs / stats.productiveDays)) : '—', sub: null, icon: '📈', bg: isDark ? 'linear-gradient(135deg, #0E7490 0%, #0F766E 54%, #0D9488 100%)' : 'linear-gradient(135deg, #06B6D4 0%, #14B8A6 54%, #2DD4BF 100%)', border: isDark ? 'rgba(13,148,136,0.46)' : 'rgba(20,184,166,0.44)' },
-    { label: 'Best Streak', value: `${longestStreak}d`, sub: currentStreak > 0 ? `${currentStreak}d current` : null, icon: '🔗', bg: isDark ? 'linear-gradient(135deg, #9D174D 0%, #BE185D 48%, #86198F 100%)' : 'linear-gradient(135deg, #DB2777 0%, #EC4899 48%, #C026D3 100%)', border: isDark ? 'rgba(190,24,93,0.46)' : 'rgba(219,39,119,0.46)' },
+    { label: 'Productive Days', value: `${stats.productiveDays}/${stats.totalDays}`, sub: stats.totalDays > 0 ? `${Math.round((stats.productiveDays / stats.totalDays) * 100)}% rate` : null, icon: '✅', bg: isDark ? 'linear-gradient(135deg, #047857 0%, #15803D 52%, #4D7C0F 100%)' : 'linear-gradient(135deg, #059669 0%, #22C55E 52%, #84CC16 100%)', border: isDark ? 'rgba(21,128,61,0.46)' : 'rgba(34,197,94,0.44)', glowRgb: '34,197,94' },
+    { label: 'Total Focus', value: formatMs(totalMs), sub: null, icon: '⏱', bg: isDark ? 'linear-gradient(135deg, #5B21B6 0%, #7E22CE 50%, #A21CAF 100%)' : 'linear-gradient(135deg, #7C3AED 0%, #A855F7 50%, #D946EF 100%)', border: isDark ? 'rgba(162,28,175,0.46)' : 'rgba(126,34,206,0.45)', glowRgb: '167,139,250' },
+    { label: 'Hyper Days', value: String(stats.hyperDays), sub: stats.hyperDays > 0 ? '🔥 On fire' : null, icon: '🔥', bg: isDark ? 'linear-gradient(135deg, #92400E 0%, #B45309 50%, #D97706 100%)' : 'linear-gradient(135deg, #F59E0B 0%, #F97316 50%, #EF4444 100%)', border: isDark ? 'rgba(217,119,6,0.46)' : 'rgba(249,115,22,0.46)', glowRgb: '249,115,22' },
+    { label: 'Tasks Done', value: `${monthTaskStats.completedTasks}/${monthTaskStats.totalTasks}`, sub: monthTaskStats.totalTasks > 0 ? `${Math.round((monthTaskStats.completedTasks / monthTaskStats.totalTasks) * 100)}% complete` : null, icon: '✓', bg: isDark ? 'linear-gradient(135deg, #1D4ED8 0%, #0369A1 52%, #0891B2 100%)' : 'linear-gradient(135deg, #2563EB 0%, #0EA5E9 52%, #22D3EE 100%)', border: isDark ? 'rgba(8,145,178,0.46)' : 'rgba(14,165,233,0.45)', glowRgb: '14,165,233' },
+    { label: 'Avg Focus/Day', value: stats.productiveDays > 0 ? formatMs(Math.round(totalMs / stats.productiveDays)) : '—', sub: null, icon: '📈', bg: isDark ? 'linear-gradient(135deg, #0E7490 0%, #0F766E 54%, #0D9488 100%)' : 'linear-gradient(135deg, #06B6D4 0%, #14B8A6 54%, #2DD4BF 100%)', border: isDark ? 'rgba(13,148,136,0.46)' : 'rgba(20,184,166,0.44)', glowRgb: '20,184,166' },
+    { label: 'Best Streak', value: `${longestStreak}d`, sub: currentStreak > 0 ? `${currentStreak}d current` : null, icon: '🔗', bg: isDark ? 'linear-gradient(135deg, #9D174D 0%, #BE185D 48%, #86198F 100%)' : 'linear-gradient(135deg, #DB2777 0%, #EC4899 48%, #C026D3 100%)', border: isDark ? 'rgba(190,24,93,0.46)' : 'rgba(219,39,119,0.46)', glowRgb: '219,39,119' },
   ]
 
   const navBtnStyle: React.CSSProperties = {
@@ -1072,8 +1213,8 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         {mKpis.map(m => (
-                          <div key={m.label} className="rounded-2xl flex flex-col relative overflow-hidden p-2.5"
-                            style={{ background: m.bg, border: `0.5px solid ${m.border}`, minHeight: 80 }}>
+                          <div key={m.label} className="rounded-2xl flex flex-col relative overflow-hidden p-2.5 xp-kpi-card"
+                            style={{ '--kpi-glow-rgb': m.glowRgb, background: m.bg, border: `0.5px solid ${m.border}`, minHeight: 80 } as React.CSSProperties}>
                             <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none', background: 'linear-gradient(165deg,rgba(255,255,255,0.22) 0%,rgba(255,255,255,0.06) 38%,rgba(255,255,255,0) 100%)' }} />
                             <div style={{ width: 20, height: 20, borderRadius: 5, marginBottom: 5, background: 'rgba(255,255,255,0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}>{m.icon}</div>
                             <p className="text-base sm:text-lg font-bold leading-none tabular-nums mb-1" style={{ color: '#FFFFFF' }}>{m.value}</p>
@@ -1084,8 +1225,8 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                       </div>
 
                       {/* Monthly Summary compact panel */}
-                      <div className="rounded-2xl p-3" style={card2}>
-                        <p className="text-[10px] font-semibold mb-2" style={{ color: isDark ? 'rgba(255,255,255,0.70)' : 'var(--xp-txt2)', letterSpacing: '0.03em' }}>Monthly Summary</p>
+                      <div className="rounded-2xl p-3" style={{ background: isDark ? 'linear-gradient(135deg,rgba(76,29,149,0.55) 0%,rgba(109,40,217,0.32) 50%,rgba(167,139,250,0.18) 100%)' : 'linear-gradient(135deg,rgba(237,233,254,0.95) 0%,rgba(221,214,254,0.80) 50%,rgba(196,181,253,0.55) 100%)', border: `0.5px solid ${isDark ? 'rgba(167,139,250,0.22)' : 'rgba(139,92,246,0.22)'}`, boxShadow: isDark ? '0 2px 18px rgba(109,40,217,0.18)' : '0 1px 6px rgba(109,40,217,0.08)' }}>
+                        <p className="text-[10px] font-semibold mb-2" style={{ color: isDark ? 'rgba(221,214,254,0.80)' : 'rgba(109,40,217,0.80)', letterSpacing: '0.03em' }}>Monthly Summary</p>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 0', rowGap: 4 }}>
                           {([
                             { label: `${stats.productiveDays} Productive Days`, col: '#22c55e' },
@@ -1110,21 +1251,24 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                     </div>
 
                     {/* RIGHT: Monthly Achievement summary */}
-                    <div className="rounded-2xl p-3 flex flex-col" style={card1}>
+                    <div ref={achRef} className="rounded-2xl p-3 flex flex-col" style={card1}>
                       <p className="text-[11px] font-bold mb-3" style={{ color: isDark ? '#a78bfa' : '#7c3aed' }}>Monthly Achievement</p>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
                         {([
-                          { emoji: '📅', label: 'Days in Month', value: String(stats.totalDays) },
-                          { emoji: '⭐', label: 'Productive', value: String(stats.productiveDays) },
-                          { emoji: '🔥', label: 'Current Streak', value: `${currentStreak}d` },
-                          { emoji: '⚡', label: 'Best Streak', value: `${longestStreak}d` },
-                          { emoji: '📊', label: 'Performance', value: `${monthScore}%` },
-                          { emoji: '🎯', label: 'Goals', value: String(stats.goalDays) },
-                          { emoji: '🏆', label: 'Milestones', value: String(stats.milestoneDays) },
-                        ] as { emoji: string; label: string; value: string }[]).map(item => (
-                          <div key={item.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 8px', borderRadius: 8, background: isDark ? 'rgba(124,58,237,0.07)' : 'rgba(124,58,237,0.04)', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.10)'}` }}>
-                            <span style={{ fontSize: 10, color: isDark ? 'rgba(203,213,225,0.65)' : 'var(--xp-txt3)' }}>{item.emoji} {item.label}</span>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: isDark ? 'rgba(255,255,255,0.90)' : 'var(--xp-txt)' }}>{item.value}</span>
+                          { emoji: '📅', label: 'Days in Month', value: String(stats.totalDays),      fill: null },
+                          { emoji: '⭐', label: 'Productive',     value: String(stats.productiveDays), fill: stats.totalDays > 0 ? stats.productiveDays / stats.totalDays : 0 },
+                          { emoji: '🔥', label: 'Current Streak', value: `${currentStreak}d`,          fill: longestStreak > 0 ? currentStreak / longestStreak : 0 },
+                          { emoji: '⚡', label: 'Best Streak',    value: `${longestStreak}d`,          fill: stats.totalDays > 0 ? longestStreak / stats.totalDays : 0 },
+                          { emoji: '📊', label: 'Performance',    value: `${monthScore}%`,             fill: monthScore / 100 },
+                          { emoji: '🎯', label: 'Goals',          value: String(stats.goalDays),       fill: stats.goalDays > 0 ? Math.min(stats.goalDays / Math.max(stats.totalDays, 1), 1) : null },
+                          { emoji: '🏆', label: 'Milestones',     value: String(stats.milestoneDays),  fill: stats.milestoneDays > 0 ? Math.min(stats.milestoneDays / Math.max(stats.totalDays, 1), 1) : null },
+                        ] as { emoji: string; label: string; value: string; fill: number | null }[]).map(item => (
+                          <div key={item.label} style={{ position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 8px', borderRadius: 8, background: isDark ? 'rgba(124,58,237,0.07)' : 'rgba(124,58,237,0.04)', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.10)'}` }}>
+                            {item.fill !== null && item.fill > 0 && (
+                              <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${item.fill * achFrac * 100}%`, background: isDark ? 'linear-gradient(90deg,rgba(124,58,237,0.22) 0%,rgba(167,139,250,0.10) 100%)' : 'linear-gradient(90deg,rgba(124,58,237,0.10) 0%,rgba(167,139,250,0.05) 100%)', borderRadius: 8, pointerEvents: 'none' }} />
+                            )}
+                            <span style={{ position: 'relative', fontSize: 10, color: isDark ? 'rgba(203,213,225,0.65)' : 'var(--xp-txt3)' }}>{item.emoji} {item.label}</span>
+                            <span style={{ position: 'relative', fontSize: 11, fontWeight: 700, color: isDark ? 'rgba(255,255,255,0.90)' : 'var(--xp-txt)' }}>{item.value}</span>
                           </div>
                         ))}
                       </div>

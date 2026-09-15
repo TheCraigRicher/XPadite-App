@@ -911,7 +911,7 @@ function ThemedApp(_props: XpaditeAppProps) {
           month={modalDay.month}
           day={modalDay.day}
           onClose={() => setModalDay(null)}
-          onDashboard={() => { setDashboardDay(modalDay); setModalDay(null) }}
+          onDashboard={() => setDashboardDay(modalDay)}
         />
       )}
 
@@ -921,7 +921,7 @@ function ThemedApp(_props: XpaditeAppProps) {
           month={dashboardDay.month}
           day={dashboardDay.day}
           onClose={() => setDashboardDay(null)}
-          onBack={() => { setModalDay(dashboardDay); setDashboardDay(null) }}
+          onBack={() => setDashboardDay(null)}
         />
       )}
 

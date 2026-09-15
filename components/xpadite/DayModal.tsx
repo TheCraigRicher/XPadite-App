@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useApp, EMPTY_DAY } from './AppContext'
-import type { Task, TaskSession, Activity, TaskAttachment } from './types'
+import type { Task, TaskSession, Activity, TaskAttachment, DayData } from './types'
 import { formatMs, formatHMS, formatTime, APP_YEAR } from './utils'
 import { ReminderModal } from './ReminderModal'
 import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
@@ -831,9 +831,12 @@ function TodayStatusDropdown({ value, onChange, isDark }: { value: StatusValue |
           onClick={() => { setOpen(o => !o); setFocusedIdx(-1) }}
           aria-haspopup="listbox"
           aria-expanded={open}
+          className="w-40 sm:w-auto"
           style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 20, fontSize: 11, fontWeight: 500, border: `1px solid ${value ? 'rgba(124,58,237,0.35)' : 'var(--xp-bdr2)'}`, background: value ? 'rgba(124,58,237,0.07)' : isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', color: value ? '#7c3aed' : 'var(--xp-txt3)', cursor: 'pointer', whiteSpace: 'nowrap', outline: 'none' }}
         >
-          {value === null ? '🤷‍♂️ None' : `${selected!.icon} ${selected!.label}`}
+          {/* Mobile shows CTA placeholder; desktop shows existing None label */}
+          <span className="sm:hidden">{value === null ? '👋 Today\'s Status' : `${selected!.icon} ${selected!.label}`}</span>
+          <span className="hidden sm:inline">{value === null ? '🤷‍♂️ None' : `${selected!.icon} ${selected!.label}`}</span>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 12, height: 12, flexShrink: 0, transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 200ms ease' }}>
             <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -1174,9 +1177,18 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
     return workMs + taskMs + activeMs
   }, [sessions, dayData.tasks, activeSession, isSessionHere, dateKey, now])
 
-  // Snapshot calData on open — baseline for unsaved-changes detection
+  // On open: pre-populate 2 blank tasks for empty days, then snapshot for dirty-change detection
   useEffect(() => {
-    openSnapshotRef.current = JSON.parse(JSON.stringify(calData[dateKey] ?? EMPTY_DAY))
+    const base: DayData = JSON.parse(JSON.stringify(calData[dateKey] ?? EMPTY_DAY))
+    if (base.tasks.length < 2) {
+      const needed = 2 - base.tasks.length
+      const newTasks = Array.from({ length: needed }, () => makeTask(''))
+      const seeded: DayData = { ...base, tasks: [...base.tasks, ...newTasks] }
+      updateDay(dateKey, () => seeded)
+      openSnapshotRef.current = JSON.parse(JSON.stringify(seeded))
+    } else {
+      openSnapshotRef.current = base
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -1423,19 +1435,19 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
       >
         {/* Modal header */}
         <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: '0.5px solid rgba(255,255,255,0.08)', background: 'linear-gradient(135deg, #3b0764 0%, #7c3aed 50%, #6d28d9 100%)' }}>
-          <button onClick={attemptClose} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)', color: 'rgba(255,255,255,0.92)' }}>← Back</button>
-          <div className="text-center px-3">
+          <button onClick={attemptClose} className="hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)', color: 'rgba(255,255,255,0.92)' }}>← Back</button>
+          <div className="flex-1 text-center px-2 sm:flex-none sm:px-3">
             <p className="text-sm font-semibold" style={{ color: '#ffffff' }}>{dateLabel}</p>
           </div>
-          <button onClick={attemptClose} className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(239,68,68,0.30)', border: '1px solid rgba(239,68,68,0.40)', color: 'rgba(255,255,255,0.92)' }}>× Close</button>
+          <button onClick={attemptClose} className="hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(239,68,68,0.30)', border: '1px solid rgba(239,68,68,0.40)', color: 'rgba(255,255,255,0.92)' }}>× Close</button>
         </div>
 
         {/* Today's Status row */}
-        <div className="flex items-center gap-3 px-4 py-2.5 flex-shrink-0 flex-wrap" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
-          <span className="text-[10px] font-semibold uppercase tracking-wider flex-shrink-0" style={{ color: 'var(--xp-txt3)' }}>Today&apos;s Status</span>
+        <div className="flex items-center gap-2 px-4 py-2 flex-shrink-0" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
+          <span className="hidden sm:inline text-[10px] font-semibold uppercase tracking-wider flex-shrink-0" style={{ color: 'var(--xp-txt3)' }}>Today&apos;s Status</span>
           <TodayStatusDropdown value={currentStatus} onChange={handleStatusSelect} isDark={isDark} />
           <div style={{ flex: 1 }} />
-          <button onClick={onDashboard} className="flex items-center gap-1.5 text-xs px-3.5 py-1.5 rounded-lg font-medium text-white transition-all hover:opacity-85 flex-shrink-0" style={{ background: '#7c3aed' }}>📊 Today&apos;s Dashboard</button>
+          <button onClick={onDashboard} className="flex items-center gap-1.5 text-[10px] sm:text-xs px-2.5 sm:px-3.5 py-1.5 rounded-lg font-medium text-white transition-all hover:opacity-85 flex-shrink-0" style={{ background: '#7c3aed' }}>📊 Today&apos;s Dashboard</button>
         </div>
 
         {/* Scrollable body */}

@@ -1566,8 +1566,8 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
     <>
     <div
       className={fitMode
-        ? 'fixed inset-0 z-50 overflow-hidden'
-        : 'fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-4'}
+        ? 'fixed inset-0 z-[51] overflow-hidden'
+        : 'fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[51] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-3 sm:pt-4'}
       style={fitMode ? undefined : { background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
       onClick={onClose}
     >
@@ -1583,7 +1583,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
       <div
         className={fitMode
           ? 'absolute inset-0 flex flex-col overflow-hidden'
-          : 'w-full rounded-2xl shadow-2xl overflow-hidden max-w-[640px] lg:max-w-[1296px]'}
+          : 'flex flex-col w-full h-full sm:h-auto sm:rounded-2xl sm:shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] sm:mb-6'}
         style={fitMode ? {
           background: S0,
         } : {
@@ -1600,23 +1600,34 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
         {/* ── Header ──────────────────────────────────────────────────────── */}
         <div
           ref={headerRef}
-          className="flex items-center gap-3 px-4 sm:px-6 py-3.5 sm:py-4 flex-shrink-0"
+          className="flex items-center px-4 sm:px-6 py-3.5 sm:py-4 flex-shrink-0 relative"
           style={{ background: 'linear-gradient(135deg, #0f052e 0%, #2d1b69 55%, #18355a 100%)', borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}
         >
+          {/* Mobile: plain arrow only */}
           {onBack && (
             <button onClick={onBack} data-export-exclude="true"
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0"
+              className="sm:hidden text-base font-light hover:opacity-70 transition-opacity flex-shrink-0 absolute left-4"
+              style={{ color: 'rgba(255,255,255,0.85)', background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1, padding: '4px 2px' }}
+              aria-label="Back">
+              ←
+            </button>
+          )}
+          {/* Desktop: Back pill */}
+          {onBack && (
+            <button onClick={onBack} data-export-exclude="true"
+              className="hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0 mr-3"
               style={{ background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.8)' }}>
               ← Back
             </button>
           )}
-          <div className="flex-1 min-w-0">
-            <h2 className="text-sm font-bold text-white tracking-wide">Today's Dashboard</h2>
+          {/* Title — absolutely centered on mobile, flex-1 on desktop */}
+          <div className="flex-1 text-center sm:text-left min-w-0">
+            <h2 className="text-sm font-bold text-white tracking-wide">Today&apos;s Dashboard</h2>
             <p className="text-[10px] mt-0.5 truncate" style={{ color: 'rgba(167,139,250,0.62)' }}>{dateLabel}</p>
           </div>
-          {/* Export button */}
+          {/* Export button — desktop only */}
           <button onClick={openExport} data-export-exclude="true"
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-90 transition-opacity flex-shrink-0"
+            className="hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-90 transition-opacity flex-shrink-0"
             style={{ background: 'rgba(167,139,250,0.16)', border: '0.5px solid rgba(167,139,250,0.3)', color: '#c4b5fd' }}
             title="Export dashboard as PNG"
             aria-label="Export dashboard">
@@ -1625,15 +1636,16 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
             </svg>
             Export
           </button>
+          {/* Close button — desktop only */}
           <button onClick={onClose} data-export-exclude="true"
-            className="text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
+            className="hidden sm:block text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0 ml-2"
             style={{ background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}>
             × Close
           </button>
         </div>
 
-        {/* ── Dashboard body — in fit mode: overflow-hidden wrapper + scale transform ── */}
-        <div className={fitMode ? 'flex-1 overflow-hidden' : ''}>
+        {/* ── Dashboard body — mobile: flex-1 scroll; fit mode: scale transform ── */}
+        <div className={fitMode ? 'flex-1 overflow-hidden' : 'flex-1 overflow-y-auto sm:block sm:overflow-visible'}>
         <div
           ref={captureRef}
           className="p-3 sm:p-4 lg:p-5 space-y-3 lg:space-y-4"

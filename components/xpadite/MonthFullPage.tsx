@@ -551,6 +551,135 @@ function SectionDivider({ title }: { title: string }) {
   )
 }
 
+// ─── Cumulative focus progress chart ─────────────────────────────────────────
+
+function MonthCumulativeChart({ month, sessions, isDark }: {
+  month: number
+  sessions: { dateKey: string; startTs: number; endTs: number | null }[]
+  isDark: boolean
+}) {
+  const { points, totalDays, maxMs } = useMemo(() => {
+    const td = new Date(APP_YEAR, month + 1, 0).getDate()
+    const byDay = new Map<string, number>()
+    for (const s of sessions) {
+      if (s.endTs !== null) {
+        byDay.set(s.dateKey, (byDay.get(s.dateKey) ?? 0) + (s.endTs - s.startTs))
+      }
+    }
+    let cum = 0
+    const pts: number[] = []
+    for (let d = 1; d <= td; d++) {
+      cum += byDay.get(dateKey(APP_YEAR, month, d)) ?? 0
+      pts.push(cum)
+    }
+    return { points: pts, totalDays: td, maxMs: cum }
+  }, [month, sessions])
+
+  if (maxMs === 0) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 160, flexDirection: 'column', gap: 8 }}>
+        <span style={{ fontSize: 22 }}>📈</span>
+        <p style={{ fontSize: 10, color: isDark ? 'rgba(148,163,184,0.50)' : 'var(--xp-txt3)' }}>No focus sessions this month</p>
+      </div>
+    )
+  }
+
+  const W = 480, H = 160
+  const PAD = { top: 18, right: 16, bottom: 30, left: 44 }
+  const cW = W - PAD.left - PAD.right
+  const cH = H - PAD.top - PAD.bottom
+  const xPos = (i: number) => PAD.left + (totalDays > 1 ? i / (totalDays - 1) : 0.5) * cW
+  const yPos = (ms: number) => PAD.top + cH - (ms / maxMs) * cH
+  const linePath = points.map((ms, i) => `${i === 0 ? 'M' : 'L'} ${xPos(i).toFixed(1)} ${yPos(ms).toFixed(1)}`).join(' ')
+  const areaPath = `${linePath} L ${xPos(totalDays - 1).toFixed(1)} ${(PAD.top + cH).toFixed(1)} L ${xPos(0).toFixed(1)} ${(PAD.top + cH).toFixed(1)} Z`
+  const maxHours = maxMs / 3_600_000
+  const rawStep = maxHours <= 10 ? 2 : maxHours <= 30 ? 5 : maxHours <= 60 ? 10 : maxHours <= 120 ? 20 : 30
+  const yLines: number[] = []
+  for (let h = rawStep; h < maxHours * 1.2; h += rawStep) { if (yLines.length >= 5) break; yLines.push(h) }
+  const xLabels = [1, 5, 10, 15, 20, 25, totalDays].filter((d, i, arr) => arr.indexOf(d) === i && d <= totalDays)
+  const lineCol = '#a78bfa'
+  const gridCol = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'
+  const txtCol  = isDark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.70)'
+  const now = new Date()
+  const todayIdx = (now.getMonth() === month && now.getFullYear() === APP_YEAR) ? Math.min(now.getDate() - 1, totalDays - 1) : null
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+      <defs>
+        <linearGradient id="mfpCumGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%"   stopColor={lineCol} stopOpacity={isDark ? 0.30 : 0.18} />
+          <stop offset="100%" stopColor={lineCol} stopOpacity={0.01} />
+        </linearGradient>
+        <clipPath id="mfpCumClip">
+          <rect x={PAD.left} y={PAD.top - 2} width={cW} height={cH + 4} />
+        </clipPath>
+      </defs>
+      {yLines.map(h => {
+        const y = yPos(h * 3_600_000)
+        if (y < PAD.top) return null
+        return (
+          <g key={h}>
+            <line x1={PAD.left} x2={PAD.left + cW} y1={y.toFixed(1)} y2={y.toFixed(1)} stroke={gridCol} strokeWidth={1} />
+            <text x={PAD.left - 5} y={y + 3.5} textAnchor="end" fontSize={8} fill={txtCol}>{h}h</text>
+          </g>
+        )
+      })}
+      <path d={areaPath} fill="url(#mfpCumGrad)" clipPath="url(#mfpCumClip)" />
+      <path d={linePath} fill="none" stroke={lineCol} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" clipPath="url(#mfpCumClip)" />
+      {todayIdx !== null && (
+        <line x1={xPos(todayIdx)} x2={xPos(todayIdx)} y1={PAD.top} y2={PAD.top + cH} stroke="rgba(167,139,250,0.40)" strokeWidth={1.5} strokeDasharray="3 3" />
+      )}
+      <line x1={PAD.left} x2={PAD.left + cW} y1={PAD.top + cH} y2={PAD.top + cH} stroke={gridCol} strokeWidth={1} />
+      {xLabels.map(d => (
+        <text key={d} x={xPos(d - 1)} y={PAD.top + cH + 14} textAnchor="middle" fontSize={8} fill={txtCol}>{d}</text>
+      ))}
+    </svg>
+  )
+}
+
+// ─── Weekly focus breakdown bar chart ─────────────────────────────────────────
+
+function WeeklyFocusChart({ month, sessions, isDark }: {
+  month: number
+  sessions: { dateKey: string; startTs: number; endTs: number | null }[]
+  isDark: boolean
+}) {
+  const weeks = useMemo(() => {
+    const td = new Date(APP_YEAR, month + 1, 0).getDate()
+    const result: { label: string; days: string; ms: number }[] = []
+    let wk = 1
+    for (let start = 1; start <= td; start += 7) {
+      const end = Math.min(start + 6, td)
+      const keys = new Set<string>()
+      for (let d = start; d <= end; d++) keys.add(dateKey(APP_YEAR, month, d))
+      const ms = sessions.filter(s => s.endTs !== null && keys.has(s.dateKey)).reduce((sum, s) => sum + (s.endTs! - s.startTs), 0)
+      result.push({ label: `Week ${wk++}`, days: start === end ? `${start}` : `${start}–${end}`, ms })
+    }
+    return result
+  }, [month, sessions])
+  const maxMs = Math.max(...weeks.map(w => w.ms), 1)
+  const COLORS = ['#7c3aed', '#6366f1', '#0ea5e9', '#14b8a6', '#f97316']
+  return (
+    <div className="flex items-end gap-3" style={{ height: 160, paddingTop: 4 }}>
+      {weeks.map((w, i) => {
+        const pct = (w.ms / maxMs) * 100
+        return (
+          <div key={w.label} className="flex flex-col items-center flex-1 gap-1">
+            <span style={{ fontSize: 9, fontWeight: 700, color: w.ms > 0 ? COLORS[i % COLORS.length] : 'transparent', whiteSpace: 'nowrap', minHeight: 14, display: 'flex', alignItems: 'center' }}>
+              {w.ms > 0 ? formatMs(w.ms) : '—'}
+            </span>
+            <div className="w-full flex-1 flex items-end">
+              <div className="w-full rounded-t-md" style={{ height: `${Math.max(pct, w.ms > 0 ? 4 : 0)}%`, background: COLORS[i % COLORS.length], opacity: w.ms > 0 ? 1 : 0.12, minHeight: w.ms > 0 ? 4 : 0, transition: 'height 600ms ease' }} />
+            </div>
+            <span style={{ fontSize: 9, color: isDark ? 'rgba(203,213,225,0.65)' : 'var(--xp-txt2)' }}>{w.label}</span>
+            <span style={{ fontSize: 7.5, color: isDark ? 'rgba(148,163,184,0.40)' : 'var(--xp-txt3)' }}>{w.days}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ─── MonthFullPage ────────────────────────────────────────────────────────────
 
 interface MonthFullPageProps {
@@ -812,6 +941,15 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
     transition: 'all 180ms ease', flexShrink: 0,
   }
 
+  const badgeTier = (() => {
+    if (monthScore >= 90) return { rank: 'Master',     icon: '👑', color: '#fbbf24', bg: 'linear-gradient(135deg,#92400e,#b45309,#d97706)', border: 'rgba(251,191,36,0.45)', msg: 'Extraordinary commitment.' }
+    if (monthScore >= 75) return { rank: 'Elite',      icon: '🏆', color: '#c4b5fd', bg: 'linear-gradient(135deg,#3b0764,#6d28d9,#7c3aed)', border: 'rgba(167,139,250,0.50)', msg: 'Outstanding performance.' }
+    if (monthScore >= 60) return { rank: 'Advanced',   icon: '🚀', color: '#7dd3fc', bg: 'linear-gradient(135deg,#0c4a6e,#0369a1,#0284c7)', border: 'rgba(56,189,248,0.45)',  msg: 'Impressive discipline.' }
+    if (monthScore >= 45) return { rank: 'Consistent', icon: '⚡', color: '#6ee7b7', bg: 'linear-gradient(135deg,#064e3b,#047857,#059669)', border: 'rgba(52,211,153,0.45)',  msg: 'Great momentum.' }
+    if (monthScore >= 25) return { rank: 'Learning',   icon: '📈', color: '#93c5fd', bg: 'linear-gradient(135deg,#1e3a8a,#1d4ed8,#2563eb)', border: 'rgba(96,165,250,0.45)',  msg: 'Keep pushing forward.' }
+    return                        { rank: 'Beginner',  icon: '🌱', color: '#86efac', bg: 'linear-gradient(135deg,#14532d,#166534,#15803d)', border: 'rgba(134,239,172,0.45)', msg: 'Every journey starts here.' }
+  })()
+
   return (
     <>
       <style>{MFP_STYLES}</style>
@@ -849,8 +987,8 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                 <button onClick={onClose} className="xp-mfp-back">← Back</button>
               </div>
 
-              {/* Center: ‹ Month Year › */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {/* Center: ‹ Month Year [· Monthly Dashboard] › */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
                 <button
                   onClick={goPrev}
                   disabled={currentMonth === 0}
@@ -858,8 +996,8 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                   style={navBtnStyle}
                   title="Previous month"
                 >‹</button>
-                <h1 style={{ fontSize: 13, fontWeight: 700, color: 'white', minWidth: 120, textAlign: 'center', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)' }}>
-                  {MONTHS[currentMonth]} {APP_YEAR}
+                <h1 style={{ fontSize: 13, fontWeight: 700, color: 'white', minWidth: 260, textAlign: 'center', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)' }}>
+                  {view === 'dashboard' ? `${MONTHS[currentMonth]} ${APP_YEAR} · Monthly Dashboard` : `${MONTHS[currentMonth]} ${APP_YEAR}`}
                 </h1>
                 <button
                   onClick={goNext}
@@ -870,22 +1008,23 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                 >›</button>
               </div>
 
-              {/* Right: Monthly Dashboard toggle */}
+              {/* Right: Dashboard toggle — calendar view only */}
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button
-                  onClick={toggleView}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    padding: '5px 14px', borderRadius: 20, fontSize: 11, fontWeight: 600,
-                    background: view === 'dashboard' ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)',
-                    color: 'white',
-                    border: view === 'dashboard' ? '1px solid rgba(255,255,255,0.50)' : '1px solid rgba(255,255,255,0.22)',
-                    boxShadow: view === 'dashboard' ? '0 2px 8px rgba(0,0,0,0.28)' : '0 1px 5px rgba(0,0,0,0.18)',
-                    cursor: 'pointer', transition: 'all 180ms ease', whiteSpace: 'nowrap',
-                  }}
-                >
-                  {view === 'calendar' ? '📊 Monthly Dashboard' : '📅 Calendar'}
-                </button>
+                {view === 'calendar' && (
+                  <button
+                    onClick={toggleView}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      padding: '5px 14px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                      background: 'rgba(255,255,255,0.12)', color: 'white',
+                      border: '1px solid rgba(255,255,255,0.22)',
+                      boxShadow: '0 1px 5px rgba(0,0,0,0.18)',
+                      cursor: 'pointer', transition: 'all 180ms ease', whiteSpace: 'nowrap',
+                    }}
+                  >
+                    📊 Monthly Dashboard
+                  </button>
+                )}
               </div>
             </div>
 
@@ -925,13 +1064,6 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
               {/* ── DASHBOARD VIEW ─────────────────────────────────────────────── */}
               {view === 'dashboard' && (
                 <div className="p-3 sm:p-4 lg:p-5 space-y-3 lg:space-y-4" style={{ background: isDark ? 'rgba(9,4,22,0.99)' : 'var(--xp-bg3)' }}>
-
-                  {/* Month context label */}
-                  <div style={{ textAlign: 'center', paddingBottom: 2 }}>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: isDark ? 'rgba(167,139,250,0.70)' : '#7c3aed', letterSpacing: '0.04em' }}>
-                      {MONTHS[currentMonth]} {APP_YEAR} · Monthly Dashboard
-                    </p>
-                  </div>
 
                   {/* ROW 1 — KPI Cards | Gauge | Achievement */}
                   <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.52fr)_minmax(0,1.36fr)_minmax(0,0.70fr)] items-stretch gap-3 lg:gap-4">
@@ -999,15 +1131,15 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                     </div>
                   </div>
 
-                  {/* ROW 2 — Monthly Progress | Activity Breakdown */}
+                  {/* ROW 2 — Monthly Progress (cumulative) | Activity Breakdown */}
                   <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)] items-stretch gap-3 lg:gap-4">
 
-                    {/* Monthly Progress — WeeklyBars */}
+                    {/* Monthly Progress — cumulative day-by-day area chart */}
                     <div className="rounded-2xl p-4 sm:p-5 flex flex-col" style={card1}>
                       <div className="flex items-start justify-between flex-shrink-0 mb-3">
                         <div>
                           <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Monthly Progress</p>
-                          <p className="text-[9px] mt-0.5" style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>Weekly focus time breakdown</p>
+                          <p className="text-[9px] mt-0.5" style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>Cumulative focus time across {MONTHS[currentMonth]}</p>
                         </div>
                         {totalMs > 0 && (
                           <div className="text-right">
@@ -1016,12 +1148,12 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                           </div>
                         )}
                       </div>
-                      <div style={{ flex: 1, minHeight: 180 }}>
-                        <MonthWeeklyBars month={currentMonth} sessions={monthSessions} />
+                      <div style={{ flex: 1, minHeight: 160 }}>
+                        <MonthCumulativeChart month={currentMonth} sessions={monthSessions} isDark={isDark} />
                       </div>
                     </div>
 
-                    {/* Activity Overview */}
+                    {/* Activity Breakdown donut */}
                     <div className="rounded-2xl p-4 sm:p-5" style={card2}>
                       <p className="text-[11px] font-semibold tracking-wide mb-3" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Activity Breakdown</p>
                       {actBreakdown.length > 0 ? (
@@ -1036,12 +1168,12 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                     </div>
                   </div>
 
-                  {/* ROW 3 — Activity List | Session Log | Task Stats */}
+                  {/* ROW 3 — Total Activities | Total Sessions | Total Tasks */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4">
 
-                    {/* Activity distribution list */}
+                    {/* Total Activities */}
                     <div className="rounded-2xl p-3.5" style={card1}>
-                      <p className="text-[11px] font-semibold tracking-wide mb-2.5" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Activities</p>
+                      <p className="text-[11px] font-semibold tracking-wide mb-2.5" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Total Activities</p>
                       {actBreakdown.length > 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                           {actBreakdown.map(a => {
@@ -1070,10 +1202,10 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                       )}
                     </div>
 
-                    {/* Top sessions this month */}
+                    {/* Total Sessions */}
                     <div className="rounded-2xl overflow-hidden" style={card2}>
                       <div className="px-4 py-2.5" style={{ borderBottom: isDark ? '0.5px solid rgba(124,58,237,0.12)' : '0.5px solid rgba(0,0,0,0.08)' }}>
-                        <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Session Log</p>
+                        <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Total Sessions</p>
                       </div>
                       {monthTopSessions.length > 0 ? (
                         <div>
@@ -1100,10 +1232,10 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                       )}
                     </div>
 
-                    {/* Task completion stats */}
+                    {/* Total Tasks */}
                     <div className="rounded-2xl p-3.5" style={card1}>
                       <div className="flex items-center justify-between mb-2.5">
-                        <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Tasks</p>
+                        <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Total Tasks</p>
                         {monthTaskStats.totalTasks > 0 && (
                           <span className="text-[8px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(124,58,237,0.16)', color: '#a78bfa', border: '0.5px solid rgba(124,58,237,0.26)' }}>
                             {monthTaskStats.completedTasks}/{monthTaskStats.totalTasks} done
@@ -1139,6 +1271,42 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                           <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No tasks this month</p>
                         </div>
                       )}
+                    </div>
+                  </div>
+
+                  {/* ROW 4 — Weekly Focus Breakdown | Monthly Performance Badge */}
+                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)] items-stretch gap-3 lg:gap-4">
+
+                    {/* Weekly Focus Breakdown */}
+                    <div className="rounded-2xl p-4 sm:p-5 flex flex-col" style={card1}>
+                      <div className="flex items-start justify-between flex-shrink-0 mb-1">
+                        <div>
+                          <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Weekly Focus Breakdown</p>
+                          <p className="text-[9px] mt-0.5" style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>Total focus hours per week · {MONTHS[currentMonth]}</p>
+                        </div>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <WeeklyFocusChart month={currentMonth} sessions={monthSessions} isDark={isDark} />
+                      </div>
+                    </div>
+
+                    {/* Monthly Performance Badge */}
+                    <div className="rounded-2xl p-5 flex flex-col items-center justify-center text-center" style={{ ...card2, position: 'relative', overflow: 'hidden' }}>
+                      <div style={{ position: 'absolute', inset: 0, background: isDark ? 'linear-gradient(145deg,rgba(124,58,237,0.06) 0%,rgba(0,0,0,0) 60%)' : 'linear-gradient(145deg,rgba(124,58,237,0.04) 0%,rgba(0,0,0,0) 60%)', borderRadius: 'inherit', pointerEvents: 'none' }} />
+                      <p style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.10em', color: isDark ? 'rgba(167,139,250,0.65)' : '#7c3aed', marginBottom: 12, position: 'relative' }}>
+                        {MONTHS[currentMonth].toUpperCase()} PERFORMANCE
+                      </p>
+                      <div style={{ width: 88, height: 88, borderRadius: '50%', background: badgeTier.bg, border: `2.5px solid ${badgeTier.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, marginBottom: 12, boxShadow: `0 6px 24px ${badgeTier.border}`, position: 'relative' }}>
+                        {badgeTier.icon}
+                      </div>
+                      <p style={{ fontSize: 17, fontWeight: 800, color: badgeTier.color, marginBottom: 6, letterSpacing: '-0.01em', position: 'relative' }}>{badgeTier.rank}</p>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 12px', borderRadius: 20, background: isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.08)', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.24)' : 'rgba(124,58,237,0.15)'}`, marginBottom: 10, position: 'relative' }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: '#a78bfa' }}>Score: {monthScore}%</span>
+                      </div>
+                      <p style={{ fontSize: 9.5, color: isDark ? 'rgba(203,213,225,0.60)' : 'var(--xp-txt2)', marginBottom: 6, fontStyle: 'italic', position: 'relative' }}>{badgeTier.msg}</p>
+                      <p style={{ fontSize: 8.5, color: isDark ? 'rgba(148,163,184,0.45)' : 'var(--xp-txt3)', position: 'relative' }}>
+                        {`You earned ${MONTHS[currentMonth]}'s ${badgeTier.rank} Badge`}
+                      </p>
                     </div>
                   </div>
                 </div>

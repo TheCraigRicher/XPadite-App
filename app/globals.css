@@ -25,6 +25,24 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* ─── Year calendar: mobile productive-ring thinning (Pass 1) ──────────────
+   On mobile the outer ring spread is reduced so tightly-packed productive days
+   feel less crowded. Desktop (≥640px) keeps the original 4.5px spread via the
+   CSS var fallback in MonthCard — no desktop pixels change.
+   Scoped to .xp-calendar-card so the expanded Monthly Calendar is unaffected. */
+@media (max-width: 639px) {
+  .xp-calendar-card {
+    --xp-prod-ring-spread: 3px;
+  }
+  /* Pass 2: enlarge inner filled circle on mobile year calendar only.
+     inset goes from 26% → 21%, making the circle diameter 58% of the cell
+     instead of 48%. Reminder-ring overlay (.xp-prod-circle not applied to it)
+     is untouched. Desktop sm:inset-[23%] overrides this via higher specificity. */
+  .xp-calendar-card .xp-prod-circle {
+    inset: 13%;
+  }
+}
+
 /* ─── Premium card hover lift ───────────────────────────── */
 
 .xp-lift {

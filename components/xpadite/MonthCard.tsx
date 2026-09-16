@@ -777,7 +777,7 @@ export function MonthCard({
                 color: progressColor === '#ffffff' ? '#000000' : 'white',
                 fontSize: "9px",
                 fontWeight: 600,
-                boxShadow: `0 0 0 2px ${gapColor}, 0 0 0 4.5px ${hexToRgba(progressColor, 0.7)}`,
+                boxShadow: `0 0 0 2px ${gapColor}, 0 0 0 var(--xp-prod-ring-spread, 4.5px) ${hexToRgba(progressColor, 0.7)}`,
               };
             else if (todayCell)
               circleStyle = {
@@ -799,7 +799,7 @@ export function MonthCard({
                 {connR}
                 <ReminderRing count={reminderCount} />
                 <div
-                  className="absolute inset-[26%] sm:inset-[23%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-110"
+                  className="xp-prod-circle absolute inset-[26%] sm:inset-[23%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-110"
                   style={{ zIndex: 1, ...circleStyle }}
                 >
                   {cell.day}

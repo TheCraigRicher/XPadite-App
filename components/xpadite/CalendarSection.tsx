@@ -58,14 +58,13 @@ export function CalendarSection({ onDayDoubleClick, onMonthZoom, activeMonth }: 
   }
 
   return (
-    <div className="px-1 sm:px-3 pb-20 sm:pb-6">
+    <div className="-mx-2 px-1 sm:mx-0 sm:px-3 pb-20 sm:pb-6">
       {/* Floating card container */}
       <div
-        className="rounded-2xl overflow-hidden"
+        className="rounded-2xl overflow-hidden xp-calendar-card"
         style={{
           background: 'var(--xp-card)',
           border: '0.5px solid var(--xp-bdr)',
-          boxShadow: '0 8px 40px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)',
           maxWidth: 1160,
           margin: '0 auto',
         }}

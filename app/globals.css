@@ -376,6 +376,16 @@ body {
   }
 }
 
+/* Main calendar card — shadow on desktop only, none on mobile */
+.xp-calendar-card {
+  box-shadow: none;
+}
+@media (min-width: 640px) {
+  .xp-calendar-card {
+    box-shadow: 0 8px 40px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
+  }
+}
+
 /* Mobile calendar emoji scaling — override inline fontSize with !important */
 @media (max-width: 639px) {
   .xp-emoji-fire   { font-size: 13px !important; }

@@ -8,10 +8,10 @@ export type MobileTab = 'calendar' | 'tasks' | 'analytics' | 'planner' | 'ai-coa
 
 const CalendarIcon = ({ active }: { active: boolean }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2 : 1.6} style={{ width: 20, height: 20 }}>
-    <rect x="3" y="3" width="8" height="8" rx="1.5" />
-    <rect x="13" y="3" width="8" height="8" rx="1.5" />
-    <rect x="3" y="13" width="8" height="8" rx="1.5" />
-    <rect x="13" y="13" width="8" height="8" rx="1.5" />
+    <rect x="3" y="4" width="18" height="17" rx="2" strokeLinejoin="round" />
+    <line x1="3" y1="9" x2="21" y2="9" strokeLinecap="round" />
+    <line x1="8" y1="2" x2="8" y2="6" strokeLinecap="round" />
+    <line x1="16" y1="2" x2="16" y2="6" strokeLinecap="round" />
   </svg>
 )
 

@@ -1082,9 +1082,11 @@ interface DayModalProps {
   day: number
   onClose: () => void
   onDashboard?: () => void
+  onDirtyChange?: (dirty: boolean) => void
+  closeIntent?: 'save' | 'discard' | null
 }
 
-export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModalProps) {
+export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyChange, closeIntent }: DayModalProps) {
   const {
     calData, updateDay, activeTaskTimer, setActiveTaskTimer,
     activities, activeSession, setActiveSession, selectedActId,
@@ -1141,6 +1143,33 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard }: DayModal
     const d = new Date(APP_YEAR, month, day)
     return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
   }, [month, day])
+
+  // Notify parent whenever dirty state changes (for nav guard)
+  useEffect(() => {
+    onDirtyChange?.(hasDirtyChanges)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasDirtyChanges])
+
+  // External close intent from parent (nav guard: 'save' or 'discard')
+  useEffect(() => {
+    if (!closeIntent) return
+    if (closeIntent === 'save') {
+      flushDirtyNotes()
+      openSnapshotRef.current = null
+      setNewTaskText('')
+      setAddingTask(false)
+      doClose()
+    } else if (closeIntent === 'discard') {
+      if (openSnapshotRef.current) {
+        updateDay(dateKey, () => openSnapshotRef.current!)
+      }
+      setDirtyNotesMap({})
+      setNewTaskText('')
+      setAddingTask(false)
+      doClose()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeIntent])
 
   const isActiveHere  = activeTaskTimer?.dateKey === dateKey
   const isSessionHere = activeSession?.dateKey === dateKey

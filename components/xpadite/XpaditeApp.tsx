@@ -622,6 +622,50 @@ function ThemedApp(_props: XpaditeAppProps) {
   // ── Mobile tab ────────────────────────────────────────────────────────────────
   const [mobileTab, setMobileTab] = useState<MobileTab>('calendar')
 
+  // ── Mobile nav guard (unsaved changes protection) ─────────────────────────────
+  const modalDirtyRef                = useRef(false)
+  const [navGuardOpen, setNavGuardOpen]         = useState(false)
+  const pendingNavRef                = useRef<(() => void) | null>(null)
+  const [dayModalCloseIntent, setDayModalCloseIntent] = useState<'save' | 'discard' | null>(null)
+
+  function executeNav(tab: MobileTab) {
+    setDashboardDay(null)
+    if (tab === 'calendar') {
+      setFullPageMonth(null)
+      setMobileTab('calendar')
+    } else if (tab === 'tasks') {
+      const today = new Date()
+      setModalDay({ key: dateKey(today.getFullYear(), today.getMonth(), today.getDate()), month: today.getMonth(), day: today.getDate() })
+    } else {
+      setMobileTab(tab)
+    }
+  }
+
+  function handleMobileNav(tab: MobileTab) {
+    if (modalDay && modalDirtyRef.current) {
+      pendingNavRef.current = () => executeNav(tab)
+      setNavGuardOpen(true)
+      return
+    }
+    if (modalDay) setModalDay(null)
+    executeNav(tab)
+  }
+
+  function navGuardSave() {
+    setNavGuardOpen(false)
+    setDayModalCloseIntent('save')
+  }
+
+  function navGuardDiscard() {
+    setNavGuardOpen(false)
+    setDayModalCloseIntent('discard')
+  }
+
+  function navGuardCancel() {
+    setNavGuardOpen(false)
+    pendingNavRef.current = null
+  }
+
   function handleAnalyticsClose() {
     setAnalyticsOpen(false)
     if (mobileTab === 'analytics') setMobileTab('calendar')
@@ -876,22 +920,7 @@ function ThemedApp(_props: XpaditeAppProps) {
       {/* ── Bottom nav (mobile only) */}
       <MobileBottomNav
         activeTab={mobileTab}
-        onTabChange={tab => {
-          if (tab === 'calendar') {
-            setFullPageMonth(null)
-            setAnalyticsOpen(false)
-            setAICoachOpen(false)
-            setAICoachMotivate(false)
-            setMobileTab('calendar')
-            return
-          }
-          if (tab === 'tasks') {
-            const today = new Date()
-            setModalDay({ key: dateKey(today.getFullYear(), today.getMonth(), today.getDate()), month: today.getMonth(), day: today.getDate() })
-            return
-          }
-          setMobileTab(tab)
-        }}
+        onTabChange={handleMobileNav}
       />
 
       {/* ── Overlays / Modals ─────────────────────────────────────────────── */}
@@ -910,8 +939,26 @@ function ThemedApp(_props: XpaditeAppProps) {
           dateKey={modalDay.key}
           month={modalDay.month}
           day={modalDay.day}
-          onClose={() => setModalDay(null)}
-          onDashboard={() => setDashboardDay(modalDay)}
+          onClose={() => {
+            setModalDay(null)
+            setDayModalCloseIntent(null)
+            const pending = pendingNavRef.current
+            if (pending) {
+              pendingNavRef.current = null
+              pending()
+            }
+          }}
+          onDashboard={() => {
+            if (modalDirtyRef.current) {
+              const day = modalDay
+              pendingNavRef.current = () => setDashboardDay(day)
+              setNavGuardOpen(true)
+            } else {
+              setDashboardDay(modalDay)
+            }
+          }}
+          onDirtyChange={(dirty) => { modalDirtyRef.current = dirty }}
+          closeIntent={dayModalCloseIntent}
         />
       )}
 
@@ -963,6 +1010,42 @@ function ThemedApp(_props: XpaditeAppProps) {
             }
           }}
         />
+      )}
+
+      {/* Mobile nav guard dialog — unsaved changes protection */}
+      {navGuardOpen && (
+        <div
+          className="sm:hidden"
+          style={{ position: 'fixed', inset: 0, zIndex: 70, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', background: 'rgba(0,0,0,0.60)' }}
+        >
+          <div
+            style={{
+              width: '100%',
+              margin: '0 12px 72px',
+              borderRadius: 16,
+              overflow: 'hidden',
+              background: isDark ? '#1a1025' : '#ffffff',
+              border: isDark ? '0.5px solid rgba(124,58,237,0.22)' : '0.5px solid rgba(0,0,0,0.10)',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.45)',
+            }}
+          >
+            <div style={{ padding: '20px 20px 12px', textAlign: 'center' }}>
+              <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--xp-txt)', margin: 0 }}>Unsaved Changes</p>
+              <p style={{ fontSize: 11, color: 'var(--xp-txt3)', marginTop: 6, marginBottom: 0 }}>You have unsaved changes in your Task Manager.</p>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '0 16px 20px' }}>
+              <button onClick={navGuardSave} style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: '#7c3aed', color: '#ffffff', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                Save &amp; Continue
+              </button>
+              <button onClick={navGuardDiscard} style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: isDark ? 'rgba(239,68,68,0.10)' : 'rgba(239,68,68,0.06)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.22)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
+                Exit Without Saving
+              </button>
+              <button onClick={navGuardCancel} style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: 'transparent', color: 'var(--xp-txt2)', border: '1px solid var(--xp-bdr2)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Toast — above bottom nav on mobile */}

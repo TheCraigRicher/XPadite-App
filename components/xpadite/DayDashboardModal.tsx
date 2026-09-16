@@ -1592,7 +1592,6 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
           boxShadow: isDark
             ? '0 30px 70px rgba(0,0,0,0.75), 0 0 0 0.5px rgba(124,58,237,0.16), inset 0 1px 0 rgba(255,255,255,0.04)'
             : '0 20px 50px rgba(0,0,0,0.12)',
-          marginBottom: 24,
         }}
         onClick={e => e.stopPropagation()}
       >

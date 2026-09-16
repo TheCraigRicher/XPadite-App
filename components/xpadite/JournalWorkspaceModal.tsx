@@ -334,9 +334,12 @@ function JournalMonthCard({
 
 interface JournalWorkspaceModalProps {
   onClose: () => void
+  mobileNavSpace?: boolean
+  onDirtyChange?: (dirty: boolean) => void
+  closeIntent?: 'save' | 'discard' | null
 }
 
-export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
+export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, closeIntent }: JournalWorkspaceModalProps) {
   const { isDark, calData, updateDay } = useApp()
 
   const todayDate = useMemo(() => new Date(), [])
@@ -508,10 +511,10 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
           borderBottom: '0.5px solid rgba(255,255,255,0.06)',
         }}
       >
-        {/* Back — absolute left so it doesn't offset the center */}
+        {/* Back — absolute left, hidden on mobile (bottom nav handles close) */}
         <button
           onClick={doClose}
-          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0"
+          className="hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0"
           style={{ position: 'absolute', left: 20, background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.80)' }}
         >
           ← Back
@@ -566,8 +569,8 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
           </div>
         </div>
 
-        {/* Right: Today (when not current year) + Close */}
-        <div style={{ position: 'absolute', right: 20, display: 'flex', alignItems: 'center', gap: 6 }}>
+        {/* Right: Today (when not current year) + Close — hidden on mobile */}
+        <div className="hidden sm:flex" style={{ position: 'absolute', right: 20, alignItems: 'center', gap: 6 }}>
           {calYear !== todayDate.getFullYear() && (
             <button
               onClick={() => setCalYear(todayDate.getFullYear())}
@@ -757,9 +760,10 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
           </span>
         </div>
 
+        {/* Close — hidden on mobile (bottom nav handles close) */}
         <button
           onClick={doClose}
-          className="text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
+          className="hidden sm:block text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
           style={{ position: 'absolute', right: 20, background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}
         >
           × Close
@@ -1318,6 +1322,8 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
       onJournalCalendar={() => setView('calendar')}
       onLibrary={() => setView('library')}
       onEditor={() => setView('editor')}
+      onDirtyChange={onDirtyChange}
+      closeIntent={closeIntent}
     />
   )
 
@@ -1338,25 +1344,28 @@ export function JournalWorkspaceModal({ onClose }: JournalWorkspaceModalProps) {
         }
       `}</style>
 
-      {/* Overlay — exactly matches DayDashboardModal */}
+      {/* Overlay */}
       <div
-        className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-4"
+        className={mobileNavSpace
+          ? "fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[49] sm:z-[70] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-4"
+          : "fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-4"
+        }
         style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
       >
-        {/* Shell — exactly matches DayDashboardModal width tokens */}
+        {/* Shell */}
         <div
-          className="w-full rounded-2xl shadow-2xl overflow-hidden max-w-[640px] lg:max-w-[1296px]"
+          className={mobileNavSpace
+            ? "w-full rounded-none sm:rounded-2xl shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] xp-j-shell-contained"
+            : "w-full rounded-2xl shadow-2xl overflow-hidden max-w-[640px] lg:max-w-[1296px]"
+          }
           style={{
             background: shellBg,
             border: isDark ? '0.5px solid rgba(124,58,237,0.22)' : '0.5px solid var(--xp-bdr2)',
             boxShadow: isDark
               ? '0 30px 70px rgba(0,0,0,0.75), 0 0 0 0.5px rgba(124,58,237,0.16), inset 0 1px 0 rgba(255,255,255,0.04)'
               : '0 20px 50px rgba(0,0,0,0.12)',
-            // Fixed height so Journal fills near the full viewport
-            height: 'calc(100vh - 44px)',
-            maxHeight: 'calc(100vh - 44px)',
             display: 'flex', flexDirection: 'column',
-            marginBottom: 24,
+            ...(mobileNavSpace ? {} : { height: 'calc(100vh - 44px)', maxHeight: 'calc(100vh - 44px)', marginBottom: 24 }),
           }}
           onClick={e => e.stopPropagation()}
         >

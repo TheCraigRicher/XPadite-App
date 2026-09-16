@@ -376,6 +376,20 @@ body {
   }
 }
 
+/* Planner shell: fills viewport on mobile, floating card on desktop */
+.xp-j-shell-contained {
+  flex: 1;
+  min-height: 0;
+}
+@media (min-width: 640px) {
+  .xp-j-shell-contained {
+    flex: none;
+    height: calc(100vh - 44px);
+    max-height: calc(100vh - 44px);
+    margin-bottom: 24px;
+  }
+}
+
 /* Main calendar card — shadow on desktop only, none on mobile */
 .xp-calendar-card {
   box-shadow: none;

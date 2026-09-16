@@ -1084,9 +1084,10 @@ interface DayModalProps {
   onDashboard?: () => void
   onDirtyChange?: (dirty: boolean) => void
   closeIntent?: 'save' | 'discard' | null
+  skipEntryAnimation?: boolean
 }
 
-export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyChange, closeIntent }: DayModalProps) {
+export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyChange, closeIntent, skipEntryAnimation }: DayModalProps) {
   const {
     calData, updateDay, activeTaskTimer, setActiveTaskTimer,
     activities, activeSession, setActiveSession, selectedActId,
@@ -1125,7 +1126,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   const [journalAnimKey,   setJournalAnimKey]    = useState(0)
   const [journalSaved,     setJournalSaved]      = useState(false)
   const [mainSaving,       setMainSaving]        = useState(false)
-  const [isMounted, setIsMounted] = useState(false)
+  const [isMounted, setIsMounted] = useState(skipEntryAnimation ?? false)
   const [isClosing, setIsClosing] = useState(false)
   const journalSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevNotesOpenRef    = useRef(false)

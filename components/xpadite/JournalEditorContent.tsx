@@ -1012,6 +1012,8 @@ interface JournalEditorContentProps {
   onJournalCalendar?: () => void
   onLibrary?: () => void
   onEditor?: () => void
+  onDirtyChange?: (dirty: boolean) => void
+  closeIntent?: 'save' | 'discard' | null
   // Legacy props — accepted for backward compat; attachments now live as inline blocks
   attachments?: TaskAttachment[]
   onAttachmentsChange?: (atts: TaskAttachment[]) => void
@@ -1024,6 +1026,7 @@ export function JournalEditorContent({
   onContentChange, onPersist,
   onNavigateDay, onNavigateToday, onBack, onClose,
   onJournalCalendar, onLibrary, onEditor,
+  onDirtyChange, closeIntent,
 }: JournalEditorContentProps) {
 
   // ── State ───────────────────────────────────────────────────────────────────
@@ -1051,6 +1054,35 @@ export function JournalEditorContent({
   const isDirtyRef      = useRef(false)  // fast path — avoids closure staleness
   const savedDocRef     = useRef('')     // doc string at last explicit Save Notes
   const pendingNavRef   = useRef<(() => void) | null>(null)
+
+  // Notify parent when dirty state changes (for global nav guard)
+  useEffect(() => {
+    onDirtyChange?.(isDirty)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDirty])
+
+  // External close intent from parent nav guard: 'save' or 'discard'
+  useEffect(() => {
+    if (!closeIntent) return
+    if (closeIntent === 'save') {
+      if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+      const serialized = buildDocStr()
+      onPersist(dateKeyRef.current, serialized)
+      savedDocRef.current = serialized
+      isDirtyRef.current  = false
+      setIsDirty(false)
+      setShowExitDialog(false)
+      onClose()
+    } else {
+      if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
+      onPersist(dateKeyRef.current, savedDocRef.current)
+      isDirtyRef.current = false
+      setIsDirty(false)
+      setShowExitDialog(false)
+      onClose()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeIntent])
   const showExitDialogRef = useRef(false)  // for ESC handler stable closure
 
   // ── Journal session timer ────────────────────────────────────────────────────
@@ -1899,9 +1931,10 @@ export function JournalEditorContent({
           position: 'relative', display: 'flex', alignItems: 'center',
           height: 52, padding: '0 14px', gap: 6,
         }}>
-          {/* Left: back */}
+          {/* Left: back — hidden on mobile (bottom nav handles close) */}
           <button
             onClick={() => guardedNavigate(onBack)}
+            className="hidden sm:block"
             style={{
               padding: '5px 10px', borderRadius: 8, border: '0.5px solid rgba(255,255,255,0.16)',
               background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.78)',
@@ -1972,8 +2005,10 @@ export function JournalEditorContent({
               }}
             >Today</button>
           )}
+          {/* Close — hidden on mobile (bottom nav handles close) */}
           <button
             onClick={() => guardedNavigate(onClose)}
+            className="hidden sm:block"
             style={{
               padding: '5px 10px', borderRadius: 8,
               border: '0.5px solid rgba(239,68,68,0.28)',

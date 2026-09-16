@@ -598,7 +598,7 @@ function MobileMoreView({ onGallery, onSettings }: { onGallery: () => void; onSe
 
 // ─── ThemedApp ────────────────────────────────────────────────────────────────
 
-interface ModalDay { key: string; month: number; day: number }
+interface ModalDay { key: string; month: number; day: number; skipAnim?: boolean }
 
 function ThemedApp(_props: XpaditeAppProps) {
   const { isDark, toast, setToast, legendVisible } = useApp()
@@ -624,9 +624,12 @@ function ThemedApp(_props: XpaditeAppProps) {
 
   // ── Mobile nav guard (unsaved changes protection) ─────────────────────────────
   const modalDirtyRef                = useRef(false)
+  const plannerDirtyRef              = useRef(false)
   const [navGuardOpen, setNavGuardOpen]         = useState(false)
+  const [navGuardSource, setNavGuardSource]     = useState<'tasks' | 'planner'>('tasks')
   const pendingNavRef                = useRef<(() => void) | null>(null)
-  const [dayModalCloseIntent, setDayModalCloseIntent] = useState<'save' | 'discard' | null>(null)
+  const [dayModalCloseIntent, setDayModalCloseIntent]     = useState<'save' | 'discard' | null>(null)
+  const [plannerCloseIntent, setPlannerCloseIntent]       = useState<'save' | 'discard' | null>(null)
 
   function executeNav(tab: MobileTab) {
     setDashboardDay(null)
@@ -634,8 +637,11 @@ function ThemedApp(_props: XpaditeAppProps) {
       setFullPageMonth(null)
       setMobileTab('calendar')
     } else if (tab === 'tasks') {
+      // Close any tab overlay (planner, analytics, ai-coach) in the same batch as opening DayModal
+      // React 18 batches these so no intermediate render with transparent DayModal backdrop
+      setMobileTab('calendar')
       const today = new Date()
-      setModalDay({ key: dateKey(today.getFullYear(), today.getMonth(), today.getDate()), month: today.getMonth(), day: today.getDate() })
+      setModalDay({ key: dateKey(today.getFullYear(), today.getMonth(), today.getDate()), month: today.getMonth(), day: today.getDate(), skipAnim: true })
     } else {
       setMobileTab(tab)
     }
@@ -644,6 +650,13 @@ function ThemedApp(_props: XpaditeAppProps) {
   function handleMobileNav(tab: MobileTab) {
     if (modalDay && modalDirtyRef.current) {
       pendingNavRef.current = () => executeNav(tab)
+      setNavGuardSource('tasks')
+      setNavGuardOpen(true)
+      return
+    }
+    if (mobileTab === 'planner' && plannerDirtyRef.current) {
+      pendingNavRef.current = () => executeNav(tab)
+      setNavGuardSource('planner')
       setNavGuardOpen(true)
       return
     }
@@ -653,12 +666,20 @@ function ThemedApp(_props: XpaditeAppProps) {
 
   function navGuardSave() {
     setNavGuardOpen(false)
-    setDayModalCloseIntent('save')
+    if (navGuardSource === 'planner') {
+      setPlannerCloseIntent('save')
+    } else {
+      setDayModalCloseIntent('save')
+    }
   }
 
   function navGuardDiscard() {
     setNavGuardOpen(false)
-    setDayModalCloseIntent('discard')
+    if (navGuardSource === 'planner') {
+      setPlannerCloseIntent('discard')
+    } else {
+      setDayModalCloseIntent('discard')
+    }
   }
 
   function navGuardCancel() {
@@ -898,11 +919,21 @@ function ThemedApp(_props: XpaditeAppProps) {
 
         {/* ── Mobile Planner tab — inline, nav persistent */}
         {mobileTab === 'planner' && (
-          <div
-            className="sm:hidden"
-            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 56, zIndex: 49, transform: 'translateZ(0)', overflow: 'hidden' }}
-          >
-            <JournalWorkspaceModal onClose={() => setMobileTab('calendar')} />
+          <div className="sm:hidden">
+            <JournalWorkspaceModal
+              onClose={() => {
+                setMobileTab('calendar')
+                setPlannerCloseIntent(null)
+                const pending = pendingNavRef.current
+                if (pending) {
+                  pendingNavRef.current = null
+                  pending()
+                }
+              }}
+              mobileNavSpace
+              onDirtyChange={dirty => { plannerDirtyRef.current = dirty }}
+              closeIntent={plannerCloseIntent}
+            />
           </div>
         )}
 
@@ -939,6 +970,7 @@ function ThemedApp(_props: XpaditeAppProps) {
           dateKey={modalDay.key}
           month={modalDay.month}
           day={modalDay.day}
+          skipEntryAnimation={modalDay.skipAnim}
           onClose={() => {
             setModalDay(null)
             setDayModalCloseIntent(null)
@@ -952,6 +984,7 @@ function ThemedApp(_props: XpaditeAppProps) {
             if (modalDirtyRef.current) {
               const day = modalDay
               pendingNavRef.current = () => setDashboardDay(day)
+              setNavGuardSource('tasks')
               setNavGuardOpen(true)
             } else {
               setDashboardDay(modalDay)
@@ -1031,7 +1064,9 @@ function ThemedApp(_props: XpaditeAppProps) {
           >
             <div style={{ padding: '20px 20px 12px', textAlign: 'center' }}>
               <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--xp-txt)', margin: 0 }}>Unsaved Changes</p>
-              <p style={{ fontSize: 11, color: 'var(--xp-txt3)', marginTop: 6, marginBottom: 0 }}>You have unsaved changes in your Task Manager.</p>
+              <p style={{ fontSize: 11, color: 'var(--xp-txt3)', marginTop: 6, marginBottom: 0 }}>
+                You have unsaved changes in your {navGuardSource === 'planner' ? 'Planner' : 'Task Manager'}.
+              </p>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '0 16px 20px' }}>
               <button onClick={navGuardSave} style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: '#7c3aed', color: '#ffffff', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>

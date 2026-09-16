@@ -6,7 +6,7 @@ const GALLERY_KEY = 'xp9g'
 
 export interface GalleryItem {
   id: string
-  type: 'month-share' | 'photo'
+  type: 'month-share' | 'year-share' | 'photo'
   createdAt: number
   title: string
   month?: number
@@ -219,7 +219,7 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
     saveGallery(updated); setItems(updated)
   }
 
-  const filtered = items.filter(i => tab === 'cards' ? i.type === 'month-share' : i.type === 'photo')
+  const filtered = items.filter(i => tab === 'cards' ? (i.type === 'month-share' || i.type === 'year-share') : i.type === 'photo')
 
   return (
     <>

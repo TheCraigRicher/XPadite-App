@@ -21,7 +21,8 @@ import { SettingsModal } from './SettingsModal'
 import { MobileBottomNav } from './MobileBottomNav'
 import { ProfileModal } from './ProfileModal'
 import { ActivityManagerModal } from './ActivityManagerModal'
-import { dateKey, todayKey } from './utils'
+import { dateKey, todayKey, APP_YEAR } from './utils'
+import { YearShareModal } from './YearProgressShare'
 import type { MobileTab } from './MobileBottomNav'
 import type { XpaditeNotification } from './NotificationsModal'
 import { loadStoredNotifications, saveStoredNotifications } from './NotificationsModal'
@@ -613,6 +614,7 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [aiCoachOpen, setAICoachOpen]                   = useState(false)
   const [aiCoachMotivate, setAICoachMotivate]           = useState(false)
   const [galleryOpen, setGalleryOpen]                   = useState(false)
+  const [yearShareOpen, setYearShareOpen]               = useState(false)
   const [settingsOpen, setSettingsOpen]                 = useState(false)
   const [profileOpen, setProfileOpen]                   = useState(false)
   const [activityManagerOpen, setActivityManagerOpen]   = useState(false)
@@ -897,6 +899,7 @@ function ThemedApp(_props: XpaditeAppProps) {
             onDayDoubleClick={(key, month, day) => setModalDay({ key, month, day })}
             onMonthZoom={month => setFullPageMonth(month)}
             activeMonth={fullPageMonth}
+            onShareYear={() => setYearShareOpen(true)}
           />
         </main>
 
@@ -1020,6 +1023,8 @@ function ThemedApp(_props: XpaditeAppProps) {
       {motivationOpen && <MotivationModal onClose={() => setMotivationOpen(false)} />}
 
       {galleryOpen && <GalleryModal onClose={() => setGalleryOpen(false)} />}
+
+      {yearShareOpen && <YearShareModal year={APP_YEAR} onClose={() => setYearShareOpen(false)} />}
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
 

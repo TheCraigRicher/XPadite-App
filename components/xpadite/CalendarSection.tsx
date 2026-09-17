@@ -88,7 +88,7 @@ export function CalendarSection({ onDayDoubleClick, onMonthZoom, activeMonth, on
             </button>
 
             {open[q.label] && (
-              <div className="grid grid-cols-3 gap-1 sm:gap-3 p-1 sm:p-3 pt-0">
+              <div className="xp-month-row grid grid-cols-3 gap-1 sm:gap-3 p-1 sm:p-3 pt-0">
                 {q.months.map(m => (
                   <div
                     key={m}

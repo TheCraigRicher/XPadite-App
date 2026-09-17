@@ -25,22 +25,34 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* ─── Productive-day ring — defined in CSS, not inline, so it is overridable
+   by a scoped selector without !important.
+   Colors are set as CSS vars on the element by MonthCard (--xp-ring-gap,
+   --xp-ring-outer). The spread var is overridden per-context below. */
+.xp-prod-circle[data-productive] {
+  box-shadow:
+    0 0 0 2px var(--xp-ring-gap, transparent),
+    0 0 0 var(--xp-prod-ring-spread, 4.5px) var(--xp-ring-outer, transparent);
+}
+
 /* ─── Year calendar: mobile productive-ring thinning (Pass 1) ──────────────
-   On mobile the outer ring spread is reduced so tightly-packed productive days
-   feel less crowded. Desktop (≥640px) keeps the original 4.5px spread via the
-   CSS var fallback in MonthCard — no desktop pixels change.
-   Scoped to .xp-calendar-card so the expanded Monthly Calendar is unaffected. */
+   Scoped to .xp-calendar-card so the expanded Monthly Calendar is unaffected.
+   Ring is now plain CSS (no inline), so no !important needed. */
 @media (max-width: 639px) {
   .xp-calendar-card {
     --xp-prod-ring-spread: 3px;
   }
-  /* Pass 2: enlarge inner filled circle on mobile year calendar only.
-     inset goes from 26% → 21%, making the circle diameter 58% of the cell
-     instead of 48%. Reminder-ring overlay (.xp-prod-circle not applied to it)
-     is untouched. Desktop sm:inset-[23%] overrides this via higher specificity. */
+  /* Pass 2: enlarge inner filled circle — inset 13% = 74% diameter. */
   .xp-calendar-card .xp-prod-circle {
     inset: 13%;
   }
+  /* Remove outer ring on mobile year calendar. More-specific selector beats
+     the .xp-prod-circle[data-productive] rule above — no !important needed. */
+  .xp-calendar-card .xp-prod-circle[data-productive] {
+    box-shadow: none;
+  }
+  /* Month container/cards restored — background, border, and padding return
+     to their original values from MonthCard's inline styles and Tailwind classes. */
 }
 
 /* ─── Premium card hover lift ───────────────────────────── */

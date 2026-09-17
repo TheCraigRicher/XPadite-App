@@ -451,7 +451,8 @@ export function MonthCard({
     <>
       {/* ── Card ────────────────────────────────────────────────────────────── */}
       <div
-        className="rounded-xl p-1 sm:p-2 transition-all duration-200 flex flex-col h-full"
+        className="xp-month-card rounded-xl p-1 sm:p-2 transition-all duration-200 flex flex-col h-full"
+        data-current={isCurrentMonth || undefined}
         style={{
           background: isCurrentMonth ? "#eff6ff" : "var(--xp-card)",
           border: isCurrentMonth
@@ -777,7 +778,8 @@ export function MonthCard({
                 color: progressColor === '#ffffff' ? '#000000' : 'white',
                 fontSize: "9px",
                 fontWeight: 600,
-                boxShadow: `0 0 0 2px ${gapColor}, 0 0 0 var(--xp-prod-ring-spread, 4.5px) ${hexToRgba(progressColor, 0.7)}`,
+                // Ring is defined in CSS via .xp-prod-circle[data-productive] so it
+                // can be overridden by a mobile scoped rule without needing !important.
               };
             else if (todayCell)
               circleStyle = {
@@ -800,7 +802,18 @@ export function MonthCard({
                 <ReminderRing count={reminderCount} />
                 <div
                   className="xp-prod-circle absolute inset-[26%] sm:inset-[23%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-110"
-                  style={{ zIndex: 1, ...circleStyle }}
+                  data-productive={productive || undefined}
+                  style={{
+                    zIndex: 1,
+                    ...circleStyle,
+                    // Expose dynamic colors as CSS vars so the ring (defined in
+                    // globals.css on [data-productive]) can be overridden by a
+                    // scoped selector without requiring !important.
+                    ...(productive ? {
+                      '--xp-ring-gap':   gapColor,
+                      '--xp-ring-outer': hexToRgba(progressColor, 0.7),
+                    } as React.CSSProperties : undefined),
+                  }}
                 >
                   {cell.day}
                 </div>

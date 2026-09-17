@@ -1100,6 +1100,8 @@ export function JournalEditorContent({
   const toolbarScrollRef   = useRef<HTMLDivElement>(null)
   const [canScrollLeft,  setCanScrollLeft]  = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
+  const [undoRedoTip,    setUndoRedoTip]    = useState<null | 'undo' | 'redo'>(null)
+  const undoRedoTipTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Move / resize mode state ─────────────────────────────────────────────────
   const [moveModeId,   setMoveModeId]   = useState<string | null>(null)
@@ -1827,6 +1829,12 @@ export function JournalEditorContent({
   const dockBdr = 'rgba(124,58,237,0.20)'
   const dockDiv = 'rgba(255,255,255,0.08)'
 
+  function showUndoRedoTip(which: 'undo' | 'redo') {
+    if (undoRedoTipTimer.current) clearTimeout(undoRedoTipTimer.current)
+    setUndoRedoTip(which)
+    undoRedoTipTimer.current = setTimeout(() => setUndoRedoTip(null), 1400)
+  }
+
   // Utility buttons: subdued navy/lavender treatment (List, Upload, Camera, Draw)
   function dockBtn(active = false): React.CSSProperties {
     return {
@@ -1905,9 +1913,50 @@ export function JournalEditorContent({
         .xp-j-sec-wrap:hover .xp-j-add-title { opacity: 0.45 !important; }
         /* Responsive collapse */
         @media (max-width: 640px) {
-          .xp-j-grid { grid-template-columns: 1fr !important; grid-auto-rows: auto !important; }
-          .xp-j-grid > * { grid-column: 1 / -1 !important; grid-row: auto !important; }
+          /* Swap masonry grid for a simple flex column — eliminates span-tracking
+             overlap where 4px auto-rows cause block content to overflow into adjacent cells */
+          .xp-j-grid { display: flex !important; flex-direction: column !important; }
+          .xp-j-grid > * { width: 100% !important; flex-shrink: 0 !important; }
+          /* Extra clearance so the last block scrolls completely above the dock toolbar */
+          .xp-j-content-scroll { padding-bottom: 24px !important; }
+          /* ROOT FIX: The default text block uses a float:left;height:0 placeholder that
+             renders visually taller than its 32px layout height on mobile (2 wrapped lines
+             ≈ 49px at 14px/1.75lh). Enforcing an 80px minimum ensures the section card
+             starts well below the placeholder text, eliminating the visual collision. */
+          .xp-j-grid > :first-child .xp-j-prose { min-height: 80px !important; }
+          /* Toolbar mobile/desktop slot switching */
+          .xp-jd-sec-dt { display: none !important; }
+          .xp-jd-ind-dt { display: none !important; }
+          /* Active nav arrows: larger + tinted pill so they read as navigation controls */
+          .xp-jd-nav-btn {
+            font-size: 20px !important;
+            color: rgba(255,255,255,0.92) !important;
+            background: rgba(124,58,237,0.22) !important;
+            border-radius: 6px !important;
+            padding: 3px 7px !important;
+          }
         }
+        @media (min-width: 641px) {
+          /* Hide mobile-only toolbar slots on desktop */
+          .xp-jd-sec-mo { display: none !important; }
+          .xp-jd-ind-mo { display: none !important; }
+        }
+        /* Undo/Redo tap tooltip — mobile only */
+        .xp-jd-tip {
+          position: absolute; bottom: calc(100% + 6px); left: 50%;
+          transform: translateX(-50%);
+          background: rgba(20,10,40,0.95); color: rgba(255,255,255,0.90);
+          font-size: 11px; padding: 3px 8px; border-radius: 6px;
+          white-space: nowrap; pointer-events: none; z-index: 100;
+          animation: xpUndoRedoTipFade 1.4s ease-in-out forwards;
+        }
+        @keyframes xpUndoRedoTipFade {
+          0%   { opacity: 0; transform: translateX(-50%) translateY(4px); }
+          15%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+          70%  { opacity: 1; }
+          100% { opacity: 0; transform: translateX(-50%) translateY(0); }
+        }
+        @media (min-width: 641px) { .xp-jd-tip { display: none; } }
         /* Ghost slot pulse during drag-move */
         @keyframes xpGhostPulse {
           0%, 100% { opacity: 0.85; }
@@ -2031,6 +2080,7 @@ export function JournalEditorContent({
         <>
           {/* Block list — masonry grid layout */}
           <div
+            className="xp-j-content-scroll"
             style={{ flex: 1, overflowY: 'auto', padding: '12px 20px 8px', minHeight: 0 }}
             onClick={() => { setSelectedBlockId(null); setMoveModeId(null); setResizeModeId(null); setSelectionRect(null) }}
           >
@@ -2215,6 +2265,7 @@ export function JournalEditorContent({
                 transition: 'opacity 160ms',
               }}>
                 <button
+                  className="xp-jd-nav-btn"
                   onMouseDown={e => { e.preventDefault(); toolbarScrollRef.current?.scrollBy({ left: -130, behavior: 'smooth' }) }}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.70)', fontSize: 16, padding: '0 4px', lineHeight: 1 }}
                 >‹</button>
@@ -2254,22 +2305,62 @@ export function JournalEditorContent({
 
                 <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
 
-                {/* ⇥ Indent */}
+                {/* + Section — mobile primary slot (desktop version lives after Draw) */}
+                <div className="xp-jd-sec-mo">
+                  <SectionPicker isDark={isDark} onPick={color => {
+                    insertBlock(createSectionBlock(color), blocks.length - 1)
+                  }} />
+                </div>
+
+                {/* ⇥ Indent — desktop primary slot (mobile version lives after Undo/Redo) */}
                 <button
-                  className="xp-jd-btn"
+                  className="xp-jd-btn xp-jd-ind-dt"
                   style={dockBtn()}
                   onClick={handleIndent}
                   title="Indent (nest into sub-item)"
                 >⇥ Indent</button>
-                {/* ↩ Undo */}
-                <button
-                  className="xp-jd-btn"
-                  style={dockBtn()}
-                  onClick={() => focusedEditor.current?.chain().focus().undo().run()}
-                  title="Undo last change"
-                >↩ Undo</button>
+                {/* ↺ Undo — icon only + mobile tap tooltip */}
+                <div style={{ position: 'relative', flexShrink: 0 }}>
+                  <button
+                    className="xp-jd-btn"
+                    style={{ ...dockBtn(), padding: '5px 9px' }}
+                    onClick={() => { focusedEditor.current?.chain().focus().undo().run(); showUndoRedoTip('undo') }}
+                    title="Undo"
+                    aria-label="Undo"
+                  >
+                    <svg viewBox="0 0 18 18" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M2.5 9A6.5 6.5 0 1 0 4.4 4.4"/>
+                      <polyline points="2 2 2 7.5 7.5 7.5"/>
+                    </svg>
+                  </button>
+                  {undoRedoTip === 'undo' && <div className="xp-jd-tip">Undo</div>}
+                </div>
+                {/* ↻ Redo — icon only + mobile tap tooltip; uses tiptap history redo */}
+                <div style={{ position: 'relative', flexShrink: 0 }}>
+                  <button
+                    className="xp-jd-btn"
+                    style={{ ...dockBtn(), padding: '5px 9px' }}
+                    onClick={() => { focusedEditor.current?.chain().focus().redo().run(); showUndoRedoTip('redo') }}
+                    title="Redo"
+                    aria-label="Redo"
+                  >
+                    <svg viewBox="0 0 18 18" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M15.5 9A6.5 6.5 0 1 1 13.6 4.4"/>
+                      <polyline points="16 2 16 7.5 10.5 7.5"/>
+                    </svg>
+                  </button>
+                  {undoRedoTip === 'redo' && <div className="xp-jd-tip">Redo</div>}
+                </div>
 
                 <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
+
+                {/* ⇥ Indent — mobile secondary slot (hidden on desktop) */}
+                <button
+                  className="xp-jd-btn xp-jd-ind-mo"
+                  style={dockBtn()}
+                  onClick={handleIndent}
+                  title="Indent (nest into sub-item)"
+                >⇥ Indent</button>
 
                 {/* Upload */}
                 <label style={{ ...dockBtn(), cursor: 'pointer' }} title="Upload image" className="xp-jd-btn">
@@ -2298,10 +2389,12 @@ export function JournalEditorContent({
                   title="Open draw canvas"
                 >✏️ Draw</button>
 
-                {/* + Section */}
-                <SectionPicker isDark={isDark} onPick={color => {
-                  insertBlock(createSectionBlock(color), blocks.length - 1)
-                }} />
+                {/* + Section — desktop slot (mobile version is before Undo/Redo) */}
+                <div className="xp-jd-sec-dt" style={{ display: 'contents' }}>
+                  <SectionPicker isDark={isDark} onPick={color => {
+                    insertBlock(createSectionBlock(color), blocks.length - 1)
+                  }} />
+                </div>
 
                 <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
 
@@ -2457,13 +2550,14 @@ export function JournalEditorContent({
                 transition: 'opacity 160ms',
               }}>
                 <button
+                  className="xp-jd-nav-btn"
                   onMouseDown={e => { e.preventDefault(); toolbarScrollRef.current?.scrollBy({ left: 130, behavior: 'smooth' }) }}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.70)', fontSize: 16, padding: '0 4px', lineHeight: 1 }}
                 >›</button>
               </div>
             </div>
 
-            {/* Save Notes — always pinned on right */}
+            {/* Save — always pinned on right */}
             <div style={{
               flexShrink: 0, display: 'flex', alignItems: 'center',
               padding: '8px 12px', borderLeft: `0.5px solid ${dockDiv}`,
@@ -2479,7 +2573,7 @@ export function JournalEditorContent({
                   boxShadow: '0 2px 10px rgba(124,58,237,0.45)',
                   whiteSpace: 'nowrap',
                 }}
-              >Save Notes</button>
+              >Save</button>
             </div>
 
             {/* Voice error toast */}

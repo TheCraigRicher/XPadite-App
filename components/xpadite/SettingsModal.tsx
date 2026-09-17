@@ -91,7 +91,7 @@ type PlanConfig = {
   note?: string
 }
 
-const PLAN_CONFIGS: Record<string, PlanConfig> = {
+export const PLAN_CONFIGS: Record<string, PlanConfig> = {
   'pro-monthly': {
     title: 'Pro Plan',
     subtitle: 'Everything you need to plan, execute and track your progress.',
@@ -355,7 +355,7 @@ function SelectMenu({
   )
 }
 
-function PlanPopup({ planId, isDark, onClose }: {
+export function PlanPopup({ planId, isDark, onClose }: {
   planId: string
   isDark: boolean
   onClose: () => void

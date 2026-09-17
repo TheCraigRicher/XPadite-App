@@ -535,4 +535,19 @@ html, body {
   .xp-aic-body-content {
     padding: 0 !important;
   }
+  /* Back button: hidden on tasks/calendar tabs; arrow-only on coach tab */
+  .xp-aic-tab-tasks .xp-aic-back-btn,
+  .xp-aic-tab-calendar .xp-aic-back-btn {
+    display: none !important;
+  }
+  .xp-aic-tab-coach .xp-aic-back-btn {
+    background: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 10px 8px !important;
+    gap: 0 !important;
+  }
+  .xp-aic-back-txt {
+    display: none;
+  }
 }

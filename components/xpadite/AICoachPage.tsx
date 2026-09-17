@@ -10,6 +10,7 @@ import {
 } from "react";
 import { useApp } from "./AppContext";
 import { CalendarSection } from "./CalendarSection";
+import { PLAN_CONFIGS, PlanPopup } from "./SettingsModal";
 import type {
   AIMessage,
   AIDraftPlan,
@@ -963,6 +964,8 @@ interface AICoachCardProps {
   isActive: boolean;
   onActivate: () => void;
   intent?: ConversationIntent;
+  hasPremiumAccess?: boolean;
+  onPremiumAttempt?: () => void;
 }
 
 function AICoachCard({
@@ -970,6 +973,8 @@ function AICoachCard({
   isActive,
   onActivate,
   intent = 'general',
+  hasPremiumAccess = false,
+  onPremiumAttempt,
 }: AICoachCardProps) {
   const { isDark } = useApp();
   const [text, setText] = useState("");
@@ -1110,6 +1115,7 @@ function AICoachCard({
                   key={g.label}
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (!hasPremiumAccess) { onPremiumAttempt?.(); return; }
                     setText(g.label);
                     taRef.current?.focus();
                   }}
@@ -1136,30 +1142,6 @@ function AICoachCard({
                   <span>{g.label}</span>
                 </button>
               ))}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  taRef.current?.focus();
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 5,
-                  padding: "5px 11px",
-                  borderRadius: 20,
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: isDark ? "rgba(255,255,255,0.38)" : "#a099b8",
-                  background: "transparent",
-                  border: isDark
-                    ? "0.5px dashed rgba(255,255,255,0.14)"
-                    : "1px dashed rgba(180,170,220,0.6)",
-                  transition: "background 140ms ease",
-                }}
-              >
-                + Custom goal
-              </button>
             </div>
           </div>
         </div>
@@ -1203,6 +1185,9 @@ function AICoachCard({
             value={text}
             onChange={(e) => { setText(e.target.value); setShowNudge(false); }}
             onKeyDown={handleKey}
+            onFocus={(e) => {
+              if (!hasPremiumAccess) { e.currentTarget.blur(); onPremiumAttempt?.(); }
+            }}
             disabled={inputDisabled || voiceState !== "idle"}
             placeholder={
               voiceState === "listening"
@@ -1267,7 +1252,10 @@ function AICoachCard({
           >
             {/* Circular mic button */}
             <button
-              onClick={handleMic}
+              onClick={() => {
+                if (!hasPremiumAccess) { onPremiumAttempt?.(); return; }
+                handleMic();
+              }}
               disabled={voiceState === "processing" || inputDisabled}
               title={
                 voiceState === "listening"
@@ -1331,6 +1319,7 @@ function AICoachCard({
             {!isSaved ? (
               <button
                 onClick={() => {
+                  if (!hasPremiumAccess) { onPremiumAttempt?.(); return; }
                   if (isGenerating || isStreaming) return;
                   const userMsgCount = messages.filter((m) => m.role === "user").length;
                   if (userMsgCount < 3) {
@@ -2121,6 +2110,8 @@ interface TaskManagerCardProps {
   onCollapse?: () => void;
   isActive?: boolean;
   onActivate?: () => void;
+  hasPremiumAccess?: boolean;
+  onPremiumAttempt?: () => void;
 }
 
 function TaskManagerCard({
@@ -2128,6 +2119,8 @@ function TaskManagerCard({
   onCollapse: _onCollapse,
   isActive = false,
   onActivate,
+  hasPremiumAccess = false,
+  onPremiumAttempt,
 }: TaskManagerCardProps) {
   const { isDark } = useApp();
   const { draftPlan, planState } = coach;
@@ -2231,6 +2224,7 @@ function TaskManagerCard({
               : `From ${fmtDate(todayStr())} to ${fmtDate(new Date(Date.now() + 6 * 86_400_000).toISOString().split("T")[0])}`}
           </div>
           <button
+            onClick={() => { if (!hasPremiumAccess) onPremiumAttempt?.(); }}
             style={{
               display: "flex",
               alignItems: "center",
@@ -2250,6 +2244,7 @@ function TaskManagerCard({
             🔔 Reminder
           </button>
           <button
+            onClick={() => { if (!hasPremiumAccess) onPremiumAttempt?.(); }}
             style={{
               display: "flex",
               alignItems: "center",
@@ -2428,7 +2423,10 @@ function TaskManagerCard({
           </button>
         ) : (
           <button
-            onClick={draftPlan ? coach.addTasksToCalendar : undefined}
+            onClick={() => {
+              if (!hasPremiumAccess) { onPremiumAttempt?.(); return; }
+              if (draftPlan) coach.addTasksToCalendar();
+            }}
             style={{
               width: "100%",
               padding: "13px 0",
@@ -2641,20 +2639,163 @@ function MotivateConfirmDialog({
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// SECTION 8c — PREMIUM UPGRADE GATE  (trial users only, mobile + desktop)
+// ═══════════════════════════════════════════════════════════════════
+
+function PremiumUpgradeGate({
+  isDark,
+  onDismiss,
+  onPickPlan,
+}: {
+  isDark: boolean;
+  onDismiss: () => void;
+  onPickPlan: (planId: string) => void;
+}) {
+  const pmCfg = PLAN_CONFIGS["premium-monthly"];
+  const pyCfg = PLAN_CONFIGS["premium-yearly"];
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: isDark ? "rgba(4,1,14,0.82)" : "rgba(0,0,0,0.48)",
+        backdropFilter: "blur(6px)",
+        WebkitBackdropFilter: "blur(6px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 20,
+        padding: 16,
+      }}
+    >
+      <div
+        style={{
+          background: isDark ? "rgba(11,5,28,0.98)" : "white",
+          border: isDark
+            ? "0.5px solid rgba(124,58,237,0.45)"
+            : "0.5px solid rgba(124,58,237,0.28)",
+          borderRadius: 20,
+          padding: "24px 20px 20px",
+          maxWidth: 340,
+          width: "100%",
+          boxShadow: isDark
+            ? "0 24px 64px rgba(0,0,0,0.7), 0 0 0 0.5px rgba(124,58,237,0.35)"
+            : "0 12px 40px rgba(0,0,0,0.18)",
+          textAlign: "center",
+          animation: "xp-set-card 240ms cubic-bezier(0.34,1.06,0.64,1) forwards",
+        }}
+      >
+        <p style={{ fontSize: 32, marginBottom: 10 }}>🔒</p>
+        <p
+          style={{
+            fontSize: 17,
+            fontWeight: 800,
+            color: isDark ? "rgba(255,255,255,0.95)" : "#1a1033",
+            marginBottom: 8,
+            lineHeight: 1.3,
+          }}
+        >
+          Unlock AI Coach
+        </p>
+        <p
+          style={{
+            fontSize: 12.5,
+            color: isDark ? "rgba(255,255,255,0.50)" : "#6b6080",
+            lineHeight: 1.6,
+            marginBottom: 20,
+          }}
+        >
+          Upgrade to Premium to start using AI Coach and unlock AI-powered planning, insights, and motivation.
+        </p>
+
+        {/* Premium plan cards — reusing PLAN_CONFIGS data + Settings card design */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+          {/* Premium Monthly — green */}
+          <div
+            className="xp-plan-card xp-plan-green"
+            onClick={() => onPickPlan("premium-monthly")}
+            style={{
+              background: pmCfg.headerGradient,
+              borderRadius: 14,
+              padding: "16px 10px",
+              textAlign: "center",
+              boxShadow: `0 4px 18px ${pmCfg.accentGlow}`,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: 84,
+              cursor: "pointer",
+            }}
+          >
+            <p style={{ fontSize: 11.5, fontWeight: 700, color: "white", lineHeight: 1.4 }}>Premium Monthly</p>
+            <p style={{ fontSize: 20, fontWeight: 800, color: "white", marginTop: 4, lineHeight: 1, letterSpacing: "-0.02em" }}>{pmCfg.price}</p>
+            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.72)", marginTop: 3 }}>{pmCfg.priceLabel} · Upgrade</p>
+          </div>
+
+          {/* Premium Yearly — gold */}
+          <div
+            className="xp-plan-card"
+            onClick={() => onPickPlan("premium-yearly")}
+            style={{
+              background: pyCfg.headerGradient,
+              borderRadius: 14,
+              padding: "16px 10px",
+              textAlign: "center",
+              boxShadow: `0 4px 18px ${pyCfg.accentGlow}`,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: 84,
+              cursor: "pointer",
+            }}
+          >
+            <p style={{ fontSize: 11.5, fontWeight: 700, color: "white", lineHeight: 1.4 }}>Premium Yearly</p>
+            <p style={{ fontSize: 20, fontWeight: 800, color: "white", marginTop: 4, lineHeight: 1, letterSpacing: "-0.02em" }}>{pyCfg.price}</p>
+            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.78)", marginTop: 3 }}>{pyCfg.savings} · Upgrade</p>
+          </div>
+        </div>
+
+        <button
+          onClick={onDismiss}
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            fontSize: 12.5,
+            color: isDark ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.38)",
+            padding: "6px 12px",
+          }}
+        >
+          Maybe later
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // SECTION 9 — AICoachPage  (main export, orchestrator)
 // ═══════════════════════════════════════════════════════════════════
 
 interface AICoachPageProps {
   onClose: () => void;
   startWithMotivate?: boolean;
+  /** true = user has active Premium subscription (full AI Coach access).
+   *  false (default) = free-trial preview mode — interactions trigger upgrade gate. */
+  hasPremiumAccess?: boolean;
 }
 
-export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
+export function AICoachPage({ onClose, startWithMotivate, hasPremiumAccess = false }: AICoachPageProps) {
   const { isDark } = useApp();
   const coach = useAICoach();
 
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("coach");
   const [showMotivateConfirm, setShowMotivateConfirm] = useState(false);
+  const [showUpgradeGate, setShowUpgradeGate] = useState(false);
+  const [upgradeDetailPlan, setUpgradeDetailPlan] = useState<string | null>(null);
   const motivateOnMountRef = useRef(startWithMotivate ?? false);
 
   function handleHeaderMotivate() {
@@ -2697,7 +2838,15 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
   // Single-panel view renderer
   function renderSinglePanel() {
     if (activeTab === "tasks") {
-      return <TaskManagerCard coach={coach} isActive onActivate={() => {}} />;
+      return (
+        <TaskManagerCard
+          coach={coach}
+          isActive
+          onActivate={() => {}}
+          hasPremiumAccess={hasPremiumAccess}
+          onPremiumAttempt={() => setShowUpgradeGate(true)}
+        />
+      );
     }
     if (activeTab === "calendar") {
       return (
@@ -2733,6 +2882,8 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
         isActive
         onActivate={() => {}}
         intent={coach.intent}
+        hasPremiumAccess={hasPremiumAccess}
+        onPremiumAttempt={() => setShowUpgradeGate(true)}
       />
     );
   }
@@ -2759,7 +2910,7 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
 
   const Header = (
     <div
-      className="xp-aic-hdr"
+      className={`xp-aic-hdr xp-aic-tab-${activeTab}`}
       style={{
         display: "flex",
         alignItems: "center",
@@ -2771,9 +2922,12 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
         position: "relative",
       }}
     >
-      {/* Far-left: ← Back */}
-      <button onClick={onClose} style={hdrBtnStyle}>
-        ← Back
+      {/* Far-left: ← Back (pill on desktop; arrow-only on mobile coach tab; hidden on tasks/calendar tabs) */}
+      <button onClick={onClose} className="xp-aic-back-btn" style={hdrBtnStyle} aria-label="Back">
+        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M13 16l-6-6 6-6" />
+        </svg>
+        <span className="xp-aic-back-txt">Back</span>
       </button>
 
       {/* Absolutely centered 🤖 AI Coach pill — independent of button widths */}
@@ -2830,6 +2984,7 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
+        position: "relative",
       }}
     >
       <div
@@ -2859,6 +3014,16 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
         active={activeTab}
         onChange={setActiveTab}
       />
+      {showUpgradeGate && (
+        <PremiumUpgradeGate
+          isDark={isDark}
+          onDismiss={() => setShowUpgradeGate(false)}
+          onPickPlan={(planId) => {
+            setUpgradeDetailPlan(planId);
+            setShowUpgradeGate(false);
+          }}
+        />
+      )}
     </div>
   );
 
@@ -2878,6 +3043,18 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
         }
         @keyframes xp-spin {
           to { transform: rotate(360deg); }
+        }
+        /* Plan card hover effects — mirrors Settings modal, needed when Settings is closed */
+        .xp-plan-card { transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease; cursor: pointer; }
+        .xp-plan-card:hover { transform: translateY(-2px); filter: brightness(1.07); }
+        .xp-plan-green:hover { box-shadow: 0 8px 28px rgba(22,163,74,0.38) !important; }
+        @keyframes xp-set-card {
+          from { opacity: 0; transform: scale(0.96) translateY(12px); }
+          to   { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        @keyframes xp-set-backdrop {
+          from { opacity: 0; }
+          to   { opacity: 1; }
         }
       `}</style>
     <div
@@ -2958,6 +3135,14 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
           />
         )}
       </div>
+      {/* PlanPopup — portal renders at z-index 9900 above all, shown when user picks a plan from upgrade gate */}
+      {upgradeDetailPlan && (
+        <PlanPopup
+          planId={upgradeDetailPlan}
+          isDark={isDark}
+          onClose={() => setUpgradeDetailPlan(null)}
+        />
+      )}
     </div>
     </>
   );

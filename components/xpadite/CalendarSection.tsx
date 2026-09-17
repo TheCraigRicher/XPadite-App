@@ -33,9 +33,10 @@ interface CalendarSectionProps {
   onMonthZoom?: (month: number) => void
   activeMonth?: number | null
   onShareYear?: () => void
+  cleanView?: boolean
 }
 
-export function CalendarSection({ onDayDoubleClick, onMonthZoom, activeMonth, onShareYear }: CalendarSectionProps) {
+export function CalendarSection({ onDayDoubleClick, onMonthZoom, activeMonth, onShareYear, cleanView }: CalendarSectionProps) {
   const [open, setOpen] = useState<Record<string, boolean>>({
     Q1: true, Q2: true, Q3: true, Q4: true,
   })
@@ -106,6 +107,7 @@ export function CalendarSection({ onDayDoubleClick, onMonthZoom, activeMonth, on
                       isZoomed={activeMonth === m}
                       onDayDoubleClick={onDayDoubleClick}
                       onMonthZoom={onMonthZoom}
+                      cleanView={cleanView}
                     />
                   </div>
                 ))}

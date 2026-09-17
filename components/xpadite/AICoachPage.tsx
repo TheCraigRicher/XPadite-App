@@ -1029,6 +1029,7 @@ function AICoachCard({
 
   return (
     <div
+      className="xp-aic-coach-card"
       onClick={onActivate}
       onFocus={onActivate}
       style={{
@@ -1036,7 +1037,7 @@ function AICoachCard({
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
-        borderRadius: 20,
+        borderRadius: "var(--xp-aic-card-radius, 20px)",
         overflow: "hidden",
         cursor: "default",
         // 190ms ease-out on all three properties — no scale, no bounce
@@ -2173,6 +2174,7 @@ function TaskManagerCard({
 
   return (
     <div
+      className="xp-aic-tm-card"
       onClick={onActivate}
       onFocus={onActivate}
       style={{
@@ -2180,7 +2182,7 @@ function TaskManagerCard({
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
-        borderRadius: 20,
+        borderRadius: "var(--xp-aic-card-radius, 20px)",
         overflow: "hidden",
         cursor: "default",
         transition:
@@ -2700,12 +2702,13 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
     if (activeTab === "calendar") {
       return (
         <div
+          className="xp-aic-cal-wrap"
           style={{
             flex: 1,
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",
-            borderRadius: 14,
+            borderRadius: "var(--xp-aic-card-radius, 14px)",
             border: "1.5px solid rgba(124,58,237,0.55)",
             boxShadow: "0 0 0 3px rgba(124,58,237,0.1)",
             background: isDark ? "rgba(8,4,22,0.95)" : "white",
@@ -2717,6 +2720,7 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
               onDayDoubleClick={() => {}}
               onMonthZoom={() => {}}
               activeMonth={null}
+              cleanView
             />
           </div>
         </div>
@@ -2829,6 +2833,7 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
       }}
     >
       <div
+        className="xp-aic-body-content"
         style={{
           flex: 1,
           minHeight: 0,

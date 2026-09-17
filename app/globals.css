@@ -507,6 +507,8 @@ html, body {
     /* Shorter waveform */
     --xp-aic-wave-h: 90px;
     --xp-aic-wave-pad: 10px 10px 8px;
+    /* Sub-panel radius token: 0 = flush edge-to-edge on mobile */
+    --xp-aic-card-radius: 0px;
   }
   /* Full-bleed shell — no outer rounding, fills the full width */
   .xp-aic-shell {
@@ -518,5 +520,19 @@ html, body {
   .xp-aic-hdr {
     padding: 0 8px !important;
     gap: 6px !important;
+  }
+  /* Remove outer card wrappers — full-bleed panels on mobile */
+  .xp-aic-coach-card,
+  .xp-aic-tm-card {
+    border: none !important;
+    box-shadow: none !important;
+  }
+  .xp-aic-cal-wrap {
+    border: none !important;
+    box-shadow: none !important;
+  }
+  /* Remove body content padding — panels touch the shell edges */
+  .xp-aic-body-content {
+    padding: 0 !important;
   }
 }

@@ -215,6 +215,7 @@ interface MonthCardProps {
   isZoomed?: boolean;
   onDayDoubleClick?: (key: string, month: number, day: number) => void;
   onMonthZoom?: (month: number) => void;
+  cleanView?: boolean;
 }
 
 interface Cell {
@@ -230,6 +231,7 @@ export function MonthCard({
   isZoomed = false,
   onDayDoubleClick,
   onMonthZoom,
+  cleanView = false,
 }: MonthCardProps) {
   const { calData, updateDay, setToast, isDark, progressColor: _rawColor, reminders, calendarClean } = useApp();
   const progressColor = resolveProgressColor(_rawColor, isDark);
@@ -541,11 +543,12 @@ export function MonthCard({
             }
 
             const dayData = calData[cell.key];
-            const streak = !calendarClean && isStreakDay(dayData);
-            const productive = !calendarClean && !!dayData?.productive;
-            const hyper = !calendarClean && !!dayData?.hyper;
-            const milestone = !calendarClean && !!dayData?.milestone;
-            const goal = !calendarClean && !!dayData?.goal;
+            const effectiveClean = cleanView || calendarClean;
+            const streak = !effectiveClean && isStreakDay(dayData);
+            const productive = !effectiveClean && !!dayData?.productive;
+            const hyper = !effectiveClean && !!dayData?.hyper;
+            const milestone = !effectiveClean && !!dayData?.milestone;
+            const goal = !effectiveClean && !!dayData?.goal;
             const todayCell = isToday(APP_YEAR, month, cell.day);
             const isSun = cell.dayOfWeek === 0;
             const reminderCount = reminderDates.get(cell.key) ?? 0;

@@ -444,20 +444,20 @@ export function PlanPopup({ planId, isDark, onClose }: {
 
           {/* Pricing */}
           {cfg.savings ? (
-            /* Yearly plans (gold & purple): price + /year + savings badge — centered as a group, inline */
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 6 }}>
-              <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+            /* Yearly plans: price+label centered, savings pill centered on its own row below */
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                 <span style={{ fontSize: 44, fontWeight: 800, color: textPrimary, lineHeight: 1, letterSpacing: '-0.03em' }}>
                   {cfg.price}
                 </span>
                 <span style={{ fontSize: 14, color: textSecondary, fontWeight: 500 }}>
                   {cfg.priceLabel}
                 </span>
-                <span style={{
-                  fontSize: 11, fontWeight: 700, color: cfg.accentColor,
-                  background: cfg.accentGlow, padding: '4px 11px', borderRadius: 8,
-                }}>{cfg.savings}</span>
               </div>
+              <span style={{
+                fontSize: 11, fontWeight: 700, color: cfg.accentColor,
+                background: cfg.accentGlow, padding: '4px 11px', borderRadius: 8,
+              }}>{cfg.savings}</span>
             </div>
           ) : (
             /* Non-yearly plans: price + label centered, no savings badge */

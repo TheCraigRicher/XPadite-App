@@ -4,9 +4,14 @@ import type { JournalBlock, JournalDoc } from './types'
 // ─── ID helpers ───────────────────────────────────────────────────────────────
 
 export function mkId(): string {
-  return typeof crypto !== 'undefined'
-    ? crypto.randomUUID()
-    : Math.random().toString(36).slice(2)
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  // RFC 4122 v4 UUID fallback for environments where crypto.randomUUID is unavailable
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+  })
 }
 
 function now(): number {

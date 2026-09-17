@@ -640,13 +640,13 @@ function WaveformDisplay({
   }, []);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "20px 14px 16px" }}>
+    <div className="xp-aic-wave" style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "var(--xp-aic-wave-pad, 20px 14px 16px)" }}>
       <canvas
         ref={canvasRef}
         style={{
           display: "block",
           width: "100%",
-          height: 150,
+          height: "var(--xp-aic-wave-h, 150px)",
           borderRadius: 6,
         }}
       />
@@ -2759,7 +2759,7 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
       style={{
         display: "flex",
         alignItems: "center",
-        height: 60,
+        height: "var(--xp-aic-hdr-h, 60px)",
         flexShrink: 0,
         borderBottom: "0.5px solid rgba(255,255,255,0.06)",
         padding: "0 12px",
@@ -2876,7 +2876,7 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
         }
       `}</style>
     <div
-      className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-3 ${isDark ? "xp-dark" : "xp-light"}`}
+      className={`xp-aic-overlay fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-3 ${isDark ? "xp-dark" : "xp-light"}`}
       style={{
         background: isDark ? "rgba(0,0,0,0.88)" : "rgba(0,0,0,0.64)",
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -2920,7 +2920,7 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
 
       {/* Modal shell */}
       <div
-        className="w-full rounded-2xl overflow-hidden max-w-[640px]"
+        className="xp-aic-shell w-full rounded-2xl overflow-hidden max-w-[640px]"
         style={{
           position: "relative",
           background: S0,
@@ -2930,9 +2930,9 @@ export function AICoachPage({ onClose, startWithMotivate }: AICoachPageProps) {
           boxShadow: isDark
             ? "0 40px 90px rgba(0,0,0,0.85), 0 0 0 0.5px rgba(124,58,237,0.28), 0 0 72px rgba(124,58,237,0.16), inset 0 1px 0 rgba(255,255,255,0.05)"
             : "0 28px 64px rgba(0,0,0,0.18), 0 0 44px rgba(124,58,237,0.12)",
-          marginBottom: 4,
-          minHeight: "calc(100vh - 32px)",
-          maxHeight: "calc(100vh - 32px)",
+          marginBottom: "var(--xp-aic-shell-mb, 4px)",
+          minHeight: "var(--xp-aic-shell-h, calc(100vh - 32px))",
+          maxHeight: "var(--xp-aic-shell-h, calc(100vh - 32px))",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",

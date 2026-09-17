@@ -488,3 +488,35 @@ html, body {
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
+
+/* ── AI Coach — mobile layout ────────────────────────────────────────────
+   All rules scoped to max-width: 639px so desktop is completely untouched.
+   CSS variables cascade to descendants so they override inline-style values
+   that reference the var() fallback pattern. Layout class overrides beat
+   Tailwind utilities because this file is outside @layer. */
+@media (max-width: 639px) {
+  /* Propagate tokens to the whole AI Coach overlay on mobile */
+  .xp-aic-overlay {
+    /* Remove outer gutter — full-bleed native-app feel */
+    padding: 0;
+    /* Shell height token: 100% of overlay (= 100vh - 56px nav, via parent transform) */
+    --xp-aic-shell-h: 100%;
+    --xp-aic-shell-mb: 0px;
+    /* Tighter header */
+    --xp-aic-hdr-h: 52px;
+    /* Shorter waveform */
+    --xp-aic-wave-h: 90px;
+    --xp-aic-wave-pad: 10px 10px 8px;
+  }
+  /* Full-bleed shell — no outer rounding, fills the full width */
+  .xp-aic-shell {
+    border-radius: 0;
+    max-width: 100%;
+  }
+  /* Tighter header padding on mobile (inline style uses CSS var for height;
+     padding / gap are overridden here since they are inline-only) */
+  .xp-aic-hdr {
+    padding: 0 8px !important;
+    gap: 6px !important;
+  }
+}

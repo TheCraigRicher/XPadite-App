@@ -133,6 +133,8 @@ interface JournalTextBlockProps {
   block: JournalBlock
   isDark: boolean
   isOnlyBlock: boolean
+  isFirstBlock?: boolean
+  forcedContent?: { content: string; seq: number }
   onContentChange: (id: string, content: string) => void
   onFocus: (editor: Editor) => void
   onSelectionUpdate: () => void
@@ -148,7 +150,7 @@ interface JournalTextBlockProps {
 }
 
 const JournalTextBlock = React.memo(function JournalTextBlock({
-  block, isDark, isOnlyBlock,
+  block, isDark, isOnlyBlock, isFirstBlock = false, forcedContent,
   onContentChange, onFocus, onSelectionUpdate,
   onDelete, onMoveActivate, onResizeActivate, onColorChange, onNameChange,
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
@@ -157,8 +159,9 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
   const [showColorPick,  setShowColorPick]  = useState(false)
   const [addingTitle,    setAddingTitle]    = useState(false)
   const [titleValue,     setTitleValue]     = useState(block.name ?? '')
-  const menuRef      = useRef<HTMLDivElement>(null)
-  const titleInputRef = useRef<HTMLInputElement>(null)
+  const menuRef           = useRef<HTMLDivElement>(null)
+  const titleInputRef     = useRef<HTMLInputElement>(null)
+  const prevForcedSeqRef  = useRef<number>(-1)
 
   const editor = useEditor({
     extensions: [
@@ -171,7 +174,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
       TaskList,
       TaskItem.configure({ nested: false }),
       Placeholder.configure({
-        placeholder: block.type === 'section'
+        placeholder: (block.type === 'section' && !isFirstBlock)
           ? 'Add section content…'
           : 'Write your plans, reflections, gratitude, journal entries, brain dumps, ideas, or mind maps here…',
       }),
@@ -190,6 +193,13 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
     editor.commands.setContent(parseJournalContent(block.content || ''), { emitUpdate: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, block.id])
+
+  useEffect(() => {
+    if (!editor || !forcedContent || forcedContent.seq === prevForcedSeqRef.current) return
+    prevForcedSeqRef.current = forcedContent.seq
+    editor.commands.setContent(parseJournalContent(forcedContent.content), { emitUpdate: false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, forcedContent])
 
   useEffect(() => {
     if (!editor) return
@@ -1030,6 +1040,13 @@ export function JournalEditorContent({
 }: JournalEditorContentProps) {
 
   // ── State ───────────────────────────────────────────────────────────────────
+  // ── Editor-wide history (mobile undo/redo) ───────────────────────────────────
+  type HistoryEntry = { blocks: JournalBlock[]; contents: Record<string, string> }
+  const historyStackRef        = useRef<HistoryEntry[]>([])
+  const historyPosRef          = useRef<number>(-1)
+  const historyTextDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [historyRestoreSeq, setHistoryRestoreSeq] = useState(0)
+
   const [blocks, setBlocks]             = useState<JournalBlock[]>([])
   const [saveStatus, setSaveStatus]     = useState<'idle' | 'saved'>('idle')
   const [showEmoji, setShowEmoji]       = useState(false)
@@ -1181,7 +1198,7 @@ export function JournalEditorContent({
     setVoiceError(null)
 
     const doc = parseJournalDoc(rawContent)
-    const initialBlocks = doc.blocks.length > 0 ? doc.blocks : [createTextBlock()]
+    const initialBlocks = doc.blocks.length > 0 ? doc.blocks : [createSectionBlock('lavender')]
     setBlocks(initialBlocks)
     blocksRef.current = initialBlocks
     contentMapRef.current.clear()
@@ -1190,6 +1207,10 @@ export function JournalEditorContent({
         contentMapRef.current.set(b.id, b.content)
       }
     })
+    // Initialize editor-wide history for this entry
+    historyStackRef.current = []
+    historyPosRef.current = -1
+    if (historyTextDebounceRef.current) { clearTimeout(historyTextDebounceRef.current); historyTextDebounceRef.current = null }
     // Load timer sessions for this date
     const sessions = doc.timerSessions ?? []
     setTimerSessions(sessions)
@@ -1212,6 +1233,7 @@ export function JournalEditorContent({
     setIsDirty(false)
     setShowExitDialog(false)
     pendingNavRef.current = null
+    pushHistoryRef.current(true)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateKey])
 
@@ -1250,10 +1272,12 @@ export function JournalEditorContent({
   }, [buildDocStr, onPersist])
 
   // ── Block content change ────────────────────────────────────────────────────
+  const pushHistoryRef = useRef<(immediate?: boolean) => void>(() => {})
   const onBlockContentChange = useCallback((id: string, content: string) => {
     contentMapRef.current.set(id, content)
     onContentChange(buildDocStr())
     scheduleSave()
+    pushHistoryRef.current()
   }, [buildDocStr, onContentChange, scheduleSave])
 
   // ── Editor focus tracking ───────────────────────────────────────────────────
@@ -1349,16 +1373,18 @@ export function JournalEditorContent({
     setBlocks(next)
     onContentChange(buildDocStr())
     scheduleSave()
+    pushHistory(true)
   }
 
   function deleteBlock(id: string) {
     contentMapRef.current.delete(id)
     const filtered = blocksRef.current.filter(b => b.id !== id)
-    const next = filtered.length > 0 ? filtered : [createTextBlock()]
+    const next = filtered.length > 0 ? filtered : [createSectionBlock('lavender')]
     blocksRef.current = next
     setBlocks(next)
     onContentChange(buildDocStr())
     scheduleSave()
+    pushHistory(true)
   }
 
   function moveBlock(id: string, delta: -1 | 1) {
@@ -1368,7 +1394,6 @@ export function JournalEditorContent({
     const newIdx = idx + delta
     if (newIdx < 0 || newIdx >= current.length) return
     const next = [...current]
-    // Preserve live content before swap
     next[idx]    = { ...next[idx],    content: contentMapRef.current.get(next[idx].id)    ?? next[idx].content    ?? '' }
     next[newIdx] = { ...next[newIdx], content: contentMapRef.current.get(next[newIdx].id) ?? next[newIdx].content ?? '' }
     ;[next[idx], next[newIdx]] = [next[newIdx], next[idx]]
@@ -1376,6 +1401,7 @@ export function JournalEditorContent({
     setBlocks(next)
     onContentChange(buildDocStr())
     scheduleSave()
+    pushHistory(true)
   }
 
   function updateBlock(id: string, updates: Partial<JournalBlock>) {
@@ -1384,6 +1410,7 @@ export function JournalEditorContent({
     setBlocks(next)
     onContentChange(buildDocStr())
     scheduleSave()
+    pushHistory(true)
   }
 
   function setBlockWidth(id: string, width: number) {
@@ -1393,6 +1420,63 @@ export function JournalEditorContent({
     onContentChange(buildDocStr())
     scheduleSave()
   }
+
+  // ── Editor-wide history helpers ──────────────────────────────────────────────
+
+  function captureHistoryState(): HistoryEntry {
+    const contents: Record<string, string> = {}
+    blocksRef.current.forEach(b => {
+      if (b.type === 'text' || b.type === 'section') {
+        contents[b.id] = contentMapRef.current.get(b.id) ?? ''
+      }
+    })
+    return { blocks: blocksRef.current.map(b => ({ ...b })), contents }
+  }
+
+  function pushHistory(immediate?: boolean) {
+    if (historyTextDebounceRef.current) {
+      clearTimeout(historyTextDebounceRef.current)
+      historyTextDebounceRef.current = null
+    }
+    const doPush = () => {
+      historyStackRef.current = historyStackRef.current.slice(0, historyPosRef.current + 1)
+      historyStackRef.current.push(captureHistoryState())
+      if (historyStackRef.current.length > 50) historyStackRef.current.shift()
+      historyPosRef.current = historyStackRef.current.length - 1
+    }
+    if (immediate) doPush()
+    else historyTextDebounceRef.current = setTimeout(doPush, 800)
+  }
+
+  function customUndo() {
+    if (historyTextDebounceRef.current) {
+      clearTimeout(historyTextDebounceRef.current)
+      historyTextDebounceRef.current = null
+    }
+    if (historyPosRef.current <= 0) return
+    historyPosRef.current -= 1
+    const entry = historyStackRef.current[historyPosRef.current]
+    if (!entry) return
+    contentMapRef.current = new Map(Object.entries(entry.contents))
+    const restored = entry.blocks.map(b => ({ ...b }))
+    blocksRef.current = restored
+    setBlocks(restored)
+    setHistoryRestoreSeq(s => s + 1)
+  }
+
+  function customRedo() {
+    if (historyPosRef.current >= historyStackRef.current.length - 1) return
+    historyPosRef.current += 1
+    const entry = historyStackRef.current[historyPosRef.current]
+    if (!entry) return
+    contentMapRef.current = new Map(Object.entries(entry.contents))
+    const restored = entry.blocks.map(b => ({ ...b }))
+    blocksRef.current = restored
+    setBlocks(restored)
+    setHistoryRestoreSeq(s => s + 1)
+  }
+
+  pushHistoryRef.current = pushHistory
 
   // 8-direction drag-to-resize — handles width %, height px, and aspect-constrained corners
   function startBlockResize(blockId: string, dir: ResizeDir, e: React.MouseEvent) {
@@ -1913,21 +1997,13 @@ export function JournalEditorContent({
         .xp-j-sec-wrap:hover .xp-j-add-title { opacity: 0.45 !important; }
         /* Responsive collapse */
         @media (max-width: 640px) {
-          /* Swap masonry grid for a simple flex column — eliminates span-tracking
-             overlap where 4px auto-rows cause block content to overflow into adjacent cells */
           .xp-j-grid { display: flex !important; flex-direction: column !important; }
           .xp-j-grid > * { width: 100% !important; flex-shrink: 0 !important; }
-          /* Extra clearance so the last block scrolls completely above the dock toolbar */
           .xp-j-content-scroll { padding-bottom: 24px !important; }
-          /* ROOT FIX: The default text block uses a float:left;height:0 placeholder that
-             renders visually taller than its 32px layout height on mobile (2 wrapped lines
-             ≈ 49px at 14px/1.75lh). Enforcing an 80px minimum ensures the section card
-             starts well below the placeholder text, eliminating the visual collision. */
           .xp-j-grid > :first-child .xp-j-prose { min-height: 80px !important; }
-          /* Toolbar mobile/desktop slot switching */
           .xp-jd-sec-dt { display: none !important; }
           .xp-jd-ind-dt { display: none !important; }
-          /* Active nav arrows: larger + tinted pill so they read as navigation controls */
+          .xp-jd-mic-toolbar { display: none !important; }
           .xp-jd-nav-btn {
             font-size: 20px !important;
             color: rgba(255,255,255,0.92) !important;
@@ -1937,9 +2013,9 @@ export function JournalEditorContent({
           }
         }
         @media (min-width: 641px) {
-          /* Hide mobile-only toolbar slots on desktop */
           .xp-jd-sec-mo { display: none !important; }
           .xp-jd-ind-mo { display: none !important; }
+          .xp-jd-mic-nav { display: none !important; }
         }
         /* Undo/Redo tap tooltip — mobile only */
         .xp-jd-tip {
@@ -2186,6 +2262,8 @@ export function JournalEditorContent({
                             block={block}
                             isDark={isDark}
                             isOnlyBlock={blocks.length === 1}
+                            isFirstBlock={idx === 0}
+                            forcedContent={{ content: contentMapRef.current.get(block.id) ?? '', seq: historyRestoreSeq }}
                             onContentChange={onBlockContentChange}
                             onFocus={onEditorFocus}
                             onSelectionUpdate={onEditorSelectionUpdate}
@@ -2324,7 +2402,11 @@ export function JournalEditorContent({
                   <button
                     className="xp-jd-btn"
                     style={{ ...dockBtn(), padding: '5px 9px' }}
-                    onClick={() => { focusedEditor.current?.chain().focus().undo().run(); showUndoRedoTip('undo') }}
+                    onClick={() => {
+                      if (typeof window !== 'undefined' && window.innerWidth < 641) customUndo()
+                      else focusedEditor.current?.chain().focus().undo().run()
+                      showUndoRedoTip('undo')
+                    }}
                     title="Undo"
                     aria-label="Undo"
                   >
@@ -2335,12 +2417,16 @@ export function JournalEditorContent({
                   </button>
                   {undoRedoTip === 'undo' && <div className="xp-jd-tip">Undo</div>}
                 </div>
-                {/* ↻ Redo — icon only + mobile tap tooltip; uses tiptap history redo */}
+                {/* ↻ Redo — icon only + mobile tap tooltip */}
                 <div style={{ position: 'relative', flexShrink: 0 }}>
                   <button
                     className="xp-jd-btn"
                     style={{ ...dockBtn(), padding: '5px 9px' }}
-                    onClick={() => { focusedEditor.current?.chain().focus().redo().run(); showUndoRedoTip('redo') }}
+                    onClick={() => {
+                      if (typeof window !== 'undefined' && window.innerWidth < 641) customRedo()
+                      else focusedEditor.current?.chain().focus().redo().run()
+                      showUndoRedoTip('redo')
+                    }}
                     title="Redo"
                     aria-label="Redo"
                   >
@@ -2515,9 +2601,9 @@ export function JournalEditorContent({
                   )
                 })()}
 
-                {/* Mic */}
+                {/* Mic — visible on desktop; on mobile it moves to the lower nav row */}
                 <button
-                  className={`xp-jd-btn${isRecording ? ' xp-j-mic-rec' : ''}`}
+                  className={`xp-jd-btn xp-jd-mic-toolbar${isRecording ? ' xp-j-mic-rec' : ''}`}
                   onClick={handleVoiceToggle}
                   title={isRecording ? 'Recording… Tap to stop' : 'Voice to Notes'}
                   style={{
@@ -2645,6 +2731,21 @@ export function JournalEditorContent({
                   title="Planner/Journal Editor"
                 >✏️ Editor</button>
               )}
+              {/* Mic — mobile only (hidden on desktop via CSS), always active in Editor view */}
+              <button
+                className={`xp-jd-btn xp-jd-mic-nav${isRecording ? ' xp-j-mic-rec' : ''}`}
+                onClick={handleVoiceToggle}
+                title={isRecording ? 'Recording… Tap to stop' : 'Voice to Notes'}
+                style={{
+                  ...dockBtn(isRecording),
+                  flexShrink: 0,
+                  ...(isRecording ? {
+                    background: 'rgba(239,68,68,0.22)',
+                    border: '0.5px solid rgba(239,68,68,0.65)',
+                    color: '#fca5a5',
+                  } : {}),
+                }}
+              >🎙 {isRecording ? 'Stop' : 'Mic'}</button>
             </div>
           )}
 

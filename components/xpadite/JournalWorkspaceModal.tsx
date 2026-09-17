@@ -681,6 +681,22 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             </button>
           )
         })}
+        {/* Mic slot — mobile only, disabled when not in Editor view */}
+        <button
+          className="xp-jws-mic-nav"
+          disabled
+          style={{
+            alignItems: 'center', gap: 6,
+            padding: '6px 14px', borderRadius: 8,
+            fontSize: 12, fontWeight: 400,
+            cursor: 'not-allowed',
+            background: 'rgba(124,58,237,0.06)',
+            border: '0.5px solid rgba(124,58,237,0.16)',
+            color: 'rgba(255,255,255,0.55)',
+            opacity: 0.35,
+          }}
+          title="Microphone (available in Editor)"
+        >🎙 Mic</button>
       </div>
     </>
   )
@@ -1297,6 +1313,22 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             </button>
           )
         })}
+        {/* Mic slot — mobile only, disabled when not in Editor view */}
+        <button
+          className="xp-jws-mic-nav"
+          disabled
+          style={{
+            alignItems: 'center', gap: 6,
+            padding: '6px 14px', borderRadius: 8,
+            fontSize: 12, fontWeight: 400,
+            cursor: 'not-allowed',
+            background: 'rgba(124,58,237,0.06)',
+            border: '0.5px solid rgba(124,58,237,0.16)',
+            color: 'rgba(255,255,255,0.55)',
+            opacity: 0.35,
+          }}
+          title="Microphone (available in Editor)"
+        >🎙 Mic</button>
       </div>
     </>
   )
@@ -1342,6 +1374,8 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           background-size: 300% 300%;
           animation: xpJHdrFlow 14s ease infinite;
         }
+        .xp-jws-mic-nav { display: none !important; }
+        @media (max-width: 640px) { .xp-jws-mic-nav { display: flex !important; } }
       `}</style>
 
       {/* Overlay */}

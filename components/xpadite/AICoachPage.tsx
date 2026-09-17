@@ -1082,7 +1082,7 @@ function AICoachCard({
 
       {/* ── Suggested Goals (empty state only) ── */}
       {messages.length === 0 && !isStreaming && !inputDisabled && (
-        <div style={{ padding: "0 12px 14px", flexShrink: 0 }}>
+        <div style={{ padding: "0 8px 12px", flexShrink: 0 }}>
           <div
             style={{
               borderRadius: 14,
@@ -1090,7 +1090,7 @@ function AICoachCard({
                 ? "1px solid rgba(124,58,237,0.18)"
                 : "1px solid rgba(229,224,255,0.9)",
               background: isDark ? "rgba(124,58,237,0.05)" : "white",
-              padding: "10px 12px",
+              padding: "10px 8px 12px",
               boxShadow: isDark ? "none" : "0 1px 4px rgba(124,58,237,0.06)",
             }}
           >
@@ -1099,13 +1099,14 @@ function AICoachCard({
                 fontSize: 11,
                 fontWeight: 700,
                 color: isDark ? "rgba(196,168,255,0.7)" : "#6d28d9",
-                marginBottom: 8,
+                marginBottom: 10,
                 letterSpacing: "0.04em",
               }}
             >
               ✨ Suggested Goals
             </p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {/* All three pills on one row — flex:1 distributes width equally; nowrap prevents row breaks */}
+            <div style={{ display: "flex", flexWrap: "nowrap", gap: 5 }}>
               {[
                 { emoji: "💪", label: "Build muscle" },
                 { emoji: "🎓", label: "College Project" },
@@ -1120,13 +1121,16 @@ function AICoachCard({
                     taRef.current?.focus();
                   }}
                   style={{
+                    flex: "1 1 0",
+                    minWidth: 0,
                     display: "flex",
                     alignItems: "center",
-                    gap: 5,
-                    padding: "5px 11px",
+                    justifyContent: "center",
+                    gap: 3,
+                    padding: "5px 4px",
                     borderRadius: 20,
                     cursor: "pointer",
-                    fontSize: 12,
+                    fontSize: 10.5,
                     fontWeight: 500,
                     color: isDark ? "rgba(255,255,255,0.82)" : "#3d3456",
                     background: isDark
@@ -1136,10 +1140,12 @@ function AICoachCard({
                       ? "0.5px solid rgba(124,58,237,0.28)"
                       : "1px solid rgba(209,200,255,0.8)",
                     transition: "background 140ms ease",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
                   }}
                 >
-                  <span>{g.emoji}</span>
-                  <span>{g.label}</span>
+                  <span style={{ fontSize: 11.5, lineHeight: 1, flexShrink: 0 }}>{g.emoji}</span>
+                  <span style={{ overflow: "hidden" }}>{g.label}</span>
                 </button>
               ))}
             </div>
@@ -2718,7 +2724,7 @@ function PremiumUpgradeGate({
             style={{
               background: pmCfg.headerGradient,
               borderRadius: 14,
-              padding: "16px 10px",
+              padding: "14px 10px 12px",
               textAlign: "center",
               boxShadow: `0 4px 18px ${pmCfg.accentGlow}`,
               display: "flex",
@@ -2727,11 +2733,19 @@ function PremiumUpgradeGate({
               justifyContent: "center",
               minHeight: 84,
               cursor: "pointer",
+              gap: 0,
             }}
           >
             <p style={{ fontSize: 11.5, fontWeight: 700, color: "white", lineHeight: 1.4 }}>Premium Monthly</p>
             <p style={{ fontSize: 20, fontWeight: 800, color: "white", marginTop: 4, lineHeight: 1, letterSpacing: "-0.02em" }}>{pmCfg.price}</p>
-            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.72)", marginTop: 3 }}>{pmCfg.priceLabel} · Upgrade</p>
+            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.72)", marginTop: 3 }}>{pmCfg.priceLabel}</p>
+            <p style={{
+              fontSize: 10, fontWeight: 600,
+              color: "rgba(255,255,255,0.92)",
+              marginTop: 8, letterSpacing: "0.03em",
+              background: "rgba(255,255,255,0.15)",
+              borderRadius: 20, padding: "2px 10px",
+            }}>Explore Plan</p>
           </div>
 
           {/* Premium Yearly — gold */}
@@ -2741,7 +2755,7 @@ function PremiumUpgradeGate({
             style={{
               background: pyCfg.headerGradient,
               borderRadius: 14,
-              padding: "16px 10px",
+              padding: "14px 10px 12px",
               textAlign: "center",
               boxShadow: `0 4px 18px ${pyCfg.accentGlow}`,
               display: "flex",
@@ -2750,11 +2764,19 @@ function PremiumUpgradeGate({
               justifyContent: "center",
               minHeight: 84,
               cursor: "pointer",
+              gap: 0,
             }}
           >
             <p style={{ fontSize: 11.5, fontWeight: 700, color: "white", lineHeight: 1.4 }}>Premium Yearly</p>
             <p style={{ fontSize: 20, fontWeight: 800, color: "white", marginTop: 4, lineHeight: 1, letterSpacing: "-0.02em" }}>{pyCfg.price}</p>
-            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.78)", marginTop: 3 }}>{pyCfg.savings} · Upgrade</p>
+            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.78)", marginTop: 3 }}>{pyCfg.savings}</p>
+            <p style={{
+              fontSize: 10, fontWeight: 600,
+              color: "rgba(255,255,255,0.92)",
+              marginTop: 8, letterSpacing: "0.03em",
+              background: "rgba(255,255,255,0.15)",
+              borderRadius: 20, padding: "2px 10px",
+            }}>Explore Plan</p>
           </div>
         </div>
 
@@ -3020,7 +3042,8 @@ export function AICoachPage({ onClose, startWithMotivate, hasPremiumAccess = fal
           onDismiss={() => setShowUpgradeGate(false)}
           onPickPlan={(planId) => {
             setUpgradeDetailPlan(planId);
-            setShowUpgradeGate(false);
+            // Gate stays visible — PlanPopup renders above it at z-index 9900.
+            // When PlanPopup closes, the gate reappears automatically.
           }}
         />
       )}

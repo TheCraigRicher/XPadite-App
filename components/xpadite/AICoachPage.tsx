@@ -1263,7 +1263,10 @@ function AICoachCard({
           >
             {/* LEFT — Motivate Me (equal width to Generate Plan via 1fr grid) */}
             <button
-              onClick={onMotivate}
+              onClick={() => {
+                if (!hasPremiumAccess) { onPremiumAttempt?.(); return; }
+                onMotivate?.();
+              }}
               style={{
                 background: "transparent",
                 borderTop: "none",

@@ -522,7 +522,7 @@ export function MonthCard({
         </div>
 
         {/* Calendar grid — natural compact height; spacer below pushes Share button to bottom */}
-        <div className="grid grid-cols-7">
+        <div className="xp-cal-grid grid grid-cols-7">
           {cells.map((cell) => {
             if (cell.isGhost) {
               return (

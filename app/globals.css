@@ -42,17 +42,23 @@ body {
   .xp-calendar-card {
     --xp-prod-ring-spread: 3px;
   }
-  /* Pass 2: enlarge inner filled circle — inset 13% = 74% diameter. */
+  /* 1. Productive circles — inset 11% = 78% diameter (tad larger than 13%/74%). */
   .xp-calendar-card .xp-prod-circle {
-    inset: 13%;
+    inset: 11%;
   }
-  /* Remove outer ring on mobile year calendar. More-specific selector beats
-     the .xp-prod-circle[data-productive] rule above — no !important needed. */
+  /* Remove outer ring on mobile year calendar. */
   .xp-calendar-card .xp-prod-circle[data-productive] {
     box-shadow: none;
   }
-  /* Month container/cards restored — background, border, and padding return
-     to their original values from MonthCard's inline styles and Tailwind classes. */
+  /* 2. Week-row vertical breathing room — 2px row-gap between calendar rows. */
+  .xp-calendar-card .xp-cal-grid {
+    row-gap: 2px;
+  }
+  /* 3. Month container: reduce L/R padding from 4px → 2px, keep T/B at 4px. */
+  .xp-calendar-card .xp-month-card {
+    padding-left: 2px;
+    padding-right: 2px;
+  }
 }
 
 /* ─── Premium card hover lift ───────────────────────────── */

@@ -946,7 +946,7 @@ function ThemedApp(_props: XpaditeAppProps) {
             className="sm:hidden"
             style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 56, zIndex: 49, transform: 'translateZ(0)', overflow: 'hidden' }}
           >
-            <AICoachPage onClose={() => setMobileTab('calendar')} startWithMotivate={false} />
+            <AICoachPage onClose={() => setMobileTab('calendar')} startWithMotivate={false} showBackButton={false} />
           </div>
         )}
       </div>

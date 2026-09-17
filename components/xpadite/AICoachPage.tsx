@@ -2366,6 +2366,7 @@ function TaskManagerCard({
 
       {/* ── Add to Calendar button ── */}
       <div
+        className="xp-aic-addbtn-area"
         style={{
           padding: "10px 12px 12px",
           borderTop: isDark
@@ -2808,9 +2809,12 @@ interface AICoachPageProps {
   /** true = user has active Premium subscription (full AI Coach access).
    *  false (default) = free-trial preview mode — interactions trigger upgrade gate. */
   hasPremiumAccess?: boolean;
+  /** false = hide back arrow (entered via bottom nav; navigation is handled by bottom tabs).
+   *  true (default) = show back arrow (entered via burger menu or overlay). */
+  showBackButton?: boolean;
 }
 
-export function AICoachPage({ onClose, startWithMotivate, hasPremiumAccess = false }: AICoachPageProps) {
+export function AICoachPage({ onClose, startWithMotivate, hasPremiumAccess = false, showBackButton = true }: AICoachPageProps) {
   const { isDark } = useApp();
   const coach = useAICoach();
 
@@ -2884,9 +2888,11 @@ export function AICoachPage({ onClose, startWithMotivate, hasPremiumAccess = fal
             boxShadow: "0 0 0 3px rgba(124,58,237,0.1)",
             background: isDark ? "rgba(8,4,22,0.95)" : "white",
             transition: "box-shadow 220ms ease",
+            cursor: !hasPremiumAccess ? "pointer" : undefined,
           }}
+          onClick={!hasPremiumAccess ? () => setShowUpgradeGate(true) : undefined}
         >
-          <div style={{ flex: 1, overflowY: "auto" }}>
+          <div className="xp-aic-cal-scroll" style={{ flex: 1, overflowY: "auto" }}>
             <CalendarSection
               onDayDoubleClick={() => {}}
               onMonthZoom={() => {}}
@@ -2944,13 +2950,15 @@ export function AICoachPage({ onClose, startWithMotivate, hasPremiumAccess = fal
         position: "relative",
       }}
     >
-      {/* Far-left: ← Back (pill on desktop; arrow-only on mobile coach tab; hidden on tasks/calendar tabs) */}
-      <button onClick={onClose} className="xp-aic-back-btn" style={hdrBtnStyle} aria-label="Back">
-        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M13 16l-6-6 6-6" />
-        </svg>
-        <span className="xp-aic-back-txt">Back</span>
-      </button>
+      {/* Far-left: ← Back — shown when entered via burger menu; hidden when entered via bottom nav */}
+      {showBackButton && (
+        <button onClick={onClose} className="xp-aic-back-btn" style={hdrBtnStyle} aria-label="Back">
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M13 16l-6-6 6-6" />
+          </svg>
+          <span className="xp-aic-back-txt">Back</span>
+        </button>
+      )}
 
       {/* Absolutely centered 🤖 AI Coach pill — independent of button widths */}
       <div
@@ -2986,14 +2994,16 @@ export function AICoachPage({ onClose, startWithMotivate, hasPremiumAccess = fal
         </div>
       </div>
 
-      {/* Far-right: Motivate Me */}
-      <button
-        onClick={handleHeaderMotivate}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all duration-150 hover:opacity-85 hover:scale-105 flex-shrink-0"
-        style={{ background: '#7c3aed', border: '0.5px solid rgba(167,139,250,0.35)', marginLeft: "auto" }}
-      >
-        Motivate Me 🔥
-      </button>
+      {/* Far-right: Motivate Me — coach tab only (not shown on tasks or calendar tabs) */}
+      {activeTab === "coach" && (
+        <button
+          onClick={handleHeaderMotivate}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all duration-150 hover:opacity-85 hover:scale-105 flex-shrink-0"
+          style={{ background: '#7c3aed', border: '0.5px solid rgba(167,139,250,0.35)', marginLeft: "auto" }}
+        >
+          Motivate Me 🔥
+        </button>
+      )}
     </div>
   );
 
@@ -3071,6 +3081,11 @@ export function AICoachPage({ onClose, startWithMotivate, hasPremiumAccess = fal
         .xp-plan-card { transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease; cursor: pointer; }
         .xp-plan-card:hover { transform: translateY(-2px); filter: brightness(1.07); }
         .xp-plan-green:hover { box-shadow: 0 8px 28px rgba(22,163,74,0.38) !important; }
+        /* Mobile: calendar slot inner padding so content doesn't press against card edges */
+        @media (max-width: 640px) {
+          .xp-aic-cal-scroll { padding: 0 8px; }
+          .xp-aic-addbtn-area { padding-left: 14px !important; padding-right: 14px !important; padding-bottom: 16px !important; }
+        }
         @keyframes xp-set-card {
           from { opacity: 0; transform: scale(0.96) translateY(12px); }
           to   { opacity: 1; transform: scale(1) translateY(0); }

@@ -966,6 +966,7 @@ interface AICoachCardProps {
   intent?: ConversationIntent;
   hasPremiumAccess?: boolean;
   onPremiumAttempt?: () => void;
+  onMotivate?: () => void;
 }
 
 function AICoachCard({
@@ -975,6 +976,7 @@ function AICoachCard({
   intent = 'general',
   hasPremiumAccess = false,
   onPremiumAttempt,
+  onMotivate,
 }: AICoachCardProps) {
   const { isDark } = useApp();
   const [text, setText] = useState("");
@@ -1244,19 +1246,47 @@ function AICoachCard({
             </div>
           )}
 
-          {/* Bottom row: mic (left) + Generate Plan (right) */}
+          {/* ── Unified segmented action bar: 1fr | mic | 1fr grid ensures equal outer widths ── */}
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "6px 8px 8px",
-              borderTop: isDark
-                ? "0.5px solid rgba(255,255,255,0.05)"
-                : "0.5px solid rgba(229,224,255,0.8)",
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) 56px minmax(0, 1fr)",
+              margin: "6px 8px 8px",
+              borderRadius: 13,
+              overflow: "hidden",
+              background: "linear-gradient(135deg, #5b21b6 0%, #7c3aed 52%, #8b5cf6 100%)",
+              border: "1px solid rgba(124,58,237,0.45)",
+              boxShadow: isDark
+                ? "0 3px 18px rgba(0,0,0,0.35), 0 0 0 0.5px rgba(167,139,250,0.10)"
+                : "0 3px 16px rgba(91,33,182,0.30)",
             }}
           >
-            {/* Circular mic button */}
+            {/* LEFT — Motivate Me (equal width to Generate Plan via 1fr grid) */}
+            <button
+              onClick={onMotivate}
+              style={{
+                background: "transparent",
+                borderTop: "none",
+                borderBottom: "none",
+                borderLeft: "none",
+                borderRight: "1px solid rgba(255,255,255,0.16)",
+                color: "rgba(255,255,255,0.93)",
+                fontSize: 12.5,
+                fontWeight: 600,
+                padding: "11px 6px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                whiteSpace: "nowrap",
+                transition: "background 150ms ease",
+                letterSpacing: "0.01em",
+              }}
+            >
+              🔥 Motivate Me
+            </button>
+
+            {/* CENTER — Mic (56px fixed, mathematically centered in the bar) */}
             <button
               onClick={() => {
                 if (!hasPremiumAccess) { onPremiumAttempt?.(); return; }
@@ -1271,24 +1301,16 @@ function AICoachCard({
                     : "Voice input"
               }
               style={{
-                width: 38,
-                height: 38,
-                borderRadius: "50%",
-                flexShrink: 0,
                 background:
                   voiceState === "listening"
-                    ? "rgba(239,68,68,0.14)"
-                    : voiceState === "processing"
-                      ? "rgba(109,40,217,0.18)"
-                      : inputDisabled && voiceState === "idle"
-                        ? "rgba(163,117,242,0.10)"
-                        : "linear-gradient(145deg, #6d28d9 0%, #8b5cf6 100%)",
-                border:
-                  voiceState === "listening"
-                    ? "1.5px solid rgba(239,68,68,0.50)"
-                    : inputDisabled && voiceState === "idle"
-                      ? "1px solid rgba(163,117,242,0.18)"
-                      : "none",
+                    ? "rgba(239,68,68,0.32)"
+                    : voiceState === "processing" || (inputDisabled && voiceState === "idle")
+                      ? "rgba(0,0,0,0.20)"
+                      : "rgba(0,0,0,0.16)",
+                borderTop: "none",
+                borderBottom: "none",
+                borderLeft: "none",
+                borderRight: "1px solid rgba(255,255,255,0.16)",
                 cursor:
                   voiceState === "processing" || inputDisabled
                     ? "not-allowed"
@@ -1296,32 +1318,24 @@ function AICoachCard({
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                transition: "background 200ms, box-shadow 200ms",
+                transition: "background 200ms",
                 boxShadow:
                   voiceState === "listening"
-                    ? "0 0 0 4px rgba(239,68,68,0.10), 0 0 0 7px rgba(239,68,68,0.05)"
-                    : voiceState === "idle" && !inputDisabled
-                      ? "0 2px 10px rgba(124,58,237,0.42), 0 0 0 2px rgba(124,58,237,0.10)"
-                      : "none",
-                opacity: voiceState === "processing" ? 0.65 : 1,
+                    ? "inset 0 0 0 1.5px rgba(239,68,68,0.55)"
+                    : "inset 0 1px 0 rgba(255,255,255,0.10)",
+                opacity: voiceState === "processing" ? 0.60 : 1,
               }}
             >
               {voiceState === "processing" ? (
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: "rgba(167,139,250,0.85)",
-                    letterSpacing: "0.18em",
-                  }}
-                >
+                <span style={{ fontSize: 10, color: "rgba(255,255,255,0.72)", letterSpacing: "0.18em" }}>
                   ···
                 </span>
               ) : (
-                <MicIcon size={19} />
+                <MicIcon size={18} color="white" />
               )}
             </button>
 
-            {/* Generate Plan / status */}
+            {/* RIGHT — Generate Plan / saved state (equal width to Motivate Me via 1fr grid) */}
             {!isSaved ? (
               <button
                 onClick={() => {
@@ -1336,38 +1350,41 @@ function AICoachCard({
                   }
                 }}
                 style={{
-                  flex: 1,
-                  padding: "9px 0",
-                  borderRadius: 11,
-                  fontSize: 13.5,
+                  background: isGenerating ? "rgba(0,0,0,0.18)" : "transparent",
+                  borderTop: "none",
+                  borderBottom: "none",
+                  borderLeft: "none",
+                  borderRight: "none",
+                  color: isGenerating ? "rgba(255,255,255,0.68)" : "rgba(255,255,255,0.96)",
+                  fontSize: 12.5,
                   fontWeight: 700,
-                  background: isGenerating
-                    ? "rgba(124,58,237,0.55)"
-                    : "linear-gradient(135deg, #5b21b6, #7c3aed)",
-                  color: "white",
-                  border: "0.5px solid rgba(167,139,250,0.35)",
+                  padding: "11px 6px",
                   cursor: "pointer",
-                  boxShadow: isGenerating ? "none" : "0 3px 12px rgba(124,58,237,0.28)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  whiteSpace: "nowrap",
                   transition: "all 200ms ease",
+                  letterSpacing: "0.01em",
                 }}
               >
-                {isGenerating ? "⏳ Generating your plan…" : "✨ Generate Plan"}
+                {isGenerating ? "⏳ Generating…" : "✨ Generate Plan"}
               </button>
             ) : (
               <div
                 style={{
-                  flex: 1,
-                  padding: "9px 0",
-                  borderRadius: 11,
-                  textAlign: "center",
-                  background: "rgba(22,163,74,0.10)",
-                  border: "0.5px solid rgba(22,163,74,0.28)",
-                  fontSize: 13.5,
-                  color: "#86efac",
+                  background: "rgba(22,163,74,0.30)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#bbf7d0",
+                  fontSize: 12.5,
                   fontWeight: 700,
+                  whiteSpace: "nowrap",
+                  padding: "11px 6px",
                 }}
               >
-                ✅ Tasks saved to calendar!
+                ✅ Tasks saved!
               </div>
             )}
           </div>
@@ -2912,6 +2929,7 @@ export function AICoachPage({ onClose, startWithMotivate, hasPremiumAccess = fal
         intent={coach.intent}
         hasPremiumAccess={hasPremiumAccess}
         onPremiumAttempt={() => setShowUpgradeGate(true)}
+        onMotivate={handleHeaderMotivate}
       />
     );
   }
@@ -2994,16 +3012,6 @@ export function AICoachPage({ onClose, startWithMotivate, hasPremiumAccess = fal
         </div>
       </div>
 
-      {/* Far-right: Motivate Me — coach tab only (not shown on tasks or calendar tabs) */}
-      {activeTab === "coach" && (
-        <button
-          onClick={handleHeaderMotivate}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all duration-150 hover:opacity-85 hover:scale-105 flex-shrink-0"
-          style={{ background: '#7c3aed', border: '0.5px solid rgba(167,139,250,0.35)', marginLeft: "auto" }}
-        >
-          Motivate Me 🔥
-        </button>
-      )}
     </div>
   );
 

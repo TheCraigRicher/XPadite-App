@@ -1,4 +1,4 @@
-import type { CalendarData } from './types'
+import type { CalendarData, Activity } from './types'
 
 export const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -45,6 +45,15 @@ export function formatMs(ms: number): string {
 
 export function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+// Returns true when a task's activity should count toward productive/focus time.
+// Activities without a countsTowardProductivity field default to true (backward-compat).
+export function isProductiveActivity(activities: Activity[], actId: string): boolean {
+  if (!actId) return true
+  const act = activities.find(a => a.id === actId)
+  if (!act) return true
+  return act.countsTowardProductivity !== false
 }
 
 export function formatTime12(ts: number): string {

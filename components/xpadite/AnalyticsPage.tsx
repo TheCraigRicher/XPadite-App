@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react'
 import { useApp } from './AppContext'
-import { formatMs, APP_YEAR, MONTHS, todayKey, dateKey } from './utils'
+import { formatMs, isProductiveActivity, APP_YEAR, MONTHS, todayKey, dateKey } from './utils'
 import { YearlyDashboardModal } from './YearlyDashboardModal'
 import { DayDashboardModal } from './DayDashboardModal'
 import { PremiumUpgradeModal } from './PremiumUpgradeModal'
@@ -32,7 +32,8 @@ interface DayPoint {
 }
 
 interface RangeStats {
-  totalMs: number
+  totalMs: number       // all tracked time (for activity distribution charts)
+  productiveMs: number  // productive activities only (for focus/worked KPIs)
   sessionCount: number
   completedTasks: number
   totalTasks: number
@@ -60,7 +61,7 @@ function computeRangeStats(
   const end = new Date(endDate)
   end.setHours(23, 59, 59, 999)
 
-  let totalMs = 0, sessionCount = 0, completedTasks = 0, totalTasks = 0
+  let totalMs = 0, productiveMs = 0, sessionCount = 0, completedTasks = 0, totalTasks = 0
   let productiveDays = 0, hyperDays = 0, milestoneDays = 0, daysElapsed = 0, daysInRange = 0
   const actMs = new Map<string, number>()
   const dayPoints: DayPoint[] = []
@@ -93,6 +94,7 @@ function computeRangeStats(
             if (dur > 0 && dur < 86_400_000) {
               dayMs += dur; totalMs += dur; daySessions++; sessionCount++
               if (t.actId) actMs.set(t.actId, (actMs.get(t.actId) ?? 0) + dur)
+              if (isProductiveActivity(activities, t.actId)) productiveMs += dur
             }
           }
         })
@@ -126,13 +128,13 @@ function computeRangeStats(
 
   let score = 0
   if (productiveDays > 0) score += 20
-  const hrs = totalMs / 3_600_000
+  const hrs = productiveMs / 3_600_000  // score based on productive time only
   if (hrs >= 2) score += 10; if (hrs >= 8) score += 15; if (hrs >= 20) score += 15
   if (completedTasks > 0) score += 15
   if (totalTasks > 0) score += Math.round((completedTasks / totalTasks) * 25)
   score = Math.min(100, score)
 
-  return { totalMs, sessionCount, completedTasks, totalTasks, productiveDays, hyperDays, milestoneDays, actBreakdown, dayPoints, strongestDay, score, daysElapsed, daysInRange }
+  return { totalMs, productiveMs, sessionCount, completedTasks, totalTasks, productiveDays, hyperDays, milestoneDays, actBreakdown, dayPoints, strongestDay, score, daysElapsed, daysInRange }
 }
 
 // ─── Week/month date ranges ───────────────────────────────────────────────────
@@ -579,7 +581,7 @@ function RangeDashboardView({ title, dateLabel, stats, isDark, monthBarLabels }:
   monthBarLabels?: string[]
 }) {
   const kpis = [
-    { label: 'Total Worked',    value: stats.totalMs > 0 ? formatMs(stats.totalMs) : '—', gradient: 'linear-gradient(135deg,#5B21B6,#7E22CE,#A21CAF)', border: 'rgba(162,28,175,0.46)', glow: '139,92,246' },
+    { label: 'Total Worked',    value: stats.productiveMs > 0 ? formatMs(stats.productiveMs) : '—', gradient: 'linear-gradient(135deg,#5B21B6,#7E22CE,#A21CAF)', border: 'rgba(162,28,175,0.46)', glow: '139,92,246' },
     { label: 'Sessions',        value: String(stats.sessionCount),                          gradient: 'linear-gradient(135deg,#0E7490,#0F766E,#0D9488)',  border: 'rgba(13,148,136,0.46)', glow: '20,184,166' },
     { label: 'Productive Days', value: `${stats.productiveDays}/${stats.daysElapsed}`,      gradient: 'linear-gradient(135deg,#047857,#15803D,#4D7C0F)',  border: 'rgba(21,128,61,0.46)',  glow: '34,197,94'  },
     { label: 'Tasks Done',      value: `${stats.completedTasks}/${stats.totalTasks || 0}`,  gradient: 'linear-gradient(135deg,#1D4ED8,#0369A1,#0891B2)',  border: 'rgba(8,145,178,0.46)',  glow: '14,165,233' },

@@ -1928,7 +1928,7 @@ export function JournalEditorContent({
       taskId = 't' + startTs + Math.random().toString(36).slice(2, 6)
       const newTask: Task = {
         id: taskId, text: taskTitle, done: false, journal: '',
-        timerStart: null, timerEnd: null, actId: '', sessions: [],
+        timerStart: null, timerEnd: null, actId: 'a-plan', sessions: [],
       }
       updateDay(sessionDate, prev => ({ ...prev, tasks: [...(prev.tasks ?? []), newTask] }))
       plannerTaskLinkRef.current = { taskId, sessionDate }

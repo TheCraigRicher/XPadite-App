@@ -2,7 +2,7 @@
 
 import { useMemo, useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react'
 import { useApp } from './AppContext'
-import { formatMs, formatTime, APP_YEAR, dateKey as makeDateKey } from './utils'
+import { formatMs, formatTime, isProductiveActivity, APP_YEAR, dateKey as makeDateKey } from './utils'
 import type { Task } from './types'
 import { GaugeMeter } from './GaugeMeter'
 import { createClient } from '@/lib/supabase/client'
@@ -1284,15 +1284,20 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
       .filter(s => getSessionDurationMs(s.startTs, s.endTs!) >= 45 * 60_000)
       .reduce((s, x) => s + getSessionDurationMs(x.startTs, x.endTs!), 0)
 
+    // Productive sessions only — Meal/Break are excluded from focus/productivity metrics
+    const productiveSessions = allSessions.filter(s => isProductiveActivity(activities, s.actId))
+    const productiveMs = productiveSessions.reduce((s, x) => s + getSessionDurationMs(x.startTs, x.endTs!), 0)
+
     let score = 0
     if (completedTasks > 0) score += 20
     if (totalTasks > 0) score += Math.round((completedTasks / totalTasks) * 20)
-    const hrs = totalMs / 3_600_000
+    const hrs = productiveMs / 3_600_000  // score based on productive time, not all tracked time
     if (hrs >= 1) score += 15; if (hrs >= 3) score += 15; if (hrs >= 6) score += 10
     if (longestMs >= 45 * 60_000) score += 10; if (longestMs >= 90 * 60_000) score += 5
     if (dayData.hyper) score += 5
     score = Math.min(100, score)
 
+    // actBreakdown uses totalMs for percentages so Activity Distribution shows all tracked time
     const actMs = new Map<string, number>()
     allSessions.forEach(s => { if (s.actId) actMs.set(s.actId, (actMs.get(s.actId) ?? 0) + getSessionDurationMs(s.startTs, s.endTs!)) })
     const actBreakdown = Array.from(actMs.entries()).map(([actId, ms]) => {
@@ -1305,7 +1310,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
       .filter(t => t.ms > 0)
       .sort((a, b) => b.ms - a.ms)
 
-    return { totalMs, longestMs, sessionCount, completedTasks, totalTasks, deepWorkMs, score, actBreakdown, allSessions, taskTotals, isPersonalBest: longestMs > 2 * 3_600_000 }
+    return { totalMs, productiveMs, productiveSessions, longestMs, sessionCount, completedTasks, totalTasks, deepWorkMs, score, actBreakdown, allSessions, taskTotals, isPersonalBest: longestMs > 2 * 3_600_000 }
   }, [dayData, activities])
 
   const weekData = useMemo(() => {
@@ -1393,7 +1398,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
 
   // ── Single final performance level — shared by gauge AND badge ───────────────
   const finalLevel: PerformanceLevel = stats
-    ? getFinalPerformanceLevel(stats.score, stats.totalMs)
+    ? getFinalPerformanceLevel(stats.score, stats.productiveMs)
     : 0
   const finalTier  = PERFORMANCE_TIERS[finalLevel]
   const gaugeScore = performanceLevelToGaugeScore(finalLevel)
@@ -1419,7 +1424,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
   // ── KPI card definitions — bold saturated premium gradients ─────────────
   const kpiCards = [
     {
-      label: 'Total Worked', value: stats ? formatMs(stats.totalMs) : '—', sub: null, icon: '⏱',
+      label: 'Total Worked', value: stats ? formatMs(stats.productiveMs) : '—', sub: null, icon: '⏱',
       bg:     isDark ? 'linear-gradient(135deg, #5B21B6 0%, #7E22CE 50%, #A21CAF 100%)'
                      : 'linear-gradient(135deg, #7C3AED 0%, #A855F7 50%, #D946EF 100%)',
       border: isDark ? 'rgba(162,28,175,0.46)' : 'rgba(126,34,206,0.45)',
@@ -1762,10 +1767,10 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                     Cumulative productive time
                   </p>
                 </div>
-                {stats && stats.totalMs > 0 && (
+                {stats && stats.productiveMs > 0 && (
                   <div className="text-right">
                     <p className="text-[14px] font-bold tabular-nums" style={{ color: '#a78bfa' }}>
-                      {formatMs(stats.totalMs)}
+                      {formatMs(stats.productiveMs)}
                     </p>
                     <p className="text-[9px]" style={{ color: isDark ? 'rgba(148,163,184,0.45)' : 'var(--xp-txt3)' }}>total</p>
                   </div>
@@ -1773,8 +1778,8 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
               </div>
               <div className={isMaximized ? 'flex-1 min-h-0' : 'flex-1 min-h-[220px] lg:min-h-[260px]'}>
                 <ProgressGraph
-                  sessions={stats?.allSessions ?? []}
-                  totalMs={stats?.totalMs ?? 0}
+                  sessions={stats?.productiveSessions ?? []}
+                  totalMs={stats?.productiveMs ?? 0}
                   activityColors={new Map<string, string>(activities.map(a => [a.id, a.color] as [string, string]))}
                   activityNames={new Map<string, string>(activities.map(a => [a.id, a.name] as [string, string]))}
                   animate={dataRevealActive}

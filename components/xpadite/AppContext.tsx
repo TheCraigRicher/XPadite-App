@@ -11,18 +11,22 @@ import {
 import { createClient } from '@/lib/supabase/client'
 
 const DEFAULT_ACTIVITIES: Activity[] = [
-  { id: 'a1', name: 'Work', color: '#7c3aed' },
-  { id: 'a2', name: 'Workout', color: '#16a34a' },
-  { id: 'a3', name: 'Learning', color: '#0891b2' },
-  { id: 'a4', name: 'Coding', color: '#6366f1' },
-  { id: 'a5', name: 'Personal', color: '#d97706' },
-  { id: 'a-meal', name: '🍽 Meal', color: '#f59e0b' },
-  { id: 'a-break', name: '☕ Break', color: '#64748b' },
+  { id: 'a1',      name: 'Work',                 color: '#7c3aed' },
+  { id: 'a2',      name: 'Workout',              color: '#16a34a' },
+  { id: 'a3',      name: 'Learning',             color: '#0891b2' },
+  { id: 'a4',      name: 'Coding',               color: '#6366f1' },
+  { id: 'a5',      name: 'Personal',             color: '#d97706' },
+  { id: 'a-meal',  name: '🍽 Meal',              color: '#f59e0b', countsTowardProductivity: false },
+  { id: 'a-break', name: '☕ Break',             color: '#64748b', countsTowardProductivity: false },
+  { id: 'a-plan',  name: 'Planning/Journaling',  color: '#22c55e', countsTowardProductivity: true },
 ]
 
+// These are always present — injected/updated on every localStorage load so they can never be removed.
+// On update: only countsTowardProductivity is forced so user color/name customisations are preserved.
 const BUILTIN_EXTRAS: Activity[] = [
-  { id: 'a-meal', name: '🍽 Meal', color: '#f59e0b' },
-  { id: 'a-break', name: '☕ Break', color: '#64748b' },
+  { id: 'a-meal',  name: '🍽 Meal',              color: '#f59e0b', countsTowardProductivity: false },
+  { id: 'a-break', name: '☕ Break',             color: '#64748b', countsTowardProductivity: false },
+  { id: 'a-plan',  name: 'Planning/Journaling',  color: '#22c55e', countsTowardProductivity: true },
 ]
 
 export const EMPTY_DAY: DayData = {
@@ -145,7 +149,13 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       if (a) {
         const parsed: Activity[] = JSON.parse(a)
         BUILTIN_EXTRAS.forEach(b => {
-          if (!parsed.some(act => act.id === b.id)) parsed.push(b)
+          const idx = parsed.findIndex(act => act.id === b.id)
+          if (idx === -1) {
+            parsed.push(b)
+          } else {
+            // Force productivity classification while preserving user's color/name choices
+            parsed[idx] = { ...parsed[idx], countsTowardProductivity: b.countsTowardProductivity }
+          }
         })
         if (parsed.length) {
           setActivitiesState(parsed)

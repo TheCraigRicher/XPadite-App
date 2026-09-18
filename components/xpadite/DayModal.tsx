@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useApp, EMPTY_DAY } from './AppContext'
 import type { Task, TaskSession, Activity, TaskAttachment, DayData } from './types'
-import { formatMs, formatHMS, formatTime, formatTime12, APP_YEAR } from './utils'
+import { formatMs, formatHMS, formatTime, formatTime12, isProductiveActivity, APP_YEAR } from './utils'
 import { ReminderModal } from './ReminderModal'
 import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
 import dynamic from 'next/dynamic'
@@ -1285,14 +1285,19 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     prevNotesOpenRef.current = notesOpen
   }, [notesOpen])
 
-  // Total Focus Time Today — shared source of truth with Dashboard / StatsRow
+  // Total Focus Time Today — productive activities only; Meal/Break excluded
   const totalFocusMsToday = useMemo(() => {
-    const workMs   = sessions.filter(s => s.dateKey === dateKey && s.endTs !== null).reduce((sum, s) => sum + (s.endTs! - s.startTs), 0)
+    const workMs   = sessions
+      .filter(s => s.dateKey === dateKey && s.endTs !== null && isProductiveActivity(activities, s.actId))
+      .reduce((sum, s) => sum + (s.endTs! - s.startTs), 0)
     // Clock-in-linked tasks are excluded: their time is already captured by the WorkSession in workMs
-    const taskMs   = (dayData.tasks ?? []).filter(task => !task.linkedSessionId).reduce((t, task) => t + (task.sessions ?? []).filter(s => s.endTs !== null).reduce((sum, s) => sum + (s.endTs! - s.startTs), 0), 0)
-    const activeMs = isSessionHere ? Math.max(0, now - activeSession!.startTs) : 0
+    const taskMs   = (dayData.tasks ?? [])
+      .filter(task => !task.linkedSessionId && isProductiveActivity(activities, task.actId))
+      .reduce((t, task) => t + (task.sessions ?? []).filter(s => s.endTs !== null).reduce((sum, s) => sum + (s.endTs! - s.startTs), 0), 0)
+    const activeMs = isSessionHere && isProductiveActivity(activities, activeSession!.actId)
+      ? Math.max(0, now - activeSession!.startTs) : 0
     return workMs + taskMs + activeMs
-  }, [sessions, dayData.tasks, activeSession, isSessionHere, dateKey, now])
+  }, [sessions, activities, dayData.tasks, activeSession, isSessionHere, dateKey, now])
 
   // On open: pre-populate 2 blank tasks for empty days, then snapshot for dirty-change detection
   useEffect(() => {

@@ -50,6 +50,7 @@ export interface Activity {
   name: string
   color: string
   emoji?: string
+  countsTowardProductivity?: boolean  // undefined/true = productive; false = non-productive (Meal, Break)
 }
 
 export interface ActiveSession {

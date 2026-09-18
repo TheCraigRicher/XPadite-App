@@ -15,7 +15,8 @@ import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
 import dynamic from 'next/dynamic'
 import { buildAttachments, ATTACHMENT_ACCEPT, CameraModal, ImageLightbox } from './attachmentUtils'
-import type { JournalBlock, JournalTimerSession, TaskAttachment } from './types'
+import type { JournalBlock, JournalTimerSession, TaskAttachment, Task, TaskSession } from './types'
+import { useApp } from './AppContext'
 import { JournalDrawModal } from './JournalDrawModal'
 import {
   parseJournalDoc, parseJournalContent, serializeJournalContent,
@@ -1039,6 +1040,9 @@ export function JournalEditorContent({
   onDirtyChange, closeIntent,
 }: JournalEditorContentProps) {
 
+  // ── App context (for Task Manager integration) ───────────────────────────────
+  const { calData, updateDay, activeTaskTimer, setActiveTaskTimer } = useApp()
+
   // ── State ───────────────────────────────────────────────────────────────────
   // ── Editor-wide history (mobile undo/redo) ───────────────────────────────────
   type HistoryEntry = { blocks: JournalBlock[]; contents: Record<string, string> }
@@ -1114,6 +1118,9 @@ export function JournalEditorContent({
   const timerStartTsRef   = useRef<number | null>(null)
   const showSessionsRef   = useRef(false)
   const timerWrapperRef    = useRef<HTMLDivElement>(null)
+  // Planner → Task Manager link: persisted in journal doc JSON so it survives remounts
+  const plannerTaskLinkRef    = useRef<{ taskId: string; sessionDate: string } | null>(null)
+  const plannerTmSessionIdRef = useRef<string | null>(null)
   const toolbarScrollRef   = useRef<HTMLDivElement>(null)
   const [canScrollLeft,  setCanScrollLeft]  = useState(false)
   const [canScrollRight, setCanScrollRight] = useState(false)
@@ -1186,6 +1193,25 @@ export function JournalEditorContent({
     }
   }, [])
 
+  // ── Unmount cleanup — close any open Task Manager session ────────────────────
+  useEffect(() => {
+    return () => {
+      const tmSessionId = plannerTmSessionIdRef.current
+      const link = plannerTaskLinkRef.current
+      if (!tmSessionId || !link) return
+      const endNow = Date.now()
+      updateDay(link.sessionDate, prev => ({
+        ...prev,
+        tasks: (prev.tasks ?? []).map(t =>
+          t.id !== link.taskId ? t : {
+            ...t, timerEnd: endNow,
+            sessions: (t.sessions ?? []).map(s => s.id === tmSessionId ? { ...s, endTs: endNow } : s),
+          }
+        ),
+      }))
+    }
+  }, [updateDay])
+
   // ── Init / date change ───────────────────────────────────────────────────────
   useEffect(() => {
     // Stop any active voice recording when navigating to a new date
@@ -1215,11 +1241,31 @@ export function JournalEditorContent({
     const sessions = doc.timerSessions ?? []
     setTimerSessions(sessions)
     timerSessionsRef.current = sessions
-    // Stop any running timer from previous date
+    // Stop any running timer from previous date — also close its Task Manager session
     if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null }
+    if (timerStartTsRef.current && plannerTmSessionIdRef.current && plannerTaskLinkRef.current) {
+      const closeEndTs = Date.now()
+      const { taskId, sessionDate } = plannerTaskLinkRef.current
+      const closingId = plannerTmSessionIdRef.current
+      updateDay(sessionDate, prev => ({
+        ...prev,
+        tasks: (prev.tasks ?? []).map(t =>
+          t.id !== taskId ? t : {
+            ...t, timerEnd: closeEndTs,
+            sessions: (t.sessions ?? []).map(s => s.id === closingId ? { ...s, endTs: closeEndTs } : s),
+          }
+        ),
+      }))
+    }
     setTimerStartTs(null)
     timerStartTsRef.current = null
     setTimerElapsedMs(0)
+    // Read/reset Planner → TM link for the new document
+    try {
+      const rawDoc = JSON.parse(rawContent ?? '{}')
+      plannerTaskLinkRef.current = rawDoc?.plannerTaskLink ?? null
+    } catch { plannerTaskLinkRef.current = null }
+    plannerTmSessionIdRef.current = null
     setShowSessions(false)
     setDrawState(null)
     setSelectedBlockId(null)
@@ -1250,6 +1296,7 @@ export function JournalEditorContent({
           : b.content,
       })),
       ...(sessions.length > 0 ? { timerSessions: sessions } : {}),
+      ...(plannerTaskLinkRef.current ? { plannerTaskLink: plannerTaskLinkRef.current } : {}),
     }
     return JSON.stringify(doc)
   }, [])
@@ -1846,6 +1893,91 @@ export function JournalEditorContent({
   // ── Journal timer logic ──────────────────────────────────────────────────────
   const IDLE_PAUSE_MS = 30 * 60 * 1000  // auto-stop after 30min inactivity
 
+  // Helper: today's date key (YYYY-MM-DD) — session date, not document date
+  function makeTodayKey(): string {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+
+  // Helper: get the title for the Task Manager task (doc title or auto-generated)
+  function getPlannerTimerTitle(sessionDateKey: string): string {
+    const docTitle = titleRef.current?.trim()
+    if (docTitle) return docTitle
+    const tasks = calData[sessionDateKey]?.tasks ?? []
+    const maxN = tasks.reduce((m, t) => {
+      const match = t.text.match(/^Planning\/Journaling Session (\d+)$/)
+      return match ? Math.max(m, parseInt(match[1])) : m
+    }, 0)
+    return `Planning/Journaling Session ${maxN + 1}`
+  }
+
+  // Start: create or reuse Task Manager task, open a TaskSession
+  function syncStartToTaskManager(startTs: number) {
+    const sessionDate = makeTodayKey()
+    const currentTasks = calData[sessionDate]?.tasks ?? []
+
+    let taskId = plannerTaskLinkRef.current?.taskId ?? null
+    let taskTitle = ''
+
+    // Validate the linked task still exists (user may have deleted it)
+    if (taskId && !currentTasks.find(t => t.id === taskId)) taskId = null
+
+    if (!taskId) {
+      // Create a fresh Task Manager task for this Planner document
+      taskTitle = getPlannerTimerTitle(sessionDate)
+      taskId = 't' + startTs + Math.random().toString(36).slice(2, 6)
+      const newTask: Task = {
+        id: taskId, text: taskTitle, done: false, journal: '',
+        timerStart: null, timerEnd: null, actId: '', sessions: [],
+      }
+      updateDay(sessionDate, prev => ({ ...prev, tasks: [...(prev.tasks ?? []), newTask] }))
+      plannerTaskLinkRef.current = { taskId, sessionDate }
+      // Persist the link in the journal doc so it survives remounts
+      if (!isDirtyRef.current) { isDirtyRef.current = true; setIsDirty(true) }
+      scheduleSave()
+    } else {
+      taskTitle = currentTasks.find(t => t.id === taskId)?.text ?? ''
+    }
+
+    // Open a new TaskSession for this timing interval
+    const tmSessionId = 'ps' + startTs + Math.random().toString(36).slice(2, 4)
+    plannerTmSessionIdRef.current = tmSessionId
+    const newTaskSession: TaskSession = { id: tmSessionId, startTs, endTs: null, note: '', tags: [] }
+    updateDay(sessionDate, prev => ({
+      ...prev,
+      tasks: (prev.tasks ?? []).map(t =>
+        t.id === taskId ? { ...t, sessions: [...(t.sessions ?? []), newTaskSession] } : t
+      ),
+    }))
+
+    // Integrate with global active-timer indicator (only if nothing else is running)
+    if (!activeTaskTimer) {
+      const taskIndex = Math.max(0, currentTasks.findIndex(t => t.id === taskId))
+      setActiveTaskTimer({ taskId: taskId!, dateKey: sessionDate, sessionId: tmSessionId, startTs, taskText: taskTitle, taskIndex })
+    }
+  }
+
+  // Stop/pause: close the running TaskSession
+  function syncStopToTaskManager(endTs: number) {
+    const link = plannerTaskLinkRef.current
+    const tmSessionId = plannerTmSessionIdRef.current
+    if (!link || !tmSessionId) return
+    const { taskId, sessionDate } = link
+    updateDay(sessionDate, prev => ({
+      ...prev,
+      tasks: (prev.tasks ?? []).map(t =>
+        t.id !== taskId ? t : {
+          ...t, timerEnd: endTs,
+          sessions: (t.sessions ?? []).map(s => s.id === tmSessionId ? { ...s, endTs } : s),
+        }
+      ),
+    }))
+    plannerTmSessionIdRef.current = null
+    if (activeTaskTimer?.taskId === taskId && activeTaskTimer.dateKey === sessionDate) {
+      setActiveTaskTimer(null)
+    }
+  }
+
   function timerStart() {
     const now = Date.now()
     lastActivityRef.current = now
@@ -1863,6 +1995,8 @@ export function JournalEditorContent({
         timerStopAt(lastActivityRef.current)
       }
     }, 1000)
+    // Mirror to Task Manager
+    syncStartToTaskManager(now)
   }
 
   function timerStopAt(endTs: number) {
@@ -1878,6 +2012,8 @@ export function JournalEditorContent({
     setTimerElapsedMs(0)
     if (!isDirtyRef.current) { isDirtyRef.current = true; setIsDirty(true) }
     scheduleSave()
+    // Mirror to Task Manager
+    syncStopToTaskManager(endTs)
   }
 
   function timerStop() { timerStopAt(Date.now()) }
@@ -2124,12 +2260,38 @@ export function JournalEditorContent({
           {!isEditorOnToday && (
             <button
               onClick={() => guardedNavigate(onNavigateToday)}
+              className="hidden sm:block"
               style={{
                 padding: '3px 8px', borderRadius: 20, border: '0.5px solid rgba(255,255,255,0.22)',
                 background: 'transparent', color: 'rgba(255,255,255,0.60)',
                 fontSize: 11, cursor: 'pointer', flexShrink: 0,
               }}
             >Today</button>
+          )}
+          {/* Mobile-only vertical T-O-D-A-Y capsule — absolutely positioned at far right of header */}
+          {!isEditorOnToday && (
+            <div
+              className="sm:hidden"
+              style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)' }}
+            >
+              <button
+                onClick={() => guardedNavigate(onNavigateToday)}
+                title="Go to today"
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  padding: '3px 4px', gap: 1,
+                  borderRadius: 8,
+                  border: '0.5px solid rgba(255,255,255,0.28)',
+                  background: 'rgba(255,255,255,0.12)',
+                  cursor: 'pointer',
+                  color: 'rgba(255,255,255,0.85)',
+                }}
+              >
+                {['T','O','D','A','Y'].map(ch => (
+                  <span key={ch} style={{ fontSize: 8, fontWeight: 600, lineHeight: '8px', display: 'block' }}>{ch}</span>
+                ))}
+              </button>
+            </div>
           )}
           {/* Close — hidden on mobile (bottom nav handles close) */}
           <button

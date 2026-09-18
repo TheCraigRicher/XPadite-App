@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useApp, EMPTY_DAY } from './AppContext'
 import type { Task, TaskSession, Activity, TaskAttachment, DayData } from './types'
-import { formatMs, formatHMS, formatTime, APP_YEAR } from './utils'
+import { formatMs, formatHMS, formatTime, formatTime12, APP_YEAR } from './utils'
 import { ReminderModal } from './ReminderModal'
 import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
 import dynamic from 'next/dynamic'
@@ -115,6 +115,19 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
     const d = new Date(baseTs); d.setHours(h, m, 0, 0); return d.getTime()
   }
 
+  // 12-hour conversion helpers — used by mobile selects only
+  function valToH12(val: string): { hour: number; minute: number; amPm: 'AM' | 'PM' } {
+    if (!val) return { hour: 12, minute: 0, amPm: 'AM' }
+    const [h, m] = val.split(':').map(Number)
+    return { hour: h === 0 ? 12 : h > 12 ? h - 12 : h, minute: m, amPm: h < 12 ? 'AM' : 'PM' }
+  }
+  function h12ToVal(hour: number, minute: number, amPm: 'AM' | 'PM'): string {
+    let h = hour
+    if (amPm === 'AM') { if (h === 12) h = 0 }
+    else               { if (h !== 12) h += 12 }
+    return `${String(h).padStart(2,'0')}:${String(minute).padStart(2,'0')}`
+  }
+
   const baseTs: number = editingSession?.startTs ?? task.timerStart ?? (() => {
     const [y, mo, d] = dateKey.split('-').map(Number); return new Date(y, mo, d).getTime()
   })()
@@ -127,9 +140,11 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
       <div className="w-full max-w-[320px] rounded-2xl shadow-2xl p-5" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)' }} onClick={e => e.stopPropagation()}>
-        <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--xp-txt)' }}>Adjust Session</h3>
+        <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--xp-txt)' }}>Adjust Time Session</h3>
         <p className="text-[10px] mb-4" style={{ color: 'var(--xp-txt3)' }}>{task.text}</p>
-        <div className="grid grid-cols-2 gap-3 mb-3">
+
+        {/* Desktop: native time inputs side-by-side */}
+        <div className="hidden sm:grid grid-cols-2 gap-3 mb-3">
           <div>
             <label className="block text-[10px] font-medium mb-1" style={{ color: 'var(--xp-txt3)' }}>Start Time</label>
             <input type="time" value={startVal} onChange={e => setStartVal(e.target.value)} className="w-full text-xs px-3 py-2 rounded-lg outline-none" style={{ border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }} />
@@ -139,6 +154,54 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
             <input type="time" value={endVal} onChange={e => setEndVal(e.target.value)} className="w-full text-xs px-3 py-2 rounded-lg outline-none" style={{ border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }} />
           </div>
         </div>
+
+        {/* Mobile: explicit 12-hour selects (Hour / Minute / AM·PM) */}
+        <div className="sm:hidden space-y-3 mb-3">
+          {(['start', 'end'] as const).map(which => {
+            const val  = which === 'start' ? startVal : endVal
+            const setV = which === 'start' ? setStartVal : setEndVal
+            const h12  = valToH12(val)
+            return (
+              <div key={which}>
+                <label className="block text-[10px] font-medium mb-1" style={{ color: 'var(--xp-txt3)' }}>
+                  {which === 'start' ? 'Start Time' : 'End Time'}
+                </label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <select
+                    value={h12.hour}
+                    onChange={e => setV(h12ToVal(Number(e.target.value), h12.minute, h12.amPm))}
+                    className="text-xs rounded-lg outline-none text-center"
+                    style={{ flex: 1, padding: '6px 2px', border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }}
+                  >
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map(h => (
+                      <option key={h} value={h}>{h}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={h12.minute}
+                    onChange={e => setV(h12ToVal(h12.hour, Number(e.target.value), h12.amPm))}
+                    className="text-xs rounded-lg outline-none text-center"
+                    style={{ flex: 1, padding: '6px 2px', border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }}
+                  >
+                    {Array.from({ length: 60 }, (_, i) => i).map(m => (
+                      <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={h12.amPm}
+                    onChange={e => setV(h12ToVal(h12.hour, h12.minute, e.target.value as 'AM' | 'PM'))}
+                    className="text-xs rounded-lg outline-none text-center"
+                    style={{ width: 52, padding: '6px 2px', border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }}
+                  >
+                    <option>AM</option>
+                    <option>PM</option>
+                  </select>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
         {startVal && endVal && (() => { const sTs = inputToTs(startVal, baseTs); let eTs = inputToTs(endVal, baseTs); if (eTs <= sTs) eTs += 86_400_000; return <p className="text-[10px] mb-3" style={{ color: 'var(--xp-txt3)' }}>Duration: {formatMs(Math.max(0, eTs - sTs))}</p> })()}
         <div className="mb-4">
           <label className="block text-[10px] font-medium mb-1" style={{ color: 'var(--xp-txt3)' }}>Reason (optional)</label>
@@ -533,12 +596,24 @@ function TaskRow({
 
           {/* Time range — always shown; placeholder when no session yet */}
           <span className="text-[9px] flex-shrink-0 tabular-nums" style={{ minWidth: 110, color: 'var(--xp-txt3)', opacity: (latestSession || (isActive && runningSession)) ? 1 : 0.32 }}>
-            {isActive && runningSession
-              ? `${formatTime(runningSession.startTs)} → …`
-              : latestSession
-              ? `${formatTime(latestSession.startTs)} – ${latestSession.endTs ? formatTime(latestSession.endTs) : '…'}`
-              : '--:-- – --:--'
-            }
+            {/* Desktop: locale default (may be 24h) */}
+            <span className="hidden sm:inline">
+              {isActive && runningSession
+                ? `${formatTime(runningSession.startTs)} → …`
+                : latestSession
+                ? `${formatTime(latestSession.startTs)} – ${latestSession.endTs ? formatTime(latestSession.endTs) : '…'}`
+                : '--:-- – --:--'
+              }
+            </span>
+            {/* Mobile: explicit 12-hour with AM/PM */}
+            <span className="sm:hidden">
+              {isActive && runningSession
+                ? `${formatTime12(runningSession.startTs)} → …`
+                : latestSession
+                ? `${formatTime12(latestSession.startTs)} – ${latestSession.endTs ? formatTime12(latestSession.endTs) : '…'}`
+                : '--:-- – --:--'
+              }
+            </span>
           </span>
 
           <div className="flex-1" />
@@ -564,9 +639,21 @@ function TaskRow({
             {/* Session info */}
             {latestSession && (
               <div className="flex items-center gap-3 mb-2 text-[10px] tabular-nums" style={{ color: 'var(--xp-txt3)' }}>
-                <span className="flex items-center gap-1"><span style={{ color: '#16a34a' }}>▶</span>{formatTime(latestSession.startTs)}</span>
+                <span className="flex items-center gap-1">
+                  <span style={{ color: '#16a34a' }}>▶</span>
+                  <span className="hidden sm:inline">{formatTime(latestSession.startTs)}</span>
+                  <span className="sm:hidden">{formatTime12(latestSession.startTs)}</span>
+                </span>
                 <span style={{ color: 'var(--xp-bdr2)' }}>→</span>
-                <span className="flex items-center gap-1"><span style={{ color: '#ef4444' }}>■</span>{latestSession.endTs ? formatTime(latestSession.endTs) : '—'}</span>
+                <span className="flex items-center gap-1">
+                  <span style={{ color: '#ef4444' }}>■</span>
+                  {latestSession.endTs ? (
+                    <>
+                      <span className="hidden sm:inline">{formatTime(latestSession.endTs)}</span>
+                      <span className="sm:hidden">{formatTime12(latestSession.endTs)}</span>
+                    </>
+                  ) : '—'}
+                </span>
                 <span className="ml-auto font-medium" style={{ color: 'var(--xp-txt2)' }}>{latestSession.endTs ? formatMs(latestSession.endTs - latestSession.startTs) : 'Running'}</span>
               </div>
             )}

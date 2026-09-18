@@ -47,6 +47,14 @@ export function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+export function formatTime12(ts: number): string {
+  const d = new Date(ts)
+  const h = d.getHours()
+  const m = d.getMinutes()
+  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h
+  return `${h12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
+}
+
 export function formatHMS(ms: number): string {
   if (!ms || ms < 0) return '00:00:00'
   const h = Math.floor(ms / 3_600_000)

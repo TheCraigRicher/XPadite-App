@@ -20,6 +20,7 @@ export interface Task {
   linkedSessionId?: string  // set when auto-created by Clock In; matches the WorkSession id
   aiPlanId?: string          // set when created by AI Coach
   attachments?: TaskAttachment[]
+  parentTaskId?: string      // set for sub-tasks; references a top-level task's id
 }
 
 export interface DayData {

@@ -91,6 +91,111 @@ const GENERATED_TASKS = [
   'Review progress and document key learnings',
 ]
 
+// ─── Task clipboard type (persisted in localStorage) ─────────────────────────
+
+interface ClipboardTask {
+  text: string
+  actId: string
+  journal: string
+  children: { text: string; actId: string; journal: string }[]
+}
+
+// ─── Compact custom dropdown (replaces native <select> for time pickers) ──────
+
+function CompactDropdown({ value, options, onChange, isDark, width }: {
+  value: string
+  options: string[]
+  onChange: (v: string) => void
+  isDark: boolean
+  width?: number
+}) {
+  const [open, setOpen] = useState(false)
+  const ref             = useRef<HTMLDivElement>(null)
+  const listRef         = useRef<HTMLDivElement>(null)
+  const [openUp, setOpenUp] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    function onOut(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    setTimeout(() => document.addEventListener('mousedown', onOut), 10)
+    return () => document.removeEventListener('mousedown', onOut)
+  }, [open])
+
+  useEffect(() => {
+    if (!open || !listRef.current) return
+    const sel = listRef.current.querySelector('[data-selected="true"]') as HTMLElement | null
+    if (sel) sel.scrollIntoView({ block: 'nearest' })
+  }, [open])
+
+  function handleOpen() {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect()
+      setOpenUp(window.innerHeight - rect.bottom < 220)
+    }
+    setOpen(o => !o)
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative', width: width ?? 64, flexShrink: 0 }}>
+      <button
+        onClick={handleOpen}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '6px 8px', borderRadius: 8, cursor: 'pointer', outline: 'none',
+          border: `1px solid ${open ? '#7c3aed' : 'var(--xp-bdr2)'}`,
+          background: 'var(--xp-bg3)', color: 'var(--xp-txt)', fontSize: 12, fontWeight: 500,
+          transition: 'border-color 150ms ease',
+        }}
+      >
+        <span style={{ flex: 1, textAlign: 'center' }}>{value}</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+          style={{ width: 10, height: 10, flexShrink: 0, opacity: 0.5,
+            transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 150ms ease' }}>
+          <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          ref={listRef}
+          style={{
+            position: 'absolute',
+            [openUp ? 'bottom' : 'top']: 'calc(100% + 4px)',
+            left: 0,
+            zIndex: 200,
+            minWidth: '100%',
+            maxHeight: 200,
+            overflowY: 'auto',
+            borderRadius: 10,
+            background: isDark ? '#1a1530' : '#ffffff',
+            border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(124,58,237,0.20)'}`,
+            boxShadow: isDark ? '0 12px 36px rgba(0,0,0,0.50)' : '0 8px 28px rgba(0,0,0,0.16)',
+            animation: 'xp-act-drop-in 150ms cubic-bezier(0.16,1,0.3,1) forwards',
+          }}
+        >
+          {options.map(opt => (
+            <button
+              key={opt}
+              data-selected={opt === value ? 'true' : 'false'}
+              onClick={() => { onChange(opt); setOpen(false) }}
+              style={{
+                width: '100%', display: 'block', textAlign: 'center',
+                padding: '8px 10px', cursor: 'pointer', border: 'none', outline: 'none',
+                fontSize: 12, fontWeight: opt === value ? 600 : 400,
+                background: opt === value ? 'rgba(124,58,237,0.12)' : 'transparent',
+                color: opt === value ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.85)' : '#111827',
+              }}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Adjust Time Modal ────────────────────────────────────────────────────────
 
 interface AdjustTimeProps {
@@ -101,115 +206,89 @@ interface AdjustTimeProps {
 }
 
 function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
-  const runningSession  = getRunningSession(task)
-  const lastSession     = task.sessions?.findLast?.(s => s.endTs !== null) ?? null
-  const editingSession  = runningSession ?? lastSession
+  const { isDark } = useApp()
+  const runningSession = getRunningSession(task)
+  const lastSession    = task.sessions?.findLast?.(s => s.endTs !== null) ?? null
+  const editingSession = runningSession ?? lastSession
 
-  function tsToInput(ts: number | null): string {
-    if (!ts) return ''
-    const d = new Date(ts)
-    return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
-  }
-  function inputToTs(val: string, baseTs: number): number {
-    const [h, m] = val.split(':').map(Number)
-    const d = new Date(baseTs); d.setHours(h, m, 0, 0); return d.getTime()
-  }
+  const HOURS   = Array.from({ length: 12 }, (_, i) => String(i + 1))
+  const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'))
+  const AMPM    = ['AM', 'PM']
 
-  // 12-hour conversion helpers — used by mobile selects only
-  function valToH12(val: string): { hour: number; minute: number; amPm: 'AM' | 'PM' } {
-    if (!val) return { hour: 12, minute: 0, amPm: 'AM' }
-    const [h, m] = val.split(':').map(Number)
-    return { hour: h === 0 ? 12 : h > 12 ? h - 12 : h, minute: m, amPm: h < 12 ? 'AM' : 'PM' }
-  }
-  function h12ToVal(hour: number, minute: number, amPm: 'AM' | 'PM'): string {
-    let h = hour
-    if (amPm === 'AM') { if (h === 12) h = 0 }
-    else               { if (h !== 12) h += 12 }
-    return `${String(h).padStart(2,'0')}:${String(minute).padStart(2,'0')}`
+  function tsToH12(ts: number | null): { h: string; m: string; ap: string } {
+    if (!ts) return { h: '12', m: '00', ap: 'AM' }
+    const d     = new Date(ts)
+    const hours = d.getHours()
+    const mins  = d.getMinutes()
+    const h12   = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours
+    return { h: String(h12), m: String(mins).padStart(2, '0'), ap: hours < 12 ? 'AM' : 'PM' }
   }
 
-  const baseTs: number = editingSession?.startTs ?? task.timerStart ?? (() => {
+  function h12ToTs(h: string, m: string, ap: string, baseTs: number): number {
+    let hours = Number(h)
+    if (ap === 'AM') { if (hours === 12) hours = 0 }
+    else             { if (hours !== 12) hours += 12 }
+    const d = new Date(baseTs); d.setHours(hours, Number(m), 0, 0); return d.getTime()
+  }
+
+  const baseTs     = editingSession?.startTs ?? task.timerStart ?? (() => {
     const [y, mo, d] = dateKey.split('-').map(Number); return new Date(y, mo, d).getTime()
   })()
+  const sessionId  = editingSession?.id ?? null
 
-  const sessionId = editingSession?.id ?? null
-  const [startVal, setStartVal] = useState(tsToInput(editingSession?.startTs ?? null))
-  const [endVal,   setEndVal]   = useState(editingSession?.endTs != null ? tsToInput(editingSession.endTs) : (runningSession ? tsToInput(Date.now()) : ''))
-  const [noteVal,  setNoteVal]  = useState('')
+  const startInit  = tsToH12(editingSession?.startTs ?? null)
+  const endInit    = tsToH12(editingSession?.endTs != null ? editingSession.endTs : (runningSession ? Date.now() : null))
+
+  const [startH,  setStartH]  = useState(startInit.h)
+  const [startM,  setStartM]  = useState(startInit.m)
+  const [startAP, setStartAP] = useState(startInit.ap)
+  const [endH,    setEndH]    = useState(endInit.h)
+  const [endM,    setEndM]    = useState(endInit.m)
+  const [endAP,   setEndAP]   = useState(endInit.ap)
+  const [noteVal, setNoteVal] = useState('')
+
+  const startTs    = h12ToTs(startH, startM, startAP, baseTs)
+  let   endTs      = h12ToTs(endH,   endM,   endAP,   baseTs)
+  if (endTs <= startTs) endTs += 86_400_000
+  const durationMs = Math.max(0, endTs - startTs)
+
+  function TimeRow({ label, h, m, ap, onH, onM, onAP }: {
+    label: string; h: string; m: string; ap: string
+    onH: (v: string) => void; onM: (v: string) => void; onAP: (v: string) => void
+  }) {
+    return (
+      <div>
+        <label style={{ display: 'block', fontSize: 10, fontWeight: 500, marginBottom: 4, color: 'var(--xp-txt3)' }}>{label}</label>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <CompactDropdown value={h}  options={HOURS}   onChange={onH}  isDark={isDark} width={56} />
+          <span style={{ color: 'var(--xp-txt3)', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>:</span>
+          <CompactDropdown value={m}  options={MINUTES} onChange={onM}  isDark={isDark} width={62} />
+          <CompactDropdown value={ap} options={AMPM}    onChange={onAP} isDark={isDark} width={60} />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
-      <div className="w-full max-w-[320px] rounded-2xl shadow-2xl p-5" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)' }} onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-[340px] rounded-2xl shadow-2xl p-5" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)' }} onClick={e => e.stopPropagation()}>
         <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--xp-txt)' }}>Adjust Time Session</h3>
         <p className="text-[10px] mb-4" style={{ color: 'var(--xp-txt3)' }}>{task.text}</p>
 
-        {/* Desktop: native time inputs side-by-side */}
-        <div className="hidden sm:grid grid-cols-2 gap-3 mb-3">
-          <div>
-            <label className="block text-[10px] font-medium mb-1" style={{ color: 'var(--xp-txt3)' }}>Start Time</label>
-            <input type="time" value={startVal} onChange={e => setStartVal(e.target.value)} className="w-full text-xs px-3 py-2 rounded-lg outline-none" style={{ border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }} />
-          </div>
-          <div>
-            <label className="block text-[10px] font-medium mb-1" style={{ color: 'var(--xp-txt3)' }}>End Time</label>
-            <input type="time" value={endVal} onChange={e => setEndVal(e.target.value)} className="w-full text-xs px-3 py-2 rounded-lg outline-none" style={{ border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }} />
-          </div>
+        <div className="space-y-3 mb-3">
+          <TimeRow label="Start Time" h={startH} m={startM} ap={startAP} onH={setStartH} onM={setStartM} onAP={setStartAP} />
+          <TimeRow label="End Time"   h={endH}   m={endM}   ap={endAP}   onH={setEndH}   onM={setEndM}   onAP={setEndAP} />
         </div>
 
-        {/* Mobile: explicit 12-hour selects (Hour / Minute / AM·PM) */}
-        <div className="sm:hidden space-y-3 mb-3">
-          {(['start', 'end'] as const).map(which => {
-            const val  = which === 'start' ? startVal : endVal
-            const setV = which === 'start' ? setStartVal : setEndVal
-            const h12  = valToH12(val)
-            return (
-              <div key={which}>
-                <label className="block text-[10px] font-medium mb-1" style={{ color: 'var(--xp-txt3)' }}>
-                  {which === 'start' ? 'Start Time' : 'End Time'}
-                </label>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <select
-                    value={h12.hour}
-                    onChange={e => setV(h12ToVal(Number(e.target.value), h12.minute, h12.amPm))}
-                    className="text-xs rounded-lg outline-none text-center"
-                    style={{ flex: 1, padding: '6px 2px', border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }}
-                  >
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map(h => (
-                      <option key={h} value={h}>{h}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={h12.minute}
-                    onChange={e => setV(h12ToVal(h12.hour, Number(e.target.value), h12.amPm))}
-                    className="text-xs rounded-lg outline-none text-center"
-                    style={{ flex: 1, padding: '6px 2px', border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }}
-                  >
-                    {Array.from({ length: 60 }, (_, i) => i).map(m => (
-                      <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={h12.amPm}
-                    onChange={e => setV(h12ToVal(h12.hour, h12.minute, e.target.value as 'AM' | 'PM'))}
-                    className="text-xs rounded-lg outline-none text-center"
-                    style={{ width: 52, padding: '6px 2px', border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }}
-                  >
-                    <option>AM</option>
-                    <option>PM</option>
-                  </select>
-                </div>
-              </div>
-            )
-          })}
-        </div>
+        <p className="text-[10px] mb-3" style={{ color: 'var(--xp-txt3)' }}>Duration: {formatMs(durationMs)}</p>
 
-        {startVal && endVal && (() => { const sTs = inputToTs(startVal, baseTs); let eTs = inputToTs(endVal, baseTs); if (eTs <= sTs) eTs += 86_400_000; return <p className="text-[10px] mb-3" style={{ color: 'var(--xp-txt3)' }}>Duration: {formatMs(Math.max(0, eTs - sTs))}</p> })()}
         <div className="mb-4">
           <label className="block text-[10px] font-medium mb-1" style={{ color: 'var(--xp-txt3)' }}>Reason (optional)</label>
           <input type="text" value={noteVal} onChange={e => setNoteVal(e.target.value)} placeholder="Why are you adjusting this time?" className="w-full text-xs px-3 py-2 rounded-lg outline-none" style={{ border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }} />
         </div>
         <div className="flex gap-2 justify-end">
           <button onClick={onClose} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
-          <button onClick={() => { if (startVal && endVal) { const sTs = inputToTs(startVal, baseTs); let eTs = inputToTs(endVal, baseTs); if (eTs <= sTs) eTs += 86_400_000; onSave(sessionId, sTs, eTs, noteVal); onClose() } }} className="text-xs px-5 py-1.5 rounded-full text-white hover:opacity-80" style={{ background: '#7c3aed' }}>Save</button>
+          <button onClick={() => { onSave(sessionId, startTs, endTs, noteVal); onClose() }} className="text-xs px-5 py-1.5 rounded-full text-white hover:opacity-80" style={{ background: '#7c3aed' }}>Save</button>
         </div>
       </div>
     </div>
@@ -218,9 +297,21 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
 
 // ─── Task 3-dot Menu ──────────────────────────────────────────────────────────
 
-interface TaskMenuProps { onEdit: () => void; onAdjustTime: () => void; onDuplicate: () => void; onDelete: () => void; onSetReminder: () => void; onClose: () => void }
+interface TaskMenuProps {
+  onEdit: () => void
+  onAdjustTime: () => void
+  onDuplicate: () => void
+  onDelete: () => void
+  onSetReminder: () => void
+  onCopy: () => void
+  onPaste: () => void
+  onCreateSubTask: () => void
+  pasteEnabled: boolean
+  isChild: boolean
+  onClose: () => void
+}
 
-function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, onClose }: TaskMenuProps) {
+function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, pasteEnabled, isChild, onClose }: TaskMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     function onClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
@@ -228,17 +319,25 @@ function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, 
     return () => document.removeEventListener('mousedown', onClick)
   }, [onClose])
 
-  const items = [
-    { icon: '✏️', label: 'Edit Task',      action: onEdit        },
-    { icon: '🔔', label: 'Set Reminder',   action: onSetReminder },
-    { icon: '🕒', label: 'Adjust Time',    action: onAdjustTime  },
-    { icon: '📄', label: 'Duplicate Task', action: onDuplicate   },
-    { icon: '🗑',  label: 'Delete Task',   action: onDelete, danger: true },
+  const items: { icon: string; label: string; action: () => void; danger?: boolean; disabled?: boolean }[] = [
+    { icon: '✏️', label: 'Edit Task',        action: onEdit        },
+    { icon: '🔔', label: 'Set Reminder',     action: onSetReminder },
+    { icon: '🕒', label: 'Adjust Time',      action: onAdjustTime  },
+    { icon: '📄', label: 'Duplicate Task',   action: onDuplicate   },
+    { icon: '📋', label: 'Copy Task',        action: onCopy        },
+    { icon: '📌', label: 'Paste Task',       action: onPaste, disabled: !pasteEnabled },
+    ...(!isChild ? [{ icon: '➕', label: 'Create Sub-Task', action: onCreateSubTask }] : []),
+    { icon: '🗑',  label: 'Delete Task',     action: onDelete, danger: true },
   ]
   return (
-    <div ref={ref} className="absolute right-0 top-full mt-1 rounded-xl shadow-xl overflow-hidden z-10" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', minWidth: 162 }}>
+    <div ref={ref} className="absolute right-0 top-full mt-1 rounded-xl shadow-xl z-10" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', minWidth: 178, maxHeight: 340, overflowY: 'auto' }}>
       {items.map(item => (
-        <button key={item.label} onClick={() => { item.action(); onClose() }} className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-xs transition-colors hover:bg-black/5" style={{ color: item.danger ? '#ef4444' : 'var(--xp-txt)' }}>
+        <button
+          key={item.label}
+          onClick={() => { if (!item.disabled) { item.action(); onClose() } }}
+          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-xs transition-colors hover:bg-black/5"
+          style={{ color: item.danger ? '#ef4444' : 'var(--xp-txt)', opacity: item.disabled ? 0.38 : 1, cursor: item.disabled ? 'default' : 'pointer' }}
+        >
           <span className="text-sm">{item.icon}</span>{item.label}
         </button>
       ))}
@@ -279,6 +378,19 @@ interface TaskRowProps {
   onDrop: () => void
   bellTriggerKey: number
   onAttachmentsChange: (attachments: TaskAttachment[]) => void
+  // Hierarchy props
+  isChild?: boolean
+  childIndex?: number
+  hasChildren?: boolean
+  isParentExpanded?: boolean
+  onParentExpandToggle?: () => void
+  subTaskCount?: number
+  subTaskDoneCount?: number
+  // Clipboard props
+  onCopy: () => void
+  onPaste: () => void
+  onCreateSubTask: () => void
+  pasteEnabled: boolean
 }
 
 function TaskRow({
@@ -289,6 +401,9 @@ function TaskRow({
   onTextChange, onActChange, onAdjustTime, onSetReminder,
   onDragStart, onDragOver, onDrop, bellTriggerKey,
   onAttachmentsChange,
+  isChild = false, childIndex, hasChildren = false, isParentExpanded, onParentExpandToggle,
+  subTaskCount, subTaskDoneCount,
+  onCopy, onPaste, onCreateSubTask, pasteEnabled,
 }: TaskRowProps) {
   const { activities, reminders, isDark, setToast } = useApp()
   const attachments = task.attachments ?? []
@@ -487,11 +602,24 @@ function TaskRow({
         {/* ── HEADER ROW ─────────────────────────────────────────────────────── */}
         <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1.5">
 
-          {/* Drag handle */}
-          <span draggable onDragStart={onDragStart} className="cursor-grab active:cursor-grabbing select-none flex-shrink-0 opacity-25 hover:opacity-55 transition-opacity" style={{ color: 'var(--xp-txt3)', fontSize: 13 }}>⠿</span>
+          {/* Hierarchy expand/collapse (replaces drag handle) */}
+          {hasChildren ? (
+            <button
+              onClick={e => { e.stopPropagation(); onParentExpandToggle?.() }}
+              className="flex-shrink-0 flex items-center justify-center transition-colors hover:bg-black/5 rounded"
+              style={{ width: 18, height: 18, color: 'var(--xp-txt3)', fontSize: 10 }}
+              title={isParentExpanded ? 'Collapse sub-tasks' : 'Expand sub-tasks'}
+            >
+              <span style={{ display: 'inline-block', lineHeight: 1, transform: isParentExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 200ms cubic-bezier(0.4,0,0.2,1)' }}>▶</span>
+            </button>
+          ) : (
+            <span className="flex-shrink-0" style={{ width: 18 }} />
+          )}
 
-          {/* Task N */}
-          <span className="text-[10px] font-semibold flex-shrink-0 tabular-nums" style={{ color: 'var(--xp-txt3)', minWidth: 38 }}>Task {index + 1}</span>
+          {/* Task N / Sub-Task N */}
+          <span className="text-[10px] font-semibold flex-shrink-0 tabular-nums" style={{ color: 'var(--xp-txt3)', minWidth: isChild ? 52 : 38 }}>
+            {isChild ? `Sub-Task ${(childIndex ?? 0) + 1}` : `Task ${index + 1}`}
+          </span>
 
           {/* Completion checkbox */}
           <button onClick={onToggle} className="w-[17px] h-[17px] rounded border-2 flex-shrink-0 flex items-center justify-center transition-all duration-150" style={{ borderColor: task.done ? '#16a34a' : 'var(--xp-bdr2)', background: task.done ? '#16a34a' : 'transparent' }}>
@@ -556,7 +684,21 @@ function TaskRow({
           {/* 3-dot */}
           <div className="relative flex-shrink-0">
             <button onClick={() => setMenuOpen(o => !o)} className="p-1.5 rounded-lg hover:bg-black/5 transition-colors" style={{ color: 'var(--xp-txt3)' }}><DotsIcon /></button>
-            {menuOpen && <TaskMenu onEdit={() => { onEditStart(); setMenuOpen(false) }} onSetReminder={onSetReminder} onAdjustTime={() => setAdjustOpen(true)} onDuplicate={onDuplicate} onDelete={onDelete} onClose={() => setMenuOpen(false)} />}
+            {menuOpen && (
+              <TaskMenu
+                onEdit={() => { onEditStart(); setMenuOpen(false) }}
+                onSetReminder={onSetReminder}
+                onAdjustTime={() => setAdjustOpen(true)}
+                onDuplicate={onDuplicate}
+                onDelete={onDelete}
+                onCopy={onCopy}
+                onPaste={onPaste}
+                onCreateSubTask={onCreateSubTask}
+                pasteEnabled={pasteEnabled}
+                isChild={isChild}
+                onClose={() => setMenuOpen(false)}
+              />
+            )}
           </div>
         </div>
 
@@ -623,6 +765,13 @@ function TaskRow({
             <span className="flex items-center gap-1.5 flex-shrink-0">
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#16a34a', display: 'inline-block', flexShrink: 0, animation: 'xp-active-pulse 1.4s ease-in-out infinite' }} />
               <span className="text-[10px] font-semibold" style={{ color: '#16a34a' }}>Active</span>
+            </span>
+          )}
+
+          {/* Sub-task count badge */}
+          {hasChildren && subTaskCount !== undefined && (
+            <span className="flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: 'var(--xp-bg2)', border: '0.5px solid var(--xp-bdr2)', color: 'var(--xp-txt3)' }}>
+              {subTaskDoneCount}/{subTaskCount}
             </span>
           )}
 
@@ -1215,6 +1364,12 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   const [mainSaving,       setMainSaving]        = useState(false)
   const [isMounted, setIsMounted] = useState(skipEntryAnimation ?? false)
   const [isClosing, setIsClosing] = useState(false)
+  // Hierarchy & clipboard state
+  const [expandedParents,  setExpandedParents]  = useState<Set<string>>(new Set())
+  const [pendingDeleteId,  setPendingDeleteId]  = useState<string | null>(null)
+  const [taskClipboard,    setTaskClipboard]    = useState<ClipboardTask | null>(() => {
+    try { const s = localStorage.getItem('xp9-task-clipboard'); return s ? JSON.parse(s) : null } catch { return null }
+  })
   const journalSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevNotesOpenRef    = useRef(false)
   const openSnapshotRef     = useRef<typeof dayData | null>(null)
@@ -1302,8 +1457,9 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   // On open: pre-populate 2 blank tasks for empty days, then snapshot for dirty-change detection
   useEffect(() => {
     const base: DayData = JSON.parse(JSON.stringify(calData[dateKey] ?? EMPTY_DAY))
-    if (base.tasks.length < 2) {
-      const needed = 2 - base.tasks.length
+    const baseTopLevel = base.tasks.filter((t: Task) => !t.parentTaskId)
+    if (baseTopLevel.length < 2) {
+      const needed = 2 - baseTopLevel.length
       const newTasks = Array.from({ length: needed }, () => makeTask(''))
       const seeded: DayData = { ...base, tasks: [...base.tasks, ...newTasks] }
       updateDay(dateKey, () => seeded)
@@ -1363,10 +1519,25 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   }
 
   function deleteTask(id: string) {
+    const children = dayData.tasks.filter(t => t.parentTaskId === id)
+    if (children.length > 0) { setPendingDeleteId(id); return }
+    doDeleteTask(id)
+  }
+
+  function doDeleteTask(id: string) {
+    const childIds = dayData.tasks.filter(t => t.parentTaskId === id).map(t => t.id)
+    const idsToDelete = new Set([id, ...childIds])
+    childIds.forEach(cid => { if (activeTaskTimer?.taskId === cid) setActiveTaskTimer(null) })
     if (activeTaskTimer?.taskId === id) setActiveTaskTimer(null)
-    updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.filter(t => t.id !== id) }))
-    if (expandedTaskId === id) setExpandedTaskId(null)
-    setDirtyNotesMap(prev => { const { [id]: _, ...rest } = prev; return rest })
+    updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.filter(t => !idsToDelete.has(t.id)) }))
+    if (expandedTaskId === id || childIds.includes(expandedTaskId ?? '')) setExpandedTaskId(null)
+    setDirtyNotesMap(prev => {
+      const next = { ...prev }
+      idsToDelete.forEach(did => { delete next[did] })
+      return next
+    })
+    setExpandedParents(prev => { const n = new Set(prev); n.delete(id); return n })
+    setPendingDeleteId(null)
   }
 
   function duplicateTask(id: string) {
@@ -1377,6 +1548,61 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
       const next = [...prev.tasks]; next.splice(idx + 1, 0, copy)
       return { ...prev, tasks: next }
     })
+  }
+
+  function copyTask(id: string) {
+    const task = dayData.tasks.find(t => t.id === id); if (!task) return
+    const children = dayData.tasks
+      .filter(t => t.parentTaskId === id)
+      .map(c => ({ text: c.text, actId: c.actId, journal: c.journal }))
+    const clip: ClipboardTask = { text: task.text, actId: task.actId, journal: task.journal, children }
+    try { localStorage.setItem('xp9-task-clipboard', JSON.stringify(clip)) } catch {}
+    setTaskClipboard(clip)
+    setToast('Task copied to clipboard ✓')
+  }
+
+  function pasteTask() {
+    if (!taskClipboard) return
+    const ts = Date.now()
+    const newParentId = 't' + ts + Math.random().toString(36).slice(2, 6)
+    const newParent: Task = {
+      id: newParentId, text: taskClipboard.text, actId: taskClipboard.actId,
+      journal: taskClipboard.journal, done: false, timerStart: null, timerEnd: null, sessions: [],
+    }
+    const newChildren: Task[] = taskClipboard.children.map((c, i) => ({
+      id: 't' + (ts + i + 1) + Math.random().toString(36).slice(2, 6),
+      text: c.text, actId: c.actId, journal: c.journal,
+      done: false, timerStart: null, timerEnd: null, sessions: [],
+      parentTaskId: newParentId,
+    }))
+    updateDay(dateKey, prev => ({ ...prev, tasks: [...prev.tasks, newParent, ...newChildren] }))
+    if (newChildren.length > 0) setExpandedParents(prev => new Set([...prev, newParentId]))
+    setToast('Task pasted ✓')
+  }
+
+  function createSubTask(parentId: string) {
+    const parent = dayData.tasks.find(t => t.id === parentId); if (!parent) return
+    const childId = 't' + Date.now() + Math.random().toString(36).slice(2, 6)
+    const child: Task = {
+      id: childId, text: '', actId: parent.actId, journal: '',
+      done: false, timerStart: null, timerEnd: null, sessions: [],
+      parentTaskId: parentId,
+    }
+    updateDay(dateKey, prev => {
+      const tasks = [...prev.tasks]
+      const lastSiblingIdx = tasks.reduce((acc, t, i) => t.parentTaskId === parentId ? i : acc, -1)
+      const parentIdx = tasks.findIndex(t => t.id === parentId)
+      const insertAfter = lastSiblingIdx >= 0 ? lastSiblingIdx : parentIdx
+      tasks.splice(insertAfter + 1, 0, child)
+      return { ...prev, tasks }
+    })
+    setExpandedParents(prev => new Set([...prev, parentId]))
+    setEditingTaskId(childId)
+    setTimeout(() => document.getElementById(`xp-task-${childId}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 80)
+  }
+
+  function toggleParentExpand(parentId: string) {
+    setExpandedParents(prev => { const n = new Set(prev); n.has(parentId) ? n.delete(parentId) : n.add(parentId); return n })
   }
 
   function updateTaskText(id: string, text: string) {
@@ -1509,7 +1735,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     updateDay(dateKey, prev => ({ ...prev, tasks })); setDragItemId(null)
   }
 
-  const doneCount = dayData.tasks.filter(t => t.done).length
+  const topLevelTasks = dayData.tasks.filter(t => !t.parentTaskId)
+  const doneCount     = topLevelTasks.filter(t => t.done).length
 
   const visible = isMounted && !isClosing
 
@@ -1541,7 +1768,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
         </div>
       )}
       <div
-        className="w-full sm:max-w-[520px] rounded-none sm:rounded-2xl flex flex-col overflow-hidden flex-1 sm:flex-none max-h-full sm:max-h-[93vh]"
+        className="w-full sm:max-w-[610px] rounded-none sm:rounded-2xl flex flex-col overflow-hidden flex-1 sm:flex-none max-h-full sm:max-h-[93vh]"
         style={{
           background: 'var(--xp-card)',
           border: '0.5px solid var(--xp-bdr2)',
@@ -1581,7 +1808,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-semibold" style={{ color: 'var(--xp-txt)' }}>
                   Accomplishments
-                  {dayData.tasks.length > 0 && <span className="ml-1 font-normal" style={{ color: 'var(--xp-txt3)' }}>· {doneCount}/{dayData.tasks.length} Completed</span>}
+                  {topLevelTasks.length > 0 && <span className="ml-1 font-normal" style={{ color: 'var(--xp-txt3)' }}>· {doneCount}/{topLevelTasks.length} Completed</span>}
                 </p>
                 <p className="text-[10px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>
                   Total Focus Time Today:{' '}
@@ -1597,7 +1824,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             </div>
 
             {/* Empty state */}
-            {dayData.tasks.length === 0 && !addingTask && (
+            {topLevelTasks.length === 0 && !addingTask && (
               <div className="text-center py-7">
                 <div className="text-2xl mb-2">📋</div>
                 <p className="text-xs font-medium mb-1" style={{ color: 'var(--xp-txt)' }}>No accomplishments yet.</p>
@@ -1606,41 +1833,88 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
               </div>
             )}
 
-            {/* Task list */}
+            {/* Task list — hierarchical */}
             <div className="space-y-2">
-              {dayData.tasks.map((task, index) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  index={index}
-                  isActive={activeTaskTimer?.taskId === task.id && activeTaskTimer.dateKey === dateKey}
-                  blockedByOtherTimer={!!activeTaskTimer && activeTaskTimer.taskId !== task.id}
-                  now={now}
-                  isEditing={editingTaskId === task.id}
-                  onEditStart={() => setEditingTaskId(task.id)}
-                  onEditEnd={() => setEditingTaskId(null)}
-                  dateKey={dateKey}
-                  expanded={expandedTaskId === task.id}
-                  onExpandToggle={() => setExpandedTaskId(prev => prev === task.id ? null : task.id)}
-                  onToggle={() => toggleTask(task.id)}
-                  onDelete={() => deleteTask(task.id)}
-                  onDuplicate={() => duplicateTask(task.id)}
-                  onStartTimer={() => startTimer(task.id, index)}
-                  onStopTimer={() => stopTimer(task.id)}
-                  draftJournal={dirtyNotesMap[task.id] ?? null}
-                  onNotesDraftChange={text => handleNotesDraftChange(task.id, text)}
-                  onNotesSave={() => saveTaskNotes(task.id)}
-                  onTextChange={text => updateTaskText(task.id, text)}
-                  onActChange={actId => updateTaskAct(task.id, actId)}
-                  onAdjustTime={(sid, s, e, n) => adjustTime(task.id, sid, s, e, n)}
-                  onSetReminder={() => setReminderTaskId(task.id)}
-                  onDragStart={() => setDragItemId(task.id)}
-                  onDragOver={e => e.preventDefault()}
-                  onDrop={() => handleDrop(task.id)}
-                  bellTriggerKey={reminderSavedKey[task.id] ?? 0}
-                  onAttachmentsChange={atts => updateTaskAttachments(task.id, atts)}
-                />
-              ))}
+              {(() => {
+                const topLevel  = dayData.tasks.filter(t => !t.parentTaskId)
+                let topIdx = 0
+                return topLevel.map(task => {
+                  const children      = dayData.tasks.filter(t => t.parentTaskId === task.id)
+                  const hasKids       = children.length > 0
+                  const isExpanded    = expandedParents.has(task.id)
+                  const parentActColor = activities.find(a => a.id === task.actId)?.color ?? '#7c3aed'
+                  const taskIndex     = topIdx++
+                  const subDone       = children.filter(c => c.done).length
+
+                  const sharedProps = (t: Task, idx: number, isChild = false, childIdx?: number) => ({
+                    task: t, index: idx, isActive: activeTaskTimer?.taskId === t.id && activeTaskTimer.dateKey === dateKey,
+                    blockedByOtherTimer: !!activeTaskTimer && activeTaskTimer.taskId !== t.id,
+                    now, isEditing: editingTaskId === t.id,
+                    onEditStart: () => setEditingTaskId(t.id), onEditEnd: () => setEditingTaskId(null),
+                    dateKey, expanded: expandedTaskId === t.id,
+                    onExpandToggle: () => setExpandedTaskId(prev => prev === t.id ? null : t.id),
+                    onToggle: () => toggleTask(t.id), onDelete: () => deleteTask(t.id),
+                    onDuplicate: () => duplicateTask(t.id),
+                    onStartTimer: () => startTimer(t.id, idx), onStopTimer: () => stopTimer(t.id),
+                    draftJournal: dirtyNotesMap[t.id] ?? null,
+                    onNotesDraftChange: (text: string) => handleNotesDraftChange(t.id, text),
+                    onNotesSave: () => saveTaskNotes(t.id),
+                    onTextChange: (text: string) => updateTaskText(t.id, text),
+                    onActChange: (actId: string) => updateTaskAct(t.id, actId),
+                    onAdjustTime: (sid: string | null, s: number, e: number, n: string) => adjustTime(t.id, sid, s, e, n),
+                    onSetReminder: () => setReminderTaskId(t.id),
+                    onDragStart: () => setDragItemId(t.id), onDragOver: (ev: React.DragEvent) => ev.preventDefault(),
+                    onDrop: () => handleDrop(t.id),
+                    bellTriggerKey: reminderSavedKey[t.id] ?? 0,
+                    onAttachmentsChange: (atts: TaskAttachment[]) => updateTaskAttachments(t.id, atts),
+                    onCopy: () => copyTask(t.id), onPaste: pasteTask,
+                    onCreateSubTask: () => createSubTask(t.id),
+                    pasteEnabled: !!taskClipboard,
+                    isChild, childIndex: childIdx,
+                  })
+
+                  return (
+                    <div key={task.id}>
+                      <TaskRow
+                        {...sharedProps(task, taskIndex)}
+                        hasChildren={hasKids}
+                        isParentExpanded={isExpanded}
+                        onParentExpandToggle={() => toggleParentExpand(task.id)}
+                        subTaskCount={hasKids ? children.length : undefined}
+                        subTaskDoneCount={hasKids ? subDone : undefined}
+                      />
+
+                      {/* Sub-tasks hierarchy */}
+                      {hasKids && isExpanded && (
+                        <div style={{ position: 'relative', marginLeft: 16, marginTop: 6 }}>
+                          {/* Vertical connector line */}
+                          <div style={{
+                            position: 'absolute', left: 7, top: 0,
+                            height: 'calc(100% - 18px)', width: 1.5,
+                            borderRadius: 1, background: `${parentActColor}48`, pointerEvents: 'none',
+                          }} />
+                          <div className="space-y-2">
+                            {children.map((child, ci) => (
+                              <div key={child.id} style={{ position: 'relative', paddingLeft: 20 }}>
+                                {/* Horizontal branch connector */}
+                                <div style={{
+                                  position: 'absolute', left: 8, top: 20,
+                                  width: 12, height: 1.5,
+                                  borderRadius: 1, background: `${parentActColor}48`, pointerEvents: 'none',
+                                }} />
+                                <TaskRow
+                                  {...sharedProps(child, ci, true, ci)}
+                                  hasChildren={false}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })
+              })()}
 
               {addingTask && (
                 <div className="flex items-center gap-2">
@@ -1651,7 +1925,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
               )}
             </div>
 
-            {dayData.tasks.length > 0 && !addingTask && (
+            {topLevelTasks.length > 0 && !addingTask && (
               <div style={{ position: 'sticky', bottom: 0, paddingTop: 6, paddingBottom: 2, background: 'var(--xp-card)', zIndex: 4 }}>
                 <button onClick={() => setAddingTask(true)} className="w-full text-xs py-2.5 rounded-xl text-white font-semibold transition-all hover:opacity-85" style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)', boxShadow: '0 2px 10px rgba(124,58,237,0.35)' }}>
                   + Add accomplishment
@@ -1732,6 +2006,27 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
           </div>
         </div>
       )}
+
+      {/* Delete parent + children confirmation */}
+      {pendingDeleteId && (() => {
+        const pendingTask = dayData.tasks.find(t => t.id === pendingDeleteId)
+        const childCount  = dayData.tasks.filter(t => t.parentTaskId === pendingDeleteId).length
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9996, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, background: 'rgba(0,0,0,0.55)' }} onClick={() => setPendingDeleteId(null)}>
+            <div style={{ background: isDark ? '#1a1530' : '#ffffff', borderRadius: 18, padding: '22px 22px 18px', maxWidth: 320, width: '100%', boxShadow: '0 24px 60px rgba(0,0,0,0.35)', border: `0.5px solid ${isDark ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.15)'}` }} onClick={e => e.stopPropagation()}>
+              <p style={{ fontWeight: 700, fontSize: 14, color: isDark ? '#ffffff' : '#111827', margin: '0 0 6px' }}>Delete task and sub-tasks?</p>
+              <p style={{ fontSize: 12, color: 'var(--xp-txt3)', margin: '0 0 4px', lineHeight: 1.55 }}>
+                <strong style={{ color: isDark ? 'rgba(255,255,255,0.85)' : '#374151' }}>{pendingTask?.text || 'This task'}</strong> has {childCount} sub-task{childCount !== 1 ? 's' : ''}.
+              </p>
+              <p style={{ fontSize: 12, color: 'var(--xp-txt3)', margin: '0 0 20px', lineHeight: 1.55 }}>Deleting it will also remove all sub-tasks and their history.</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button onClick={() => setPendingDeleteId(null)} style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: 'transparent', color: 'var(--xp-txt3)', border: '1px solid var(--xp-bdr2)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>Keep Task</button>
+                <button onClick={() => doDeleteTask(pendingDeleteId)} style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: isDark ? 'rgba(239,68,68,0.12)' : 'rgba(239,68,68,0.07)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Delete Task + Sub-Tasks</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {showConfetti && <ConfettiPop onDone={onConfettiDone} />}
 

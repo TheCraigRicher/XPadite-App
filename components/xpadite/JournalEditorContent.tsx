@@ -2004,6 +2004,7 @@ export function JournalEditorContent({
           .xp-jd-sec-dt { display: none !important; }
           .xp-jd-ind-dt { display: none !important; }
           .xp-jd-mic-toolbar { display: none !important; }
+          .xp-j-saved-txt { display: none !important; }
           .xp-jd-nav-btn {
             font-size: 20px !important;
             color: rgba(255,255,255,0.92) !important;
@@ -2484,8 +2485,8 @@ export function JournalEditorContent({
 
                 <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
 
-                {/* Saved ✓ indicator */}
-                <span style={{
+                {/* Saved ✓ indicator — hidden on mobile (takes dead width when transparent) */}
+                <span className="xp-j-saved-txt" style={{
                   fontSize: 11, whiteSpace: 'nowrap', userSelect: 'none', flexShrink: 0,
                   color: saveStatus === 'saved' ? '#16a34a' : 'transparent',
                   transition: 'color 200ms',

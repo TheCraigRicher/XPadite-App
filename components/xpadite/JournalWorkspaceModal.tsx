@@ -155,6 +155,8 @@ interface JournalMonthCardProps {
   isDark: boolean
   onDayClick: (dateKey: string) => void
   onDayDoubleClick: (dateKey: string) => void
+  maxLabels?: number
+  embedded?: boolean
 }
 
 const MAX_LABELS = 3
@@ -170,6 +172,7 @@ const CAL_GRID: React.CSSProperties = {
 
 function JournalMonthCard({
   year, month, todayKey, selectedDate, getEntrySummaries, isDark, onDayClick, onDayDoubleClick,
+  maxLabels = MAX_LABELS, embedded = false,
 }: JournalMonthCardProps) {
   const cells   = useMemo(() => buildCells(year, month), [year, month])
   const acc     = '#7c3aed'
@@ -177,6 +180,10 @@ function JournalMonthCard({
   const dowColor = isDark ? 'rgba(167,139,250,0.58)' : 'rgba(109,40,217,0.48)'
   const cardBg  = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.70)'
   const cardBdr = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'
+  const overflowColor = isDark ? 'rgba(255,255,255,0.42)' : 'rgba(0,0,0,0.38)'
+  const cardStyle: React.CSSProperties = embedded
+    ? { padding: '6px 8px 10px', display: 'flex', flexDirection: 'column', gap: 2 }
+    : { background: cardBg, border: `0.5px solid ${cardBdr}`, borderRadius: 10, padding: '10px 8px 8px', display: 'flex', flexDirection: 'column', gap: 2 }
 
   // Journal cell border/background when the day has entries but is not selected/today
   const journalBdr = isDark ? 'rgba(167,139,250,0.30)' : 'rgba(124,58,237,0.22)'
@@ -186,20 +193,16 @@ function JournalMonthCard({
   const journalHoverBg  = isDark ? 'rgba(167,139,250,0.13)' : 'rgba(124,58,237,0.08)'
 
   return (
-    <div style={{
-      background: cardBg,
-      border: `0.5px solid ${cardBdr}`,
-      borderRadius: 10,
-      padding: '10px 8px 8px',
-      display: 'flex', flexDirection: 'column', gap: 2,
-    }}>
-      {/* Month name */}
-      <div style={{
-        textAlign: 'center', fontSize: 11, fontWeight: 600,
-        color: txt, paddingBottom: 4, letterSpacing: '0.02em',
-      }}>
-        {MONTH_NAMES[month]}
-      </div>
+    <div style={cardStyle}>
+      {/* Month name — hidden in embedded mode (header row already shows it) */}
+      {!embedded && (
+        <div style={{
+          textAlign: 'center', fontSize: 11, fontWeight: 600,
+          color: txt, paddingBottom: 4, letterSpacing: '0.02em',
+        }}>
+          {MONTH_NAMES[month]}
+        </div>
+      )}
 
       {/* Single CAL_GRID container: DOW headers and ALL day cells share the exact same
           7-column grid definition. Column alignment is structurally guaranteed. */}
@@ -220,7 +223,8 @@ function JournalMonthCard({
           const isSel     = selectedDate === dateKey
           const summaries = getEntrySummaries(dateKey)
           const hasJ      = summaries.length > 0
-          const visible   = summaries.slice(0, MAX_LABELS)
+          const visible   = summaries.slice(0, maxLabels)
+          const overflow  = summaries.length - maxLabels
 
           return (
             <button
@@ -320,6 +324,14 @@ function JournalMonthCard({
                       </span>
                     </div>
                   ))}
+                  {overflow > 0 && (
+                    <div style={{
+                      fontSize: 6.5, lineHeight: '10px', flexShrink: 0,
+                      paddingLeft: 3, color: overflowColor,
+                    }}>
+                      +{overflow}
+                    </div>
+                  )}
                 </div>
               )}
             </button>
@@ -353,16 +365,15 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   const [selectedLibEntry, setSelectedLibEntry] = useState<string | null>(null)
   const [renamingEntry, setRenamingEntry]       = useState<string | null>(null)
   const [renameValue, setRenameValue]           = useState('')
-  const [draggingKey, setDraggingKey]           = useState<string | null>(null)
-  const [dropZoneOver, setDropZoneOver]         = useState(false)
-  const [deleteConfirmKey, setDeleteConfirmKey] = useState<string | null>(null)
-  const libTouchRef      = useRef<{ key: string; time: number } | null>(null)
-  const dropZoneRef      = useRef<HTMLDivElement>(null)
-  const longPressRef     = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const touchDragKeyRef  = useRef<string | null>(null)
-  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null)
+  const [isSelectMode, setIsSelectMode]         = useState(false)
+  const [selectedKeys, setSelectedKeys]         = useState<Set<string>>(new Set())
+  const [deleteConfirmKeys, setDeleteConfirmKeys] = useState<string[] | null>(null)
+  const libTouchRef = useRef<{ key: string; time: number } | null>(null)
   const [libViewMode, setLibViewMode]   = useState<'compact' | 'detail' | 'tile' | 'thumbnail'>('compact')
   const [libSortOrder, setLibSortOrder] = useState<'newer' | 'older'>('newer')
+  const [openMobileMonths, setOpenMobileMonths] = useState<Set<number>>(
+    () => new Set([todayDate.getMonth()])
+  )
 
   // ── ESC key — calendar view only; editor ESC is owned by JournalEditorContent ─
   const escRef = useRef<() => void>(() => {})
@@ -426,11 +437,34 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     setRenamingEntry(null)
   }
 
-  function commitDelete(dateKey: string) {
-    updateDay(dateKey, prev => ({ ...prev, notes: '' }))
-    if (renamingEntry === dateKey) setRenamingEntry(null)
-    if (selectedLibEntry === dateKey) setSelectedLibEntry(null)
-    setDeleteConfirmKey(null)
+  function enterSelectMode() {
+    setIsSelectMode(true)
+    setSelectedKeys(new Set())
+    setRenamingEntry(null)
+  }
+
+  function exitSelectMode() {
+    setIsSelectMode(false)
+    setSelectedKeys(new Set())
+  }
+
+  function toggleSelectKey(key: string) {
+    setSelectedKeys(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function commitDeleteMany(keys: string[]) {
+    for (const key of keys) {
+      updateDay(key, prev => ({ ...prev, notes: '' }))
+      if (renamingEntry === key) setRenamingEntry(null)
+      if (selectedLibEntry === key) setSelectedLibEntry(null)
+    }
+    setDeleteConfirmKeys(null)
+    exitSelectMode()
   }
 
   function navigateDay(delta: number) {
@@ -456,6 +490,21 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     setOpenQ(prev => ({ ...prev, [label]: !prev[label] }))
   }
 
+  function toggleMobileMonth(m: number) {
+    setOpenMobileMonths(prev => {
+      const next = new Set(prev)
+      if (next.has(m)) next.delete(m)
+      else next.add(m)
+      return next
+    })
+  }
+
+  // Reset mobile month expansion when the viewed year changes
+  useEffect(() => {
+    const isCurrentYear = calYear === todayDate.getFullYear()
+    setOpenMobileMonths(new Set(isCurrentYear ? [todayDate.getMonth()] : []))
+  }, [calYear, todayDate])
+
   const getEntrySummaries = useCallback((dateKey: string): JournalEntrySummary[] => {
     return getJournalEntrySummaries(calData[dateKey]?.notes)
   }, [calData])
@@ -475,15 +524,21 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       : entries.sort((a, b) => a.dateKey.localeCompare(b.dateKey))
   }, [calData, libSortOrder])
 
-  // ── Scroll to today's quarter on calendar open ────────────────────────────────
-  const calContentRef = useRef<HTMLDivElement>(null)
+  // ── Scroll to today's quarter/month on calendar open ─────────────────────────
+  const calContentRef  = useRef<HTMLDivElement>(null)
+  const calMobileRef   = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (view !== 'calendar') return
-    const q = QUARTERS.find(q => q.months.includes(todayDate.getMonth()))
-    if (!q) return
     requestAnimationFrame(() => {
-      const el = document.getElementById(`xp-j-q-${q.label}`)
-      if (el && calContentRef.current) calContentRef.current.scrollTop = el.offsetTop - 12
+      // Desktop: scroll to today's quarter section
+      const q = QUARTERS.find(q => q.months.includes(todayDate.getMonth()))
+      if (q) {
+        const el = document.getElementById(`xp-j-q-${q.label}`)
+        if (el && calContentRef.current) calContentRef.current.scrollTop = el.offsetTop - 12
+      }
+      // Mobile: scroll to today's month card
+      const mEl = document.getElementById(`xp-jcal-mob-m-${todayDate.getMonth()}`)
+      if (mEl && calMobileRef.current) calMobileRef.current.scrollTop = mEl.offsetTop - 12
     })
   }, [view, todayDate])
 
@@ -593,8 +648,8 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         </div>
       </div>
 
-      {/* Quarterly calendar content */}
-      <div ref={calContentRef} style={{ flex: 1, overflowY: 'auto', padding: '14px 20px 28px' }}>
+      {/* Quarterly calendar content — desktop/tablet only */}
+      <div ref={calContentRef} className="xp-jcal-quarters" style={{ flex: 1, overflowY: 'auto', padding: '14px 20px 28px' }}>
         {QUARTERS.map(q => {
           const isOpen = openQ[q.label]
           return (
@@ -648,6 +703,118 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         </div>
       </div>
 
+      {/* Mobile-only: collapsible Q/month accordion */}
+      <div ref={calMobileRef} className="xp-jcal-mobile-grid" style={{ flex: 1, overflowY: 'auto', padding: '6px 12px 20px' }}>
+        {QUARTERS.map(q => (
+          <div key={q.label} style={{ marginBottom: 8 }}>
+            {/* Quarter header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '8px 2px 5px',
+            }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--xp-acc)', letterSpacing: '0.03em' }}>
+                {q.label}
+              </span>
+              <span style={{ fontSize: 10, color: muted }}>— {calYear}</span>
+              <div style={{ flex: 1, height: '0.5px', background: bdr, marginLeft: 2 }} />
+            </div>
+
+            {/* Month rows */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {q.months.map(m => {
+                const isOpen = openMobileMonths.has(m)
+                const isCurrentM = m === todayDate.getMonth() && calYear === todayDate.getFullYear()
+                return (
+                  <div key={m} id={`xp-jcal-mob-m-${m}`}>
+                    {/* Month header row */}
+                    <button
+                      onClick={() => toggleMobileMonth(m)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        width: '100%', padding: '8px 10px',
+                        borderRadius: isOpen ? '8px 8px 0 0' : 8,
+                        background: isOpen
+                          ? (isDark ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.09)')
+                          : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.65)'),
+                        border: `0.5px solid ${isOpen
+                          ? 'rgba(124,58,237,0.38)'
+                          : (isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.09)')}`,
+                        ...(isOpen ? { borderBottom: 'none' } : {}),
+                        cursor: 'pointer', textAlign: 'left',
+                        transition: 'background 120ms',
+                      }}
+                    >
+                      <svg
+                        width="10" height="10" viewBox="0 0 10 10"
+                        style={{
+                          flexShrink: 0,
+                          transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                          transition: 'transform 150ms',
+                          color: isOpen ? '#7c3aed' : (isDark ? 'rgba(255,255,255,0.42)' : 'rgba(0,0,0,0.32)'),
+                        }}
+                      >
+                        <polyline points="3,1 8,5 3,9" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      <span style={{
+                        fontSize: 12, fontWeight: isOpen ? 600 : 400,
+                        color: isCurrentM
+                          ? '#7c3aed'
+                          : isOpen
+                          ? (isDark ? '#c4b5fd' : '#5b21b6')
+                          : (isDark ? 'rgba(255,255,255,0.78)' : 'rgba(0,0,0,0.65)'),
+                        transition: 'color 120ms',
+                      }}>
+                        {MONTH_NAMES[m]}
+                      </span>
+                      {isCurrentM && (
+                        <span style={{
+                          fontSize: 8, fontWeight: 600,
+                          color: '#7c3aed',
+                          background: isDark ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.10)',
+                          border: '0.5px solid rgba(124,58,237,0.28)',
+                          borderRadius: 4, padding: '1px 5px', lineHeight: 1.5,
+                          marginLeft: 2,
+                        }}>
+                          Now
+                        </span>
+                      )}
+                    </button>
+
+                    {/* Expanded calendar */}
+                    {isOpen && (
+                      <div style={{
+                        border: '0.5px solid rgba(124,58,237,0.38)',
+                        borderTop: 'none',
+                        borderRadius: '0 0 8px 8px',
+                        overflow: 'hidden',
+                        background: isDark ? 'rgba(124,58,237,0.04)' : 'rgba(248,245,255,0.80)',
+                      }}>
+                        <JournalMonthCard
+                          year={calYear}
+                          month={m}
+                          todayKey={todayKey}
+                          selectedDate={selectedDate}
+                          getEntrySummaries={getEntrySummaries}
+                          isDark={isDark}
+                          onDayClick={handleDayClick}
+                          onDayDoubleClick={handleDayDoubleClick}
+                          embedded
+                        />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+        <div style={{ textAlign: 'center', paddingTop: 8, paddingBottom: 4 }}>
+          <span style={{ fontSize: 11, color: muted }}>
+            Tap a date to open the journal editor
+          </span>
+        </div>
+      </div>
+
       {/* ── Bottom view-nav bar ───────────────────────────────────────────── */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -666,6 +833,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             <button
               key={item.key}
               onClick={item.action}
+              className={`xp-jws-nav-btn${active ? ' xp-jws-nav-active' : ''}`}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
                 padding: '6px 14px', borderRadius: 8,
@@ -683,7 +851,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         })}
         {/* Mic slot — mobile only, disabled when not in Editor view */}
         <button
-          className="xp-jws-mic-nav"
+          className="xp-jws-mic-nav xp-jws-nav-btn"
           disabled
           style={{
             alignItems: 'center', gap: 6,
@@ -700,49 +868,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       </div>
     </>
   )
-
-  // ── Shared drag-event factory used by all 4 library card modes ──────────────
-  function mkDragHandlers(dateKey: string, title: string, isRen: boolean) {
-    return {
-      draggable: !isRen,
-      onDragStart: !isRen ? () => setDraggingKey(dateKey) : undefined,
-      onDragEnd: () => { setDraggingKey(null); setDropZoneOver(false) },
-      onTouchStart: (e: React.TouchEvent) => {
-        if (isRen) return
-        touchStartPosRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
-        longPressRef.current = setTimeout(() => {
-          touchDragKeyRef.current = dateKey
-          setDraggingKey(dateKey)
-          setSelectedLibEntry(dateKey)
-          if (navigator.vibrate) navigator.vibrate(50)
-        }, 600)
-      },
-      onTouchMove: (e: React.TouchEvent) => {
-        const t = e.touches[0]
-        if (longPressRef.current && touchStartPosRef.current) {
-          if (Math.hypot(t.clientX - touchStartPosRef.current.x, t.clientY - touchStartPosRef.current.y) > 10) {
-            clearTimeout(longPressRef.current); longPressRef.current = null
-          }
-        }
-        if (touchDragKeyRef.current) {
-          e.preventDefault()
-          setDropZoneOver(dropZoneRef.current?.contains(document.elementFromPoint(t.clientX, t.clientY)) ?? false)
-        }
-      },
-      onTouchEnd: (e: React.TouchEvent) => {
-        if (longPressRef.current) { clearTimeout(longPressRef.current); longPressRef.current = null }
-        if (touchDragKeyRef.current) {
-          const t = e.changedTouches[0]
-          if (dropZoneRef.current?.contains(document.elementFromPoint(t.clientX, t.clientY))) {
-            setDeleteConfirmKey(touchDragKeyRef.current)
-          }
-          touchDragKeyRef.current = null; setDraggingKey(null); setDropZoneOver(false)
-          e.preventDefault(); return
-        }
-        e.preventDefault(); handleLibTouchEnd(dateKey, title)
-      },
-    }
-  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // LIBRARY VIEW
@@ -764,7 +889,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       >
         <button
           onClick={() => setView('calendar')}
-          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0"
+          className="hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0"
           style={{ position: 'absolute', left: 20, background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.80)' }}
         >
           ← Back
@@ -786,97 +911,136 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         </button>
       </div>
 
-      {/* Controls bar — view mode + sort order */}
+      {/* Controls bar — normal mode: view/sort + delete; select mode: cancel/count/delete */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '8px 20px', flexShrink: 0,
+        display: 'flex', alignItems: 'center',
+        padding: '8px 12px', flexShrink: 0, minHeight: 44,
         borderBottom: `0.5px solid ${bdr}`,
-        background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)',
-        gap: 12,
+        background: isSelectMode
+          ? (isDark ? 'rgba(239,68,68,0.06)' : 'rgba(239,68,68,0.04)')
+          : (isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)'),
+        transition: 'background 180ms',
       }}>
-        {/* View mode toggles + sort order inline */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ fontSize: 10, color: muted, marginRight: 4, whiteSpace: 'nowrap' }}>View:</span>
-          {([
-            { key: 'compact'   as const, label: '⊡ Default'   , title: 'Default (compact) mode' },
-            { key: 'detail'    as const, label: '≡ Detail'    , title: 'Detail mode'    },
-            { key: 'tile'      as const, label: '⊞ Tile'      , title: 'Tile mode'      },
-            { key: 'thumbnail' as const, label: '⊟ Thumbnail' , title: 'Thumbnail mode' },
-          ]).map(opt => (
+        {isSelectMode ? (
+          /* ── Selection mode: Cancel | N selected | Delete ── */
+          <>
             <button
-              key={opt.key}
-              onClick={() => setLibViewMode(opt.key)}
-              title={opt.title}
+              onClick={exitSelectMode}
               style={{
-                padding: '3px 10px', borderRadius: 6, fontSize: 11,
-                fontWeight: libViewMode === opt.key ? 600 : 400,
-                cursor: 'pointer',
-                background: libViewMode === opt.key ? 'rgba(124,58,237,0.18)' : 'transparent',
-                border: `0.5px solid ${libViewMode === opt.key ? 'rgba(124,58,237,0.40)' : 'rgba(124,58,237,0.14)'}`,
-                color: libViewMode === opt.key ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.50)' : 'rgba(0,0,0,0.45)',
-                transition: 'background 120ms',
+                padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 500,
+                cursor: 'pointer', flexShrink: 0,
+                background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`,
+                color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)',
               }}
-            >{opt.label}</button>
-          ))}
-
-          {/* Divider */}
-          <span style={{ width: 1, height: 14, background: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)', margin: '0 4px', flexShrink: 0 }} />
-
-          {/* Sort toggles — inline after view buttons */}
-          {([
-            { key: 'newer' as const, label: '↓ Newer' },
-            { key: 'older' as const, label: '↑ Older' },
-          ]).map(opt => (
-            <button
-              key={opt.key}
-              onClick={() => setLibSortOrder(opt.key)}
-              style={{
-                padding: '3px 10px', borderRadius: 6, fontSize: 11,
-                fontWeight: libSortOrder === opt.key ? 600 : 400,
-                cursor: 'pointer',
-                background: libSortOrder === opt.key ? 'rgba(124,58,237,0.18)' : 'transparent',
-                border: `0.5px solid ${libSortOrder === opt.key ? 'rgba(124,58,237,0.40)' : 'rgba(124,58,237,0.14)'}`,
-                color: libSortOrder === opt.key ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.50)' : 'rgba(0,0,0,0.45)',
-                transition: 'background 120ms',
-              }}
-            >{opt.label}</button>
-          ))}
-        </div>
-
-        {/* Trash drop zone */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
-          <div
-            ref={dropZoneRef}
-            onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropZoneOver(true) }}
-            onDragLeave={() => setDropZoneOver(false)}
-            onDrop={e => {
-              e.preventDefault(); setDropZoneOver(false)
-              if (draggingKey) { setDeleteConfirmKey(draggingKey); setDraggingKey(null) }
-            }}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 500,
-              userSelect: 'none', transition: 'all 180ms',
-              border: `1.5px dashed ${dropZoneOver ? 'rgba(239,68,68,0.85)' : draggingKey ? 'rgba(239,68,68,0.50)' : 'rgba(239,68,68,0.25)'}`,
-              background: dropZoneOver ? 'rgba(239,68,68,0.18)' : draggingKey ? 'rgba(239,68,68,0.07)' : 'transparent',
-              color: dropZoneOver ? '#fca5a5' : draggingKey ? 'rgba(239,68,68,0.75)' : 'rgba(239,68,68,0.45)',
-              cursor: draggingKey ? 'copy' : 'default',
-              transform: dropZoneOver ? 'scale(1.05)' : 'scale(1)',
-            }}
-          >
-            🗑️ {dropZoneOver ? 'Release to delete' : draggingKey ? 'Drop here to delete' : 'Delete'}
-          </div>
-          {!draggingKey && !dropZoneOver && (
+            >Cancel</button>
             <span style={{
-              fontSize: 9, color: 'rgba(239,68,68,0.28)', fontStyle: 'italic',
-              whiteSpace: 'nowrap', lineHeight: 1, userSelect: 'none',
+              flex: 1, textAlign: 'center', fontSize: 12, fontWeight: 600,
+              color: isDark ? 'rgba(255,255,255,0.82)' : 'rgba(0,0,0,0.72)',
             }}>
-              {typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0
-                ? 'Long-press & drag a document here to delete'
-                : 'Drag a document here to delete'}
+              {selectedKeys.size} selected
             </span>
-          )}
-        </div>
+            <button
+              onClick={() => { if (selectedKeys.size > 0) setDeleteConfirmKeys([...selectedKeys]) }}
+              disabled={selectedKeys.size === 0}
+              style={{
+                padding: '5px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+                cursor: selectedKeys.size > 0 ? 'pointer' : 'default', flexShrink: 0,
+                background: selectedKeys.size > 0 ? 'rgba(239,68,68,0.88)' : 'rgba(239,68,68,0.14)',
+                border: `0.5px solid ${selectedKeys.size > 0 ? 'rgba(239,68,68,0.60)' : 'rgba(239,68,68,0.22)'}`,
+                color: selectedKeys.size > 0 ? '#fff' : 'rgba(239,68,68,0.38)',
+                transition: 'background 180ms, color 180ms',
+              }}
+            >Delete</button>
+          </>
+        ) : (
+          /* ── Normal mode: View controls | Delete button ── */
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0 }}>
+              <span style={{ fontSize: 10, color: muted, marginRight: 2, whiteSpace: 'nowrap' }}>View:</span>
+
+              {/* Mobile: compact dropdown (shown on mobile only via CSS) */}
+              <select
+                className="xp-lib-view-dropdown"
+                value={libViewMode}
+                onChange={e => setLibViewMode(e.target.value as 'compact' | 'detail' | 'tile' | 'thumbnail')}
+                style={{
+                  padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                  cursor: 'pointer', border: '0.5px solid rgba(124,58,237,0.40)',
+                  background: isDark ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.10)',
+                  color: '#a78bfa', outline: 'none',
+                }}
+              >
+                <option value="compact">⊡ Default</option>
+                <option value="detail">≡ Detail</option>
+                <option value="tile">⊞ Tile</option>
+                <option value="thumbnail">⊟ Thumbnail</option>
+              </select>
+
+              {/* Desktop: 4-button view toggles (hidden on mobile via CSS) */}
+              <div className="xp-lib-view-btns" style={{ display: 'flex', gap: 4 }}>
+                {([
+                  { key: 'compact'   as const, label: '⊡ Default'   , title: 'Default (compact) mode' },
+                  { key: 'detail'    as const, label: '≡ Detail'    , title: 'Detail mode'    },
+                  { key: 'tile'      as const, label: '⊞ Tile'      , title: 'Tile mode'      },
+                  { key: 'thumbnail' as const, label: '⊟ Thumbnail' , title: 'Thumbnail mode' },
+                ]).map(opt => (
+                  <button
+                    key={opt.key}
+                    onClick={() => setLibViewMode(opt.key)}
+                    title={opt.title}
+                    style={{
+                      padding: '3px 10px', borderRadius: 6, fontSize: 11,
+                      fontWeight: libViewMode === opt.key ? 600 : 400,
+                      cursor: 'pointer',
+                      background: libViewMode === opt.key ? 'rgba(124,58,237,0.18)' : 'transparent',
+                      border: `0.5px solid ${libViewMode === opt.key ? 'rgba(124,58,237,0.40)' : 'rgba(124,58,237,0.14)'}`,
+                      color: libViewMode === opt.key ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.50)' : 'rgba(0,0,0,0.45)',
+                      transition: 'background 120ms',
+                    }}
+                  >{opt.label}</button>
+                ))}
+              </div>
+
+              {/* Divider */}
+              <span style={{ width: 1, height: 14, background: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)', margin: '0 2px', flexShrink: 0 }} />
+
+              {/* Sort toggles */}
+              {([
+                { key: 'newer' as const, label: '↓ Newer' },
+                { key: 'older' as const, label: '↑ Older' },
+              ]).map(opt => (
+                <button
+                  key={opt.key}
+                  onClick={() => setLibSortOrder(opt.key)}
+                  style={{
+                    padding: '3px 8px', borderRadius: 6, fontSize: 11,
+                    fontWeight: libSortOrder === opt.key ? 600 : 400,
+                    cursor: 'pointer', whiteSpace: 'nowrap',
+                    background: libSortOrder === opt.key ? 'rgba(124,58,237,0.18)' : 'transparent',
+                    border: `0.5px solid ${libSortOrder === opt.key ? 'rgba(124,58,237,0.40)' : 'rgba(124,58,237,0.14)'}`,
+                    color: libSortOrder === opt.key ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.50)' : 'rgba(0,0,0,0.45)',
+                    transition: 'background 120ms',
+                  }}
+                >{opt.label}</button>
+              ))}
+            </div>
+
+            {/* Delete button — enters selection mode */}
+            <button
+              onClick={enterSelectMode}
+              style={{
+                padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+                cursor: 'pointer', flexShrink: 0, marginLeft: 6,
+                background: 'transparent',
+                border: '0.5px solid rgba(239,68,68,0.30)',
+                color: 'rgba(239,68,68,0.55)',
+                transition: 'background 150ms, color 150ms',
+                whiteSpace: 'nowrap',
+              }}
+            >🗑️ Delete</button>
+          </>
+        )}
       </div>
 
       {/* Entry list */}
@@ -894,6 +1058,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             {libraryEntries.map(entry => {
               const isSel = selectedLibEntry === entry.dateKey
               const isRen = renamingEntry === entry.dateKey
+              const isChecked = selectedKeys.has(entry.dateKey)
               const renInput = (fontSize: number, width?: string) => (
                 <input
                   autoFocus
@@ -917,34 +1082,47 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   }}
                 />
               )
-              const isDragThis = draggingKey === entry.dateKey
               return (
                 <div
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
-                  onClick={() => handleLibClick(entry.dateKey, entry.title)}
-                  onDoubleClick={() => handleLibDoubleClick(entry.dateKey)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey) }}
-                  {...mkDragHandlers(entry.dateKey, entry.title, isRen)}
-                  title={`${entry.title} — ${MONTH_NAMES[entry.month]} ${entry.day}, ${entry.year}\nClick/tap to rename · Double-click/tap to open\nDrag / long-press to delete zone to remove`}
+                  onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => handleLibClick(entry.dateKey, entry.title)}
+                  onDoubleClick={isSelectMode ? undefined : () => handleLibDoubleClick(entry.dateKey)}
+                  onKeyDown={e => {
+                    if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
+                    else if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey)
+                  }}
+                  onTouchEnd={e => { e.preventDefault(); if (isSelectMode) toggleSelectKey(entry.dateKey); else handleLibTouchEnd(entry.dateKey, entry.title) }}
+                  title={isSelectMode ? entry.title : `${entry.title} — ${MONTH_NAMES[entry.month]} ${entry.day}, ${entry.year}\nClick/tap to rename · Double-click/tap to open`}
                   style={{
-                    width: 110, flexShrink: 0,
+                    width: 110, flexShrink: 0, position: 'relative',
                     display: 'flex', flexDirection: 'column', alignItems: 'center',
                     padding: '10px 8px 8px', borderRadius: 10, textAlign: 'center',
-                    cursor: isDragThis ? 'grabbing' : 'pointer', userSelect: 'none',
-                    background: isSel
-                      ? (isDark ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.14)')
-                      : 'transparent',
-                    border: isSel
-                      ? '1.5px solid rgba(124,58,237,0.55)'
-                      : '1.5px solid transparent',
-                    transition: 'background 130ms, border-color 130ms, opacity 150ms, transform 150ms',
-                    opacity: isDragThis ? 0.40 : 1,
-                    transform: isDragThis ? 'scale(0.92)' : undefined,
+                    cursor: 'pointer', userSelect: 'none',
+                    background: isSelectMode
+                      ? (isChecked ? (isDark ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.14)') : 'transparent')
+                      : (isSel ? (isDark ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.14)') : 'transparent'),
+                    border: isSelectMode
+                      ? `1.5px solid ${isChecked ? 'rgba(124,58,237,0.55)' : 'rgba(124,58,237,0.18)'}`
+                      : (isSel ? '1.5px solid rgba(124,58,237,0.55)' : '1.5px solid transparent'),
+                    transition: 'background 130ms, border-color 130ms',
                     gap: 5,
                   }}
                 >
+                  {/* Selection checkbox */}
+                  {isSelectMode && (
+                    <div style={{
+                      position: 'absolute', top: 5, right: 5,
+                      width: 17, height: 17, borderRadius: 4,
+                      border: `1.5px solid ${isChecked ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.28)'}`,
+                      background: isChecked ? 'rgba(124,58,237,0.88)' : isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.80)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      pointerEvents: 'none',
+                    }}>
+                      {isChecked && <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                    </div>
+                  )}
                   <div style={{
                     width: 52, height: 60, borderRadius: 6,
                     background: isSel
@@ -961,7 +1139,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       borderColor: `transparent ${isDark ? 'rgba(0,0,0,0.40)' : 'rgba(124,58,237,0.18)'} transparent transparent`,
                     }} />
                   </div>
-                  {isRen ? renInput(11) : (
+                  {isRen && !isSelectMode ? renInput(11) : (
                     <span style={{
                       fontSize: 11, fontWeight: 500, lineHeight: 1.3,
                       color: isSel ? (isDark ? '#c4b5fd' : '#7c3aed') : isDark ? 'rgba(255,255,255,0.82)' : 'rgba(0,0,0,0.75)',
@@ -983,36 +1161,49 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             {libraryEntries.map(entry => {
               const isSel = selectedLibEntry === entry.dateKey
               const isRen = renamingEntry === entry.dateKey
-              const isDragThis = draggingKey === entry.dateKey
+              const isChecked = selectedKeys.has(entry.dateKey)
               return (
                 <div
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
-                  onClick={() => handleLibClick(entry.dateKey, entry.title)}
-                  onDoubleClick={() => handleLibDoubleClick(entry.dateKey)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey) }}
-                  {...mkDragHandlers(entry.dateKey, entry.title, isRen)}
-                  title="Click/tap to rename · Double-click/tap to open · Drag to 🗑️ to delete"
+                  onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => handleLibClick(entry.dateKey, entry.title)}
+                  onDoubleClick={isSelectMode ? undefined : () => handleLibDoubleClick(entry.dateKey)}
+                  onKeyDown={e => {
+                    if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
+                    else if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey)
+                  }}
+                  onTouchEnd={e => { e.preventDefault(); if (isSelectMode) toggleSelectKey(entry.dateKey); else handleLibTouchEnd(entry.dateKey, entry.title) }}
+                  title={isSelectMode ? entry.title : 'Click/tap to rename · Double-click/tap to open'}
                   style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     padding: '12px 16px', borderRadius: 10, textAlign: 'left',
-                    cursor: isDragThis ? 'grabbing' : 'pointer', userSelect: 'none',
-                    background: isSel
-                      ? (isDark ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.10)')
-                      : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.70)'),
-                    border: isSel
-                      ? '1.5px solid rgba(124,58,237,0.50)'
-                      : `0.5px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'}`,
-                    transition: 'background 140ms, border-color 140ms, opacity 150ms, transform 150ms',
-                    opacity: isDragThis ? 0.40 : 1,
-                    transform: isDragThis ? 'scale(0.98)' : undefined,
-                    minWidth: 0,
+                    cursor: 'pointer', userSelect: 'none',
+                    background: isSelectMode
+                      ? (isChecked ? (isDark ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.10)') : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.70)'))
+                      : (isSel ? (isDark ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.10)') : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.70)')),
+                    border: isSelectMode
+                      ? `1.5px solid ${isChecked ? 'rgba(124,58,237,0.50)' : isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'}`
+                      : (isSel ? '1.5px solid rgba(124,58,237,0.50)' : `0.5px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'}`),
+                    transition: 'background 140ms, border-color 140ms',
+                    minWidth: 0, position: 'relative',
                   }}
                 >
+                  {/* Selection checkbox */}
+                  {isSelectMode && (
+                    <div style={{
+                      width: 17, height: 17, borderRadius: 4, flexShrink: 0, marginRight: 10,
+                      border: `1.5px solid ${isChecked ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.28)'}`,
+                      background: isChecked ? 'rgba(124,58,237,0.88)' : isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.80)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      pointerEvents: 'none',
+                    }}>
+                      {isChecked && <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                    </div>
+                  )}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0, flex: 1 }}>
                     <span style={{ fontSize: 18, flexShrink: 0 }}>📝</span>
-                    {isRen ? (
+                    {isRen && !isSelectMode ? (
                       <input
                         autoFocus
                         type="text"
@@ -1037,7 +1228,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                     ) : (
                       <span style={{
                         fontSize: 13, fontWeight: 500,
-                        color: isSel ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.88)' : 'rgba(0,0,0,0.80)',
+                        color: (isSelectMode ? isChecked : isSel) ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.88)' : 'rgba(0,0,0,0.80)',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         minWidth: 0,
                       }}>{entry.title}</span>
@@ -1058,35 +1249,49 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             {libraryEntries.map(entry => {
               const isSel = selectedLibEntry === entry.dateKey
               const isRen = renamingEntry === entry.dateKey
-              const isDragThis = draggingKey === entry.dateKey
+              const isChecked = selectedKeys.has(entry.dateKey)
               return (
                 <div
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
-                  onClick={() => handleLibClick(entry.dateKey, entry.title)}
-                  onDoubleClick={() => handleLibDoubleClick(entry.dateKey)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey) }}
-                  {...mkDragHandlers(entry.dateKey, entry.title, isRen)}
-                  title="Click/tap to rename · Double-click/tap to open · Drag to 🗑️ to delete"
+                  onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => handleLibClick(entry.dateKey, entry.title)}
+                  onDoubleClick={isSelectMode ? undefined : () => handleLibDoubleClick(entry.dateKey)}
+                  onKeyDown={e => {
+                    if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
+                    else if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey)
+                  }}
+                  onTouchEnd={e => { e.preventDefault(); if (isSelectMode) toggleSelectKey(entry.dateKey); else handleLibTouchEnd(entry.dateKey, entry.title) }}
+                  title={isSelectMode ? entry.title : 'Click/tap to rename · Double-click/tap to open'}
                   style={{
                     display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
-                    padding: '14px 16px', borderRadius: 12, textAlign: 'left',
-                    cursor: isDragThis ? 'grabbing' : 'pointer', userSelect: 'none',
-                    background: isSel
-                      ? (isDark ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.10)')
-                      : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.80)'),
-                    border: isSel
-                      ? '1.5px solid rgba(124,58,237,0.50)'
-                      : `0.5px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'}`,
-                    transition: 'background 140ms, border-color 140ms, opacity 150ms, transform 150ms',
-                    opacity: isDragThis ? 0.40 : 1,
-                    transform: isDragThis ? 'scale(0.96)' : undefined,
+                    padding: '14px 16px', borderRadius: 12, textAlign: 'left', position: 'relative',
+                    cursor: 'pointer', userSelect: 'none',
+                    background: isSelectMode
+                      ? (isChecked ? (isDark ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.10)') : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.80)'))
+                      : (isSel ? (isDark ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.10)') : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.80)')),
+                    border: isSelectMode
+                      ? `1.5px solid ${isChecked ? 'rgba(124,58,237,0.50)' : isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'}`
+                      : (isSel ? '1.5px solid rgba(124,58,237,0.50)' : `0.5px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'}`),
+                    transition: 'background 140ms, border-color 140ms',
                     gap: 8, minWidth: 0,
                   }}
                 >
+                  {/* Selection checkbox */}
+                  {isSelectMode && (
+                    <div style={{
+                      position: 'absolute', top: 8, right: 8,
+                      width: 17, height: 17, borderRadius: 4,
+                      border: `1.5px solid ${isChecked ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.28)'}`,
+                      background: isChecked ? 'rgba(124,58,237,0.88)' : isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.80)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      pointerEvents: 'none',
+                    }}>
+                      {isChecked && <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                    </div>
+                  )}
                   <span style={{ fontSize: 22 }}>📝</span>
-                  {isRen ? (
+                  {isRen && !isSelectMode ? (
                     <input
                       autoFocus
                       type="text"
@@ -1111,7 +1316,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   ) : (
                     <span style={{
                       fontSize: 13, fontWeight: 600, lineHeight: 1.3,
-                      color: isSel ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.90)' : 'rgba(0,0,0,0.82)',
+                      color: (isSelectMode ? isChecked : isSel) ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.90)' : 'rgba(0,0,0,0.82)',
                       overflow: 'hidden', textOverflow: 'ellipsis',
                       display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
                       width: '100%',
@@ -1130,33 +1335,47 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             {libraryEntries.map(entry => {
               const isSel = selectedLibEntry === entry.dateKey
               const isRen = renamingEntry === entry.dateKey
-              const isDragThis = draggingKey === entry.dateKey
+              const isChecked = selectedKeys.has(entry.dateKey)
               return (
                 <div
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
-                  onClick={() => handleLibClick(entry.dateKey, entry.title)}
-                  onDoubleClick={() => handleLibDoubleClick(entry.dateKey)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey) }}
-                  {...mkDragHandlers(entry.dateKey, entry.title, isRen)}
-                  title="Click/tap to rename · Double-click/tap to open · Drag to 🗑️ to delete"
+                  onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => handleLibClick(entry.dateKey, entry.title)}
+                  onDoubleClick={isSelectMode ? undefined : () => handleLibDoubleClick(entry.dateKey)}
+                  onKeyDown={e => {
+                    if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
+                    else if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey)
+                  }}
+                  onTouchEnd={e => { e.preventDefault(); if (isSelectMode) toggleSelectKey(entry.dateKey); else handleLibTouchEnd(entry.dateKey, entry.title) }}
+                  title={isSelectMode ? entry.title : 'Click/tap to rename · Double-click/tap to open'}
                   style={{
                     display: 'flex', flexDirection: 'column', alignItems: 'center',
-                    padding: '20px 14px 16px', borderRadius: 14, textAlign: 'center',
-                    cursor: isDragThis ? 'grabbing' : 'pointer', userSelect: 'none',
-                    background: isSel
-                      ? (isDark ? 'rgba(124,58,237,0.22)' : 'rgba(124,58,237,0.12)')
-                      : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.85)'),
-                    border: isSel
-                      ? '1.5px solid rgba(124,58,237,0.55)'
-                      : `0.5px solid ${isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.07)'}`,
-                    transition: 'background 140ms, border-color 140ms, opacity 150ms, transform 150ms',
-                    opacity: isDragThis ? 0.40 : 1,
-                    transform: isDragThis ? 'scale(0.96)' : undefined,
+                    padding: '20px 14px 16px', borderRadius: 14, textAlign: 'center', position: 'relative',
+                    cursor: 'pointer', userSelect: 'none',
+                    background: isSelectMode
+                      ? (isChecked ? (isDark ? 'rgba(124,58,237,0.22)' : 'rgba(124,58,237,0.12)') : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.85)'))
+                      : (isSel ? (isDark ? 'rgba(124,58,237,0.22)' : 'rgba(124,58,237,0.12)') : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.85)')),
+                    border: isSelectMode
+                      ? `1.5px solid ${isChecked ? 'rgba(124,58,237,0.55)' : isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.07)'}`
+                      : (isSel ? '1.5px solid rgba(124,58,237,0.55)' : `0.5px solid ${isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.07)'}`),
+                    transition: 'background 140ms, border-color 140ms',
                     gap: 10, minWidth: 0,
                   }}
                 >
+                  {/* Selection checkbox */}
+                  {isSelectMode && (
+                    <div style={{
+                      position: 'absolute', top: 8, right: 8,
+                      width: 17, height: 17, borderRadius: 4,
+                      border: `1.5px solid ${isChecked ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.28)'}`,
+                      background: isChecked ? 'rgba(124,58,237,0.88)' : isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.80)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      pointerEvents: 'none',
+                    }}>
+                      {isChecked && <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                    </div>
+                  )}
                   <div style={{
                     width: '100%', height: 70, borderRadius: 8,
                     background: isSel ? 'rgba(124,58,237,0.15)' : isDark ? 'rgba(124,58,237,0.08)' : 'rgba(124,58,237,0.06)',
@@ -1164,7 +1383,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 28, marginBottom: 2,
                   }}>📝</div>
-                  {isRen ? (
+                  {isRen && !isSelectMode ? (
                     <input
                       autoFocus
                       type="text"
@@ -1189,7 +1408,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   ) : (
                     <span style={{
                       fontSize: 12, fontWeight: 600, lineHeight: 1.3,
-                      color: isSel ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.90)' : 'rgba(0,0,0,0.82)',
+                      color: (isSelectMode ? isChecked : isSel) ? '#a78bfa' : isDark ? 'rgba(255,255,255,0.90)' : 'rgba(0,0,0,0.82)',
                       overflow: 'hidden', textOverflow: 'ellipsis',
                       display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
                       width: '100%',
@@ -1204,7 +1423,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           </div>
         )}
 
-        {libraryEntries.length > 0 && (
+        {libraryEntries.length > 0 && !isSelectMode && (
           <div style={{ textAlign: 'center', paddingTop: 14 }}>
             <span style={{ fontSize: 11, color: muted }}>
               Click / tap to rename · Double-click / double-tap to open in editor
@@ -1214,71 +1433,71 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       </div>
 
       {/* ── Delete confirmation dialog ───────────────────────────────────── */}
-      {deleteConfirmKey && (() => {
-        const entry = libraryEntries.find(e => e.dateKey === deleteConfirmKey)
-        return (
+      {deleteConfirmKeys && deleteConfirmKeys.length > 0 && (
+        <div
+          style={{
+            position: 'absolute', inset: 0, zIndex: 80,
+            background: 'rgba(0,0,0,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            borderRadius: 'inherit',
+          }}
+          onClick={() => setDeleteConfirmKeys(null)}
+        >
           <div
+            onClick={e => e.stopPropagation()}
             style={{
-              position: 'absolute', inset: 0, zIndex: 80,
-              background: 'rgba(0,0,0,0.55)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              borderRadius: 'inherit',
+              background: isDark ? '#1e1b2e' : '#ffffff',
+              border: `1px solid ${isDark ? 'rgba(239,68,68,0.35)' : 'rgba(239,68,68,0.25)'}`,
+              borderRadius: 14, padding: '24px 28px', maxWidth: 320, width: '90%',
+              boxShadow: '0 8px 40px rgba(0,0,0,0.45)',
+              display: 'flex', flexDirection: 'column', gap: 16,
             }}
-            onClick={() => setDeleteConfirmKey(null)}
           >
-            <div
-              onClick={e => e.stopPropagation()}
-              style={{
-                background: isDark ? '#1e1b2e' : '#ffffff',
-                border: `1px solid ${isDark ? 'rgba(239,68,68,0.35)' : 'rgba(239,68,68,0.25)'}`,
-                borderRadius: 14, padding: '24px 28px', maxWidth: 320, width: '90%',
-                boxShadow: '0 8px 40px rgba(0,0,0,0.45)',
-                display: 'flex', flexDirection: 'column', gap: 16,
-              }}
-            >
-              <div style={{ fontSize: 15, fontWeight: 600, color: isDark ? 'rgba(255,255,255,0.90)' : 'rgba(0,0,0,0.85)' }}>
-                Delete this document?
-              </div>
-              {entry && (
+            <div style={{ fontSize: 15, fontWeight: 600, color: isDark ? 'rgba(255,255,255,0.90)' : 'rgba(0,0,0,0.85)' }}>
+              {deleteConfirmKeys.length === 1 ? 'Delete this document?' : `Delete ${deleteConfirmKeys.length} documents?`}
+            </div>
+            {deleteConfirmKeys.length === 1 && (() => {
+              const entry = libraryEntries.find(e => e.dateKey === deleteConfirmKeys[0])
+              return entry ? (
                 <div style={{ fontSize: 13, color: muted, lineHeight: 1.4 }}>
                   <strong style={{ color: isDark ? 'rgba(255,255,255,0.80)' : 'rgba(0,0,0,0.75)' }}>{entry.title}</strong>
                   <br />
                   {MONTH_NAMES[entry.month]} {entry.day}, {entry.year}
                 </div>
-              )}
-              <div style={{ fontSize: 12, color: muted }}>
-                This action cannot be undone.
-              </div>
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                <button
-                  onClick={() => setDeleteConfirmKey(null)}
-                  style={{
-                    padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500,
-                    cursor: 'pointer',
-                    background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-                    border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`,
-                    color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)',
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => commitDelete(deleteConfirmKey)}
-                  style={{
-                    padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                    cursor: 'pointer',
-                    background: 'rgba(239,68,68,0.88)',
-                    border: '0.5px solid rgba(239,68,68,0.60)',
-                    color: '#fff',
-                  }}
-                >
-                  Delete
-                </button>
-              </div>
+              ) : null
+            })()}
+            <div style={{ fontSize: 12, color: muted }}>
+              This action cannot be undone.
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setDeleteConfirmKeys(null)}
+                style={{
+                  padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+                  cursor: 'pointer',
+                  background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                  border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`,
+                  color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => commitDeleteMany(deleteConfirmKeys)}
+                style={{
+                  padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                  cursor: 'pointer',
+                  background: 'rgba(239,68,68,0.88)',
+                  border: '0.5px solid rgba(239,68,68,0.60)',
+                  color: '#fff',
+                }}
+              >
+                Delete
+              </button>
             </div>
           </div>
-        )
-      })()}
+        </div>
+      )}
 
       {/* ── Bottom view-nav bar ───────────────────────────────────────────── */}
       <div style={{
@@ -1298,6 +1517,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             <button
               key={item.key}
               onClick={item.action}
+              className={`xp-jws-nav-btn${active ? ' xp-jws-nav-active' : ''}`}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
                 padding: '6px 14px', borderRadius: 8,
@@ -1315,7 +1535,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         })}
         {/* Mic slot — mobile only, disabled when not in Editor view */}
         <button
-          className="xp-jws-mic-nav"
+          className="xp-jws-mic-nav xp-jws-nav-btn"
           disabled
           style={{
             alignItems: 'center', gap: 6,
@@ -1376,6 +1596,31 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         }
         .xp-jws-mic-nav { display: none !important; }
         @media (max-width: 640px) { .xp-jws-mic-nav { display: flex !important; } }
+        .xp-jcal-mobile-grid { display: none !important; }
+        @media (max-width: 640px) {
+          .xp-jcal-quarters { display: none !important; }
+          .xp-jcal-mobile-grid { display: block !important; }
+        }
+        .xp-lib-view-dropdown { display: none !important; }
+        @media (max-width: 640px) {
+          .xp-lib-view-btns { display: none !important; }
+          .xp-lib-view-dropdown { display: inline-flex !important; }
+          .xp-jws-nav-btn {
+            padding: 5px 11px !important;
+            border-radius: 7px !important;
+            background: rgba(255,255,255,0.04) !important;
+            border: 0.5px solid rgba(255,255,255,0.09) !important;
+            color: rgba(255,255,255,0.60) !important;
+            font-size: 12px !important;
+            font-weight: 400 !important;
+          }
+          .xp-jws-nav-active {
+            background: rgba(124,58,237,0.28) !important;
+            border-color: rgba(124,58,237,0.65) !important;
+            color: #c4b5fd !important;
+            font-weight: 600 !important;
+          }
+        }
       `}</style>
 
       {/* Overlay */}

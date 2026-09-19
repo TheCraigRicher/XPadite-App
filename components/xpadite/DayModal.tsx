@@ -291,24 +291,46 @@ function CompactDropdown({ value, options, onChange, isDark, width, ariaLabel, i
 
 // ─── TimeRow — module-level so React never remounts CompactDropdown on state change ──
 
-function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setActivePicker, prefix }: {
+function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setActivePicker, prefix,
+  manualMode, rawH, rawM, onRawH, onRawM, hInvalid, mInvalid }: {
   label: string; h: string; m: string; ap: string
   onH: (v: string) => void; onM: (v: string) => void; onAP: (v: string) => void
   isDark: boolean
   activePicker: string | null
   setActivePicker: (key: string | null) => void
   prefix: string
+  manualMode?: boolean
+  rawH?: string; rawM?: string
+  onRawH?: (v: string) => void; onRawM?: (v: string) => void
+  hInvalid?: boolean; mInvalid?: boolean
 }) {
+  const inputBase: React.CSSProperties = {
+    borderRadius: 8, textAlign: 'center', fontSize: 12, fontWeight: 500,
+    background: 'var(--xp-bg3)', color: 'var(--xp-txt)', outline: 'none',
+    padding: '7px 8px', WebkitAppearance: 'none', MozAppearance: 'textfield',
+  }
   return (
     <div>
-      <label style={{ display: 'block', fontSize: 10, fontWeight: 500, marginBottom: 4, color: 'var(--xp-txt3)' }}>{label}</label>
+      <label style={{ display: 'block', fontSize: 10, fontWeight: 500, marginBottom: 5, color: 'var(--xp-txt3)' }}>{label}</label>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        <CompactDropdown value={h}  options={ADJUST_HOURS}   onChange={onH}  isDark={isDark} width={56}
-          isOpen={activePicker === `${prefix}H`}  onOpenChange={o => setActivePicker(o ? `${prefix}H`  : null)} />
+        {manualMode ? (
+          <input type="text" inputMode="numeric" value={rawH ?? h} onChange={e => onRawH?.(e.target.value)}
+            placeholder="H" maxLength={2}
+            style={{ ...inputBase, width: 56, border: `1px solid ${hInvalid ? '#ef4444' : 'var(--xp-bdr2)'}` }} />
+        ) : (
+          <CompactDropdown value={h} options={ADJUST_HOURS} onChange={onH} isDark={isDark} width={56}
+            isOpen={activePicker === `${prefix}H`} onOpenChange={o => setActivePicker(o ? `${prefix}H` : null)} />
+        )}
         <span style={{ color: 'var(--xp-txt3)', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>:</span>
-        <CompactDropdown value={m}  options={ADJUST_MINUTES} onChange={onM}  isDark={isDark} width={62}
-          isOpen={activePicker === `${prefix}M`}  onOpenChange={o => setActivePicker(o ? `${prefix}M`  : null)} />
-        <CompactDropdown value={ap} options={ADJUST_AMPM}    onChange={onAP} isDark={isDark} width={60}
+        {manualMode ? (
+          <input type="text" inputMode="numeric" value={rawM ?? m} onChange={e => onRawM?.(e.target.value)}
+            placeholder="MM" maxLength={2}
+            style={{ ...inputBase, width: 62, border: `1px solid ${mInvalid ? '#ef4444' : 'var(--xp-bdr2)'}` }} />
+        ) : (
+          <CompactDropdown value={m} options={ADJUST_MINUTES} onChange={onM} isDark={isDark} width={62}
+            isOpen={activePicker === `${prefix}M`} onOpenChange={o => setActivePicker(o ? `${prefix}M` : null)} />
+        )}
+        <CompactDropdown value={ap} options={ADJUST_AMPM} onChange={onAP} isDark={isDark} width={60}
           isOpen={activePicker === `${prefix}AP`} onOpenChange={o => setActivePicker(o ? `${prefix}AP` : null)} />
       </div>
     </div>
@@ -330,6 +352,7 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   const lastSession    = task.sessions?.findLast?.(s => s.endTs !== null) ?? null
   const editingSession = runningSession ?? lastSession
 
+  // Canonical 12h ↔ 24h helpers — identical logic used for both dropdown and manual modes
   function tsToH12(ts: number | null): { h: string; m: string; ap: string } {
     if (!ts) return { h: '12', m: '00', ap: 'AM' }
     const d     = new Date(ts)
@@ -338,7 +361,6 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
     const h12   = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours
     return { h: String(h12), m: String(mins).padStart(2, '0'), ap: hours < 12 ? 'AM' : 'PM' }
   }
-
   function h12ToTs(h: string, m: string, ap: string, baseTs: number): number {
     let hours = Number(h)
     if (ap === 'AM') { if (hours === 12) hours = 0 }
@@ -346,14 +368,15 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
     const d = new Date(baseTs); d.setHours(hours, Number(m), 0, 0); return d.getTime()
   }
 
-  const baseTs     = editingSession?.startTs ?? task.timerStart ?? (() => {
+  const baseTs    = editingSession?.startTs ?? task.timerStart ?? (() => {
     const [y, mo, d] = dateKey.split('-').map(Number); return new Date(y, mo, d).getTime()
   })()
-  const sessionId  = editingSession?.id ?? null
+  const sessionId = editingSession?.id ?? null
 
-  const startInit  = tsToH12(editingSession?.startTs ?? null)
-  const endInit    = tsToH12(editingSession?.endTs != null ? editingSession.endTs : (runningSession ? Date.now() : null))
+  const startInit = tsToH12(editingSession?.startTs ?? null)
+  const endInit   = tsToH12(editingSession?.endTs != null ? editingSession.endTs : (runningSession ? Date.now() : null))
 
+  // Dropdown state
   const [startH,  setStartH]  = useState(startInit.h)
   const [startM,  setStartM]  = useState(startInit.m)
   const [startAP, setStartAP] = useState(startInit.ap)
@@ -363,33 +386,134 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   const [noteVal, setNoteVal] = useState('')
   const [activePicker, setActivePicker] = useState<string | null>(null)
 
-  const startTs    = h12ToTs(startH, startM, startAP, baseTs)
-  let   endTs      = h12ToTs(endH,   endM,   endAP,   baseTs)
-  if (endTs <= startTs) endTs += 86_400_000
-  const durationMs = Math.max(0, endTs - startTs)
+  // Manual entry state (initialized from dropdown values when entering manual mode)
+  const [manualMode, setManualMode] = useState(false)
+  const [startHRaw, setStartHRaw]   = useState(startInit.h)
+  const [startMRaw, setStartMRaw]   = useState(startInit.m)
+  const [endHRaw,   setEndHRaw]     = useState(endInit.h)
+  const [endMRaw,   setEndMRaw]     = useState(endInit.m)
+
+  // Validation helpers
+  function validH(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 1 && n <= 12 }
+  function validM(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 0 && n <= 59 }
+
+  // In manual mode, validate the raw inputs
+  const sHInvalid = manualMode && !validH(startHRaw)
+  const sMInvalid = manualMode && !validM(startMRaw)
+  const eHInvalid = manualMode && !validH(endHRaw)
+  const eMInvalid = manualMode && !validM(endMRaw)
+  const isValid   = !sHInvalid && !sMInvalid && !eHInvalid && !eMInvalid
+
+  // Effective values for time computation — same canonical path regardless of mode
+  const sH = manualMode ? startHRaw : startH
+  const sM = manualMode ? startMRaw : startM
+  const eH = manualMode ? endHRaw   : endH
+  const eM = manualMode ? endMRaw   : endM
+
+  const startTs    = isValid ? h12ToTs(sH, sM, startAP, baseTs) : 0
+  let   endTs      = isValid ? h12ToTs(eH, eM, endAP,   baseTs) : 0
+  if (isValid && endTs <= startTs) endTs += 86_400_000
+  const durationMs = isValid ? Math.max(0, endTs - startTs) : 0
+
+  function toggleManualMode() {
+    if (manualMode) {
+      // Return to dropdowns — sync valid raw values back into dropdown state
+      if (validH(startHRaw)) setStartH(startHRaw.trim())
+      if (validM(startMRaw)) setStartM(String(parseInt(startMRaw, 10)).padStart(2, '0'))
+      if (validH(endHRaw))   setEndH(endHRaw.trim())
+      if (validM(endMRaw))   setEndM(String(parseInt(endMRaw, 10)).padStart(2, '0'))
+    } else {
+      // Enter manual mode — prime raw values from current dropdowns
+      setStartHRaw(startH); setStartMRaw(startM)
+      setEndHRaw(endH);     setEndMRaw(endM)
+    }
+    setManualMode(m => !m)
+    setActivePicker(null)
+  }
+
+  const inputSectionStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 10 }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
-      <div className="w-full max-w-[340px] rounded-2xl shadow-2xl p-5" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)' }} onClick={e => e.stopPropagation()}>
-        <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--xp-txt)' }}>Adjust Time Session</h3>
-        <p className="text-[10px] mb-4" style={{ color: 'var(--xp-txt3)' }}>{task.text}</p>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.65)' }} onClick={onClose}>
+      <div className="w-full max-w-[340px] rounded-2xl shadow-2xl" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)' }} onClick={e => e.stopPropagation()}>
 
-        <div className="space-y-3 mb-3">
-          <TimeRow label="Start Time" h={startH} m={startM} ap={startAP} onH={setStartH} onM={setStartM} onAP={setStartAP}
-            isDark={isDark} activePicker={activePicker} setActivePicker={setActivePicker} prefix="start" />
-          <TimeRow label="End Time"   h={endH}   m={endM}   ap={endAP}   onH={setEndH}   onM={setEndM}   onAP={setEndAP}
-            isDark={isDark} activePicker={activePicker} setActivePicker={setActivePicker} prefix="end" />
+        {/* Purple header */}
+        <div style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)', borderRadius: '16px 16px 0 0', padding: '18px 20px 16px', textAlign: 'center', boxShadow: '0 2px 10px rgba(124,58,237,0.25)' }}>
+          <p style={{ color: 'white', fontSize: 14, fontWeight: 700, lineHeight: 1.2, marginBottom: 4 }}>Adjust Time Session</p>
+          {task.text ? (
+            <p style={{ color: 'rgba(255,255,255,0.70)', fontSize: 11, lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{task.text}</p>
+          ) : null}
         </div>
 
-        <p className="text-[10px] mb-3" style={{ color: 'var(--xp-txt3)' }}>Duration: {formatMs(durationMs)}</p>
+        {/* Body */}
+        <div style={{ padding: '18px 20px 16px' }}>
 
-        <div className="mb-4">
-          <label className="block text-[10px] font-medium mb-1" style={{ color: 'var(--xp-txt3)' }}>Reason (optional)</label>
-          <input type="text" value={noteVal} onChange={e => setNoteVal(e.target.value)} placeholder="Why are you adjusting this time?" className="w-full text-xs px-3 py-2 rounded-lg outline-none" style={{ border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }} />
-        </div>
-        <div className="flex gap-2 justify-end">
-          <button onClick={onClose} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
-          <button onClick={() => { onSave(sessionId, startTs, endTs, noteVal); onClose() }} className="text-xs px-5 py-1.5 rounded-full text-white hover:opacity-80" style={{ background: '#7c3aed' }}>Save</button>
+          <div style={inputSectionStyle}>
+            <TimeRow
+              label="Start Time" h={startH} m={startM} ap={startAP}
+              onH={setStartH} onM={setStartM} onAP={setStartAP}
+              isDark={isDark} activePicker={activePicker} setActivePicker={setActivePicker} prefix="start"
+              manualMode={manualMode} rawH={startHRaw} rawM={startMRaw}
+              onRawH={setStartHRaw} onRawM={setStartMRaw}
+              hInvalid={sHInvalid} mInvalid={sMInvalid}
+            />
+            <TimeRow
+              label="End Time" h={endH} m={endM} ap={endAP}
+              onH={setEndH} onM={setEndM} onAP={setEndAP}
+              isDark={isDark} activePicker={activePicker} setActivePicker={setActivePicker} prefix="end"
+              manualMode={manualMode} rawH={endHRaw} rawM={endMRaw}
+              onRawH={setEndHRaw} onRawM={setEndMRaw}
+              hInvalid={eHInvalid} mInvalid={eMInvalid}
+            />
+          </div>
+
+          {/* Manual entry / use dropdowns toggle */}
+          <div style={{ textAlign: 'center', marginBottom: 12 }}>
+            <button type="button" onClick={toggleManualMode} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 500,
+              color: manualMode ? '#7c3aed' : 'var(--xp-txt3)',
+              background: manualMode ? (isDark ? 'rgba(124,58,237,0.10)' : 'rgba(124,58,237,0.07)') : 'transparent',
+              border: `1px solid ${manualMode ? 'rgba(124,58,237,0.30)' : 'var(--xp-bdr2)'}`,
+              borderRadius: 8, padding: '4px 10px', cursor: 'pointer', transition: 'all 120ms ease',
+              WebkitTapHighlightColor: 'transparent',
+            }}>
+              <span>{manualMode ? '▾' : '✎'}</span>
+              <span>{manualMode ? 'Use Dropdowns' : 'Manual Entry'}</span>
+            </button>
+            {/* Validation hint in manual mode */}
+            {manualMode && !isValid && (
+              <p style={{ fontSize: 9.5, color: '#ef4444', marginTop: 5 }}>Hour: 1–12 · Minute: 00–59</p>
+            )}
+          </div>
+
+          {/* Total Duration card */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 14px', borderRadius: 10, marginBottom: 14, background: isDark ? 'rgba(124,58,237,0.08)' : 'rgba(124,58,237,0.05)', border: `1px solid ${isDark ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.14)'}` }}>
+            <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--xp-txt3)', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span>⏱</span> Total Duration
+            </span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: isValid && durationMs > 0 ? '#7c3aed' : 'var(--xp-txt3)' }}>
+              {isValid ? formatMs(durationMs) : '—'}
+            </span>
+          </div>
+
+          {/* Reason */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: 'block', fontSize: 10, fontWeight: 500, marginBottom: 5, color: 'var(--xp-txt3)' }}>Reason (optional)</label>
+            <input type="text" value={noteVal} onChange={e => setNoteVal(e.target.value)}
+              placeholder="Why are you adjusting this time?"
+              className="w-full text-xs px-3 py-2 rounded-lg outline-none"
+              style={{ border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }} />
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-2 justify-end">
+            <button type="button" onClick={onClose} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
+            <button type="button" disabled={!isValid} onClick={() => { onSave(sessionId, startTs, endTs, noteVal); onClose() }}
+              className="text-xs px-5 py-1.5 rounded-full text-white"
+              style={{ background: isValid ? '#7c3aed' : 'rgba(124,58,237,0.38)', cursor: isValid ? 'pointer' : 'not-allowed', transition: 'opacity 150ms ease' }}>
+              Save
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -21,6 +21,8 @@ export interface Task {
   aiPlanId?: string          // set when created by AI Coach
   attachments?: TaskAttachment[]
   parentTaskId?: string      // set for sub-tasks; references a top-level task's id
+  taskColor?: string         // user-chosen highlight color key (e.g. 'yellow', 'blue')
+  isPriority?: boolean       // user-marked as urgent/important
 }
 
 export interface DayData {

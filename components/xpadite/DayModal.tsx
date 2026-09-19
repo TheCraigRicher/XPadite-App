@@ -97,101 +97,220 @@ interface ClipboardTask {
   text: string
   actId: string
   journal: string
-  children: { text: string; actId: string; journal: string }[]
+  taskColor?: string
+  isPriority?: boolean
+  children: { text: string; actId: string; journal: string; taskColor?: string; isPriority?: boolean }[]
 }
 
-// ─── Compact custom dropdown (replaces native <select> for time pickers) ──────
+// ─── Compact XPadite time-picker dropdown — NO native <select>, NO browser UI ──
+// Uses only React state + <button>/<div> elements. Touch and mouse safe.
 
-function CompactDropdown({ value, options, onChange, isDark, width }: {
+const ADJUST_HOURS   = Array.from({ length: 12 }, (_, i) => String(i + 1))
+const ADJUST_MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'))
+const ADJUST_AMPM    = ['AM', 'PM']
+
+// Fully controlled: parent owns open state so only one dropdown is open at a time.
+function CompactDropdown({ value, options, onChange, isDark, width, ariaLabel, isOpen, onOpenChange }: {
   value: string
   options: string[]
   onChange: (v: string) => void
   isDark: boolean
   width?: number
+  ariaLabel?: string
+  isOpen: boolean
+  onOpenChange: (open: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const ref             = useRef<HTMLDivElement>(null)
-  const listRef         = useRef<HTMLDivElement>(null)
   const [openUp, setOpenUp] = useState(false)
+  const [focusedIdx, setFocusedIdx] = useState(-1)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const listRef      = useRef<HTMLDivElement>(null)
+  const triggerRef   = useRef<HTMLButtonElement>(null)
 
+  // Close on outside pointer-down (works on both touch and mouse)
   useEffect(() => {
-    if (!open) return
-    function onOut(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    if (!isOpen) return
+    function onOutside(e: PointerEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        onOpenChange(false)
+        setFocusedIdx(-1)
+      }
     }
-    setTimeout(() => document.addEventListener('mousedown', onOut), 10)
-    return () => document.removeEventListener('mousedown', onOut)
-  }, [open])
+    // rAF so the trigger's own pointerdown doesn't immediately re-close
+    const raf = requestAnimationFrame(() => document.addEventListener('pointerdown', onOutside))
+    return () => { cancelAnimationFrame(raf); document.removeEventListener('pointerdown', onOutside) }
+  }, [isOpen, onOpenChange])
 
+  // Scroll selected option into view when opening
   useEffect(() => {
-    if (!open || !listRef.current) return
-    const sel = listRef.current.querySelector('[data-selected="true"]') as HTMLElement | null
+    if (!isOpen || !listRef.current) return
+    const sel = listRef.current.querySelector('[data-sel="true"]') as HTMLElement | null
     if (sel) sel.scrollIntoView({ block: 'nearest' })
-  }, [open])
+  }, [isOpen])
 
-  function handleOpen() {
-    if (ref.current) {
-      const rect = ref.current.getBoundingClientRect()
-      setOpenUp(window.innerHeight - rect.bottom < 220)
+  // Reset keyboard focus when closed
+  useEffect(() => { if (!isOpen) setFocusedIdx(-1) }, [isOpen])
+
+  function handleTriggerClick(e: React.MouseEvent | React.TouchEvent) {
+    e.stopPropagation()
+    if (!isOpen && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect()
+      setOpenUp(window.innerHeight - rect.bottom < 230)
     }
-    setOpen(o => !o)
+    onOpenChange(!isOpen)
   }
 
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (!isOpen) {
+      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
+        e.preventDefault()
+        onOpenChange(true)
+        setFocusedIdx(options.indexOf(value))
+      }
+      return
+    }
+    if (e.key === 'Escape') { e.preventDefault(); onOpenChange(false); setFocusedIdx(-1); triggerRef.current?.focus() }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setFocusedIdx(i => Math.min(i + 1, options.length - 1)) }
+    else if (e.key === 'ArrowUp')   { e.preventDefault(); setFocusedIdx(i => Math.max(i - 1, 0)) }
+    else if (e.key === 'Enter' && focusedIdx >= 0) {
+      e.preventDefault(); onChange(options[focusedIdx]); onOpenChange(false); setFocusedIdx(-1); triggerRef.current?.focus()
+    }
+  }
+
+  // Prevent the list's own scroll from propagating to the page on touch
+  function handleListTouchMove(e: React.TouchEvent) { e.stopPropagation() }
+
+  const panelStyle: React.CSSProperties = {
+    position:   'absolute',
+    left:       0,
+    zIndex:     9999,
+    minWidth:   '100%',
+    maxHeight:  options.length <= 2 ? 'none' : 190,
+    overflowY:  options.length <= 2 ? 'visible' : 'auto',
+    borderRadius: 10,
+    background: isDark ? '#1e1635' : '#ffffff',
+    border:     `1px solid ${isDark ? 'rgba(124,58,237,0.35)' : 'rgba(124,58,237,0.22)'}`,
+    boxShadow:  isDark
+      ? '0 16px 48px rgba(0,0,0,0.60), 0 4px 16px rgba(0,0,0,0.30)'
+      : '0 12px 36px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.08)',
+    overscrollBehavior: 'contain',
+    WebkitOverflowScrolling: 'touch',
+    animation: 'xp-act-drop-in 140ms cubic-bezier(0.16,1,0.3,1) forwards',
+  } as React.CSSProperties
+  panelStyle[openUp ? 'bottom' : 'top'] = 'calc(100% + 5px)'
+
   return (
-    <div ref={ref} style={{ position: 'relative', width: width ?? 64, flexShrink: 0 }}>
+    <div
+      ref={containerRef}
+      style={{ position: 'relative', width: width ?? 64, flexShrink: 0 }}
+      onKeyDown={handleKeyDown}
+    >
+      {/* Trigger — pure <button>, never a <select> */}
       <button
-        onClick={handleOpen}
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-label={ariaLabel}
+        onClick={handleTriggerClick}
         style={{
           width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '6px 8px', borderRadius: 8, cursor: 'pointer', outline: 'none',
-          border: `1px solid ${open ? '#7c3aed' : 'var(--xp-bdr2)'}`,
-          background: 'var(--xp-bg3)', color: 'var(--xp-txt)', fontSize: 12, fontWeight: 500,
-          transition: 'border-color 150ms ease',
+          padding: '7px 8px', borderRadius: 8, cursor: 'pointer', outline: 'none',
+          border: `1px solid ${isOpen ? '#7c3aed' : 'var(--xp-bdr2)'}`,
+          background: isOpen ? (isDark ? 'rgba(124,58,237,0.10)' : 'rgba(124,58,237,0.05)') : 'var(--xp-bg3)',
+          color: 'var(--xp-txt)', fontSize: 12, fontWeight: 500,
+          transition: 'border-color 130ms ease, background 130ms ease',
+          WebkitTapHighlightColor: 'transparent',
+          userSelect: 'none',
         }}
       >
-        <span style={{ flex: 1, textAlign: 'center' }}>{value}</span>
+        <span style={{ flex: 1, textAlign: 'center', lineHeight: 1.2 }}>{value}</span>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-          style={{ width: 10, height: 10, flexShrink: 0, opacity: 0.5,
-            transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 150ms ease' }}>
+          style={{ width: 10, height: 10, flexShrink: 0, opacity: 0.45,
+            transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 140ms ease' }}>
           <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
-      {open && (
+
+      {/* Dropdown panel — React-rendered, never a browser-native overlay */}
+      {isOpen && (
         <div
           ref={listRef}
-          style={{
-            position: 'absolute',
-            [openUp ? 'bottom' : 'top']: 'calc(100% + 4px)',
-            left: 0,
-            zIndex: 200,
-            minWidth: '100%',
-            maxHeight: 200,
-            overflowY: 'auto',
-            borderRadius: 10,
-            background: isDark ? '#1a1530' : '#ffffff',
-            border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(124,58,237,0.20)'}`,
-            boxShadow: isDark ? '0 12px 36px rgba(0,0,0,0.50)' : '0 8px 28px rgba(0,0,0,0.16)',
-            animation: 'xp-act-drop-in 150ms cubic-bezier(0.16,1,0.3,1) forwards',
-          }}
+          role="listbox"
+          aria-label={ariaLabel}
+          style={panelStyle}
+          onTouchMove={handleListTouchMove}
         >
-          {options.map(opt => (
-            <button
-              key={opt}
-              data-selected={opt === value ? 'true' : 'false'}
-              onClick={() => { onChange(opt); setOpen(false) }}
-              style={{
-                width: '100%', display: 'block', textAlign: 'center',
-                padding: '8px 10px', cursor: 'pointer', border: 'none', outline: 'none',
-                fontSize: 12, fontWeight: opt === value ? 600 : 400,
-                background: opt === value ? 'rgba(124,58,237,0.12)' : 'transparent',
-                color: opt === value ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.85)' : '#111827',
-              }}
-            >
-              {opt}
-            </button>
-          ))}
+          {options.map((opt, i) => {
+            const isSelected = opt === value
+            const isFocused  = focusedIdx === i
+            return (
+              <button
+                key={opt}
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                data-sel={isSelected ? 'true' : 'false'}
+                onClick={e => {
+                  e.stopPropagation()
+                  onChange(opt)
+                  onOpenChange(false)
+                  setFocusedIdx(-1)
+                }}
+                onMouseEnter={() => setFocusedIdx(i)}
+                onMouseLeave={() => setFocusedIdx(-1)}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '10px 12px', cursor: 'pointer', border: 'none', outline: 'none',
+                  fontSize: 12, fontWeight: isSelected ? 600 : 400,
+                  background: isSelected
+                    ? 'rgba(124,58,237,0.12)'
+                    : isFocused
+                    ? (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(124,58,237,0.06)')
+                    : 'transparent',
+                  color: isSelected ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.88)' : '#111827',
+                  WebkitTapHighlightColor: 'transparent',
+                  userSelect: 'none',
+                  touchAction: 'manipulation',
+                }}
+              >
+                <span style={{ flex: 1, textAlign: 'center' }}>{opt}</span>
+                {isSelected && (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5"
+                    style={{ width: 11, height: 11, flexShrink: 0 }}>
+                    <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
+            )
+          })}
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── TimeRow — module-level so React never remounts CompactDropdown on state change ──
+
+function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setActivePicker, prefix }: {
+  label: string; h: string; m: string; ap: string
+  onH: (v: string) => void; onM: (v: string) => void; onAP: (v: string) => void
+  isDark: boolean
+  activePicker: string | null
+  setActivePicker: (key: string | null) => void
+  prefix: string
+}) {
+  return (
+    <div>
+      <label style={{ display: 'block', fontSize: 10, fontWeight: 500, marginBottom: 4, color: 'var(--xp-txt3)' }}>{label}</label>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <CompactDropdown value={h}  options={ADJUST_HOURS}   onChange={onH}  isDark={isDark} width={56}
+          isOpen={activePicker === `${prefix}H`}  onOpenChange={o => setActivePicker(o ? `${prefix}H`  : null)} />
+        <span style={{ color: 'var(--xp-txt3)', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>:</span>
+        <CompactDropdown value={m}  options={ADJUST_MINUTES} onChange={onM}  isDark={isDark} width={62}
+          isOpen={activePicker === `${prefix}M`}  onOpenChange={o => setActivePicker(o ? `${prefix}M`  : null)} />
+        <CompactDropdown value={ap} options={ADJUST_AMPM}    onChange={onAP} isDark={isDark} width={60}
+          isOpen={activePicker === `${prefix}AP`} onOpenChange={o => setActivePicker(o ? `${prefix}AP` : null)} />
+      </div>
     </div>
   )
 }
@@ -210,10 +329,6 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   const runningSession = getRunningSession(task)
   const lastSession    = task.sessions?.findLast?.(s => s.endTs !== null) ?? null
   const editingSession = runningSession ?? lastSession
-
-  const HOURS   = Array.from({ length: 12 }, (_, i) => String(i + 1))
-  const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'))
-  const AMPM    = ['AM', 'PM']
 
   function tsToH12(ts: number | null): { h: string; m: string; ap: string } {
     if (!ts) return { h: '12', m: '00', ap: 'AM' }
@@ -246,28 +361,12 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   const [endM,    setEndM]    = useState(endInit.m)
   const [endAP,   setEndAP]   = useState(endInit.ap)
   const [noteVal, setNoteVal] = useState('')
+  const [activePicker, setActivePicker] = useState<string | null>(null)
 
   const startTs    = h12ToTs(startH, startM, startAP, baseTs)
   let   endTs      = h12ToTs(endH,   endM,   endAP,   baseTs)
   if (endTs <= startTs) endTs += 86_400_000
   const durationMs = Math.max(0, endTs - startTs)
-
-  function TimeRow({ label, h, m, ap, onH, onM, onAP }: {
-    label: string; h: string; m: string; ap: string
-    onH: (v: string) => void; onM: (v: string) => void; onAP: (v: string) => void
-  }) {
-    return (
-      <div>
-        <label style={{ display: 'block', fontSize: 10, fontWeight: 500, marginBottom: 4, color: 'var(--xp-txt3)' }}>{label}</label>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <CompactDropdown value={h}  options={HOURS}   onChange={onH}  isDark={isDark} width={56} />
-          <span style={{ color: 'var(--xp-txt3)', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>:</span>
-          <CompactDropdown value={m}  options={MINUTES} onChange={onM}  isDark={isDark} width={62} />
-          <CompactDropdown value={ap} options={AMPM}    onChange={onAP} isDark={isDark} width={60} />
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={onClose}>
@@ -276,8 +375,10 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
         <p className="text-[10px] mb-4" style={{ color: 'var(--xp-txt3)' }}>{task.text}</p>
 
         <div className="space-y-3 mb-3">
-          <TimeRow label="Start Time" h={startH} m={startM} ap={startAP} onH={setStartH} onM={setStartM} onAP={setStartAP} />
-          <TimeRow label="End Time"   h={endH}   m={endM}   ap={endAP}   onH={setEndH}   onM={setEndM}   onAP={setEndAP} />
+          <TimeRow label="Start Time" h={startH} m={startM} ap={startAP} onH={setStartH} onM={setStartM} onAP={setStartAP}
+            isDark={isDark} activePicker={activePicker} setActivePicker={setActivePicker} prefix="start" />
+          <TimeRow label="End Time"   h={endH}   m={endM}   ap={endAP}   onH={setEndH}   onM={setEndM}   onAP={setEndAP}
+            isDark={isDark} activePicker={activePicker} setActivePicker={setActivePicker} prefix="end" />
         </div>
 
         <p className="text-[10px] mb-3" style={{ color: 'var(--xp-txt3)' }}>Duration: {formatMs(durationMs)}</p>
@@ -295,6 +396,112 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   )
 }
 
+// ─── Task color system ────────────────────────────────────────────────────────
+
+const TASK_COLOR_CONFIG: Record<string, { label: string; hex: string; tintL: string; tintD: string }> = {
+  default: { label: 'Default', hex: '',        tintL: '',                        tintD: '' },
+  red:     { label: 'Red',     hex: '#ef4444', tintL: 'rgba(239,68,68,0.08)',   tintD: 'rgba(239,68,68,0.13)' },
+  orange:  { label: 'Orange',  hex: '#f97316', tintL: 'rgba(249,115,22,0.08)',  tintD: 'rgba(249,115,22,0.13)' },
+  yellow:  { label: 'Yellow',  hex: '#eab308', tintL: 'rgba(234,179,8,0.11)',   tintD: 'rgba(234,179,8,0.16)' },
+  green:   { label: 'Green',   hex: '#22c55e', tintL: 'rgba(34,197,94,0.08)',   tintD: 'rgba(34,197,94,0.13)' },
+  teal:    { label: 'Teal',    hex: '#14b8a6', tintL: 'rgba(20,184,166,0.08)',  tintD: 'rgba(20,184,166,0.13)' },
+  blue:    { label: 'Blue',    hex: '#3b82f6', tintL: 'rgba(59,130,246,0.08)',  tintD: 'rgba(59,130,246,0.13)' },
+  purple:  { label: 'Purple',  hex: '#7c3aed', tintL: 'rgba(124,58,237,0.08)', tintD: 'rgba(124,58,237,0.13)' },
+  pink:    { label: 'Pink',    hex: '#ec4899', tintL: 'rgba(236,72,153,0.08)', tintD: 'rgba(236,72,153,0.13)' },
+}
+const PRIORITY_TINT = { L: 'rgba(239,68,68,0.09)', D: 'rgba(239,68,68,0.14)' }
+
+function ColorPickerPopover({ currentColor, isDark, onSelect, onClose }: {
+  currentColor: string; isDark: boolean; onSelect: (color: string) => void; onClose: () => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    function onOut(e: PointerEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
+    const raf = requestAnimationFrame(() => document.addEventListener('pointerdown', onOut))
+    return () => { cancelAnimationFrame(raf); document.removeEventListener('pointerdown', onOut) }
+  }, [onClose])
+
+  return (
+    <div ref={ref} style={{
+      position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 9997,
+      background: isDark ? '#1e1635' : '#fff',
+      border: `1px solid ${isDark ? 'rgba(124,58,237,0.3)' : 'rgba(124,58,237,0.18)'}`,
+      borderRadius: 14, padding: '10px 12px', minWidth: 172,
+      boxShadow: isDark ? '0 12px 40px rgba(0,0,0,0.55)' : '0 8px 28px rgba(0,0,0,0.14)',
+    }}>
+      <p style={{ fontSize: 10, fontWeight: 600, color: 'var(--xp-txt3)', marginBottom: 8 }}>Task Color</p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6 }}>
+        {Object.entries(TASK_COLOR_CONFIG).map(([key, cfg]) => (
+          <button key={key} type="button" onClick={() => { onSelect(key); onClose() }} style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+            padding: '6px 4px', borderRadius: 9, border: `1.5px solid ${currentColor === key ? '#7c3aed' : (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.09)')}`,
+            background: currentColor === key ? (isDark ? 'rgba(124,58,237,0.15)' : 'rgba(124,58,237,0.06)') : 'transparent',
+            cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          }}>
+            <div style={{
+              width: 16, height: 16, borderRadius: '50%',
+              background: cfg.hex || (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'),
+              border: key === 'default' ? `1.5px dashed ${isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.22)'}` : 'none',
+            }} />
+            <span style={{ fontSize: 9, color: 'var(--xp-txt3)', fontWeight: currentColor === key ? 600 : 400 }}>{cfg.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Tasks batch-action dropdown ──────────────────────────────────────────────
+
+function TasksDropdown({ onGenerate, onReorder, onDelete, isDark }: {
+  onGenerate: () => void; onReorder: () => void; onDelete: () => void; isDark: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    function onOut(e: PointerEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    const raf = requestAnimationFrame(() => document.addEventListener('pointerdown', onOut))
+    return () => { cancelAnimationFrame(raf); document.removeEventListener('pointerdown', onOut) }
+  }, [open])
+
+  const items = [
+    { icon: '✨', label: 'Generate 3 Tasks', action: onGenerate },
+    { icon: '↕',  label: 'Reorder Tasks',    action: onReorder },
+    { icon: '🗑',  label: 'Delete Tasks',     action: onDelete  },
+  ]
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button type="button" onClick={() => setOpen(o => !o)}
+        className="text-[10px] px-2.5 py-1 rounded-lg border transition-colors hover:border-violet-400 hover:text-violet-500"
+        style={{ borderColor: open ? '#7c3aed' : 'var(--xp-bdr2)', color: open ? '#7c3aed' : 'var(--xp-txt3)', background: open ? (isDark ? 'rgba(124,58,237,0.08)' : 'rgba(124,58,237,0.04)') : 'transparent' }}>
+        ✨ Tasks ▼
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 9995,
+          background: isDark ? '#1e1635' : '#fff',
+          border: `1px solid ${isDark ? 'rgba(124,58,237,0.3)' : 'rgba(124,58,237,0.18)'}`,
+          borderRadius: 12, minWidth: 170, overflow: 'hidden',
+          boxShadow: isDark ? '0 12px 40px rgba(0,0,0,0.55)' : '0 8px 28px rgba(0,0,0,0.14)',
+        }}>
+          {items.map((item, idx) => (
+            <button key={item.label} type="button"
+              onClick={() => { item.action(); setOpen(false) }}
+              className="w-full flex items-center gap-2 px-3.5 py-2.5 text-left text-xs transition-colors hover:bg-black/5"
+              style={{
+                color: item.label === 'Delete Tasks' ? '#ef4444' : 'var(--xp-txt)',
+                borderTop: idx === 2 ? `0.5px solid var(--xp-bdr)` : 'none',
+              }}>
+              <span>{item.icon}</span>{item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Task 3-dot Menu ──────────────────────────────────────────────────────────
 
 interface TaskMenuProps {
@@ -306,37 +513,48 @@ interface TaskMenuProps {
   onCopy: () => void
   onPaste: () => void
   onCreateSubTask: () => void
+  onChooseColor: () => void
+  onTogglePriority: () => void
   pasteEnabled: boolean
   isChild: boolean
+  isPriority: boolean
   onClose: () => void
 }
 
-function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, pasteEnabled, isChild, onClose }: TaskMenuProps) {
+function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onChooseColor, onTogglePriority, pasteEnabled, isChild, isPriority, onClose }: TaskMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    function onClick(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
-    setTimeout(() => document.addEventListener('mousedown', onClick), 10)
-    return () => document.removeEventListener('mousedown', onClick)
+    function onOut(e: PointerEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
+    const raf = requestAnimationFrame(() => document.addEventListener('pointerdown', onOut))
+    return () => { cancelAnimationFrame(raf); document.removeEventListener('pointerdown', onOut) }
   }, [onClose])
 
-  const items: { icon: string; label: string; action: () => void; danger?: boolean; disabled?: boolean }[] = [
+  type MenuItem = { icon: string; label: string; action: () => void; danger?: boolean; disabled?: boolean; sep?: boolean }
+  const items: MenuItem[] = [
     { icon: '✏️', label: 'Edit Task',        action: onEdit        },
     { icon: '🔔', label: 'Set Reminder',     action: onSetReminder },
     { icon: '🕒', label: 'Adjust Time',      action: onAdjustTime  },
-    { icon: '📄', label: 'Duplicate Task',   action: onDuplicate   },
+    { icon: '📄', label: 'Duplicate Task',   action: onDuplicate, sep: true },
     { icon: '📋', label: 'Copy Task',        action: onCopy        },
     { icon: '📌', label: 'Paste Task',       action: onPaste, disabled: !pasteEnabled },
-    ...(!isChild ? [{ icon: '➕', label: 'Create Sub-Task', action: onCreateSubTask }] : []),
-    { icon: '🗑',  label: 'Delete Task',     action: onDelete, danger: true },
+    ...(!isChild ? [{ icon: '➕', label: 'Create Sub-Task', action: onCreateSubTask }] as MenuItem[] : []),
+    { icon: '🎨', label: 'Choose Task Color',                action: onChooseColor, sep: true },
+    { icon: isPriority ? '⚡' : '⚡', label: isPriority ? 'Remove Priority' : 'Mark as Priority', action: onTogglePriority },
+    { icon: '🗑',  label: 'Delete Task',     action: onDelete, danger: true, sep: true },
   ]
   return (
-    <div ref={ref} className="absolute right-0 top-full mt-1 rounded-xl shadow-xl z-10" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', minWidth: 178, maxHeight: 340, overflowY: 'auto' }}>
-      {items.map(item => (
+    <div ref={ref} className="absolute right-0 top-full mt-1 rounded-xl shadow-xl z-10" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', minWidth: 184, maxHeight: 360, overflowY: 'auto' }}>
+      {items.map((item, idx) => (
         <button
           key={item.label}
+          type="button"
           onClick={() => { if (!item.disabled) { item.action(); onClose() } }}
           className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-xs transition-colors hover:bg-black/5"
-          style={{ color: item.danger ? '#ef4444' : 'var(--xp-txt)', opacity: item.disabled ? 0.38 : 1, cursor: item.disabled ? 'default' : 'pointer' }}
+          style={{
+            color: item.danger ? '#ef4444' : item.label === (isPriority ? 'Remove Priority' : 'Mark as Priority') ? '#f97316' : 'var(--xp-txt)',
+            opacity: item.disabled ? 0.38 : 1, cursor: item.disabled ? 'default' : 'pointer',
+            borderTop: item.sep && idx > 0 ? '0.5px solid var(--xp-bdr)' : 'none',
+          }}
         >
           <span className="text-sm">{item.icon}</span>{item.label}
         </button>
@@ -391,6 +609,9 @@ interface TaskRowProps {
   onPaste: () => void
   onCreateSubTask: () => void
   pasteEnabled: boolean
+  // Color + priority
+  onChooseColor: (color: string) => void
+  onTogglePriority: () => void
 }
 
 function TaskRow({
@@ -404,6 +625,7 @@ function TaskRow({
   isChild = false, childIndex, hasChildren = false, isParentExpanded, onParentExpandToggle,
   subTaskCount, subTaskDoneCount,
   onCopy, onPaste, onCreateSubTask, pasteEnabled,
+  onChooseColor, onTogglePriority,
 }: TaskRowProps) {
   const { activities, reminders, isDark, setToast } = useApp()
   const attachments = task.attachments ?? []
@@ -429,6 +651,7 @@ function TaskRow({
   const hasReminder = reminders.some(r => r.taskId === task.id && r.dateKey === dateKey && r.isActive)
 
   const [menuOpen,       setMenuOpen]       = useState(false)
+  const [colorPickerOpen, setColorPickerOpen] = useState(false)
   const [adjustOpen,     setAdjustOpen]     = useState(false)
   const [emojiOpen,      setEmojiOpen]      = useState(false)
   const [isDragOver,     setIsDragOver]     = useState(false)
@@ -563,9 +786,18 @@ function TaskRow({
   const multiSession   = (task.sessions?.filter(s => s.endTs !== null).length ?? 0) > 1
 
   // ── Card visuals: purple accent for active (not green) ─────────────────────
-  const cardBorder = expanded ? 'rgba(124,58,237,0.28)' : 'var(--xp-bdr)'
+  const cardBorder = expanded ? 'rgba(124,58,237,0.28)' : task.isPriority ? 'rgba(239,68,68,0.28)' : 'var(--xp-bdr)'
 
-  const cardBg = expanded
+  // Priority overrides custom color visually; custom color overrides default
+  const colorOverlay = task.isPriority
+    ? (isDark ? PRIORITY_TINT.D : PRIORITY_TINT.L)
+    : (task.taskColor && task.taskColor !== 'default' && TASK_COLOR_CONFIG[task.taskColor])
+    ? (isDark ? TASK_COLOR_CONFIG[task.taskColor].tintD : TASK_COLOR_CONFIG[task.taskColor].tintL)
+    : null
+
+  const cardBg = colorOverlay
+    ? colorOverlay
+    : expanded
     ? (isDark ? 'rgba(255,255,255,0.035)' : '#ffffff')
     : isActive
     ? (isDark ? 'rgba(124,58,237,0.07)' : 'rgba(124,58,237,0.04)')
@@ -614,6 +846,11 @@ function TaskRow({
             </button>
           ) : (
             <span className="flex-shrink-0" style={{ width: 18 }} />
+          )}
+
+          {/* Priority indicator */}
+          {task.isPriority && (
+            <span className="flex-shrink-0 font-bold leading-none" style={{ fontSize: 11, color: '#ef4444' }} title="Priority task">!</span>
           )}
 
           {/* Task N / Sub-Task N */}
@@ -683,7 +920,7 @@ function TaskRow({
 
           {/* 3-dot */}
           <div className="relative flex-shrink-0">
-            <button onClick={() => setMenuOpen(o => !o)} className="p-1.5 rounded-lg hover:bg-black/5 transition-colors" style={{ color: 'var(--xp-txt3)' }}><DotsIcon /></button>
+            <button type="button" onClick={() => setMenuOpen(o => !o)} className="p-1.5 rounded-lg hover:bg-black/5 transition-colors" style={{ color: 'var(--xp-txt3)' }}><DotsIcon /></button>
             {menuOpen && (
               <TaskMenu
                 onEdit={() => { onEditStart(); setMenuOpen(false) }}
@@ -694,9 +931,20 @@ function TaskRow({
                 onCopy={onCopy}
                 onPaste={onPaste}
                 onCreateSubTask={onCreateSubTask}
+                onChooseColor={() => { setMenuOpen(false); setColorPickerOpen(true) }}
+                onTogglePriority={() => { onTogglePriority(); setMenuOpen(false) }}
                 pasteEnabled={pasteEnabled}
                 isChild={isChild}
+                isPriority={!!task.isPriority}
                 onClose={() => setMenuOpen(false)}
+              />
+            )}
+            {colorPickerOpen && (
+              <ColorPickerPopover
+                currentColor={task.taskColor ?? 'default'}
+                isDark={isDark}
+                onSelect={onChooseColor}
+                onClose={() => setColorPickerOpen(false)}
               />
             )}
           </div>
@@ -1370,6 +1618,12 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   const [taskClipboard,    setTaskClipboard]    = useState<ClipboardTask | null>(() => {
     try { const s = localStorage.getItem('xp9-task-clipboard'); return s ? JSON.parse(s) : null } catch { return null }
   })
+  // Task organisation modes
+  const [reorderMode,    setReorderMode]    = useState(false)
+  const [deleteMode,     setDeleteMode]     = useState(false)
+  const [selectedForDel, setSelectedForDel] = useState<Set<string>>(new Set())
+  const [deleteConfirm,  setDeleteConfirm]  = useState(false)
+  const [dragOverId,     setDragOverId]     = useState<string | null>(null)
   const journalSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevNotesOpenRef    = useRef(false)
   const openSnapshotRef     = useRef<typeof dayData | null>(null)
@@ -1540,6 +1794,50 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     setPendingDeleteId(null)
   }
 
+  function setTaskColor(taskId: string, color: string) {
+    updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, taskColor: color } : t) }))
+  }
+
+  function toggleTaskPriority(taskId: string) {
+    updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, isPriority: !t.isPriority } : t) }))
+  }
+
+  function toggleDeleteSelect(taskId: string) {
+    setSelectedForDel(prev => { const n = new Set(prev); n.has(taskId) ? n.delete(taskId) : n.add(taskId); return n })
+  }
+
+  function executeDeleteSelected() {
+    const toDelete = new Set<string>()
+    selectedForDel.forEach(id => {
+      toDelete.add(id)
+      dayData.tasks.forEach(t => { if (t.parentTaskId === id) toDelete.add(t.id) })
+    })
+    toDelete.forEach(id => { if (activeTaskTimer?.taskId === id) setActiveTaskTimer(null) })
+    updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.filter(t => !toDelete.has(t.id)) }))
+    setDirtyNotesMap(prev => { const n = { ...prev }; toDelete.forEach(id => delete n[id]); return n })
+    setExpandedParents(prev => { const n = new Set(prev); toDelete.forEach(id => n.delete(id)); return n })
+    setSelectedForDel(new Set()); setDeleteMode(false); setDeleteConfirm(false)
+  }
+
+  function handleReorderDrop(targetTopLevelId: string) {
+    if (!dragItemId || dragItemId === targetTopLevelId) { setDragItemId(null); setDragOverId(null); return }
+    const all = [...dayData.tasks]
+    const dragged = all.find(t => t.id === dragItemId)
+    if (!dragged || dragged.parentTaskId) { setDragItemId(null); setDragOverId(null); return }
+    const dragFamily = all.filter(t => t.id === dragItemId || t.parentTaskId === dragItemId)
+    const dragIds = new Set(dragFamily.map(t => t.id))
+    const remaining = all.filter(t => !dragIds.has(t.id))
+    let insertAt = remaining.length
+    for (let i = remaining.length - 1; i >= 0; i--) {
+      if (remaining[i].id === targetTopLevelId || remaining[i].parentTaskId === targetTopLevelId) {
+        insertAt = i + 1; break
+      }
+    }
+    const result = [...remaining.slice(0, insertAt), ...dragFamily, ...remaining.slice(insertAt)]
+    updateDay(dateKey, prev => ({ ...prev, tasks: result }))
+    setDragItemId(null); setDragOverId(null)
+  }
+
   function duplicateTask(id: string) {
     const src = dayData.tasks.find(t => t.id === id); if (!src) return
     const copy = makeTask(src.text + ' (copy)'); copy.actId = src.actId
@@ -1554,8 +1852,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     const task = dayData.tasks.find(t => t.id === id); if (!task) return
     const children = dayData.tasks
       .filter(t => t.parentTaskId === id)
-      .map(c => ({ text: c.text, actId: c.actId, journal: c.journal }))
-    const clip: ClipboardTask = { text: task.text, actId: task.actId, journal: task.journal, children }
+      .map(c => ({ text: c.text, actId: c.actId, journal: c.journal, taskColor: c.taskColor, isPriority: c.isPriority }))
+    const clip: ClipboardTask = { text: task.text, actId: task.actId, journal: task.journal, taskColor: task.taskColor, isPriority: task.isPriority, children }
     try { localStorage.setItem('xp9-task-clipboard', JSON.stringify(clip)) } catch {}
     setTaskClipboard(clip)
     setToast('Task copied to clipboard ✓')
@@ -1568,12 +1866,13 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     const newParent: Task = {
       id: newParentId, text: taskClipboard.text, actId: taskClipboard.actId,
       journal: taskClipboard.journal, done: false, timerStart: null, timerEnd: null, sessions: [],
+      taskColor: taskClipboard.taskColor, isPriority: taskClipboard.isPriority,
     }
     const newChildren: Task[] = taskClipboard.children.map((c, i) => ({
       id: 't' + (ts + i + 1) + Math.random().toString(36).slice(2, 6),
       text: c.text, actId: c.actId, journal: c.journal,
       done: false, timerStart: null, timerEnd: null, sessions: [],
-      parentTaskId: newParentId,
+      parentTaskId: newParentId, taskColor: c.taskColor, isPriority: c.isPriority,
     }))
     updateDay(dateKey, prev => ({ ...prev, tasks: [...prev.tasks, newParent, ...newChildren] }))
     if (newChildren.length > 0) setExpandedParents(prev => new Set([...prev, newParentId]))
@@ -1818,7 +2117,12 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                 </p>
               </div>
               <div className="flex items-center gap-1.5 flex-shrink-0">
-                <button onClick={generateTasks} className="text-[10px] px-2.5 py-1 rounded-lg border transition-colors hover:border-violet-400 hover:text-violet-500" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt3)' }}>✨ Generate 3</button>
+                <TasksDropdown
+                  isDark={isDark}
+                  onGenerate={generateTasks}
+                  onReorder={() => { setReorderMode(true); setDeleteMode(false); setSelectedForDel(new Set()) }}
+                  onDelete={() => { setDeleteMode(true); setReorderMode(false); setSelectedForDel(new Set()) }}
+                />
                 <button onClick={() => setAddingTask(true)} className="text-[10px] px-2.5 py-1 rounded-lg text-white font-medium transition-opacity hover:opacity-85 flex-shrink-0" style={{ background: '#16a34a' }}>+ Add Task</button>
               </div>
             </div>
@@ -1846,6 +2150,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                   const taskIndex     = topIdx++
                   const subDone       = children.filter(c => c.done).length
 
+                  const connColor = `${parentActColor}70`
+
                   const sharedProps = (t: Task, idx: number, isChild = false, childIdx?: number) => ({
                     task: t, index: idx, isActive: activeTaskTimer?.taskId === t.id && activeTaskTimer.dateKey === dateKey,
                     blockedByOtherTimer: !!activeTaskTimer && activeTaskTimer.taskId !== t.id,
@@ -1864,51 +2170,86 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                     onAdjustTime: (sid: string | null, s: number, e: number, n: string) => adjustTime(t.id, sid, s, e, n),
                     onSetReminder: () => setReminderTaskId(t.id),
                     onDragStart: () => setDragItemId(t.id), onDragOver: (ev: React.DragEvent) => ev.preventDefault(),
-                    onDrop: () => handleDrop(t.id),
+                    onDrop: () => reorderMode ? handleReorderDrop(t.id) : handleDrop(t.id),
                     bellTriggerKey: reminderSavedKey[t.id] ?? 0,
                     onAttachmentsChange: (atts: TaskAttachment[]) => updateTaskAttachments(t.id, atts),
                     onCopy: () => copyTask(t.id), onPaste: pasteTask,
                     onCreateSubTask: () => createSubTask(t.id),
                     pasteEnabled: !!taskClipboard,
                     isChild, childIndex: childIdx,
+                    onChooseColor: (color: string) => setTaskColor(t.id, color),
+                    onTogglePriority: () => toggleTaskPriority(t.id),
                   })
 
                   return (
                     <div key={task.id}>
-                      <TaskRow
-                        {...sharedProps(task, taskIndex)}
-                        hasChildren={hasKids}
-                        isParentExpanded={isExpanded}
-                        onParentExpandToggle={() => toggleParentExpand(task.id)}
-                        subTaskCount={hasKids ? children.length : undefined}
-                        subTaskDoneCount={hasKids ? subDone : undefined}
-                      />
+                      {/* Reorder drag wrapper */}
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                        {/* Drag handle — reorder mode only */}
+                        {reorderMode && (
+                          <div
+                            draggable
+                            onDragStart={() => setDragItemId(task.id)}
+                            style={{ cursor: dragItemId === task.id ? 'grabbing' : 'grab', padding: '12px 4px', color: 'var(--xp-txt3)', flexShrink: 0, fontSize: 13, lineHeight: 1, userSelect: 'none', opacity: 0.6 }}
+                            title="Drag to reorder"
+                          >⠿</div>
+                        )}
+                        {/* Delete checkbox — delete mode only */}
+                        {deleteMode && (
+                          <button type="button" onClick={() => toggleDeleteSelect(task.id)} style={{ padding: '12px 4px', flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer' }}>
+                            <div style={{ width: 16, height: 16, borderRadius: 4, border: `2px solid ${selectedForDel.has(task.id) ? '#ef4444' : 'var(--xp-bdr2)'}`, background: selectedForDel.has(task.id) ? '#ef4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {selectedForDel.has(task.id) && <span style={{ color: 'white', fontSize: 9, fontWeight: 700, lineHeight: 1 }}>✓</span>}
+                            </div>
+                          </button>
+                        )}
+                        <div style={{ flex: 1, minWidth: 0, outline: reorderMode && dragOverId === task.id ? '2px solid rgba(124,58,237,0.45)' : 'none', borderRadius: 12 }}
+                          onDragOver={reorderMode ? (e => { e.preventDefault(); setDragOverId(task.id) }) : undefined}
+                          onDragLeave={reorderMode ? () => setDragOverId(null) : undefined}
+                          onDrop={reorderMode ? () => { handleReorderDrop(task.id); setDragOverId(null) } : undefined}
+                        >
+                          <TaskRow
+                            {...sharedProps(task, taskIndex)}
+                            hasChildren={hasKids}
+                            isParentExpanded={isExpanded}
+                            onParentExpandToggle={() => toggleParentExpand(task.id)}
+                            subTaskCount={hasKids ? children.length : undefined}
+                            subTaskDoneCount={hasKids ? subDone : undefined}
+                          />
+                        </div>
+                      </div>
 
-                      {/* Sub-tasks hierarchy */}
+                      {/* Sub-tasks hierarchy — corrected connector geometry */}
                       {hasKids && isExpanded && (
-                        <div style={{ position: 'relative', marginLeft: 16, marginTop: 6 }}>
-                          {/* Vertical connector line */}
-                          <div style={{
-                            position: 'absolute', left: 7, top: 0,
-                            height: 'calc(100% - 18px)', width: 1.5,
-                            borderRadius: 1, background: `${parentActColor}48`, pointerEvents: 'none',
-                          }} />
-                          <div className="space-y-2">
-                            {children.map((child, ci) => (
-                              <div key={child.id} style={{ position: 'relative', paddingLeft: 20 }}>
-                                {/* Horizontal branch connector */}
-                                <div style={{
-                                  position: 'absolute', left: 8, top: 20,
-                                  width: 12, height: 1.5,
-                                  borderRadius: 1, background: `${parentActColor}48`, pointerEvents: 'none',
-                                }} />
+                        <div style={{ marginLeft: reorderMode || deleteMode ? 24 : 16, marginTop: 6 }}>
+                          {children.map((child, ci) => {
+                            const isLast = ci === children.length - 1
+                            return (
+                              <div key={child.id} style={{ position: 'relative', paddingLeft: 22, marginBottom: isLast ? 0 : 8 }}>
+                                {/* Upper vertical: top → midpoint */}
+                                <div style={{ position: 'absolute', left: 7, top: 0, height: '50%', width: 1.5, background: connColor, pointerEvents: 'none' }} />
+                                {/* Lower vertical: midpoint → bottom + gap (non-last only) */}
+                                {!isLast && (
+                                  <div style={{ position: 'absolute', left: 7, top: '50%', height: 'calc(50% + 8px)', width: 1.5, background: connColor, pointerEvents: 'none' }} />
+                                )}
+                                {/* Horizontal branch at exact midpoint */}
+                                <div style={{ position: 'absolute', left: 7, top: '50%', width: 14, height: 1.5, background: connColor, transform: 'translateY(-50%)', pointerEvents: 'none', borderRadius: 1 }} />
+                                {/* Arrowhead */}
+                                <div style={{ position: 'absolute', left: 19, top: '50%', transform: 'translateY(-50%)', width: 0, height: 0, borderTop: '3px solid transparent', borderBottom: '3px solid transparent', borderLeft: `4px solid ${connColor}`, pointerEvents: 'none' }} />
+                                {/* Delete checkbox for sub-tasks */}
+                                {deleteMode && (
+                                  <button type="button" onClick={() => toggleDeleteSelect(child.id)} style={{ position: 'absolute', left: 22, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', zIndex: 2, padding: 2 }}>
+                                    <div style={{ width: 13, height: 13, borderRadius: 3, border: `1.5px solid ${selectedForDel.has(child.id) ? '#ef4444' : 'var(--xp-bdr2)'}`, background: selectedForDel.has(child.id) ? '#ef4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                      {selectedForDel.has(child.id) && <span style={{ color: 'white', fontSize: 8, fontWeight: 700, lineHeight: 1 }}>✓</span>}
+                                    </div>
+                                  </button>
+                                )}
                                 <TaskRow
                                   {...sharedProps(child, ci, true, ci)}
                                   hasChildren={false}
                                 />
                               </div>
-                            ))}
-                          </div>
+                            )
+                          })}
                         </div>
                       )}
                     </div>
@@ -1925,7 +2266,30 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
               )}
             </div>
 
-            {topLevelTasks.length > 0 && !addingTask && (
+            {/* Reorder mode banner */}
+            {reorderMode && (
+              <div style={{ position: 'sticky', bottom: 0, paddingTop: 8, paddingBottom: 2, background: 'var(--xp-card)', zIndex: 5 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderRadius: 12, background: isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.22)' }}>
+                  <span style={{ fontSize: 11, fontWeight: 500, color: '#7c3aed' }}>↕ Drag tasks to reorder</span>
+                  <button type="button" onClick={() => setReorderMode(false)} style={{ fontSize: 11, fontWeight: 600, color: 'white', background: '#7c3aed', border: 'none', borderRadius: 8, padding: '4px 12px', cursor: 'pointer' }}>Done</button>
+                </div>
+              </div>
+            )}
+
+            {/* Delete mode controls */}
+            {deleteMode && (
+              <div style={{ position: 'sticky', bottom: 0, paddingTop: 8, paddingBottom: 2, background: 'var(--xp-card)', zIndex: 5 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 12px', borderRadius: 12, background: isDark ? 'rgba(239,68,68,0.10)' : 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.22)' }}>
+                  <span style={{ fontSize: 11, fontWeight: 500, color: '#ef4444' }}>{selectedForDel.size} selected</span>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button type="button" onClick={() => { setDeleteMode(false); setSelectedForDel(new Set()) }} style={{ fontSize: 11, fontWeight: 500, color: 'var(--xp-txt2)', background: 'var(--xp-bg3)', border: '1px solid var(--xp-bdr2)', borderRadius: 8, padding: '4px 10px', cursor: 'pointer' }}>Cancel</button>
+                    <button type="button" disabled={selectedForDel.size === 0} onClick={() => setDeleteConfirm(true)} style={{ fontSize: 11, fontWeight: 600, color: 'white', background: selectedForDel.size > 0 ? '#ef4444' : 'rgba(239,68,68,0.3)', border: 'none', borderRadius: 8, padding: '4px 12px', cursor: selectedForDel.size > 0 ? 'pointer' : 'default' }}>Delete {selectedForDel.size > 0 ? selectedForDel.size : ''}</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {topLevelTasks.length > 0 && !addingTask && !reorderMode && !deleteMode && (
               <div style={{ position: 'sticky', bottom: 0, paddingTop: 6, paddingBottom: 2, background: 'var(--xp-card)', zIndex: 4 }}>
                 <button onClick={() => setAddingTask(true)} className="w-full text-xs py-2.5 rounded-xl text-white font-semibold transition-all hover:opacity-85" style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)', boxShadow: '0 2px 10px rgba(124,58,237,0.35)' }}>
                   + Add accomplishment
@@ -2022,6 +2386,29 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <button onClick={() => setPendingDeleteId(null)} style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: 'transparent', color: 'var(--xp-txt3)', border: '1px solid var(--xp-bdr2)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>Keep Task</button>
                 <button onClick={() => doDeleteTask(pendingDeleteId)} style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: isDark ? 'rgba(239,68,68,0.12)' : 'rgba(239,68,68,0.07)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.28)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Delete Task + Sub-Tasks</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Multi-delete confirmation dialog */}
+      {deleteConfirm && (() => {
+        const parentCount = [...selectedForDel].filter(id => !dayData.tasks.find(t => t.id === id)?.parentTaskId).length
+        const childrenAffected = [...selectedForDel]
+          .filter(id => !dayData.tasks.find(t => t.id === id)?.parentTaskId)
+          .reduce((acc, id) => acc + dayData.tasks.filter(t => t.parentTaskId === id && !selectedForDel.has(t.id)).length, 0)
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9996, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(0,0,0,0.5)' }}>
+            <div style={{ width: '100%', maxWidth: 320, borderRadius: 18, padding: 20, background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+              <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--xp-txt)', marginBottom: 8 }}>Delete {selectedForDel.size} task{selectedForDel.size !== 1 ? 's' : ''}?</p>
+              {childrenAffected > 0 && (
+                <p style={{ fontSize: 12, color: 'var(--xp-txt3)', marginBottom: 14, lineHeight: 1.5 }}>{parentCount > 1 ? 'Some' : 'One'} selected task{parentCount > 1 ? 's have' : ' has'} sub-tasks. Those sub-tasks will also be deleted ({childrenAffected} additional item{childrenAffected !== 1 ? 's' : ''}).</p>
+              )}
+              {childrenAffected === 0 && <p style={{ fontSize: 12, color: 'var(--xp-txt3)', marginBottom: 14 }}>This action cannot be undone.</p>}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" onClick={() => setDeleteConfirm(false)} style={{ flex: 1, padding: '9px 0', borderRadius: 10, background: 'transparent', color: 'var(--xp-txt2)', border: '1px solid var(--xp-bdr2)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
+                <button type="button" onClick={executeDeleteSelected} style={{ flex: 1, padding: '9px 0', borderRadius: 10, background: '#ef4444', color: 'white', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Delete</button>
               </div>
             </div>
           </div>

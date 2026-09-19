@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { useApp, EMPTY_DAY } from './AppContext'
 import type { Task, TaskSession, Activity, TaskAttachment, DayData } from './types'
 import { formatMs, formatHMS, formatTime, formatTime12, isProductiveActivity, APP_YEAR } from './utils'
@@ -310,7 +311,8 @@ function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setAct
     padding: '7px 8px', WebkitAppearance: 'none', MozAppearance: 'textfield',
   }
   return (
-    <div>
+    <div style={{ display: 'flex', justifyContent: 'center' }}>
+      <div>
       <label style={{ display: 'block', fontSize: 10, fontWeight: 500, marginBottom: 5, color: 'var(--xp-txt3)' }}>{label}</label>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         {manualMode ? (
@@ -333,6 +335,7 @@ function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setAct
         <CompactDropdown value={ap} options={ADJUST_AMPM} onChange={onAP} isDark={isDark} width={60}
           isOpen={activePicker === `${prefix}AP`} onOpenChange={o => setActivePicker(o ? `${prefix}AP` : null)} />
       </div>
+      </div>
     </div>
   )
 }
@@ -352,9 +355,8 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   const lastSession    = task.sessions?.findLast?.(s => s.endTs !== null) ?? null
   const editingSession = runningSession ?? lastSession
 
-  // Canonical 12h ↔ 24h helpers — identical logic used for both dropdown and manual modes
   function tsToH12(ts: number | null): { h: string; m: string; ap: string } {
-    if (!ts) return { h: '12', m: '00', ap: 'AM' }
+    if (!ts) return { h: '', m: '', ap: 'AM' }
     const d     = new Date(ts)
     const hours = d.getHours()
     const mins  = d.getMinutes()
@@ -376,7 +378,6 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   const startInit = tsToH12(editingSession?.startTs ?? null)
   const endInit   = tsToH12(editingSession?.endTs != null ? editingSession.endTs : (runningSession ? Date.now() : null))
 
-  // Dropdown state
   const [startH,  setStartH]  = useState(startInit.h)
   const [startM,  setStartM]  = useState(startInit.m)
   const [startAP, setStartAP] = useState(startInit.ap)
@@ -386,52 +387,14 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   const [noteVal, setNoteVal] = useState('')
   const [activePicker, setActivePicker] = useState<string | null>(null)
 
-  // Manual entry state (initialized from dropdown values when entering manual mode)
-  const [manualMode, setManualMode] = useState(false)
-  const [startHRaw, setStartHRaw]   = useState(startInit.h)
-  const [startMRaw, setStartMRaw]   = useState(startInit.m)
-  const [endHRaw,   setEndHRaw]     = useState(endInit.h)
-  const [endMRaw,   setEndMRaw]     = useState(endInit.m)
-
-  // Validation helpers
   function validH(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 1 && n <= 12 }
   function validM(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 0 && n <= 59 }
 
-  // In manual mode, validate the raw inputs
-  const sHInvalid = manualMode && !validH(startHRaw)
-  const sMInvalid = manualMode && !validM(startMRaw)
-  const eHInvalid = manualMode && !validH(endHRaw)
-  const eMInvalid = manualMode && !validM(endMRaw)
-  const isValid   = !sHInvalid && !sMInvalid && !eHInvalid && !eMInvalid
-
-  // Effective values for time computation — same canonical path regardless of mode
-  const sH = manualMode ? startHRaw : startH
-  const sM = manualMode ? startMRaw : startM
-  const eH = manualMode ? endHRaw   : endH
-  const eM = manualMode ? endMRaw   : endM
-
-  const startTs    = isValid ? h12ToTs(sH, sM, startAP, baseTs) : 0
-  let   endTs      = isValid ? h12ToTs(eH, eM, endAP,   baseTs) : 0
+  const isValid    = validH(startH) && validM(startM) && validH(endH) && validM(endM)
+  const startTs    = isValid ? h12ToTs(startH, startM, startAP, baseTs) : 0
+  let   endTs      = isValid ? h12ToTs(endH, endM, endAP, baseTs) : 0
   if (isValid && endTs <= startTs) endTs += 86_400_000
   const durationMs = isValid ? Math.max(0, endTs - startTs) : 0
-
-  function toggleManualMode() {
-    if (manualMode) {
-      // Return to dropdowns — sync valid raw values back into dropdown state
-      if (validH(startHRaw)) setStartH(startHRaw.trim())
-      if (validM(startMRaw)) setStartM(String(parseInt(startMRaw, 10)).padStart(2, '0'))
-      if (validH(endHRaw))   setEndH(endHRaw.trim())
-      if (validM(endMRaw))   setEndM(String(parseInt(endMRaw, 10)).padStart(2, '0'))
-    } else {
-      // Enter manual mode — prime raw values from current dropdowns
-      setStartHRaw(startH); setStartMRaw(startM)
-      setEndHRaw(endH);     setEndMRaw(endM)
-    }
-    setManualMode(m => !m)
-    setActivePicker(null)
-  }
-
-  const inputSectionStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 10 }
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.65)' }} onClick={onClose}>
@@ -448,42 +411,23 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
         {/* Body */}
         <div style={{ padding: '18px 20px 16px' }}>
 
-          <div style={inputSectionStyle}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16 }}>
             <TimeRow
               label="Start Time" h={startH} m={startM} ap={startAP}
               onH={setStartH} onM={setStartM} onAP={setStartAP}
               isDark={isDark} activePicker={activePicker} setActivePicker={setActivePicker} prefix="start"
-              manualMode={manualMode} rawH={startHRaw} rawM={startMRaw}
-              onRawH={setStartHRaw} onRawM={setStartMRaw}
-              hInvalid={sHInvalid} mInvalid={sMInvalid}
+              manualMode={true} rawH={startH} rawM={startM}
+              onRawH={setStartH} onRawM={setStartM}
+              hInvalid={startH !== '' && !validH(startH)} mInvalid={startM !== '' && !validM(startM)}
             />
             <TimeRow
               label="End Time" h={endH} m={endM} ap={endAP}
               onH={setEndH} onM={setEndM} onAP={setEndAP}
               isDark={isDark} activePicker={activePicker} setActivePicker={setActivePicker} prefix="end"
-              manualMode={manualMode} rawH={endHRaw} rawM={endMRaw}
-              onRawH={setEndHRaw} onRawM={setEndMRaw}
-              hInvalid={eHInvalid} mInvalid={eMInvalid}
+              manualMode={true} rawH={endH} rawM={endM}
+              onRawH={setEndH} onRawM={setEndM}
+              hInvalid={endH !== '' && !validH(endH)} mInvalid={endM !== '' && !validM(endM)}
             />
-          </div>
-
-          {/* Manual entry / use dropdowns toggle */}
-          <div style={{ textAlign: 'center', marginBottom: 12 }}>
-            <button type="button" onClick={toggleManualMode} style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 500,
-              color: manualMode ? '#7c3aed' : 'var(--xp-txt3)',
-              background: manualMode ? (isDark ? 'rgba(124,58,237,0.10)' : 'rgba(124,58,237,0.07)') : 'transparent',
-              border: `1px solid ${manualMode ? 'rgba(124,58,237,0.30)' : 'var(--xp-bdr2)'}`,
-              borderRadius: 8, padding: '4px 10px', cursor: 'pointer', transition: 'all 120ms ease',
-              WebkitTapHighlightColor: 'transparent',
-            }}>
-              <span>{manualMode ? '▾' : '✎'}</span>
-              <span>{manualMode ? 'Use Dropdowns' : 'Manual Entry'}</span>
-            </button>
-            {/* Validation hint in manual mode */}
-            {manualMode && !isValid && (
-              <p style={{ fontSize: 9.5, color: '#ef4444', marginTop: 5 }}>Hour: 1–12 · Minute: 00–59</p>
-            )}
           </div>
 
           {/* Total Duration card */}
@@ -492,7 +436,7 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
               <span>⏱</span> Total Duration
             </span>
             <span style={{ fontSize: 13, fontWeight: 700, color: isValid && durationMs > 0 ? '#7c3aed' : 'var(--xp-txt3)' }}>
-              {isValid ? formatMs(durationMs) : '—'}
+              {isValid && durationMs > 0 ? formatMs(durationMs) : '00h 00m'}
             </span>
           </div>
 
@@ -524,8 +468,8 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
 
 const TASK_COLOR_CONFIG: Record<string, { label: string; hex: string; tintL: string; tintD: string }> = {
   default: { label: 'Default', hex: '',        tintL: '',                        tintD: '' },
-  red:     { label: 'Red',     hex: '#ef4444', tintL: 'rgba(239,68,68,0.08)',   tintD: 'rgba(239,68,68,0.13)' },
-  orange:  { label: 'Orange',  hex: '#f97316', tintL: 'rgba(249,115,22,0.08)',  tintD: 'rgba(249,115,22,0.13)' },
+  lime:    { label: 'Lime',    hex: '#c6ff3e', tintL: 'rgba(198,255,62,0.14)',  tintD: 'rgba(198,255,62,0.19)' },
+  orange:  { label: 'Gold',    hex: '#d97706', tintL: 'rgba(217,119,6,0.09)',   tintD: 'rgba(217,119,6,0.14)' },
   yellow:  { label: 'Yellow',  hex: '#eab308', tintL: 'rgba(234,179,8,0.11)',   tintD: 'rgba(234,179,8,0.16)' },
   green:   { label: 'Green',   hex: '#22c55e', tintL: 'rgba(34,197,94,0.08)',   tintD: 'rgba(34,197,94,0.13)' },
   teal:    { label: 'Teal',    hex: '#14b8a6', tintL: 'rgba(20,184,166,0.08)',  tintD: 'rgba(20,184,166,0.13)' },
@@ -589,9 +533,9 @@ function TasksDropdown({ onGenerate, onReorder, onDelete, isDark }: {
     return () => { cancelAnimationFrame(raf); document.removeEventListener('pointerdown', onOut) }
   }, [open])
 
-  const items = [
+  const items: { icon: string; label: string; action: () => void; iconStyle?: React.CSSProperties }[] = [
     { icon: '✨', label: 'Generate 3 Tasks', action: onGenerate },
-    { icon: '↕',  label: 'Reorder Tasks',    action: onReorder },
+    { icon: '↕',  label: 'Reorder Tasks',    action: onReorder, iconStyle: { fontSize: 17, fontWeight: 700 } },
     { icon: '🗑',  label: 'Delete Tasks',     action: onDelete  },
   ]
   return (
@@ -612,12 +556,13 @@ function TasksDropdown({ onGenerate, onReorder, onDelete, isDark }: {
           {items.map((item, idx) => (
             <button key={item.label} type="button"
               onClick={() => { item.action(); setOpen(false) }}
-              className="w-full flex items-center gap-2 px-3.5 py-2.5 text-left text-xs transition-colors hover:bg-black/5"
+              className="w-full flex items-center px-3.5 py-2.5 text-left text-xs transition-colors hover:bg-black/5"
               style={{
                 color: item.label === 'Delete Tasks' ? '#ef4444' : 'var(--xp-txt)',
                 borderTop: idx === 2 ? `0.5px solid var(--xp-bdr)` : 'none',
               }}>
-              <span>{item.icon}</span>{item.label}
+              <span style={{ width: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, ...item.iconStyle }}>{item.icon}</span>
+              <span>{item.label}</span>
             </button>
           ))}
         </div>
@@ -642,10 +587,12 @@ interface TaskMenuProps {
   pasteEnabled: boolean
   isChild: boolean
   isPriority: boolean
+  menuAnchor: DOMRect
+  isDark: boolean
   onClose: () => void
 }
 
-function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onChooseColor, onTogglePriority, pasteEnabled, isChild, isPriority, onClose }: TaskMenuProps) {
+function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onChooseColor, onTogglePriority, pasteEnabled, isChild, isPriority, onClose, menuAnchor, isDark }: TaskMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     function onOut(e: PointerEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
@@ -662,28 +609,81 @@ function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, 
     { icon: '📋', label: 'Copy Task',        action: onCopy        },
     { icon: '📌', label: 'Paste Task',       action: onPaste, disabled: !pasteEnabled },
     ...(!isChild ? [{ icon: '➕', label: 'Create Sub-Task', action: onCreateSubTask }] as MenuItem[] : []),
-    { icon: '🎨', label: 'Choose Task Color',                action: onChooseColor, sep: true },
-    { icon: isPriority ? '⚡' : '⚡', label: isPriority ? 'Remove Priority' : 'Mark as Priority', action: onTogglePriority },
-    { icon: '🗑',  label: 'Delete Task',     action: onDelete, danger: true, sep: true },
+    { icon: '🎨', label: 'Choose Task Color', action: onChooseColor, sep: true },
+    { icon: '⚡', label: isPriority ? 'Remove Priority' : 'Mark as Priority', action: onTogglePriority },
+    { icon: '🗑',  label: 'Delete Task',      action: onDelete, danger: true, sep: true },
   ]
-  return (
-    <div ref={ref} className="absolute right-0 top-full mt-1 rounded-xl shadow-xl z-10" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', minWidth: 184, maxHeight: 360, overflowY: 'auto' }}>
+
+  const MENU_MAX_H = 360
+  const vw = typeof window !== 'undefined' ? window.innerWidth  : 390
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+  const spaceBelow = vh - menuAnchor.bottom - 8
+  const openUpward = spaceBelow < MENU_MAX_H
+
+  // Explicit colors — CSS variables cannot cascade into a body-level portal
+  const menuBg  = isDark ? '#1e1635' : '#ffffff'
+  const menuBdr = isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.09)'
+  const itemTxt = isDark ? '#e2e8f0' : '#111827'
+  const sepClr  = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'
+  const hoverBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'
+
+  return createPortal(
+    <div ref={ref} style={{
+      position: 'fixed',
+      right: vw - menuAnchor.right,
+      ...(openUpward ? { bottom: vh - menuAnchor.top + 4 } : { top: menuAnchor.bottom + 4 }),
+      zIndex: 99999,
+      background: menuBg,
+      border: `0.5px solid ${menuBdr}`,
+      borderRadius: 12,
+      boxShadow: isDark ? '0 16px 48px rgba(0,0,0,0.7)' : '0 8px 32px rgba(0,0,0,0.18)',
+      minWidth: 184,
+      maxHeight: MENU_MAX_H,
+      overflowY: 'auto',
+      overscrollBehavior: 'contain',
+    }}>
       {items.map((item, idx) => (
-        <button
-          key={item.label}
-          type="button"
-          onClick={() => { if (!item.disabled) { item.action(); onClose() } }}
-          className="w-full flex items-center gap-2.5 px-3.5 py-2 text-left text-xs transition-colors hover:bg-black/5"
-          style={{
-            color: item.danger ? '#ef4444' : item.label === (isPriority ? 'Remove Priority' : 'Mark as Priority') ? '#f97316' : 'var(--xp-txt)',
-            opacity: item.disabled ? 0.38 : 1, cursor: item.disabled ? 'default' : 'pointer',
-            borderTop: item.sep && idx > 0 ? '0.5px solid var(--xp-bdr)' : 'none',
-          }}
-        >
-          <span className="text-sm">{item.icon}</span>{item.label}
-        </button>
+        <TaskMenuItem key={item.label}
+          item={item} idx={idx} isPriority={isPriority}
+          itemTxt={itemTxt} sepClr={sepClr} hoverBg={hoverBg}
+          onClose={onClose}
+        />
       ))}
-    </div>
+    </div>,
+    document.body
+  )
+}
+
+// Extracted to avoid inline-function recreation on every render
+function TaskMenuItem({ item, idx, isPriority, itemTxt, sepClr, hoverBg, onClose }: {
+  item: { icon: string; label: string; action: () => void; danger?: boolean; disabled?: boolean; sep?: boolean }
+  idx: number; isPriority: boolean; itemTxt: string; sepClr: string; hoverBg: string
+  onClose: () => void
+}) {
+  const [hovered, setHovered] = useState(false)
+  const priorityLabel = isPriority ? 'Remove Priority' : 'Mark as Priority'
+  const color = item.danger ? '#ef4444' : item.label === priorityLabel ? '#f97316' : itemTxt
+  return (
+    <button
+      type="button"
+      onPointerEnter={() => { if (!item.disabled) setHovered(true) }}
+      onPointerLeave={() => setHovered(false)}
+      onClick={() => { if (!item.disabled) { item.action(); onClose() } }}
+      style={{
+        width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+        padding: '8px 14px', textAlign: 'left', fontSize: 12,
+        background: hovered && !item.disabled ? hoverBg : 'transparent',
+        border: 'none',
+        borderTop: item.sep && idx > 0 ? `0.5px solid ${sepClr}` : 'none',
+        cursor: item.disabled ? 'default' : 'pointer',
+        opacity: item.disabled ? 0.38 : 1,
+        color, WebkitTapHighlightColor: 'transparent',
+        transition: 'background 120ms ease',
+      }}
+    >
+      <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0, width: 22, textAlign: 'center' }}>{item.icon}</span>
+      <span style={{ whiteSpace: 'nowrap' }}>{item.label}</span>
+    </button>
   )
 }
 
@@ -775,6 +775,8 @@ function TaskRow({
   const hasReminder = reminders.some(r => r.taskId === task.id && r.dateKey === dateKey && r.isActive)
 
   const [menuOpen,       setMenuOpen]       = useState(false)
+  const [menuAnchorRect, setMenuAnchorRect] = useState<DOMRect | null>(null)
+  const dotBtnRef = useRef<HTMLButtonElement>(null)
   const [colorPickerOpen, setColorPickerOpen] = useState(false)
   const [adjustOpen,     setAdjustOpen]     = useState(false)
   const [emojiOpen,      setEmojiOpen]      = useState(false)
@@ -1044,8 +1046,11 @@ function TaskRow({
 
           {/* 3-dot */}
           <div className="relative flex-shrink-0">
-            <button type="button" onClick={() => setMenuOpen(o => !o)} className="p-1.5 rounded-lg hover:bg-black/5 transition-colors" style={{ color: 'var(--xp-txt3)' }}><DotsIcon /></button>
-            {menuOpen && (
+            <button ref={dotBtnRef} type="button" onClick={() => {
+              if (!menuOpen && dotBtnRef.current) setMenuAnchorRect(dotBtnRef.current.getBoundingClientRect())
+              setMenuOpen(o => !o)
+            }} className="p-1.5 rounded-lg hover:bg-black/5 transition-colors" style={{ color: 'var(--xp-txt3)' }}><DotsIcon /></button>
+            {menuOpen && menuAnchorRect && (
               <TaskMenu
                 onEdit={() => { onEditStart(); setMenuOpen(false) }}
                 onSetReminder={onSetReminder}
@@ -1061,6 +1066,8 @@ function TaskRow({
                 isChild={isChild}
                 isPriority={!!task.isPriority}
                 onClose={() => setMenuOpen(false)}
+                menuAnchor={menuAnchorRect}
+                isDark={isDark}
               />
             )}
             {colorPickerOpen && (
@@ -2000,6 +2007,9 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     }))
     updateDay(dateKey, prev => ({ ...prev, tasks: [...prev.tasks, newParent, ...newChildren] }))
     if (newChildren.length > 0) setExpandedParents(prev => new Set([...prev, newParentId]))
+    // Single-use: consume clipboard immediately so paste cannot repeat
+    setTaskClipboard(null)
+    try { localStorage.removeItem('xp9-task-clipboard') } catch {}
     setToast('Task pasted ✓')
   }
 
@@ -2318,19 +2328,20 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                             title="Drag to reorder"
                           >⠿</div>
                         )}
-                        {/* Delete checkbox — delete mode only */}
-                        {deleteMode && (
-                          <button type="button" onClick={() => toggleDeleteSelect(task.id)} style={{ padding: '12px 4px', flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer' }}>
-                            <div style={{ width: 16, height: 16, borderRadius: 4, border: `2px solid ${selectedForDel.has(task.id) ? '#ef4444' : 'var(--xp-bdr2)'}`, background: selectedForDel.has(task.id) ? '#ef4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              {selectedForDel.has(task.id) && <span style={{ color: 'white', fontSize: 9, fontWeight: 700, lineHeight: 1 }}>✓</span>}
-                            </div>
-                          </button>
-                        )}
-                        <div style={{ flex: 1, minWidth: 0, outline: reorderMode && dragOverId === task.id ? '2px solid rgba(124,58,237,0.45)' : 'none', borderRadius: 12 }}
+                        <div style={{ flex: 1, minWidth: 0, position: 'relative', outline: reorderMode && dragOverId === task.id ? '2px solid rgba(124,58,237,0.45)' : 'none', borderRadius: 12 }}
                           onDragOver={reorderMode ? (e => { e.preventDefault(); setDragOverId(task.id) }) : undefined}
                           onDragLeave={reorderMode ? () => setDragOverId(null) : undefined}
                           onDrop={reorderMode ? () => { handleReorderDrop(task.id); setDragOverId(null) } : undefined}
                         >
+                          {/* Delete checkbox — inside top-left of card, overlay */}
+                          {deleteMode && (
+                            <button type="button" onClick={() => toggleDeleteSelect(task.id)}
+                              style={{ position: 'absolute', top: 5, left: 5, zIndex: 10, background: 'none', border: 'none', cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
+                              <div style={{ width: 14, height: 14, borderRadius: 4, border: `1.5px solid ${selectedForDel.has(task.id) ? '#ef4444' : 'var(--xp-bdr2)'}`, background: selectedForDel.has(task.id) ? '#ef4444' : (isDark ? 'rgba(30,22,53,0.9)' : 'rgba(255,255,255,0.92)'), display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.14)' }}>
+                                {selectedForDel.has(task.id) && <span style={{ color: 'white', fontSize: 8, fontWeight: 700, lineHeight: 1 }}>✓</span>}
+                              </div>
+                            </button>
+                          )}
                           <TaskRow
                             {...sharedProps(task, taskIndex)}
                             hasChildren={hasKids}
@@ -2344,7 +2355,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
 
                       {/* Sub-tasks hierarchy — corrected connector geometry */}
                       {hasKids && isExpanded && (
-                        <div style={{ marginLeft: reorderMode || deleteMode ? 24 : 16, marginTop: 6 }}>
+                        <div style={{ marginLeft: reorderMode ? 24 : 16, marginTop: 6 }}>
                           {children.map((child, ci) => {
                             const isLast = ci === children.length - 1
                             return (

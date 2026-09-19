@@ -274,12 +274,15 @@ function CompactDropdown({ value, options, onChange, isDark, width, ariaLabel, i
                   touchAction: 'manipulation',
                 }}
               >
+                <span style={{ width: 11, flexShrink: 0 }} />
                 <span style={{ flex: 1, textAlign: 'center' }}>{opt}</span>
-                {isSelected && (
+                {isSelected ? (
                   <svg viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5"
                     style={{ width: 11, height: 11, flexShrink: 0 }}>
                     <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
+                ) : (
+                  <span style={{ width: 11, flexShrink: 0 }} />
                 )}
               </button>
             )
@@ -317,7 +320,7 @@ function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setAct
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         {manualMode ? (
           <input type="text" inputMode="numeric" value={rawH ?? h} onChange={e => onRawH?.(e.target.value)}
-            placeholder="H" maxLength={2}
+            placeholder="00" maxLength={2}
             style={{ ...inputBase, width: 56, border: `1px solid ${hInvalid ? '#ef4444' : 'var(--xp-bdr2)'}` }} />
         ) : (
           <CompactDropdown value={h} options={ADJUST_HOURS} onChange={onH} isDark={isDark} width={56}
@@ -326,7 +329,7 @@ function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setAct
         <span style={{ color: 'var(--xp-txt3)', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>:</span>
         {manualMode ? (
           <input type="text" inputMode="numeric" value={rawM ?? m} onChange={e => onRawM?.(e.target.value)}
-            placeholder="MM" maxLength={2}
+            placeholder="00" maxLength={2}
             style={{ ...inputBase, width: 62, border: `1px solid ${mInvalid ? '#ef4444' : 'var(--xp-bdr2)'}` }} />
         ) : (
           <CompactDropdown value={m} options={ADJUST_MINUTES} onChange={onM} isDark={isDark} width={62}
@@ -2336,7 +2339,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                           {/* Delete checkbox — inside top-left of card, overlay */}
                           {deleteMode && (
                             <button type="button" onClick={() => toggleDeleteSelect(task.id)}
-                              style={{ position: 'absolute', top: 5, left: 5, zIndex: 10, background: 'none', border: 'none', cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
+                              style={{ position: 'absolute', top: 3, left: 3, zIndex: 10, background: 'none', border: 'none', cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
                               <div style={{ width: 14, height: 14, borderRadius: 4, border: `1.5px solid ${selectedForDel.has(task.id) ? '#ef4444' : 'var(--xp-bdr2)'}`, background: selectedForDel.has(task.id) ? '#ef4444' : (isDark ? 'rgba(30,22,53,0.9)' : 'rgba(255,255,255,0.92)'), display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.14)' }}>
                                 {selectedForDel.has(task.id) && <span style={{ color: 'white', fontSize: 8, fontWeight: 700, lineHeight: 1 }}>✓</span>}
                               </div>

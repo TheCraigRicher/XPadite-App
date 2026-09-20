@@ -1,6 +1,7 @@
 'use client'
 
 import React from 'react'
+import { useApp } from './AppContext'
 
 export type MobileTab = 'calendar' | 'tasks' | 'analytics' | 'planner' | 'ai-coach'
 
@@ -66,6 +67,8 @@ interface MobileBottomNavProps {
 }
 
 export function MobileBottomNav({ activeTab, onTabChange }: MobileBottomNavProps) {
+  const { setSidebarOpen } = useApp()
+
   return (
     /*
      * xp-mobile-nav: defined in globals.css as display:flex / @media sm+ display:none
@@ -93,7 +96,7 @@ export function MobileBottomNav({ activeTab, onTabChange }: MobileBottomNavProps
         return (
           <button
             key={tab}
-            onClick={() => onTabChange(tab)}
+            onClick={() => { setSidebarOpen(false); onTabChange(tab) }}
             aria-label={label}
             aria-current={active ? 'page' : undefined}
             style={{

@@ -2165,6 +2165,11 @@ export function JournalEditorContent({
           .xp-jd-ind-dt { display: none !important; }
           .xp-jd-mic-toolbar { display: none !important; }
           .xp-j-saved-txt { display: none !important; }
+          /* Mobile save-button in-button feedback */
+          .xp-j-save-btn .xp-j-save-lbl { transition: opacity 180ms; }
+          .xp-j-save-btn .xp-j-saved-mob { opacity: 0; transition: opacity 180ms; }
+          .xp-j-save-btn-saved .xp-j-save-lbl { opacity: 0; }
+          .xp-j-save-btn-saved .xp-j-saved-mob { opacity: 1; }
           .xp-jd-nav-btn {
             font-size: 20px !important;
             color: rgba(255,255,255,0.92) !important;
@@ -2177,6 +2182,8 @@ export function JournalEditorContent({
           .xp-jd-sec-mo { display: none !important; }
           .xp-jd-ind-mo { display: none !important; }
           .xp-jd-mic-nav { display: none !important; }
+          /* Desktop/tablet — in-button saved overlay never appears */
+          .xp-j-saved-mob { display: none !important; }
         }
         /* Undo/Redo tap tooltip — mobile only */
         .xp-jd-tip {
@@ -2837,7 +2844,7 @@ export function JournalEditorContent({
                 transition: 'opacity 200ms',
               }}>✓ Saved</span>
               <button
-                className="xp-j-save-btn"
+                className={`xp-j-save-btn${saveStatus === 'saved' ? ' xp-j-save-btn-saved' : ''}`}
                 onClick={handleManualSave}
                 style={{
                   padding: '6px 18px', borderRadius: 8, border: 'none', cursor: 'pointer',
@@ -2845,8 +2852,17 @@ export function JournalEditorContent({
                   color: '#fff', fontSize: 12, fontWeight: 700,
                   boxShadow: '0 2px 10px rgba(124,58,237,0.45)',
                   whiteSpace: 'nowrap',
+                  position: 'relative', overflow: 'hidden',
                 }}
-              >Save</button>
+              >
+                <span className="xp-j-save-lbl">Save</span>
+                {/* Mobile in-button saved state — absolutely overlays "Save" text */}
+                <span className="xp-j-saved-mob" style={{
+                  position: 'absolute', inset: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 11, fontWeight: 700,
+                }}>✓ Saved</span>
+              </button>
             </div>
 
             {/* Voice error toast */}

@@ -57,20 +57,16 @@ export default function LoginPage() {
 
   return (
     <main
-      className="min-h-screen flex items-center justify-center p-6 lg:p-10"
+      className="min-h-screen sm:flex sm:items-center sm:justify-center sm:p-6 lg:p-10"
       style={{ background: '#f7f6f4' }}
     >
       {/* Centered composed container */}
       <div
-        className="w-full max-w-[1300px] flex overflow-hidden"
-        style={{
-          borderRadius: 32,
-          boxShadow: '0 8px 40px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06)',
-        }}
+        className="w-full sm:max-w-[1300px] flex min-h-screen sm:min-h-0 overflow-hidden sm:rounded-[32px] sm:shadow-[0_8px_40px_rgba(0,0,0,0.10),0_0_0_1px_rgba(0,0,0,0.06)]"
       >
-        {/* Left marketing panel — has its own gradient */}
+        {/* Left marketing panel — hidden on mobile, visible sm+ */}
         <div
-          className="flex-1"
+          className="hidden sm:block sm:flex-1"
           style={{ background: 'linear-gradient(140deg, #1e0548 0%, #3b1282 50%, #5421b0 100%)' }}
         >
           <MarketingPanel />
@@ -78,7 +74,7 @@ export default function LoginPage() {
 
         {/* Right auth panel */}
         <div
-          className="flex-1 lg:flex-none lg:w-[560px] xl:w-[600px] flex items-center justify-center py-12 px-8 lg:px-12"
+          className="flex-1 lg:flex-none lg:w-[560px] xl:w-[600px] flex items-start sm:items-center justify-center py-8 sm:py-12 px-5 sm:px-8 lg:px-12"
           style={{ background: '#f3effe' }}
         >
           <div
@@ -132,18 +128,18 @@ export default function LoginPage() {
               />
 
               {/* Remember me + Forgot password */}
-              <div className="flex items-center justify-between pt-0.5">
-                <label className="flex items-center gap-2 cursor-pointer select-none">
+              <div className="flex items-center justify-between gap-3 pt-0.5">
+                <label className="flex items-center gap-2 cursor-pointer select-none flex-shrink-0">
                   <input
                     type="checkbox"
                     checked={rememberMe}
                     onChange={e => setRememberMe(e.target.checked)}
                     className="w-4 h-4 rounded accent-violet-700 cursor-pointer"
                   />
-                  <span className="text-sm text-gray-600">Remember me</span>
+                  <span className="text-sm text-gray-600 whitespace-nowrap">Remember me</span>
                 </label>
                 <Link href="/forgot-password"
-                  className="text-sm text-violet-700 hover:text-violet-900 font-medium transition-colors duration-150">
+                  className="text-sm text-violet-700 hover:text-violet-900 font-medium transition-colors duration-150 whitespace-nowrap flex-shrink-0">
                   Forgot password?
                 </Link>
               </div>

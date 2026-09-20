@@ -147,8 +147,7 @@ export default function SignUpPage() {
         style={pageStyle}
       >
         <div
-          className="w-full max-w-[1300px] flex overflow-hidden"
-          style={containerShadow}
+          className="w-full sm:max-w-[1300px] flex min-h-screen sm:min-h-0 overflow-hidden sm:rounded-[32px] sm:shadow-[0_8px_40px_rgba(0,0,0,0.10),0_0_0_1px_rgba(0,0,0,0.06)]"
         >
           <div
             className="flex-1"
@@ -160,7 +159,7 @@ export default function SignUpPage() {
             <MarketingPanel />
           </div>
           <div
-            className="flex-1 lg:flex-none lg:w-[560px] xl:w-[600px] flex items-center justify-center py-12 px-8 lg:px-12"
+            className="flex-1 lg:flex-none lg:w-[560px] xl:w-[600px] flex items-start sm:items-center justify-center py-8 sm:py-12 px-5 sm:px-8 lg:px-12"
             style={{ background: "#f3effe" }}
           >
             <div
@@ -215,7 +214,7 @@ export default function SignUpPage() {
 
   return (
     <main
-      className="min-h-screen flex items-center justify-center p-6 lg:p-10"
+      className="min-h-screen sm:flex sm:items-center sm:justify-center sm:p-6 lg:p-10"
       style={pageStyle}
     >
       {/* Centered composed container */}
@@ -225,7 +224,7 @@ export default function SignUpPage() {
       >
         {/* Left marketing panel */}
         <div
-          className="flex-1"
+          className="hidden sm:block sm:flex-1"
           style={{
             background:
               "linear-gradient(140deg, #1e0548 0%, #3b1282 50%, #5421b0 100%)",
@@ -236,7 +235,7 @@ export default function SignUpPage() {
 
         {/* Right auth panel */}
         <div
-          className="flex-1 lg:flex-none lg:w-[560px] xl:w-[600px] flex items-center justify-center py-10 px-8 lg:px-12"
+          className="flex-1 lg:flex-none lg:w-[560px] xl:w-[600px] flex items-start sm:items-center justify-center py-6 sm:py-10 px-5 sm:px-8 lg:px-12"
           style={{ background: "#f3effe" }}
         >
           <div

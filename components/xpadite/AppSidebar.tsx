@@ -130,6 +130,16 @@ export function AppSidebar({
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     )
     await supabase.auth.signOut()
+    // Wipe all user-owned localStorage so the next account that logs in on
+    // this device never inherits the previous user's tasks, sessions, or preferences.
+    const USER_LS_KEYS = [
+      'xp9d', 'xp9s', 'xp9a', 'xp9r', 'xp9g',
+      'xp9-active-session', 'xp9-active-task-timer',
+      'xp9-task-clipboard', 'xp9-profile', 'xp9-aic',
+      'xp9-journal', 'xp9-notifications', 'xp9_connections',
+      'xp-theme', 'xp-progress-color',
+    ]
+    try { USER_LS_KEYS.forEach(k => localStorage.removeItem(k)) } catch {}
     router.push('/login')
   }
 

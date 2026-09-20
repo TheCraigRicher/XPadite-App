@@ -1025,6 +1025,7 @@ interface JournalEditorContentProps {
   onEditor?: () => void
   onDirtyChange?: (dirty: boolean) => void
   closeIntent?: 'save' | 'discard' | null
+  flushRef?: React.MutableRefObject<(() => void) | null>
   // Legacy props — accepted for backward compat; attachments now live as inline blocks
   attachments?: TaskAttachment[]
   onAttachmentsChange?: (atts: TaskAttachment[]) => void
@@ -1037,7 +1038,7 @@ export function JournalEditorContent({
   onContentChange, onPersist,
   onNavigateDay, onNavigateToday, onBack, onClose,
   onJournalCalendar, onLibrary, onEditor,
-  onDirtyChange, closeIntent,
+  onDirtyChange, closeIntent, flushRef,
 }: JournalEditorContentProps) {
 
   // ── App context (for Task Manager integration) ───────────────────────────────
@@ -1317,6 +1318,29 @@ export function JournalEditorContent({
       saveTimerRef.current = null
     }, 1500)
   }, [buildDocStr, onPersist])
+
+  // ── Imperative flush: cancel pending autosave and persist immediately ────────
+  // Updated each render so the closure always reads latest refs.
+  const flushFnRef = useRef<() => void>(() => {})
+  flushFnRef.current = () => {
+    if (!saveTimerRef.current) return
+    clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = null
+    onPersist(dateKeyRef.current, buildDocStr())
+  }
+  // Expose to parent (for modal close) and to pagehide (for tab close).
+  if (flushRef) flushRef.current = flushFnRef.current
+  useEffect(() => {
+    const flush = () => flushFnRef.current()
+    const onVis = () => { if (document.visibilityState === 'hidden') flush() }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Block content change ────────────────────────────────────────────────────
   const pushHistoryRef = useRef<(immediate?: boolean) => void>(() => {})

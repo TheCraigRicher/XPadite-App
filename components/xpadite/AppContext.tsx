@@ -6,9 +6,21 @@ import {
   upsertReminder as supabaseUpsertReminder,
   deleteReminder as supabaseDeleteReminder,
   patchReminder as supabasePatchReminder,
+  fetchReminders as supabaseFetchReminders,
   computeNextRunAt,
 } from '@/lib/reminders'
 import { createClient } from '@/lib/supabase/client'
+import {
+  fetchCalendarDays,
+  upsertDayData,
+  fetchWorkSessions,
+  upsertWorkSession,
+  fetchUserActivities,
+  upsertAllActivities,
+  deleteUserActivity,
+  fetchUserPreferences,
+  upsertUserPreferences,
+} from '@/lib/supabase/core-data'
 
 const DEFAULT_ACTIVITIES: Activity[] = [
   { id: 'a1',      name: 'Work',                 color: '#7c3aed' },
@@ -104,10 +116,10 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const [sessions, setSessions] = useState<WorkSession[]>([])
   const [activities, setActivitiesState] = useState<Activity[]>(DEFAULT_ACTIVITIES)
   const [selectedActId, setSelectedActId] = useState<string>(DEFAULT_ACTIVITIES[0].id)
-  const [isDark, setIsDark] = useState(false)
+  const [isDark, setIsDarkRaw] = useState(false)
   const [calendarClean, setCalendarClean] = useState(false)
-  const [activeSession, setActiveSession] = useState<ActiveSession | null>(null)
-  const [activeTaskTimer, setActiveTaskTimer] = useState<ActiveTaskTimer | null>(null)
+  const [activeSession, setActiveSessionRaw] = useState<ActiveSession | null>(null)
+  const [activeTaskTimer, setActiveTaskTimerRaw] = useState<ActiveTaskTimer | null>(null)
   const [removingMode, setRemovingMode] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
@@ -124,6 +136,17 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   remindersRef.current = reminders
   const userIdRef = useRef(userId)
   userIdRef.current = userId
+  const activitiesRef = useRef(activities)
+  activitiesRef.current = activities
+  const activeTaskTimerRef = useRef(activeTaskTimer)
+  activeTaskTimerRef.current = activeTaskTimer
+  const activeSessionRef = useRef(activeSession)
+  activeSessionRef.current = activeSession
+
+  // Per-dateKey debounce timers for Supabase day upserts (1 second idle = flush)
+  const pendingDaySyncTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  // Latest DayData awaiting sync for each dateKey (written synchronously, read by timer)
+  const pendingDaySyncDataRef = useRef<Map<string, DayData>>(new Map())
 
   // ─── Load from localStorage on mount ────────────────────────────────────────
 
@@ -133,7 +156,9 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       if (d) {
         const parsed = JSON.parse(d) as CalendarData
         Object.values(parsed).forEach(day => {
-          day.tasks?.forEach(task => {
+          // Guard legacy entries that pre-date the tasks field
+          if (!Array.isArray(day.tasks)) day.tasks = []
+          day.tasks.forEach(task => {
             if (!Array.isArray(task.sessions)) task.sessions = []
           })
         })
@@ -172,10 +197,25 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       const pc = localStorage.getItem('xp-progress-color')
       if (pc) setProgressColorRaw(pc)
     } catch {}
+    try {
+      // Theme is now persisted — load from localStorage so it survives page refreshes
+      const theme = localStorage.getItem('xp-theme')
+      if (theme !== null) setIsDarkRaw(theme === 'true')
+    } catch {}
+    // Restore active clock-in session so page refresh doesn't lose an in-progress timer
+    try {
+      const as = localStorage.getItem('xp9-active-session')
+      if (as) setActiveSessionRaw(JSON.parse(as) as ActiveSession)
+    } catch {}
+    try {
+      const att = localStorage.getItem('xp9-active-task-timer')
+      if (att) setActiveTaskTimerRaw(JSON.parse(att) as ActiveTaskTimer)
+    } catch {}
     setHydrated(true)
   }, [])
 
-  // Fetch Supabase userId for background sync (does NOT overwrite reminders)
+  // ─── Resolve Supabase user ID after hydration ────────────────────────────────
+
   useEffect(() => {
     if (!hydrated) return
     createClient().auth.getUser().then(({ data }) => {
@@ -183,25 +223,347 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     }).catch(() => {})
   }, [hydrated])
 
+  // ─── Initial Supabase data fetch ─────────────────────────────────────────────
+  // Runs once per session when the user ID becomes available.
+  // SAFETY: if Supabase returns empty data for a table, we keep the existing
+  // localStorage state untouched — this protects pre-migration desktop data.
+
+  useEffect(() => {
+    if (!userId) return
+    const supabase = createClient()
+
+    Promise.all([
+      fetchCalendarDays(supabase, userId),
+      fetchWorkSessions(supabase, userId),
+      fetchUserActivities(supabase, userId),
+      fetchUserPreferences(supabase, userId),
+      supabaseFetchReminders(),
+    ]).then(([sbCalData, sbSessions, sbActivities, sbPrefs, sbReminders]) => {
+
+      // Calendar days: merge if Supabase has rows; Supabase data wins per date key.
+      // Skip days that have a pending local write to avoid a race between a fast
+      // user edit (debounce not yet fired) and the hydration network response.
+      if (Object.keys(sbCalData).length > 0) {
+        setCalData(prev => {
+          const merged = { ...prev }
+          for (const [key, dayData] of Object.entries(sbCalData)) {
+            if (!pendingDaySyncTimersRef.current.has(key)) {
+              merged[key] = dayData
+            }
+          }
+          try { localStorage.setItem('xp9d', JSON.stringify(merged)) } catch {}
+          return merged
+        })
+      }
+
+      // Work sessions: merge if Supabase has rows; Supabase wins per session id
+      if (sbSessions.length > 0) {
+        setSessions(prev => {
+          const byId = new Map(prev.map(s => [s.id, s]))
+          for (const s of sbSessions) byId.set(s.id, s)
+          const merged = Array.from(byId.values()).sort((a, b) => a.startTs - b.startTs)
+          try { localStorage.setItem('xp9s', JSON.stringify(merged)) } catch {}
+          return merged
+        })
+
+        // Reconstruct activeSession for cross-device restore.
+        // The canonical indicator is a work_sessions row with endTs === null.
+        const openSession = sbSessions.find(s => s.endTs === null)
+        const localActive = activeSessionRef.current
+        if (openSession) {
+          if (localActive?.id !== openSession.id) {
+            setActiveSessionRaw(openSession)
+            try { localStorage.setItem('xp9-active-session', JSON.stringify(openSession)) } catch {}
+          }
+        } else if (localActive) {
+          // Supabase has sessions but none open → stale local active session
+          setActiveSessionRaw(null)
+          try { localStorage.removeItem('xp9-active-session') } catch {}
+        }
+      }
+
+      // Activities: replace if Supabase has rows; enforce builtin extras
+      if (sbActivities.length > 0) {
+        const withBuiltins = [...sbActivities]
+        BUILTIN_EXTRAS.forEach(b => {
+          const idx = withBuiltins.findIndex(a => a.id === b.id)
+          if (idx === -1) withBuiltins.push(b)
+          else withBuiltins[idx] = { ...withBuiltins[idx], countsTowardProductivity: b.countsTowardProductivity }
+        })
+        setActivitiesState(withBuiltins)
+        try { localStorage.setItem('xp9a', JSON.stringify(withBuiltins)) } catch {}
+      }
+
+      // Preferences: apply if Supabase row exists (Supabase is the cross-device truth)
+      if (sbPrefs) {
+        setIsDarkRaw(sbPrefs.isDark)
+        try { localStorage.setItem('xp-theme', String(sbPrefs.isDark)) } catch {}
+        if (sbPrefs.progressColor) {
+          setProgressColorRaw(sbPrefs.progressColor)
+          try { localStorage.setItem('xp-progress-color', sbPrefs.progressColor) } catch {}
+        }
+      }
+
+      // Reminders: merge local + Supabase; Supabase wins per id; keep local-only entries
+      if (sbReminders.length > 0) {
+        setReminders(prev => {
+          const byId = new Map(prev.map(r => [r.id, r]))
+          for (const r of sbReminders) {
+            // Preserve localFiredAt from local copy (never stored in Supabase)
+            byId.set(r.id, { ...r, localFiredAt: byId.get(r.id)?.localFiredAt ?? null })
+          }
+          const merged = Array.from(byId.values())
+          try { localStorage.setItem('xp9r', JSON.stringify(merged)) } catch {}
+          return merged
+        })
+      }
+
+      // Active task timer: reconstruct from Supabase for cross-device restore.
+      // The canonical running-timer indicator in Supabase is a task session with endTs === null
+      // inside calendar_days.day_data.tasks. localStorage is the same-device fast path;
+      // Supabase is the durable cross-device source of truth.
+      if (Object.keys(sbCalData).length > 0) {
+        // Scan Supabase calendar data for a task with an open session
+        let sbTimer: ActiveTaskTimer | null = null
+        for (const [dayKey, dayData] of Object.entries(sbCalData)) {
+          if (sbTimer) break
+          const tasks = dayData.tasks ?? []
+          for (let i = 0; i < tasks.length; i++) {
+            const runningSess = (tasks[i].sessions ?? []).find(s => s.endTs === null)
+            if (runningSess) {
+              sbTimer = {
+                taskId:    tasks[i].id,
+                dateKey:   dayKey,
+                sessionId: runningSess.id,
+                startTs:   runningSess.startTs,
+                taskText:  tasks[i].text || `Task ${i + 1}`,
+                taskIndex: i,
+              }
+              break
+            }
+          }
+        }
+        // localTimer is what this device already knows (set from localStorage during mount)
+        const localTimer = activeTaskTimerRef.current
+        if (sbTimer) {
+          const sameTimer =
+            localTimer?.taskId    === sbTimer.taskId &&
+            localTimer?.sessionId === sbTimer.sessionId
+          if (!sameTimer) {
+            // Cross-device restore: Supabase has a running timer this device doesn't know about
+            setActiveTaskTimerRaw(sbTimer)
+            try { localStorage.setItem('xp9-active-task-timer', JSON.stringify(sbTimer)) } catch {}
+          }
+          // Same-device: localStorage already restored correctly; nothing to do
+        } else if (localTimer) {
+          // Supabase has calendar data but no running task session → local timer is stale
+          setActiveTaskTimerRaw(null)
+          try { localStorage.removeItem('xp9-active-task-timer') } catch {}
+        }
+      }
+
+    }).catch(err => {
+      console.error('[XPadite] Supabase initial fetch error:', err)
+    })
+  }, [userId])
+
+  // ─── Supabase Realtime: cross-device active timer sync ───────────────────────
+  // Subscribes to postgres_changes on calendar_days and work_sessions for the
+  // authenticated user. On remote changes, reconciles activeTaskTimer and
+  // activeSession without triggering any Supabase writes (no feedback loop).
+  //
+  // REQUIRES: both tables must be in the supabase_realtime publication.
+  // Apply migration 006_realtime_publications.sql in Supabase Dashboard → SQL Editor.
+  useEffect(() => {
+    if (!userId) return
+    const supabase = createClient()
+
+    const channel = supabase
+      .channel(`xp-realtime-${userId}`)
+
+      // ── calendar_days changes ────────────────────────────────────────────────
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'calendar_days', filter: `user_id=eq.${userId}` },
+        (payload) => {
+          if (payload.eventType === 'DELETE') return
+          const row = payload.new as { date_key?: string; day_data?: DayData }
+          if (!row.date_key || !row.day_data) return
+
+          const dateKey = row.date_key
+          const dayData  = row.day_data
+
+          // Accept remote calData only when we have no pending local write for this date.
+          // This prevents echoes of our own debounce writes from clobbering optimistic state.
+          if (!pendingDaySyncTimersRef.current.has(dateKey)) {
+            setCalData(prev => {
+              const next = { ...prev, [dateKey]: dayData }
+              try { localStorage.setItem('xp9d', JSON.stringify(next)) } catch {}
+              return next
+            })
+          }
+
+          // Reconcile active task timer (always — timer state must be cross-device accurate)
+          const tasks = dayData.tasks ?? []
+          let remoteTimer: ActiveTaskTimer | null = null
+          for (let i = 0; i < tasks.length; i++) {
+            const runningSess = (tasks[i].sessions ?? []).find(s => s.endTs === null)
+            if (runningSess) {
+              remoteTimer = {
+                taskId:    tasks[i].id,
+                dateKey:   dateKey,
+                sessionId: runningSess.id,
+                startTs:   runningSess.startTs,
+                taskText:  tasks[i].text || `Task ${i + 1}`,
+                taskIndex: i,
+              }
+              break
+            }
+          }
+
+          const cur = activeTaskTimerRef.current
+          if (remoteTimer) {
+            const alreadySame =
+              cur?.taskId    === remoteTimer.taskId &&
+              cur?.sessionId === remoteTimer.sessionId
+            if (!alreadySame) {
+              setActiveTaskTimerRaw(remoteTimer)
+              try { localStorage.setItem('xp9-active-task-timer', JSON.stringify(remoteTimer)) } catch {}
+            }
+          } else if (cur?.dateKey === dateKey) {
+            // This day was updated and now has no running session → remote stop
+            setActiveTaskTimerRaw(null)
+            try { localStorage.removeItem('xp9-active-task-timer') } catch {}
+          }
+        },
+      )
+
+      // ── work_sessions changes ────────────────────────────────────────────────
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'work_sessions', filter: `user_id=eq.${userId}` },
+        (payload) => {
+          if (payload.eventType === 'DELETE') {
+            const old = payload.old as { session_id?: string }
+            if (old.session_id && activeSessionRef.current?.id === old.session_id) {
+              setActiveSessionRaw(null)
+              try { localStorage.removeItem('xp9-active-session') } catch {}
+            }
+            return
+          }
+          const row = payload.new as {
+            session_id?: string; act_id?: string; act_name?: string; act_color?: string
+            start_ts?: number; end_ts?: number | null; date_key?: string
+          }
+          if (!row.session_id || !row.act_id || !row.act_name || !row.act_color ||
+              row.start_ts == null || !row.date_key) return
+
+          const incoming: WorkSession = {
+            id:       row.session_id,
+            actId:    row.act_id,
+            actName:  row.act_name,
+            actColor: row.act_color,
+            startTs:  row.start_ts,
+            endTs:    row.end_ts ?? null,
+            dateKey:  row.date_key,
+          }
+
+          // Merge into sessions list
+          setSessions(prev => {
+            const byId = new Map(prev.map(s => [s.id, s]))
+            byId.set(incoming.id, incoming)
+            const next = Array.from(byId.values()).sort((a, b) => a.startTs - b.startTs)
+            try { localStorage.setItem('xp9s', JSON.stringify(next)) } catch {}
+            return next
+          })
+
+          // Reconcile active clock-in session
+          const curActive = activeSessionRef.current
+          if (incoming.endTs === null) {
+            if (curActive?.id !== incoming.id) {
+              setActiveSessionRaw(incoming)
+              try { localStorage.setItem('xp9-active-session', JSON.stringify(incoming)) } catch {}
+            }
+          } else {
+            if (curActive?.id === incoming.id) {
+              setActiveSessionRaw(null)
+              try { localStorage.removeItem('xp9-active-session') } catch {}
+            }
+          }
+        },
+      )
+
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [userId])
+
+  // Flush all pending debounced day-sync writes when the page is about to be discarded.
+  // Prevents data loss when the user closes the tab or navigates away within 1 second of editing.
+  useEffect(() => {
+    function flush() {
+      pendingDaySyncTimersRef.current.forEach((timer, key) => {
+        clearTimeout(timer)
+        const dayData = pendingDaySyncDataRef.current.get(key)
+        pendingDaySyncDataRef.current.delete(key)
+        const uid = userIdRef.current
+        if (dayData && uid) {
+          upsertDayData(createClient(), uid, key, dayData).catch(() => {})
+        }
+      })
+      pendingDaySyncTimersRef.current.clear()
+    }
+    function onVisChange() { if (document.visibilityState === 'hidden') flush() }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', onVisChange)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', onVisChange)
+    }
+  }, [])
+
   // Sync activeTaskTimer.taskText when the user renames the task while clocked in
   useEffect(() => {
-    if (!activeTaskTimer) return
-    const dayData = calData[activeTaskTimer.dateKey]
+    const att = activeTaskTimerRef.current
+    if (!att) return
+    const dayData = calData[att.dateKey]
     if (!dayData) return
-    const task = dayData.tasks.find(t => t.id === activeTaskTimer.taskId)
-    if (!task || task.text === activeTaskTimer.taskText) return
-    setActiveTaskTimer(prev => prev ? { ...prev, taskText: task.text } : null)
+    const task = dayData.tasks.find(t => t.id === att.taskId)
+    if (!task || task.text === att.taskText) return
+    setActiveTaskTimerRaw({ ...att, taskText: task.text })
   }, [calData]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Core data mutations ─────────────────────────────────────────────────────
 
   const updateDay = useCallback((key: string, updater: (prev: DayData) => DayData) => {
     setCalData(prev => {
-      const current = prev[key] ?? { ...EMPTY_DAY }
-      const next = { ...prev, [key]: updater(current) }
+      const raw = prev[key] ?? { ...EMPTY_DAY }
+      // Normalize legacy DayData that may lack a tasks array
+      const current: DayData = Array.isArray(raw.tasks) ? raw : { ...raw, tasks: [] }
+      const updated = updater(current)
+      const next = { ...prev, [key]: updated }
       try { localStorage.setItem('xp9d', JSON.stringify(next)) } catch {}
+      // Store latest value for the debounced Supabase write
+      pendingDaySyncDataRef.current.set(key, updated)
       return next
     })
+    // Schedule debounced Supabase upsert (outside setState to avoid strict-mode double-invoke issues)
+    const uid = userIdRef.current
+    if (uid) {
+      const existing = pendingDaySyncTimersRef.current.get(key)
+      if (existing != null) clearTimeout(existing)
+      const timer = setTimeout(() => {
+        pendingDaySyncTimersRef.current.delete(key)
+        const dayData = pendingDaySyncDataRef.current.get(key)
+        pendingDaySyncDataRef.current.delete(key)
+        if (dayData) {
+          upsertDayData(createClient(), uid, key, dayData).catch(err =>
+            console.error('[CalData] Supabase sync error for', key, err)
+          )
+        }
+      }, 1000)
+      pendingDaySyncTimersRef.current.set(key, timer)
+    }
   }, [])
 
   const addSession = useCallback((s: WorkSession) => {
@@ -210,43 +572,99 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       try { localStorage.setItem('xp9s', JSON.stringify(next)) } catch {}
       return next
     })
+    const uid = userIdRef.current
+    if (uid) {
+      upsertWorkSession(createClient(), uid, s).catch(err =>
+        console.error('[Sessions] Supabase sync error:', err)
+      )
+    }
   }, [])
 
   const addActivity = useCallback((a: Activity) => {
-    setActivitiesState(prev => {
-      const next = [...prev, a]
-      try { localStorage.setItem('xp9a', JSON.stringify(next)) } catch {}
-      return next
-    })
+    const next = [...activitiesRef.current, a]
+    try { localStorage.setItem('xp9a', JSON.stringify(next)) } catch {}
+    setActivitiesState(next)
+    const uid = userIdRef.current
+    if (uid) {
+      upsertAllActivities(createClient(), uid, next).catch(err =>
+        console.error('[Activities] Supabase sync error:', err)
+      )
+    }
   }, [])
 
   const updateActivity = useCallback((id: string, patch: Partial<Activity>) => {
-    setActivitiesState(prev => {
-      const next = prev.map(a => a.id === id ? { ...a, ...patch } : a)
-      try { localStorage.setItem('xp9a', JSON.stringify(next)) } catch {}
-      return next
-    })
+    const next = activitiesRef.current.map(a => a.id === id ? { ...a, ...patch } : a)
+    try { localStorage.setItem('xp9a', JSON.stringify(next)) } catch {}
+    setActivitiesState(next)
+    const uid = userIdRef.current
+    if (uid) {
+      upsertAllActivities(createClient(), uid, next).catch(err =>
+        console.error('[Activities] Supabase sync error:', err)
+      )
+    }
   }, [])
 
   const setProgressColor = useCallback((c: string) => {
     setProgressColorRaw(c)
     try { localStorage.setItem('xp-progress-color', c) } catch {}
+    const uid = userIdRef.current
+    if (uid) {
+      upsertUserPreferences(createClient(), uid, { progressColor: c }).catch(err =>
+        console.error('[Prefs] Progress color sync error:', err)
+      )
+    }
+  }, [])
+
+  const setIsDark = useCallback((v: boolean) => {
+    setIsDarkRaw(v)
+    try { localStorage.setItem('xp-theme', String(v)) } catch {}
+    const uid = userIdRef.current
+    if (uid) {
+      upsertUserPreferences(createClient(), uid, { isDark: v }).catch(err =>
+        console.error('[Prefs] Theme sync error:', err)
+      )
+    }
+  }, [])
+
+  // Wrapped setters that persist to localStorage so the active clock-in session
+  // survives a page refresh. On clock-in (non-null), also creates an in-progress
+  // work_session row in Supabase (end_ts=null); clock-out's addSession will update it.
+  const setActiveSession = useCallback((s: ActiveSession | null) => {
+    setActiveSessionRaw(s)
+    if (s) {
+      try { localStorage.setItem('xp9-active-session', JSON.stringify(s)) } catch {}
+      const uid = userIdRef.current
+      if (uid) {
+        upsertWorkSession(createClient(), uid, { ...s, endTs: null }).catch(err =>
+          console.error('[ActiveSession] Supabase upsert error:', err)
+        )
+      }
+    } else {
+      try { localStorage.removeItem('xp9-active-session') } catch {}
+    }
+  }, [])
+
+  const setActiveTaskTimer = useCallback((t: ActiveTaskTimer | null) => {
+    setActiveTaskTimerRaw(t)
+    if (t) {
+      try { localStorage.setItem('xp9-active-task-timer', JSON.stringify(t)) } catch {}
+    } else {
+      try { localStorage.removeItem('xp9-active-task-timer') } catch {}
+    }
   }, [])
 
   const removeActivity = useCallback((id: string) => {
-    setActivitiesState(prev => {
-      const next = prev.filter(a => a.id !== id)
-      try { localStorage.setItem('xp9a', JSON.stringify(next)) } catch {}
-      return next
-    })
-    setSelectedActId(prev => {
-      if (prev === id) {
-        const remaining = activities.filter(a => a.id !== id)
-        return remaining[0]?.id ?? DEFAULT_ACTIVITIES[0].id
-      }
-      return prev
-    })
-  }, [activities])
+    const next = activitiesRef.current.filter(a => a.id !== id)
+    try { localStorage.setItem('xp9a', JSON.stringify(next)) } catch {}
+    setActivitiesState(next)
+    setSelectedActId(prev => prev === id ? (next[0]?.id ?? DEFAULT_ACTIVITIES[0].id) : prev)
+    const uid = userIdRef.current
+    if (uid) {
+      deleteUserActivity(createClient(), uid, id).catch(err =>
+        console.error('[Activities] Supabase delete error:', err)
+      )
+    }
+  }, [])
 
   // ─── Reminder CRUD (localStorage-primary, Supabase background sync) ──────────
 

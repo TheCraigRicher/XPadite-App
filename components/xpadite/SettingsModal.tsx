@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp } from './AppContext'
+import { exportLocalData } from '@/lib/data-backup'
 import { resolveProgressColor } from './utils'
 
 const PROGRESS_COLORS: { name: string; value: string; darkCheck?: boolean }[] = [
@@ -1048,6 +1049,38 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* ══ DATA & BACKUP ════════════════════════════════════════════════ */}
+            <div style={{ background: cardBg, border: `1px solid ${cardBorder}`, borderRadius: 18, overflow: 'hidden', flexShrink: 0, marginTop: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 20px' }}>
+                <SectionIcon emoji="💾" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 14, fontWeight: 700, color: titleColor, lineHeight: 1.3 }}>Data &amp; Backup</p>
+                  <p style={{ fontSize: 11.5, color: subtitleColor, marginTop: 2 }}>Export a snapshot of your local XPadite data</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => exportLocalData()}
+                  style={{
+                    flexShrink: 0,
+                    display: 'flex', alignItems: 'center', gap: 7,
+                    fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    color: isDark ? 'rgba(255,255,255,0.80)' : '#374151',
+                    background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
+                    border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.10)'}`,
+                    borderRadius: 10, padding: '8px 14px',
+                    transition: 'opacity 150ms',
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 13, height: 13 }}>
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" strokeLinecap="round" strokeLinejoin="round" />
+                    <polyline points="7 10 12 15 17 10" strokeLinecap="round" strokeLinejoin="round" />
+                    <line x1="12" y1="15" x2="12" y2="3" strokeLinecap="round" />
+                  </svg>
+                  Export Backup
+                </button>
+              </div>
             </div>
 
           </div>

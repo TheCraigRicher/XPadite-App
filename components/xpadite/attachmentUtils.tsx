@@ -55,14 +55,24 @@ export async function buildAttachment(
   file: File,
   source: 'upload' | 'camera',
 ): Promise<TaskAttachment> {
-  const thumbnail = await makeThumb(file)
+  // Use a data URI for `url` instead of a blob URL so the attachment survives page refresh.
+  // Blob URLs (URL.createObjectURL) are session-only and become invalid after reload.
+  const [thumbnail, url] = await Promise.all([
+    makeThumb(file),
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = e => resolve(e.target!.result as string)
+      reader.onerror = () => reject(new Error('Failed to read file'))
+      reader.readAsDataURL(file)
+    }),
+  ])
   const now = Date.now()
   return {
     id: `att_${now}_${Math.random().toString(36).slice(2, 7)}`,
     name: file.name,
     mimeType: file.type || 'application/octet-stream',
     size: file.size,
-    url: URL.createObjectURL(file),
+    url,
     thumbnail,
     addedAt: now,
     source,
@@ -83,8 +93,6 @@ export function removeAttachmentById(
   attachments: TaskAttachment[],
   id: string,
 ): TaskAttachment[] {
-  const att = attachments.find(a => a.id === id)
-  if (att) { try { URL.revokeObjectURL(att.url) } catch {} }
   return attachments.filter(a => a.id !== id)
 }
 

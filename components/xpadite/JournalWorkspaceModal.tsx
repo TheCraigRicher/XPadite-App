@@ -409,8 +409,10 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     setView('editor')
   }
 
+  const editorFlushRef = useRef<(() => void) | null>(null)
+
   function doGoCalendar() { setView('calendar') }
-  function doClose()      { onClose() }
+  function doClose()      { editorFlushRef.current?.(); onClose() }
 
   // ── Library rename + open handlers ───────────────────────────────────────────
   function handleLibClick(dateKey: string, title: string) {
@@ -1779,6 +1781,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       onEditor={() => setView('editor')}
       onDirtyChange={onDirtyChange}
       closeIntent={closeIntent}
+      flushRef={editorFlushRef}
     />
   )
 

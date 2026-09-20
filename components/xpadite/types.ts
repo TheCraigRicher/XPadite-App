@@ -111,7 +111,7 @@ export interface TaskAttachment {
   name: string
   mimeType: string
   size: number
-  url: string           // object URL (session) or data URL (images)
+  url: string           // base64 data URI — persists across page refreshes
   thumbnail: string | null  // base64 JPEG for image previews
   addedAt: number       // Unix ms
   source: 'upload' | 'camera' | 'drawing'

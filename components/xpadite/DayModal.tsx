@@ -1842,19 +1842,10 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     return workMs + taskMs + activeMs
   }, [sessions, activities, dayData.tasks, activeSession, isSessionHere, dateKey, now])
 
-  // On open: pre-populate 2 blank tasks for empty days, then snapshot for dirty-change detection
+  // On open: snapshot for dirty-change detection
   useEffect(() => {
     const base: DayData = JSON.parse(JSON.stringify(calData[dateKey] ?? EMPTY_DAY))
-    const baseTopLevel = base.tasks.filter((t: Task) => !t.parentTaskId)
-    if (baseTopLevel.length < 2) {
-      const needed = 2 - baseTopLevel.length
-      const newTasks = Array.from({ length: needed }, () => makeTask(''))
-      const seeded: DayData = { ...base, tasks: [...base.tasks, ...newTasks] }
-      updateDay(dateKey, () => seeded)
-      openSnapshotRef.current = JSON.parse(JSON.stringify(seeded))
-    } else {
-      openSnapshotRef.current = base
-    }
+    openSnapshotRef.current = base
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

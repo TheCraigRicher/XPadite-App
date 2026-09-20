@@ -1,6 +1,14 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import {
+  uploadGalleryImage,
+  upsertGalleryItemMetadata,
+  deleteGalleryItem as supabaseDeleteGalleryItem,
+  fetchGalleryItems,
+  getSignedUrl,
+} from '@/lib/supabase/gallery'
 
 const GALLERY_KEY = 'xp9g'
 
@@ -28,8 +36,27 @@ export function loadGallery(): GalleryItem[] {
 export function saveGallery(items: GalleryItem[]): void {
   localStorage.setItem(GALLERY_KEY, JSON.stringify(items))
 }
+// Saves to localStorage synchronously, then fires a background Supabase upload.
+// Callers do not need to await — write-through pattern.
 export function addGalleryItem(item: GalleryItem): void {
   saveGallery([item, ...loadGallery()])
+  // Background Supabase sync — fire and forget
+  ;(async () => {
+    try {
+      const supabase = createClient()
+      const { data } = await supabase.auth.getUser()
+      if (!data.user) return
+      const uid = data.user.id
+      const storagePath = await uploadGalleryImage(supabase, uid, item.id, item.dataUri)
+      if (!storagePath) {
+        console.error('[Gallery] Upload failed for item', item.id, '— metadata not written')
+        return
+      }
+      await upsertGalleryItemMetadata(supabase, uid, item, storagePath)
+    } catch (err) {
+      console.error('[Gallery] Supabase sync error:', err)
+    }
+  })()
 }
 
 function resizeImage(file: File, maxW: number, maxH: number): Promise<string> {
@@ -182,11 +209,17 @@ function CameraModal({ onSave, onClose }: { onSave: (uri: string) => void; onClo
 
 // ─── Gallery Modal ────────────────────────────────────────────────────────────
 
+// Extends GalleryItem with a resolved display URL (signed URL from Supabase Storage,
+// or falls back to dataUri for locally-sourced items).
+type DisplayItem = GalleryItem & { displayUrl: string }
+
 interface GalleryModalProps { onClose: () => void }
 
 export function GalleryModal({ onClose }: GalleryModalProps) {
   const [tab, setTab] = useState<'cards' | 'photos'>('cards')
-  const [items, setItems] = useState<GalleryItem[]>(() => loadGallery())
+  const [items, setItems] = useState<DisplayItem[]>(() =>
+    loadGallery().map(i => ({ ...i, displayUrl: i.dataUri }))
+  )
   const [uploading, setUploading] = useState(false)
   const [cameraOpen, setCameraOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -197,6 +230,49 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  // Merge Supabase gallery_items into the display list on open.
+  // Items that only exist in Supabase (cross-device) get a signed URL for display.
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const supabase = createClient()
+        const { data } = await supabase.auth.getUser()
+        if (!data.user) return
+        const uid = data.user.id
+        const rows = await fetchGalleryItems(supabase, uid)
+        if (rows.length === 0) return
+        // Build a map of what's already in localStorage (by id)
+        const local = loadGallery()
+        const localById = new Map(local.map(i => [i.id, i]))
+        // Generate signed URLs for items that have a storage path
+        const resolved = await Promise.all(
+          rows.map(async row => {
+            const existing = localById.get(row.itemId)
+            const displayUrl = existing?.dataUri
+              ?? (row.storagePath ? (await getSignedUrl(supabase, row.storagePath)) ?? '' : '')
+            if (!displayUrl) return null
+            const item: DisplayItem = {
+              id: row.itemId,
+              type: row.type as GalleryItem['type'],
+              title: row.title,
+              createdAt: row.createdAt,
+              dataUri: existing?.dataUri ?? displayUrl,
+              displayUrl,
+              month: row.month ?? undefined,
+              year: row.year ?? undefined,
+              stats: row.stats ?? undefined,
+            }
+            return item
+          })
+        )
+        const valid = resolved.filter((i): i is DisplayItem => i !== null)
+        if (valid.length > 0) setItems(valid)
+      } catch (err) {
+        console.error('[Gallery] Supabase load error:', err)
+      }
+    })()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleFileUpload = useCallback(async (files: FileList | null) => {
     if (!files || !files.length) return
     setUploading(true)
@@ -205,21 +281,33 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
         const uri = await resizeImage(file, 400, 300)
         addGalleryItem({ id: 'ph-' + Date.now() + '-' + Math.random().toString(36).slice(2), type: 'photo', createdAt: Date.now(), title: file.name.replace(/\.[^.]+$/, ''), dataUri: uri })
       }
-      setItems(loadGallery())
+      setItems(loadGallery().map(i => ({ ...i, displayUrl: i.dataUri })))
     } finally { setUploading(false) }
   }, [])
 
   function handleCameraCapture(uri: string) {
     addGalleryItem({ id: 'cam-' + Date.now(), type: 'photo', createdAt: Date.now(), title: `Photo ${new Date().toLocaleDateString()}`, dataUri: uri })
-    setItems(loadGallery())
+    setItems(loadGallery().map(i => ({ ...i, displayUrl: i.dataUri })))
   }
 
   function deleteItem(id: string) {
     const updated = items.filter(i => i.id !== id)
-    saveGallery(updated); setItems(updated)
+    saveGallery(updated.map(i => ({ id: i.id, type: i.type, title: i.title, createdAt: i.createdAt, dataUri: i.dataUri, month: i.month, year: i.year, stats: i.stats })))
+    setItems(updated)
+    // Background Supabase delete
+    ;(async () => {
+      try {
+        const supabase = createClient()
+        const { data } = await supabase.auth.getUser()
+        if (data.user) await supabaseDeleteGalleryItem(supabase, data.user.id, id)
+      } catch (err) {
+        console.error('[Gallery] Supabase delete error:', err)
+      }
+    })()
   }
 
   const filtered = items.filter(i => tab === 'cards' ? (i.type === 'month-share' || i.type === 'year-share') : i.type === 'photo')
+
 
   return (
     <>
@@ -272,7 +360,7 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {filtered.map(item => (
                   <div key={item.id} className="relative group rounded-xl overflow-hidden" style={{ background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
-                    <img src={item.dataUri} alt={item.title} className="w-full aspect-video object-cover"/>
+                    <img src={item.displayUrl || item.dataUri} alt={item.title} className="w-full aspect-video object-cover"/>
                     <div className="p-2">
                       <p className="text-[10px] font-medium truncate" style={{ color: 'var(--xp-txt2)' }}>{item.title}</p>
                       <p className="text-[9px]" style={{ color: 'var(--xp-txt3)' }}>{new Date(item.createdAt).toLocaleDateString()}</p>

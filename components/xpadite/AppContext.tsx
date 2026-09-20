@@ -406,17 +406,21 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
           // Reconcile active task timer (always — timer state must be cross-device accurate)
           const tasks = dayData.tasks ?? []
           let remoteTimer: ActiveTaskTimer | null = null
+          let remoteTimerTaskIdx = -1
           for (let i = 0; i < tasks.length; i++) {
             const runningSess = (tasks[i].sessions ?? []).find(s => s.endTs === null)
             if (runningSess) {
+              // Preserve the raw task text (empty string = Clock-In task, non-empty = Task Manager task).
+              // Do NOT apply a fallback here — the empty-string value is the cross-device signal.
               remoteTimer = {
                 taskId:    tasks[i].id,
                 dateKey:   dateKey,
                 sessionId: runningSess.id,
                 startTs:   runningSess.startTs,
-                taskText:  tasks[i].text || `Task ${i + 1}`,
+                taskText:  tasks[i].text,
                 taskIndex: i,
               }
+              remoteTimerTaskIdx = i
               break
             }
           }
@@ -429,6 +433,28 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
             if (!alreadySame) {
               setActiveTaskTimerRaw(remoteTimer)
               try { localStorage.setItem('xp9-active-task-timer', JSON.stringify(remoteTimer)) } catch {}
+            }
+
+            // If this is a Clock-In task (empty text + linkedSessionId) and activeSession is
+            // not yet set (e.g. work_sessions Realtime hasn't fired yet), reconstruct it now.
+            // This makes the Clock-Out button immediately responsive on the receiving device.
+            if (!activeSessionRef.current && remoteTimerTaskIdx >= 0) {
+              const clockInTask = tasks[remoteTimerTaskIdx]
+              if (clockInTask.text === '' && clockInTask.linkedSessionId) {
+                const act = activitiesRef.current.find(a => a.id === clockInTask.actId)
+                if (act) {
+                  const reconstructed = {
+                    id:      clockInTask.linkedSessionId,
+                    actId:   act.id,
+                    actName: (act.emoji ? act.emoji + ' ' : '') + act.name,
+                    actColor: act.color,
+                    startTs: remoteTimer.startTs,
+                    dateKey: remoteTimer.dateKey,
+                  }
+                  setActiveSessionRaw(reconstructed)
+                  try { localStorage.setItem('xp9-active-session', JSON.stringify(reconstructed)) } catch {}
+                }
+              }
             }
           } else if (cur?.dateKey === dateKey) {
             // This day was updated and now has no running session → remote stop

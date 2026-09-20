@@ -111,6 +111,11 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
   const elapsed = activeSession ? now - activeSession.startTs : 0
   const taskElapsed = activeTaskTimer ? now - activeTaskTimer.startTs : 0
 
+  // Clock-In tasks have taskText === '' (set by clockIn(), distinct from Task Manager timers).
+  // A Clock-In Realtime event may arrive via calendar_days before work_sessions fires,
+  // so derive the global-session state from both to keep both buttons immediately correct.
+  const isClockedIn = !!(activeSession || (activeTaskTimer && activeTaskTimer.taskText === ''))
+
   const ThemeToggle = (
     <button
       onClick={() => setCalendarClean(!calendarClean)}
@@ -225,14 +230,14 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
             {/* Clock In — smaller padding on mobile to free space for capsule */}
             <button
               onClick={clockIn}
-              disabled={!!activeSession}
+              disabled={isClockedIn}
               style={{
                 display: 'flex', alignItems: 'center', gap: 4,
                 padding: '5px 9px', borderRadius: 8,
                 background: 'rgba(22,163,74,0.85)', color: 'white',
                 fontSize: 10, fontWeight: 700, flexShrink: 0,
-                opacity: activeSession ? 0.35 : 1,
-                cursor: activeSession ? 'not-allowed' : 'pointer',
+                opacity: isClockedIn ? 0.35 : 1,
+                cursor: isClockedIn ? 'not-allowed' : 'pointer',
                 border: 'none', transition: 'opacity 150ms ease',
               }}
               aria-label="Clock In"
@@ -264,14 +269,14 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
             {/* Clock Out — smaller padding on mobile to free space for capsule */}
             <button
               onClick={clockOut}
-              disabled={!activeSession}
+              disabled={!isClockedIn}
               style={{
                 display: 'flex', alignItems: 'center', gap: 4,
                 padding: '5px 9px', borderRadius: 8,
                 background: 'rgba(185,28,28,0.85)', color: 'white',
                 fontSize: 10, fontWeight: 700, flexShrink: 0,
-                opacity: activeSession ? 1 : 0.35,
-                cursor: activeSession ? 'pointer' : 'not-allowed',
+                opacity: isClockedIn ? 1 : 0.35,
+                cursor: isClockedIn ? 'pointer' : 'not-allowed',
                 border: 'none', transition: 'opacity 150ms ease',
               }}
               aria-label="Clock Out"
@@ -317,7 +322,7 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
               <button
                 onClick={clockIn}
-                disabled={!!activeSession}
+                disabled={isClockedIn}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all duration-150 disabled:opacity-35 disabled:cursor-not-allowed flex-shrink-0"
                 style={{ background: 'rgba(22,163,74,0.85)' }}
               >
@@ -348,7 +353,7 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
 
               <button
                 onClick={clockOut}
-                disabled={!activeSession}
+                disabled={!isClockedIn}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-white transition-all duration-150 disabled:opacity-35 disabled:cursor-not-allowed flex-shrink-0"
                 style={{ background: 'rgba(185,28,28,0.85)' }}
               >

@@ -19,7 +19,6 @@ const PROGRESS_COLORS: { name: string; value: string; darkCheck?: boolean }[] = 
   { name: 'Neon Pink',        value: '#FF00FB' },
   { name: 'Lime',             value: '#A6FF00', darkCheck: true },
   { name: 'Cyan',             value: '#00FFF2', darkCheck: true },
-  { name: 'Black & White',    value: 'bw'      },
 ]
 
 const DEFAULT_COLOR = '#7c3aed'
@@ -168,23 +167,42 @@ export const PLAN_CONFIGS: Record<string, PlanConfig> = {
     excludedFeatures: [],
   },
   'ltd': {
-    title: 'Lifetime Deal',
-    subtitle: "Get XPadite's core productivity system for life with one payment.",
-    badge: 'Limited Time',
+    title: 'Lifetime Pro',
+    subtitle: "Own XPadite Pro for life with a single payment. Limited to the first 100 customers for this offer.",
+    badge: 'Limited Offer',
     badgeIcon: '💎',
-    price: '$99',
+    price: '$199',
     priceLabel: 'one-time payment',
     headerGradient: 'linear-gradient(135deg, #0c4a6e 0%, #0891b2 45%, #22d3ee 100%)',
     accentColor: '#0891b2',
     accentGlow: 'rgba(6,182,212,0.22)',
     interiorLight: '#ecfeff',
     interiorDark: '#031a22',
-    ctaLabel: 'Get Lifetime Deal',
+    ctaLabel: 'Get Lifetime Pro',
     ctaBg: 'linear-gradient(135deg, #0891b2 0%, #22d3ee 100%)',
     ctaGlow: 'rgba(6,182,212,0.38)',
     includedFeatures: PRO_CORE_FEATURES,
     excludedFeatures: AI_FEATURES,
-    note: 'AI features are not included. XPadite AI Coach and other Premium AI functionality require a separate Premium subscription.',
+    note: 'Limited to the first 100 customers for this offer. AI features are not included and require a separate Premium subscription.',
+  },
+  '3year-pro': {
+    title: '3-Year Pro',
+    subtitle: 'Three full years of XPadite Pro with a single one-time payment. Limited to the first 100 customers for this offer.',
+    badge: 'Limited Offer',
+    badgeIcon: '⚡',
+    price: '$119',
+    priceLabel: 'one-time payment',
+    headerGradient: 'linear-gradient(135deg, #92720a 0%, #c9a200 45%, #f0e15d 100%)',
+    accentColor: '#92720a',
+    accentGlow: 'rgba(146,114,10,0.18)',
+    interiorLight: '#fffef0',
+    interiorDark: '#1a1500',
+    ctaLabel: 'Get 3-Year Pro',
+    ctaBg: 'linear-gradient(135deg, #92720a 0%, #c9a200 100%)',
+    ctaGlow: 'rgba(146,114,10,0.40)',
+    includedFeatures: PRO_CORE_FEATURES,
+    excludedFeatures: AI_FEATURES,
+    note: 'Limited to the first 100 customers for this offer. AI features are not included and require a separate Premium subscription.',
   },
 }
 
@@ -307,7 +325,7 @@ function SelectMenu({
   }
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div style={{ position: 'relative', minWidth: 0 }}>
       <button
         ref={btnRef}
         style={triggerStyle}
@@ -567,6 +585,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [hoveredSwatch, setHoveredSwatch] = useState<string | null>(null)
   const [activePlanPopup, setActivePlanPopup] = useState<string | null>(null)
 
+  // Graceful fallback: if user had the removed 'bw' option stored, reset to default purple
+  useEffect(() => {
+    if (progressColor === 'bw') setProgressColor(DEFAULT_COLOR)
+  }, [progressColor, setProgressColor])
+
   const handleClose = () => {
     if (hasChanges) { setShowPrompt(true) } else { onClose() }
   }
@@ -628,6 +651,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         .xp-set-body::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.38); border-radius: 10px }
         .xp-set-body::-webkit-scrollbar-thumb:hover { background: rgba(124,58,237,0.58) }
         .xp-set-body { scrollbar-width: thin; scrollbar-color: rgba(124,58,237,0.38) transparent }
+        /* ── Mobile viewport fit: fill space above the fixed bottom nav ── */
+        @media (max-width: 640px) {
+          .xp-set-modal {
+            max-height: 100% !important;
+            max-width: 100% !important;
+            border-radius: 0 !important;
+            height: 100%;
+          }
+          .xp-set-close { display: none !important; }
+        }
         .xp-sec-btn {
           width: 100%; display: flex; align-items: center; gap: 13px;
           padding: 18px 22px; cursor: pointer; background: none; border: none;
@@ -636,10 +669,11 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         .xp-sec-btn:hover { background: rgba(124,58,237,0.035) }
         .xp-plan-card { transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease; cursor: pointer }
         .xp-plan-card:hover { transform: translateY(-2px); filter: brightness(1.07) }
-        .xp-plan-purple:hover { box-shadow: 0 8px 28px rgba(124,58,237,0.42) !important }
-        .xp-plan-green:hover  { box-shadow: 0 8px 28px rgba(22,163,74,0.38) !important }
-        .xp-plan-orange:hover { box-shadow: 0 8px 28px rgba(234,88,12,0.38) !important }
-        .xp-plan-cyan:hover   { box-shadow: 0 8px 28px rgba(6,182,212,0.38) !important }
+        .xp-plan-purple:hover  { box-shadow: 0 8px 28px rgba(124,58,237,0.42) !important }
+        .xp-plan-green:hover   { box-shadow: 0 8px 28px rgba(22,163,74,0.38) !important }
+        .xp-plan-orange:hover  { box-shadow: 0 8px 28px rgba(234,88,12,0.38) !important }
+        .xp-plan-cyan:hover    { box-shadow: 0 8px 28px rgba(6,182,212,0.38) !important }
+        .xp-plan-yellow:hover  { box-shadow: 0 8px 28px rgba(200,162,0,0.42) !important }
         .xp-set-close:hover   { background: rgba(255,255,255,0.22) !important }
         .xp-reset-txt { background: none; border: none; cursor: pointer; display: flex; align-items: center; gap: 5px; padding: 6px 2px; font-size: 12px; font-weight: 500; transition: color 150ms }
         .xp-reset-txt:hover { color: #7c3aed !important }
@@ -656,8 +690,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       `}</style>
 
       {/* ── Backdrop ─────────────────────────────────────────────────────────── */}
+      {/*
+       * Mobile: stops at bottom-14 (56px) so the XPadite bottom nav remains
+       * fully visible beneath. sm+: covers full inset-0 as before.
+       * items-stretch on mobile makes the modal fill the available height.
+       */}
       <div
-        className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+        className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[60] flex items-stretch sm:items-center justify-center p-0 sm:p-4"
         style={{
           background: isDark ? 'rgba(10,4,24,0.65)' : 'rgba(30,10,60,0.32)',
           backdropFilter: 'blur(8px)',
@@ -668,17 +707,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
         {/*
          * ── Modal shell ──────────────────────────────────────────────────────
-         * Three-region flex column:
-         *   1. Header  → flex-shrink: 0   (never scrolls, always visible)
-         *   2. Body    → flex: 1 1 0      (scrolls when content exceeds height)
-         *   3. Footer  → flex-shrink: 0   (never scrolls, always visible)
+         * Three-region grid:
+         *   1. Header  → auto     (never scrolls, always visible)
+         *   2. Body    → 1fr      (scrolls when content exceeds height)
+         *   3. Footer  → auto     (never scrolls, always visible)
          *
-         * The critical fix is flex: '1 1 0' + minHeight: 0 on the body.
-         * Without minHeight: 0 a flex child cannot shrink below its intrinsic
-         * height, so overflow-y: auto never activates.
+         * On mobile: xp-set-modal CSS makes this fill 100% of the backdrop
+         * (which already stops above the bottom nav), so the three regions
+         * always fit perfectly without overlapping header or footer.
          */}
         <div
-          className="w-full max-w-[600px]"
+          className="w-full max-w-[600px] xp-set-modal"
           style={{
             display: 'grid',
             gridTemplateRows: 'auto 1fr auto',
@@ -995,16 +1034,34 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
                   </div>
 
-                  <div style={{ marginTop: 12 }}>
+                  <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+
+                    {/* 3-Year Pro — yellow */}
+                    <div className="xp-plan-card xp-plan-yellow" onClick={() => setActivePlanPopup('3year-pro')} style={{
+                      background: 'linear-gradient(135deg, #c9a200 0%, #e8cc00 55%, #f0e15d 100%)',
+                      borderRadius: 14, padding: '20px 16px', textAlign: 'center',
+                      boxShadow: '0 4px 18px rgba(200,162,0,0.38)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
+                    }}>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: '#1a1200', lineHeight: 1.4 }}>3-Year Pro $119</p>
+                      <p style={{ fontSize: 10, color: 'rgba(26,18,0,0.62)', marginTop: 4, lineHeight: 1.3 }}>One-Time Payment</p>
+                      <p style={{ fontSize: 9.5, color: 'rgba(26,18,0,0.55)', marginTop: 2, lineHeight: 1.3 }}>First 100 Customers</p>
+                      <p style={{ fontSize: 10.5, color: 'rgba(26,18,0,0.75)', marginTop: 6 }}>Upgrade</p>
+                    </div>
+
+                    {/* Lifetime Pro — cyan */}
                     <div className="xp-plan-card xp-plan-cyan" onClick={() => setActivePlanPopup('ltd')} style={{
-                      background: 'linear-gradient(to right, #22d3ee, #0891b2)',
-                      borderRadius: 14, padding: '20px 18px', textAlign: 'center',
+                      background: 'linear-gradient(135deg, #0891b2 0%, #22d3ee 100%)',
+                      borderRadius: 14, padding: '20px 16px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(6,182,212,0.28)',
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
                     }}>
-                      <p style={{ fontSize: 14, fontWeight: 700, color: 'white' }}>LTD – Lifetime Deal $99</p>
-                      <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.68)', marginTop: 6 }}>Upgrade</p>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Lifetime Pro $199</p>
+                      <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.72)', marginTop: 4, lineHeight: 1.3 }}>One-Time Payment</p>
+                      <p style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.58)', marginTop: 2, lineHeight: 1.3 }}>First 100 Customers</p>
+                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.72)', marginTop: 6 }}>Upgrade</p>
                     </div>
+
                   </div>
                 </div>
               )}
@@ -1026,7 +1083,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 20px 22px 36px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
 
-                    <div>
+                    <div style={{ minWidth: 0 }}>
                       <p style={{ fontSize: 11.5, fontWeight: 600, color: subtitleColor, marginBottom: 9 }}>Language</p>
                       <SelectMenu
                         value={language}
@@ -1036,7 +1093,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       />
                     </div>
 
-                    <div>
+                    <div style={{ minWidth: 0 }}>
                       <p style={{ fontSize: 11.5, fontWeight: 600, color: subtitleColor, marginBottom: 9 }}>Time Zone</p>
                       <SelectMenu
                         value={timezone}

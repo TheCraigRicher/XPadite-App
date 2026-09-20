@@ -58,7 +58,39 @@ const MFP_STYLES = `
     /* Calendar circles slightly larger on mobile */
     .xp-cal-circle{inset:20%!important;}
 
+    /* Remove dashboard pill from mobile header — moved to bottom dual bar */
+    .xp-mfp-hdr .xp-mfp-dash-pill{display:none!important;}
+
+    /* Mobile: hide desktop share button, show dual bar */
+    .xp-mfp-share-desktop{display:none!important;}
+    .xp-mfp-dual-bar{display:flex!important;}
+
+    /* Mobile dashboard header: two-line title */
+    .xp-mfp-dash-main-title{display:none!important;}
+    .xp-mfp-dash-mobile-title{display:inline!important;}
+    .xp-mfp-dash-mobile-sub{display:block!important;}
   }
+
+  /* Desktop defaults */
+  .xp-mfp-dash-mobile-title{display:none;}
+  .xp-mfp-dash-mobile-sub{display:none;}
+  .xp-mfp-share-desktop{display:flex;}
+  .xp-mfp-dual-bar{
+    display:none;
+    margin:14px 16px 16px;border-radius:16px;overflow:hidden;flex-shrink:0;
+    border:1px solid rgba(124,58,237,0.28);
+    background:rgba(124,58,237,0.05);
+    box-shadow:0 2px 12px rgba(124,58,237,0.10);
+  }
+  .xp-mfp-dual-left,.xp-mfp-dual-right{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    padding:13px 8px;background:transparent;border:none;cursor:pointer;
+    font-size:11px;font-weight:600;color:#7c3aed;line-height:1.3;
+    transition:background 140ms ease;
+  }
+  .xp-mfp-dual-left:active,.xp-mfp-dual-right:active{background:rgba(124,58,237,0.10);}
+  .xp-mfp-dual-icon{font-size:15px;line-height:1;margin-bottom:1px;}
+  .xp-mfp-dual-divider{width:1px;background:rgba(124,58,237,0.20);flex-shrink:0;align-self:stretch;margin:10px 0;}
 
   .xp-mfp-back{
     display:inline-flex;align-items:center;gap:6px;
@@ -1214,9 +1246,23 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                   style={navBtnStyle}
                   title="Previous month"
                 ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(-2px)' }}>‹</span></button>
-                <h1 className="xp-mfp-hdr-title" style={{ fontSize: 13, fontWeight: 700, color: 'white', textAlign: 'center', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)' }}>
-                  {view === 'dashboard' ? `${MONTHS[currentMonth]} ${APP_YEAR} · Monthly Dashboard` : `${MONTHS[currentMonth]} ${APP_YEAR}`}
-                </h1>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <h1 className="xp-mfp-hdr-title" style={{ fontSize: 13, fontWeight: 700, color: 'white', textAlign: 'center', textShadow: '0 1px 4px rgba(0,0,0,0.30)', margin: 0 }}>
+                    {view === 'dashboard' ? (
+                      <>
+                        <span className="xp-mfp-dash-main-title" style={{ whiteSpace: 'nowrap' }}>{`${MONTHS[currentMonth]} ${APP_YEAR} · Monthly Dashboard`}</span>
+                        <span className="xp-mfp-dash-mobile-title">Monthly Dashboard</span>
+                      </>
+                    ) : (
+                      <span style={{ whiteSpace: 'nowrap' }}>{`${MONTHS[currentMonth]} ${APP_YEAR}`}</span>
+                    )}
+                  </h1>
+                  {view === 'dashboard' && (
+                    <div className="xp-mfp-dash-mobile-sub" style={{ fontSize: 10, color: 'rgba(255,255,255,0.68)', marginTop: 2, whiteSpace: 'nowrap', textAlign: 'center' }}>
+                      {`${MONTHS[currentMonth]} ${APP_YEAR}`}
+                    </div>
+                  )}
+                </div>
                 <button
                   onClick={goNext}
                   disabled={currentMonth === 11}
@@ -1276,8 +1322,8 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                       calData={calData as Record<string, unknown>}
                       onDayDoubleClick={onDayDoubleClick}
                     />
-                    {/* Share button — centered below calendar, same pattern as MonthCard */}
-                    <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 28, paddingBottom: 4 }}>
+                    {/* Share button — desktop only (hidden on mobile) */}
+                    <div className="xp-mfp-share-desktop" style={{ justifyContent: 'center', paddingTop: 28, paddingBottom: 4 }}>
                       <button
                         onClick={openPanel}
                         className="xp-mfp-share"
@@ -1291,6 +1337,18 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                         }}
                       >
                         <ShareIcon /> Share {MONTHS[currentMonth]}
+                      </button>
+                    </div>
+                    {/* Mobile dual action bar — shown on mobile only */}
+                    <div className="xp-mfp-dual-bar">
+                      <button className="xp-mfp-dual-left" onClick={toggleView}>
+                        <span className="xp-mfp-dual-icon">📊</span>
+                        Monthly Dashboard
+                      </button>
+                      <div className="xp-mfp-dual-divider" />
+                      <button className="xp-mfp-dual-right" onClick={openPanel}>
+                        <span className="xp-mfp-dual-icon">↗</span>
+                        Share Progress
                       </button>
                     </div>
                   </div>

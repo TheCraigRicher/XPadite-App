@@ -123,6 +123,38 @@ export function AppSidebar({
     return () => window.removeEventListener('xp9-avatar-changed', loadAvatar)
   }, [loadAvatar])
 
+  /*
+   * Robust mobile scroll lock: saves window.scrollY before locking, then
+   * applies position:fixed + top:-scrollY so the page is visually frozen
+   * at exactly the right position. On close, restores all styles and
+   * scrolls back to the saved offset — no jump, no shift.
+   *
+   * overflow:hidden alone does NOT work on iOS/Android mobile browsers;
+   * the fixed-position trick is the standard cross-browser solution.
+   */
+  useEffect(() => {
+    if (!sidebarOpen) return
+
+    const scrollY    = window.scrollY
+    const prevOv     = document.body.style.overflow
+    const prevPos    = document.body.style.position
+    const prevTop    = document.body.style.top
+    const prevWidth  = document.body.style.width
+
+    document.body.style.overflow = 'hidden'
+    document.body.style.position = 'fixed'
+    document.body.style.top      = `-${scrollY}px`
+    document.body.style.width    = '100%'
+
+    return () => {
+      document.body.style.overflow = prevOv
+      document.body.style.position = prevPos
+      document.body.style.top      = prevTop
+      document.body.style.width    = prevWidth
+      window.scrollTo(0, scrollY)
+    }
+  }, [sidebarOpen])
+
   async function handleSignOut() {
     setSidebarOpen(false)
     const supabase = createBrowserClient(
@@ -184,7 +216,7 @@ export function AppSidebar({
 
       {/* Drawer */}
       <div
-        className="fixed top-0 left-0 bottom-0 z-50 w-64 flex flex-col transition-transform duration-300 ease-out"
+        className="fixed top-0 left-0 bottom-14 sm:bottom-0 z-50 w-64 flex flex-col transition-transform duration-300 ease-out"
         style={{
           background: '#0f172a',
           borderRight: '0.5px solid rgba(255,255,255,0.08)',
@@ -207,8 +239,8 @@ export function AppSidebar({
           </button>
         </div>
 
-        {/* Nav items */}
-        <nav className="flex-1 py-1 overflow-y-auto">
+        {/* Nav items — Sign Out is the final normal scrollable item */}
+        <nav className="flex-1 py-1 overflow-y-auto" style={{ overscrollBehavior: 'contain' }}>
           {MENU_ITEMS.map(item => (
             <div key={item.label}>
               {item.dividerBefore && (
@@ -247,22 +279,21 @@ export function AppSidebar({
               )}
             </div>
           ))}
-        </nav>
 
-        {/* Sign out at the very bottom */}
-        <div
-          className="flex-shrink-0 p-3"
-          style={{ borderTop: '0.5px solid rgba(255,255,255,0.08)' }}
-        >
+          {/* Sign Out — last item in the normal scroll flow, NOT pinned/fixed */}
+          <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.06)', margin: '4px 0' }} />
           <button
             onClick={handleSignOut}
-            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm text-left transition-colors duration-150 hover:bg-red-500/10"
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors duration-150 hover:bg-red-500/10"
             style={{ color: '#f87171' }}
           >
-            <LogoutIcon />
+            <span className="flex-shrink-0"><LogoutIcon /></span>
             Sign Out
           </button>
-        </div>
+
+          {/* Bottom padding so Sign Out clears the fixed bottom nav on mobile */}
+          <div className="h-4" />
+        </nav>
       </div>
     </>
   )

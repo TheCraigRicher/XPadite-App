@@ -810,7 +810,16 @@ function ThemedApp(_props: XpaditeAppProps) {
         onProfile={() => setProfileOpen(true)}
         onActivities={() => setActivityManagerOpen(true)}
         onAICoach={() => setAICoachOpen(true)}
-        onJournalNotes={() => setJournalNotesOpen(true)}
+        onTasks={() => handleMobileNav('tasks')}
+        onJournalNotes={() => {
+          // On mobile: switch to the polished Planner tab (same as bottom-nav Planner)
+          // On desktop/tablet: open the JournalNotesModal overlay
+          if (typeof window !== 'undefined' && window.innerWidth < 640) {
+            handleMobileNav('planner')
+          } else {
+            setJournalNotesOpen(true)
+          }
+        }}
         onNotifications={() => setNotificationsOpen(true)}
       />
 

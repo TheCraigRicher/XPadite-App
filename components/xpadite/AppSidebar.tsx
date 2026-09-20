@@ -26,6 +26,7 @@ const LogoutIcon = () => (
 
 type MenuAction =
   | 'profile'
+  | 'tasks'
   | 'analytics'
   | 'activities'
   | 'sync-calendar'
@@ -50,6 +51,7 @@ interface MenuItem {
 
 const MENU_ITEMS: MenuItem[] = [
   { icon: '👤', label: 'Profile',               action: 'profile'                                                                    },
+  { icon: '✅', label: 'Task Manager',          action: 'tasks'                                                                      },
   { icon: '📊', label: 'Analytics',             action: 'analytics',     dividerBefore: true                                         },
   { icon: '🎯', label: 'Activity Manager',       action: 'activities'                                                                 },
   { icon: '📅', label: 'Sync Google Calendar',  action: 'sync-calendar', dividerBefore: true                                         },
@@ -78,6 +80,7 @@ interface AppSidebarProps {
   onAICoach?: () => void
   onJournalNotes?: () => void
   onNotifications?: () => void
+  onTasks?: () => void
 }
 
 export function AppSidebar({
@@ -91,6 +94,7 @@ export function AppSidebar({
   onAICoach,
   onJournalNotes,
   onNotifications,
+  onTasks,
 }: AppSidebarProps) {
   const { sidebarOpen, setSidebarOpen } = useApp()
   const router = useRouter()
@@ -234,6 +238,7 @@ export function AppSidebar({
     setSidebarOpen(false)
     switch (action) {
       case 'profile':        onProfile?.(); break
+      case 'tasks':          onTasks?.(); break
       case 'analytics':      onAnalytics?.(); break
       case 'activities':     onActivities?.(); break
       case 'gallery':        onGallery?.(); break

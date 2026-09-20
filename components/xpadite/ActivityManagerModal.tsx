@@ -182,34 +182,52 @@ export function ActivityManagerModal({ onClose }: ActivityManagerModalProps) {
     setMode('list')
   }
 
+  const headerTitle =
+    mode === 'add' ? 'Add Activity'
+    : mode === 'edit' ? 'Edit Activity'
+    : mode === 'confirm-remove' ? 'Remove Activity'
+    : 'Activities'
+
   return (
+    /*
+     * Overlay: on mobile (< sm) stops 56px above screen bottom so the fixed
+     * bottom nav (z-50, 56px tall) remains visible and interactive.
+     * On sm+ covers the full viewport as a centered modal backdrop.
+     */
     <div
-      className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4"
+      className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4"
       style={{ background: 'rgba(0,0,0,0.55)' }}
       onClick={mode === 'list' ? onClose : undefined}
     >
+      {/*
+       * Modal card: flex-column so the purple header never scrolls.
+       * overflow-hidden clips the gradient header into the rounded top corners.
+       * The body region scrolls independently.
+       */}
       <div
-        className="w-full sm:max-w-[420px] sm:rounded-2xl rounded-t-2xl"
+        className="w-full sm:max-w-[420px] sm:rounded-2xl rounded-t-2xl flex flex-col overflow-hidden"
         style={{
           background: 'var(--xp-card)',
           border: '0.5px solid var(--xp-bdr2)',
           boxShadow: '0 24px 64px rgba(0,0,0,0.30)',
           maxHeight: '88vh',
-          overflowY: 'auto',
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
+        {/* ── Purple header — never scrolls ─────────────────────────────────── */}
         <div
-          className="flex items-center justify-between px-5 py-4 sticky top-0"
-          style={{ background: 'var(--xp-card)', borderBottom: '0.5px solid var(--xp-bdr)', zIndex: 1 }}
+          className="flex items-center justify-between px-5 py-4 flex-shrink-0"
+          style={{
+            background: 'linear-gradient(135deg, #5b21b6 0%, #7c3aed 100%)',
+            borderBottom: '0.5px solid rgba(255,255,255,0.12)',
+          }}
         >
           <div>
-            <h2 className="text-sm font-semibold" style={{ color: 'var(--xp-txt)' }}>
-              {mode === 'add' ? 'Add Activity' : mode === 'edit' ? 'Edit Activity' : mode === 'confirm-remove' ? 'Remove Activity' : 'Activities'}
+            <h2 className="text-sm font-semibold" style={{ color: 'white' }}>
+              {headerTitle}
             </h2>
             {mode === 'list' && (
-              <p className="text-[11px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>
+              <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.65)' }}>
                 {activities.length} {activities.length === 1 ? 'activity' : 'activities'}
               </p>
             )}
@@ -218,8 +236,8 @@ export function ActivityManagerModal({ onClose }: ActivityManagerModalProps) {
             {mode === 'list' && (
               <button
                 onClick={() => setMode('add')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-white transition-opacity hover:opacity-85"
-                style={{ background: '#7c3aed' }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-opacity hover:opacity-85"
+                style={{ background: 'rgba(255,255,255,0.18)', color: 'white', border: '0.5px solid rgba(255,255,255,0.28)' }}
               >
                 <PlusIcon /> Add
               </button>
@@ -227,14 +245,15 @@ export function ActivityManagerModal({ onClose }: ActivityManagerModalProps) {
             <button
               onClick={() => { if (mode !== 'list') setMode('list'); else onClose() }}
               className="w-8 h-8 rounded-full flex items-center justify-center hover:opacity-70 transition-opacity"
-              style={{ background: 'rgba(124,58,237,0.1)', color: '#7c3aed' }}
+              style={{ background: 'rgba(255,255,255,0.15)', color: 'white' }}
             >
               {mode !== 'list' ? '←' : '✕'}
             </button>
           </div>
         </div>
 
-        <div className="px-5 py-4">
+        {/* ── Scrollable body ───────────────────────────────────────────────── */}
+        <div className="px-5 py-4 overflow-y-auto flex-1">
           {/* Add form */}
           {mode === 'add' && (
             <ActivityForm

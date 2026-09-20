@@ -2177,6 +2177,17 @@ export function JournalEditorContent({
             border-radius: 6px !important;
             padding: 3px 7px !important;
           }
+          /* Emoji picker: clamp to viewport width on mobile so it never clips left */
+          #xp-j-emoji {
+            left: 4px !important;
+            right: 4px !important;
+            width: auto !important;
+          }
+          #xp-j-emoji aside,
+          #xp-j-emoji .EmojiPickerReact {
+            width: 100% !important;
+            min-width: 0 !important;
+          }
         }
         @media (min-width: 641px) {
           .xp-jd-sec-mo { display: none !important; }

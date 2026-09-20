@@ -2671,13 +2671,6 @@ export function JournalEditorContent({
 
                 <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
 
-                {/* Saved ✓ indicator — hidden on mobile (takes dead width when transparent) */}
-                <span className="xp-j-saved-txt" style={{
-                  fontSize: 11, whiteSpace: 'nowrap', userSelect: 'none', flexShrink: 0,
-                  color: saveStatus === 'saved' ? '#16a34a' : 'transparent',
-                  transition: 'color 200ms',
-                }}>Saved ✓</span>
-
                 {/* ── Journal Session Timer ─────────────────────────────── */}
                 {(() => {
                   const isRunning   = timerStartTs !== null
@@ -2832,10 +2825,17 @@ export function JournalEditorContent({
 
             {/* Save — always pinned on right */}
             <div style={{
-              flexShrink: 0, display: 'flex', alignItems: 'center',
+              flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
               padding: '8px 12px', borderLeft: `0.5px solid ${dockDiv}`,
               background: dockBg,
             }}>
+              {/* ✓ Saved — desktop/tablet only; space always reserved so Save button never shifts */}
+              <span className="xp-j-saved-txt" style={{
+                fontSize: 11, whiteSpace: 'nowrap', userSelect: 'none', flexShrink: 0,
+                color: '#16a34a', fontWeight: 600,
+                opacity: saveStatus === 'saved' ? 1 : 0,
+                transition: 'opacity 200ms',
+              }}>✓ Saved</span>
               <button
                 className="xp-j-save-btn"
                 onClick={handleManualSave}

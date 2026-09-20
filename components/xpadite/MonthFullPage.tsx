@@ -22,50 +22,48 @@ const MFP_STYLES = `
   .xp-mfp-hdr-title{min-width:260px;}
 
   @media(max-width:640px){
-    /* Overlay: true flex column from top to just above bottom nav */
-    .xp-mfp-overlay{bottom:56px!important;overflow:hidden!important;display:flex!important;flex-direction:column!important;padding:0!important;}
-    /* Wrap: fills overlay, zero padding */
+    /* Overlay: fills screen above bottom nav; fully opaque to prevent bleed-through */
+    .xp-mfp-overlay{bottom:56px!important;overflow:hidden!important;display:flex!important;flex-direction:column!important;padding:0!important;background:rgba(0,0,0,1)!important;}
+    /* Wrap: fills overlay */
     .xp-mfp-wrap{flex:1!important;min-height:0!important;padding:0!important;display:flex!important;flex-direction:column!important;align-items:stretch!important;justify-content:flex-start!important;}
-    /* Modal box: fills all remaining space, zero border-radius */
+    /* Modal box: fills all space; fully opaque background */
     .xp-mfp-box{flex:1!important;height:auto!important;max-height:none!important;max-width:none!important;width:100%!important;border-radius:0!important;margin:0!important;}
 
-    /* Mobile header: flex-wrap — row ordering via CSS order */
-    .xp-mfp-hdr{display:flex!important;flex-wrap:wrap!important;align-items:center;gap:0;padding:10px 14px 8px!important;position:relative;}
-
-    /* ROW 1 (top): ← back(left) | pill(absolute center) | toggle(right) */
+    /* Mobile header: SINGLE ROW — ← | ‹ Month Year › | [toggle] */
+    .xp-mfp-hdr{display:flex!important;flex-wrap:nowrap!important;align-items:center;gap:0;padding:8px 10px!important;position:relative;}
     .xp-mfp-hdr-l{order:1;flex:0 0 auto;align-self:center;}
-    .xp-mfp-hdr-r{order:1;flex:0 0 auto;margin-left:auto;display:flex!important;justify-content:flex-end;align-items:center;gap:0!important;}
-
-    /* Dashboard pill: absolutely centered in the full modal width */
-    .xp-mfp-hdr .xp-mfp-dash-pill{position:absolute!important;left:50%!important;top:10px!important;transform:translateX(-50%)!important;}
-
-    /* ROW 2 (bottom): ‹ Month Year › centered full-width — increased gap for breathing room */
-    .xp-mfp-hdr-c{order:2;width:100%;display:flex!important;align-items:center;gap:18px!important;justify-content:center!important;padding-top:6px;}
+    .xp-mfp-hdr-c{order:2;flex:1!important;width:auto!important;display:flex!important;align-items:center;gap:8px!important;justify-content:center!important;padding-top:0!important;}
+    .xp-mfp-hdr-r{order:3;flex:0 0 auto;margin-left:0!important;display:flex!important;justify-content:flex-end;align-items:center;gap:0!important;}
 
     .xp-mfp-hdr-title{min-width:0!important;font-size:12px!important;}
+    .xp-mfp-nav{width:28px!important;height:28px!important;font-size:18px!important;}
 
-    /* Back button: plain arrow on mobile — no capsule, no border, no bg */
-    .xp-mfp-hdr .xp-mfp-back{background:transparent!important;border:none!important;box-shadow:none!important;padding:4px 10px 4px 0!important;font-size:22px!important;line-height:1!important;border-radius:0!important;}
+    /* Back button: plain transparent — no capsule, no focus rectangle */
+    .xp-mfp-hdr .xp-mfp-back{background:transparent!important;border:none!important;box-shadow:none!important;padding:6px 6px 6px 0!important;font-size:22px!important;line-height:1!important;border-radius:4px!important;-webkit-tap-highlight-color:transparent!important;}
     .xp-mfp-hdr .xp-mfp-back:hover{background:transparent!important;transform:none!important;box-shadow:none!important;}
+    .xp-mfp-hdr .xp-mfp-back:focus{outline:none!important;background:transparent!important;box-shadow:none!important;}
+    .xp-mfp-hdr .xp-mfp-back:active{background:rgba(255,255,255,0.12)!important;}
     .xp-back-txt{display:none;}
-
-    /* Calendar content padding */
-    .xp-mfp-cal-body{padding:10px 6px!important;}
-
-    /* Calendar week row vertical spacing */
-    .xp-mfp-cal-grid{row-gap:18px!important;}
-
-    /* Calendar circles slightly larger on mobile */
-    .xp-cal-circle{inset:20%!important;}
 
     /* Remove dashboard pill from mobile header — moved to bottom dual bar */
     .xp-mfp-hdr .xp-mfp-dash-pill{display:none!important;}
 
+    /* Calendar content padding */
+    .xp-mfp-cal-body{padding:10px 6px!important;}
+    .xp-mfp-cal-grid{row-gap:18px!important;}
+    .xp-cal-circle{inset:20%!important;}
+
     /* Mobile: hide desktop share button, show dual bar */
     .xp-mfp-share-desktop{display:none!important;}
-    .xp-mfp-dual-bar{display:flex!important;}
+    .xp-mfp-dual-bar{
+      display:flex!important;
+      margin:0!important;border-radius:0!important;
+      border:none!important;border-top:1px solid rgba(124,58,237,0.18)!important;
+      box-shadow:0 -2px 10px rgba(124,58,237,0.07)!important;
+      flex-shrink:0!important;
+    }
 
-    /* Mobile dashboard header: two-line title */
+    /* Mobile dashboard header: title only — subtitle moves to content area */
     .xp-mfp-dash-main-title{display:none!important;}
     .xp-mfp-dash-mobile-title{display:inline!important;}
     .xp-mfp-dash-mobile-sub{display:block!important;}
@@ -76,21 +74,25 @@ const MFP_STYLES = `
   .xp-mfp-dash-mobile-sub{display:none;}
   .xp-mfp-share-desktop{display:flex;}
   .xp-mfp-dual-bar{
-    display:none;
-    margin:14px 16px 16px;border-radius:16px;overflow:hidden;flex-shrink:0;
-    border:1px solid rgba(124,58,237,0.28);
-    background:rgba(124,58,237,0.05);
-    box-shadow:0 2px 12px rgba(124,58,237,0.10);
+    display:none;flex-shrink:0;
+    background:var(--xp-bg,#ffffff);
   }
   .xp-mfp-dual-left,.xp-mfp-dual-right{
     flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
     padding:13px 8px;background:transparent;border:none;cursor:pointer;
     font-size:11px;font-weight:600;color:#7c3aed;line-height:1.3;
-    transition:background 140ms ease;
+    transition:transform 120ms ease,background 120ms ease;
+    -webkit-tap-highlight-color:transparent;
   }
-  .xp-mfp-dual-left:active,.xp-mfp-dual-right:active{background:rgba(124,58,237,0.10);}
+  .xp-mfp-dual-left:active,.xp-mfp-dual-right:active{
+    transform:scale(0.97);
+    background:rgba(124,58,237,0.09);
+    transition:transform 80ms ease,background 80ms ease;
+  }
   .xp-mfp-dual-icon{font-size:15px;line-height:1;margin-bottom:1px;}
   .xp-mfp-dual-divider{width:1px;background:rgba(124,58,237,0.20);flex-shrink:0;align-self:stretch;margin:10px 0;}
+  .xp-mfp-dash-ctx{display:none;text-align:center;font-size:10.5px;font-weight:500;color:var(--xp-txt2,#64748b);padding:8px 0 2px;letter-spacing:0.01em;}
+  @media(max-width:640px){.xp-mfp-dash-ctx{display:block!important;}}
 
   .xp-mfp-back{
     display:inline-flex;align-items:center;gap:6px;
@@ -508,14 +510,15 @@ function MonthCalendarLarge({
                 </div>
               )}
 
-              {/* Base circle — always visible; shows plain date (+ today ring if applicable) */}
+              {/* Base circle — always visible; shows date only when no emoji is active (ring still shows for today) */}
               <div className="absolute inset-[25%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-105 xp-cal-circle" style={{
                 zIndex: 1,
                 color: todayCell ? 'var(--xp-acc)' : cell.dow === 0 ? '#f97316' : isDark ? 'rgba(255,255,255,0.70)' : '#374151',
                 fontSize: 14,
-                ...(todayCell ? { background: 'rgba(124,58,237,0.08)', outline: '2px solid var(--xp-acc)', outlineOffset: '-1px' } : {}),
+                ...(todayCell && !rawHyper && !rawMil && !rawGoal ? { background: 'rgba(124,58,237,0.08)', outline: '2px solid var(--xp-acc)', outlineOffset: '-1px' } : {}),
+                ...(todayCell && (rawHyper || rawMil || rawGoal) ? { outline: '2px solid var(--xp-acc)', outlineOffset: '-1px', background: 'transparent' } : {}),
               }}>
-                {cell.day}
+                {!(rawHyper || rawMil || rawGoal) && cell.day}
               </div>
             </div>
           )
@@ -913,6 +916,22 @@ interface MonthFullPageProps {
   onDayDoubleClick?: (key: string, month: number, day: number) => void
 }
 
+function playTapSound() {
+  try {
+    const Ctx = (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)
+    if (!Ctx) return
+    const ctx = new Ctx()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain); gain.connect(ctx.destination)
+    osc.frequency.value = 820; osc.type = 'sine'
+    gain.gain.setValueAtTime(0.07, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07)
+    osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.07)
+    setTimeout(() => { try { ctx.close() } catch {} }, 200)
+  } catch {}
+}
+
 export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPageProps) {
   const { calData, sessions, activities, isDark, progressColor: _rawColor2, setToast, calendarClean, setCalendarClean } = useApp()
   const progressColor = resolveProgressColor(_rawColor2, isDark)
@@ -959,6 +978,13 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // Lock body scroll while modal is open (prevents background calendar from scrolling through)
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
 
   // Share panel Escape — intercepts before modal listener via capture phase
   useEffect(() => {
@@ -1246,23 +1272,14 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                   style={navBtnStyle}
                   title="Previous month"
                 ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(-2px)' }}>‹</span></button>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <h1 className="xp-mfp-hdr-title" style={{ fontSize: 13, fontWeight: 700, color: 'white', textAlign: 'center', textShadow: '0 1px 4px rgba(0,0,0,0.30)', margin: 0 }}>
-                    {view === 'dashboard' ? (
-                      <>
-                        <span className="xp-mfp-dash-main-title" style={{ whiteSpace: 'nowrap' }}>{`${MONTHS[currentMonth]} ${APP_YEAR} · Monthly Dashboard`}</span>
-                        <span className="xp-mfp-dash-mobile-title">Monthly Dashboard</span>
-                      </>
-                    ) : (
-                      <span style={{ whiteSpace: 'nowrap' }}>{`${MONTHS[currentMonth]} ${APP_YEAR}`}</span>
-                    )}
-                  </h1>
-                  {view === 'dashboard' && (
-                    <div className="xp-mfp-dash-mobile-sub" style={{ fontSize: 10, color: 'rgba(255,255,255,0.68)', marginTop: 2, whiteSpace: 'nowrap', textAlign: 'center' }}>
-                      {`${MONTHS[currentMonth]} ${APP_YEAR}`}
-                    </div>
-                  )}
-                </div>
+                <h1 className="xp-mfp-hdr-title" style={{ fontSize: 13, fontWeight: 700, color: 'white', textAlign: 'center', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)', margin: 0 }}>
+                  {view === 'dashboard' ? (
+                    <>
+                      <span className="xp-mfp-dash-main-title">{`${MONTHS[currentMonth]} ${APP_YEAR} · Monthly Dashboard`}</span>
+                      <span className="xp-mfp-dash-mobile-title">Monthly Dashboard</span>
+                    </>
+                  ) : `${MONTHS[currentMonth]} ${APP_YEAR}`}
+                </h1>
                 <button
                   onClick={goNext}
                   disabled={currentMonth === 11}
@@ -1308,7 +1325,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
             </div>
 
             {/* ── Scroll body — scrollbar clipped within modal rounded corners ── */}
-            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
 
             {/* ── Animated body ──────────────────────────────────────────────── */}
             <div key={`${view}-${currentMonth}`} style={{ animation: `${animName} 270ms ease` }}>
@@ -1322,7 +1339,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                       calData={calData as Record<string, unknown>}
                       onDayDoubleClick={onDayDoubleClick}
                     />
-                    {/* Share button — desktop only (hidden on mobile) */}
+                    {/* Share button — desktop only (hidden on mobile via CSS) */}
                     <div className="xp-mfp-share-desktop" style={{ justifyContent: 'center', paddingTop: 28, paddingBottom: 4 }}>
                       <button
                         onClick={openPanel}
@@ -1339,18 +1356,6 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                         <ShareIcon /> Share {MONTHS[currentMonth]}
                       </button>
                     </div>
-                    {/* Mobile dual action bar — shown on mobile only */}
-                    <div className="xp-mfp-dual-bar">
-                      <button className="xp-mfp-dual-left" onClick={toggleView}>
-                        <span className="xp-mfp-dual-icon">📊</span>
-                        Monthly Dashboard
-                      </button>
-                      <div className="xp-mfp-dual-divider" />
-                      <button className="xp-mfp-dual-right" onClick={openPanel}>
-                        <span className="xp-mfp-dual-icon">↗</span>
-                        Share Progress
-                      </button>
-                    </div>
                   </div>
                 </div>
               )}
@@ -1358,6 +1363,8 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
               {/* ── DASHBOARD VIEW ─────────────────────────────────────────────── */}
               {view === 'dashboard' && (
                 <div className="p-3 sm:p-4 lg:p-5 space-y-3 lg:space-y-4" style={{ background: isDark ? 'rgba(9,4,22,0.99)' : 'var(--xp-bg3)' }}>
+                  {/* Mobile context label — month/year shown below header on mobile */}
+                  <div className="xp-mfp-dash-ctx">{MONTHS[currentMonth]} {APP_YEAR}</div>
 
                   {/* ROW 1 — KPI Cards | Gauge | Achievement */}
                   <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.52fr)_minmax(0,1.36fr)_minmax(0,0.70fr)] items-stretch gap-3 lg:gap-4">
@@ -1610,6 +1617,21 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
               )}
             </div>
             </div>{/* ── /scroll body ── */}
+
+            {/* ── Mobile dual action bar — locked at modal bottom, above nav ── */}
+            {view === 'calendar' && (
+              <div className="xp-mfp-dual-bar">
+                <button className="xp-mfp-dual-left" onClick={() => { playTapSound(); toggleView() }}>
+                  <span className="xp-mfp-dual-icon">📊</span>
+                  Monthly Dashboard
+                </button>
+                <div className="xp-mfp-dual-divider" />
+                <button className="xp-mfp-dual-right" onClick={() => { playTapSound(); openPanel() }}>
+                  <span className="xp-mfp-dual-icon">↗</span>
+                  Share Progress
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

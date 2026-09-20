@@ -95,22 +95,73 @@ export function AppSidebar({
   const { sidebarOpen, setSidebarOpen } = useApp()
   const router = useRouter()
   const [avatarUrl, setAvatarUrl] = useState('')
+  const [avatarInitial, setAvatarInitial] = useState('')
   const [loadingMotivate, setLoadingMotivate] = useState(false)
 
   const loadAvatar = useCallback(async () => {
     try {
       const raw = localStorage.getItem('xp9-profile')
-      const path: string = raw ? (JSON.parse(raw).avatarUrl || '') : ''
-      if (!path) { setAvatarUrl(''); return }
-      // Legacy data: URI — use directly
-      if (path.startsWith('data:')) { setAvatarUrl(path); return }
-      // Storage path — generate a signed URL (bucket is private)
-      const sb = createClient()
-      const { data: signed, error } = await sb.storage.from('avatars').createSignedUrl(path, 3600)
-      if (error) { console.error('Sidebar avatar error:', error); setAvatarUrl(''); return }
-      setAvatarUrl(signed?.signedUrl ?? '')
+
+      if (raw) {
+        // localStorage present — derive initial + resolve any storage path
+        let parsed: { firstName?: string; displayName?: string; avatarUrl?: string } = {}
+        try { parsed = JSON.parse(raw) } catch {}
+        const initial = (parsed.firstName || parsed.displayName || '').charAt(0).toUpperCase()
+        setAvatarInitial(initial)
+        const path: string = parsed.avatarUrl || ''
+        if (!path) { setAvatarUrl(''); return }
+        if (path.startsWith('data:')) { setAvatarUrl(path); return }
+        const sb = createClient()
+        const { data: signed, error } = await sb.storage.from('avatars').createSignedUrl(path, 3600)
+        if (error) { console.error('Sidebar avatar error:', error); setAvatarUrl(''); return }
+        setAvatarUrl(signed?.signedUrl ?? '')
+      } else {
+        // No cached profile — bootstrap directly from Supabase on auth init
+        const sb = createClient()
+        const { data: authData } = await sb.auth.getUser()
+        if (!authData.user) { setAvatarUrl(''); setAvatarInitial(''); return }
+
+        const { data: profile } = await sb
+          .from('profiles')
+          .select('full_name, avatar_url')
+          .eq('id', authData.user.id)
+          .single()
+
+        const row = profile as { full_name?: string; avatar_url?: string } | null
+        const fullName = row?.full_name ?? ''
+        const avatarPath = row?.avatar_url ?? ''
+
+        const spaceIdx = fullName.indexOf(' ')
+        const firstName = fullName ? (spaceIdx === -1 ? fullName : fullName.slice(0, spaceIdx)) : ''
+        const lastName  = spaceIdx === -1 ? '' : fullName.slice(spaceIdx + 1)
+
+        // Fallback priority: first name → email initial
+        const email = authData.user.email ?? ''
+        const initial = (firstName || email).charAt(0).toUpperCase()
+        setAvatarInitial(initial)
+
+        // Seed localStorage so ProfileModal finds consistent data without another Supabase call
+        if (fullName || avatarPath) {
+          try {
+            localStorage.setItem('xp9-profile', JSON.stringify({
+              firstName,
+              lastName,
+              displayName: firstName,
+              avatarUrl: avatarPath,
+            }))
+          } catch {}
+        }
+
+        if (!avatarPath) { setAvatarUrl(''); return }
+        if (avatarPath.startsWith('data:')) { setAvatarUrl(avatarPath); return }
+
+        const { data: signed, error } = await sb.storage.from('avatars').createSignedUrl(avatarPath, 3600)
+        if (error) { console.error('Sidebar avatar error:', error); setAvatarUrl(''); return }
+        setAvatarUrl(signed?.signedUrl ?? '')
+      }
     } catch {
       setAvatarUrl('')
+      setAvatarInitial('')
     }
   }, [])
 
@@ -271,6 +322,13 @@ export function AppSidebar({
                       className="w-5 h-5 rounded-full flex-shrink-0"
                       style={{ objectFit: 'cover' }}
                     />
+                  ) : item.action === 'profile' && avatarInitial ? (
+                    <span
+                      className="w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold"
+                      style={{ background: 'linear-gradient(135deg, #7c3aed, #a78bfa)', fontSize: 9 }}
+                    >
+                      {avatarInitial}
+                    </span>
                   ) : (
                     <span className="text-base w-5 text-center flex-shrink-0">{item.icon}</span>
                   )}

@@ -47,7 +47,7 @@ const MFP_STYLES = `
     /* Month trigger — smaller on mobile */
     .xp-mfp-month-trigger{font-size:12px!important;}
     .xp-mfp-month-trigger-sub{font-size:10px!important;}
-    .xp-mfp-month-caret{font-size:14px!important;}
+    .xp-mfp-month-caret{font-size:15px!important;margin-top:-1px!important;}
 
     .xp-mfp-cal-body{padding:10px 6px!important;}
     .xp-mfp-cal-dh{padding-top:9px!important;padding-bottom:9px!important;}
@@ -177,7 +177,7 @@ const MFP_STYLES = `
     color:rgba(255,255,255,0.70)!important;text-shadow:none!important;
     padding:2px 8px!important;
   }
-  .xp-mfp-month-caret{font-size:12px;opacity:0.75;margin-top:1px;line-height:1;}
+  .xp-mfp-month-caret{font-size:13px;opacity:0.78;margin-top:-1px;line-height:1;}
 
   /* Month/Year picker popup */
   .xp-mfp-picker-wrap{
@@ -208,6 +208,23 @@ const MFP_STYLES = `
   }
   .xp-mfp-picker-present:hover{background:rgba(124,58,237,0.38);}
   .xp-mfp-picker-present:active{background:rgba(124,58,237,0.52);transition-duration:60ms;}
+  /* Active state: user is on a different month — strong purple CTA */
+  .xp-mfp-picker-present-active{
+    background:#7c3aed!important;
+    border-color:rgba(124,58,237,0.90)!important;
+    box-shadow:0 2px 14px rgba(124,58,237,0.48)!important;
+    font-weight:700!important;
+  }
+  .xp-mfp-picker-present-active:hover{background:#6d28d9!important;}
+  .xp-mfp-picker-present-active:active{background:#5b21b6!important;transition-duration:60ms;}
+  /* Inactive state: already viewing present month — subdued */
+  .xp-mfp-picker-present-inactive{
+    background:rgba(255,255,255,0.05)!important;
+    border-color:rgba(255,255,255,0.10)!important;
+    color:rgba(255,255,255,0.32)!important;
+    cursor:default!important;font-weight:500!important;
+  }
+  .xp-mfp-picker-present-inactive:hover{background:rgba(255,255,255,0.05)!important;}
   .xp-mfp-picker-year{
     display:flex;align-items:center;justify-content:space-between;
     padding:2px 2px 8px;
@@ -1011,12 +1028,13 @@ function MonthYearPicker({
   pickerRef: React.RefObject<HTMLDivElement | null>
 }) {
   const realMonth = new Date().getMonth()
+  const isPresent = selectedMonth === realMonth
 
   return (
     <div ref={pickerRef} className="xp-mfp-picker">
       <button
-        className="xp-mfp-picker-present"
-        onClick={() => onSelect(realMonth)}
+        className={`xp-mfp-picker-present${isPresent ? ' xp-mfp-picker-present-inactive' : ' xp-mfp-picker-present-active'}`}
+        onClick={() => { if (!isPresent) onSelect(realMonth) }}
       >
         Present Month
       </button>

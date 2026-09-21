@@ -509,7 +509,7 @@ export function NotificationsModal({ onClose, onAction }: NotificationsModalProp
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4"
+      className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[70] flex items-stretch sm:items-center justify-center p-0 sm:p-4"
       style={{ background: 'rgba(0,0,0,0.55)' }}
       onClick={onClose}
     >
@@ -521,13 +521,11 @@ export function NotificationsModal({ onClose, onAction }: NotificationsModalProp
         }
       `}</style>
       <div
-        className="w-full sm:max-w-[560px] sm:rounded-2xl rounded-t-2xl overflow-hidden"
+        className="w-full sm:max-w-[560px] sm:rounded-2xl rounded-none max-sm:border-0! overflow-hidden h-full max-h-full sm:h-[86vh] sm:max-h-[86vh]"
         style={{
           background: 'var(--xp-card)',
           border: '0.5px solid var(--xp-bdr2)',
           boxShadow: '0 24px 64px rgba(0,0,0,0.32)',
-          height: '86vh',
-          maxHeight: '86vh',
           display: 'flex',
           flexDirection: 'column',
         }}
@@ -692,7 +690,7 @@ export function NotificationsModal({ onClose, onAction }: NotificationsModalProp
         </div>
 
         {/* ── Notification list or empty state ── */}
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
           {visible.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-8 py-14 text-center">
               <div

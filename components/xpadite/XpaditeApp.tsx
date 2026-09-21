@@ -35,31 +35,85 @@ interface XpaditeAppProps {
 // ─── QOTD data ────────────────────────────────────────────────────────────────
 
 const QOTD_LIST = [
+  { quote: "Success is the sum of small efforts, repeated day in and day out.", author: "Robert Collier" },
   { quote: "The secret of getting ahead is getting started.", author: "Mark Twain" },
-  { quote: "Small steps every day compound into extraordinary results.", author: "Xpadite" },
+  { quote: "Well done is better than well said.", author: "Benjamin Franklin" },
+  { quote: "Great things are done by a series of small things brought together.", author: "Vincent van Gogh" },
   { quote: "It always seems impossible until it's done.", author: "Nelson Mandela" },
-  { quote: "Don't watch the clock; do what it does. Keep going.", author: "Sam Levenson" },
   { quote: "The future depends on what you do today.", author: "Mahatma Gandhi" },
-  { quote: "Success is not final, failure is not fatal — it's the courage to continue that counts.", author: "Winston Churchill" },
+  { quote: "You miss 100% of the shots you don't take.", author: "Wayne Gretzky" },
+  { quote: "Action is the foundational key to all success.", author: "Pablo Picasso" },
+  { quote: "If opportunity doesn't knock, build a door.", author: "Milton Berle" },
+  { quote: "The way to get started is to quit talking and begin doing.", author: "Walt Disney" },
+  { quote: "A year from now you may wish you had started today.", author: "Karen Lamb" },
+  { quote: "Don't watch the clock; do what it does. Keep going.", author: "Sam Levenson" },
+  { quote: "Start where you are. Use what you have. Do what you can.", author: "Arthur Ashe" },
+  { quote: "Nothing will work unless you do.", author: "Maya Angelou" },
+  { quote: "You don't have to see the whole staircase, just take the first step.", author: "Martin Luther King Jr." },
+  { quote: "Energy and persistence conquer all things.", author: "Benjamin Franklin" },
+  { quote: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
+  { quote: "Quality is not an act, it is a habit.", author: "Aristotle" },
+  { quote: "The successful warrior is the average man, with laser-like focus.", author: "Bruce Lee" },
+  { quote: "Concentrate all your thoughts upon the work in hand.", author: "Alexander Graham Bell" },
+  { quote: "Lost time is never found again.", author: "Benjamin Franklin" },
+  { quote: "The bad news is time flies. The good news is you're the pilot.", author: "Michael Altshuler" },
+  { quote: "Either you run the day or the day runs you.", author: "Jim Rohn" },
+  { quote: "Success usually comes to those who are too busy to be looking for it.", author: "Henry David Thoreau" },
+  { quote: "Do what you can, with what you have, where you are.", author: "Theodore Roosevelt" },
+  { quote: "You may delay, but time will not.", author: "Benjamin Franklin" },
+  { quote: "What you do today can improve all your tomorrows.", author: "Ralph Marston" },
+  { quote: "Setting goals is the first step in turning the invisible into the visible.", author: "Tony Robbins" },
+  { quote: "A goal properly set is halfway reached.", author: "Zig Ziglar" },
+  { quote: "Dream big. Start small. Act now.", author: "Robin Sharma" },
+  { quote: "Success is walking from failure to failure with no loss of enthusiasm.", author: "Winston Churchill" },
+  { quote: "Our greatest glory is not in never falling, but in rising every time we fall.", author: "Confucius" },
+  { quote: "Fall seven times and stand up eight.", author: "Japanese proverb" },
+  { quote: "Difficulties strengthen the mind, as labor does the body.", author: "Seneca" },
+  { quote: "He who has a why to live can bear almost any how.", author: "Friedrich Nietzsche" },
+  { quote: "Do not pray for an easy life; pray for the strength to endure a difficult one.", author: "Bruce Lee" },
+  { quote: "Persistence guarantees that results are inevitable.", author: "Paramahansa Yogananda" },
+  { quote: "The harder the conflict, the greater the triumph.", author: "George Washington" },
+  { quote: "Success is not final, failure is not fatal: it is the courage to continue that counts.", author: "Winston Churchill" },
+  { quote: "Turn your wounds into wisdom.", author: "Oprah Winfrey" },
+  { quote: "Ideas are easy. Execution is everything.", author: "John Doerr" },
+  { quote: "If you really look closely, most overnight successes took a long time.", author: "Steve Jobs" },
+  { quote: "Move fast and break things.", author: "Mark Zuckerberg" },
+  { quote: "Don't worry about failure; you only have to be right once.", author: "Drew Houston" },
+  { quote: "Make every detail perfect and limit the number of details to perfect.", author: "Jack Dorsey" },
+  { quote: "We are what we repeatedly do. Excellence, then, is not an act, but a habit.", author: "Will Durant" },
+  { quote: "Chase the vision, not the money; the money will end up following you.", author: "Tony Hsieh" },
+  { quote: "Stay hungry. Stay foolish.", author: "Steve Jobs" },
+  { quote: "Risk more than others think is safe. Dream more than others think is practical.", author: "Howard Schultz" },
+  { quote: "Success doesn't come from what you do occasionally. It comes from what you do consistently.", author: "Marie Forleo" },
+  { quote: "A plan becomes powerful the moment you act on it.", author: "XPadite" },
+  { quote: "Protect your focus. Your future is being built inside it.", author: "XPadite" },
+  { quote: "You don't need a perfect day. You need a productive next hour.", author: "XPadite" },
+  { quote: "Small progress still moves the finish line closer.", author: "XPadite" },
+  { quote: "Your calendar shows your intentions. Your actions reveal your priorities.", author: "XPadite" },
+  { quote: "Stop waiting for momentum. Create it.", author: "XPadite" },
+  { quote: "Track the work. Learn from it. Improve tomorrow.", author: "XPadite" },
+  { quote: "Big goals are completed one focused session at a time.", author: "XPadite" },
+  { quote: "Make today count toward something bigger.", author: "XPadite" },
+  { quote: "Plan it. Start it. Finish it. XPadite it.", author: "XPadite" },
+  // Unique existing XPadite quotes retained from prior collection
+  { quote: "Small steps every day compound into extraordinary results.", author: "XPadite" },
   { quote: "Focus on being productive instead of busy.", author: "Anonymous" },
   { quote: "Excellence is not an act, but a habit.", author: "Aristotle" },
   { quote: "You don't have to be great to start, but you have to start to be great.", author: "Zig Ziglar" },
-  { quote: "Consistency is the foundation of achievement.", author: "Xpadite" },
-  { quote: "The discipline you maintain today builds the life you want tomorrow.", author: "Xpadite" },
+  { quote: "Consistency is the foundation of achievement.", author: "XPadite" },
+  { quote: "The discipline you maintain today builds the life you want tomorrow.", author: "XPadite" },
   { quote: "Push yourself, because no one else is going to do it for you.", author: "Anonymous" },
   { quote: "Great things never come from comfort zones.", author: "Anonymous" },
   { quote: "Your limitation is only your imagination.", author: "Anonymous" },
-  { quote: "One productive day at a time — that's how it's built.", author: "Xpadite" },
-  { quote: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
+  { quote: "One productive day at a time — that's how it's built.", author: "XPadite" },
   { quote: "Dream it. Wish it. Do it.", author: "Anonymous" },
 ]
 
-// Deterministic per calendar day: same day → same quote
-const _qotdToday = (() => {
-  const d = new Date()
-  const key = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate()
+// Deterministic per local calendar day → same quote all day, advances at local midnight
+function getQotdForDate(date: Date) {
+  const key = date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate()
   return QOTD_LIST[key % QOTD_LIST.length]
-})()
+}
 
 // ─── Motivation Modal ─────────────────────────────────────────────────────────
 
@@ -715,8 +769,27 @@ function ThemedApp(_props: XpaditeAppProps) {
   }
 
   // ── QOTD banner ───────────────────────────────────────────────────────────────
+  const [qotdToday, setQotdToday] = useState(() => getQotdForDate(new Date()))
   const [qotdIn, setQotdIn] = useState(false)
+  // Drives the translateY slide-up on the inner content; opacity is never animated
+  const [qotdExiting, setQotdExiting] = useState(false)
   const qotdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const qotdExitRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Advance quote at local midnight without requiring a page refresh
+  useEffect(() => {
+    let id: ReturnType<typeof setTimeout>
+    function scheduleNext() {
+      const now = new Date()
+      const msUntilMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime() - now.getTime()
+      id = setTimeout(() => {
+        setQotdToday(getQotdForDate(new Date()))
+        scheduleNext()
+      }, msUntilMidnight)
+    }
+    scheduleNext()
+    return () => clearTimeout(id)
+  }, [])
 
   // Mobile pan-once scroll state
   const qotdInnerRef     = useRef<HTMLDivElement>(null)
@@ -727,50 +800,65 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [qotdTransActive,setQotdTransActive]= useState(false)
 
   useEffect(() => () => {
-    if (qotdTimerRef.current)   clearTimeout(qotdTimerRef.current)
+    if (qotdTimerRef.current)    clearTimeout(qotdTimerRef.current)
+    if (qotdExitRef.current)     clearTimeout(qotdExitRef.current)
     if (qotdScrollTimer.current) clearTimeout(qotdScrollTimer.current)
   }, [])
 
-  // Reset scroll state whenever banner hides; trigger pan on mobile when it shows
+  // Reset scroll + exit state when banner hides; start mobile pan when it shows
   useEffect(() => {
     if (!qotdIn) {
       if (qotdScrollTimer.current) { clearTimeout(qotdScrollTimer.current); qotdScrollTimer.current = null }
       setQotdTranslate(0)
       setQotdTransDur(0)
       setQotdTransActive(false)
-      return
+      // Reset slide-up after the outer height collapses (200 ms transition)
+      const rid = setTimeout(() => setQotdExiting(false), 250)
+      return () => clearTimeout(rid)
     }
-    // Wait for the 300 ms slide-in + 500 ms reading pause before measuring
+    // Wait for 300 ms slide-in + 500 ms reading pause before measuring
     qotdScrollTimer.current = setTimeout(() => {
       if (window.innerWidth > 768) return  // desktop: unchanged
       const inner = qotdInnerRef.current
       const track = qotdTrackRef.current
       if (!inner || !track) return
-      const overflow = track.offsetWidth - inner.clientWidth
+      // inner padding is 9px 24px → 48 px total horizontal; subtract to get true content-area overflow
+      const overflow = Math.max(0, track.offsetWidth - (inner.clientWidth - 48))
       if (overflow <= 4) return  // fits — nothing to do
-      // 60 px/s speed, clamped to 3–5 s
-      const dur = Math.min(5000, Math.max(3000, (overflow / 60) * 1000))
-      setQotdTransDur(dur)
+      const scrollMs = Math.max(2000, (overflow / 55) * 1000)
+      setQotdTransDur(scrollMs)
       setQotdTranslate(-overflow)
       setQotdTransActive(true)
+      // Reschedule dismiss: after scroll completes + 1.5 s end pause
+      if (qotdTimerRef.current) { clearTimeout(qotdTimerRef.current); qotdTimerRef.current = null }
+      qotdTimerRef.current = setTimeout(() => { dismissQotd() }, scrollMs + 1500) // eslint-disable-line
     }, 800)
     return () => { if (qotdScrollTimer.current) { clearTimeout(qotdScrollTimer.current); qotdScrollTimer.current = null } }
-  }, [qotdIn])
+  }, [qotdIn]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!qotdIn) return
-    function onDocClick() {
-      if (qotdTimerRef.current) { clearTimeout(qotdTimerRef.current); qotdTimerRef.current = null }
-      setQotdIn(false)
-    }
+    function onDocClick() { dismissQotd() } // eslint-disable-line
     document.addEventListener('click', onDocClick)
     return () => document.removeEventListener('click', onDocClick)
-  }, [qotdIn])
+  }, [qotdIn]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Phase 1: translateY(-100%) slides inner up (280 ms, opacity stays 1).
+  // Phase 2: 290 ms later, qotdIn→false collapses the outer height (200 ms).
+  // The outer's purple background fills any gap during the slide — no white flash.
+  function dismissQotd() {
+    if (qotdTimerRef.current) { clearTimeout(qotdTimerRef.current); qotdTimerRef.current = null }
+    if (qotdExitRef.current)  { clearTimeout(qotdExitRef.current);  qotdExitRef.current = null }
+    setQotdExiting(true)
+    qotdExitRef.current = setTimeout(() => { setQotdIn(false); qotdExitRef.current = null }, 470)
+  }
 
   function triggerQotd() {
     if (qotdTimerRef.current) { clearTimeout(qotdTimerRef.current); qotdTimerRef.current = null }
+    if (qotdExitRef.current)  { clearTimeout(qotdExitRef.current);  qotdExitRef.current = null }
+    setQotdExiting(false)  // snap inner to position 0 before outer expands
     setQotdIn(true)
-    qotdTimerRef.current = setTimeout(() => setQotdIn(false), 7000)
+    qotdTimerRef.current = setTimeout(() => { dismissQotd() }, 7000) // eslint-disable-line
   }
 
   // ── Auto-dismiss toast with fade-out ──────────────────────────────────────────
@@ -824,49 +912,63 @@ function ThemedApp(_props: XpaditeAppProps) {
       />
 
       {/* QOTD banner */}
+      {/* Seat: controls layout height. overflow:hidden during open (clips bar in), visible during exit (lets bar slide freely with no top-edge clip) */}
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          overflow: 'hidden',
-          maxHeight: qotdIn ? '44px' : '0px',
-          opacity: qotdIn ? 1 : 0,
-          transition: 'max-height 300ms ease, opacity 250ms ease',
-          willChange: 'max-height, opacity',
+          position: 'relative',
+          overflow: qotdExiting ? 'visible' : 'hidden',
+          maxHeight: (qotdIn && !qotdExiting) ? '44px' : '0px',
+          transition: (qotdIn && !qotdExiting) ? 'max-height 300ms ease' : 'max-height 450ms cubic-bezier(0.4, 0, 0.2, 1)',
+          background: 'linear-gradient(90deg, #4c1d95 0%, #5b21b6 50%, #4c1d95 100%)',
           flexShrink: 0,
         }}
       >
+        {/* Visual unit: position:absolute so it is never clipped by the seat during exit. translateY moves the ENTIRE bar + label + quote + author as one rigid piece. */}
         <div
-          ref={qotdInnerRef}
           style={{
+            position: 'absolute',
+            top: 0, left: 0, right: 0, height: '44px', zIndex: 21,
             background: 'linear-gradient(90deg, #4c1d95 0%, #5b21b6 50%, #4c1d95 100%)',
-            padding: '9px 24px',
-            textAlign: 'center',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
+            transform: qotdExiting ? 'translateY(-100%)' : 'translateY(0)',
+            transition: 'transform 450ms cubic-bezier(0.4, 0, 0.2, 1)',
           }}
         >
-          {/* Single inline track — slides left on mobile when quote overflows */}
+          {/* Scroll viewport: clips translateX overflow only */}
           <div
-            ref={qotdTrackRef}
+            ref={qotdInnerRef}
             style={{
-              display: 'inline-block',
+              padding: '9px 24px',
+              textAlign: 'center',
               whiteSpace: 'nowrap',
-              transform: `translateX(${qotdTranslate}px)`,
-              transition: qotdTransActive ? `transform ${qotdTransDur}ms ease-in-out` : 'none',
-              willChange: qotdTransActive ? 'transform' : 'auto',
+              overflow: 'hidden',
             }}
           >
-            <span style={{ fontSize: 10, color: 'rgba(216,180,254,0.7)', fontWeight: 600, letterSpacing: '0.08em', marginRight: 8 }}>
-              QUOTE OF THE DAY
-            </span>
-            <span style={{ fontSize: 11.5, color: 'white', fontStyle: 'italic', fontWeight: 400 }}>
-              &ldquo;{_qotdToday.quote}&rdquo;
-            </span>
-            <span style={{ fontSize: 10, color: 'rgba(216,180,254,0.55)', marginLeft: 8 }}>
-              — {_qotdToday.author}
-            </span>
+            {/* Track: translateX only for mobile long-quote scroll */}
+            <div
+              ref={qotdTrackRef}
+              style={{
+                display: 'inline-block',
+                whiteSpace: 'nowrap',
+                transform: `translateX(${qotdTranslate}px)`,
+                transition: qotdTransActive ? `transform ${qotdTransDur}ms ease-in-out` : 'none',
+                willChange: qotdTransActive ? 'transform' : 'auto',
+              }}
+            >
+              <span style={{ fontSize: 10, color: 'rgba(216,180,254,0.7)', fontWeight: 600, letterSpacing: '0.08em', marginRight: 8 }}>
+                QUOTE OF THE DAY
+              </span>
+              <span style={{ fontSize: 11.5, color: 'white', fontStyle: 'italic', fontWeight: 400 }}>
+                &ldquo;{qotdToday.quote}&rdquo;
+              </span>
+              <span style={{ fontSize: 10, color: 'rgba(216,180,254,0.55)', marginLeft: 8 }}>
+                — {qotdToday.author}
+              </span>
+            </div>
           </div>
         </div>
+        {/* Spacer: gives the seat its 44px height so the absolute visual unit is contained during display */}
+        <div style={{ height: '44px' }} />
       </div>
 
       {/* Header */}

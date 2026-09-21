@@ -40,9 +40,11 @@ const MFP_STYLES = `
       display:flex!important;align-items:center!important;gap:8px!important;
       justify-content:center!important;padding-top:0!important;z-index:1;
     }
+    /* Dashboard view only: widen gap around title for breathing room (calendar keeps default 8px) */
+    .xp-mfp-hdr-c-dash{gap:16px!important;}
     .xp-mfp-hdr-r{order:3;flex:0 0 auto;margin-left:0!important;display:flex!important;justify-content:flex-end;align-items:center;gap:0!important;position:relative;z-index:2;}
 
-    .xp-mfp-hdr-title{min-width:0!important;font-size:12px!important;white-space:normal!important;}
+    .xp-mfp-hdr-title{min-width:0!important;font-size:12px!important;}
     .xp-mfp-nav{width:28px!important;height:28px!important;font-size:18px!important;}
 
     /* Back button: transparent, no focus rectangle on tap */
@@ -1330,14 +1332,14 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
               </div>
 
               {/* Center: ‹ Month Year [· Monthly Dashboard] › */}
-              <div className="xp-mfp-hdr-c" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div className={`xp-mfp-hdr-c${view === 'dashboard' ? ' xp-mfp-hdr-c-dash' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button
                   onClick={goPrev}
                   disabled={currentMonth === 0}
                   className="xp-mfp-nav"
                   style={navBtnStyle}
                   title="Previous month"
-                ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(1px)' }}>‹</span></button>
+                ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(0)' }}>‹</span></button>
                 <h1 className="xp-mfp-hdr-title" style={{ fontSize: 13, fontWeight: 700, color: 'white', textAlign: 'center', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)', margin: 0 }}>
                   {view === 'dashboard' ? (
                     <>
@@ -1353,7 +1355,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                   className="xp-mfp-nav"
                   style={navBtnStyle}
                   title="Next month"
-                ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(1px)' }}>›</span></button>
+                ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(0)' }}>›</span></button>
               </div>
 
               {/* Right: Calendar toggle + Dashboard pill */}

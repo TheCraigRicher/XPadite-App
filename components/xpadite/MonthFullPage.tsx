@@ -581,7 +581,6 @@ function MonthCalendarLarge({
                 <div className="absolute inset-[25%] xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none', overflow: 'visible' }}>
                   <div className="absolute inset-0 flex items-center justify-center transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
                     <span style={{ position: 'relative', display: 'inline-block', lineHeight: 1 }}>
-                      <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 30, color: 'rgba(167,139,250,0.20)', filter: 'drop-shadow(0 0 6px rgba(167,139,250,0.55))', lineHeight: 1, userSelect: 'none', zIndex: 0, pointerEvents: 'none' }}>★</span>
                       <span style={{ fontSize: 36, lineHeight: 1, userSelect: 'none', display: 'block', position: 'relative', zIndex: 1 }}>🏆</span>
                       <span style={{ position: 'absolute', top: '26%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
                     </span>

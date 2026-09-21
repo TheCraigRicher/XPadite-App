@@ -670,23 +670,6 @@ export function MonthCard({
                     style={{ zIndex: 1 }}
                   >
                     <span
-                      className="xp-emoji-star"
-                      style={{
-                        position: "absolute",
-                        top: "50%",
-                        left: "50%",
-                        transform: "translate(-50%, -50%)",
-                        fontSize: "24px",
-                        color: "rgba(167,139,250,0.20)",
-                        filter: "drop-shadow(0 0 5px rgba(167,139,250,0.55))",
-                        userSelect: "none",
-                        lineHeight: 1,
-                        zIndex: 0,
-                      }}
-                    >
-                      ★
-                    </span>
-                    <span
                       className="xp-emoji-trophy"
                       style={{
                         position: "absolute",

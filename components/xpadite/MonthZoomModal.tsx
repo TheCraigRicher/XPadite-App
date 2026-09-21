@@ -234,8 +234,6 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
                   <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)} title="Milestone!">
                     {connL}{connR}
                     <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
-                      {/* Subtle purple star — sits behind trophy, above connector */}
-                      <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '28px', color: 'rgba(167, 139, 250, 0.20)', filter: 'drop-shadow(0 0 6px rgba(167, 139, 250, 0.55))', userSelect: 'none', lineHeight: 1, zIndex: 0 }}>★</span>
                       <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '30px', lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🏆</span>
                       <span style={{ position: 'absolute', top: '37%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 2, fontSize: '9px', fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 5px rgba(255,255,255,1)', pointerEvents: 'none' }}>
                         {cell.day}

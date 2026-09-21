@@ -29,11 +29,18 @@ const MFP_STYLES = `
     /* Modal box: fills all space; background matches calendar surface for seamless fill */
     .xp-mfp-box{flex:1!important;height:auto!important;max-height:none!important;max-width:none!important;width:100%!important;border-radius:0!important;margin:0!important;background:var(--xp-bg)!important;}
 
-    /* Mobile header: SINGLE ROW — ← | ‹ Month Year › | [toggle]; slightly taller than minimum */
-    .xp-mfp-hdr{display:flex!important;flex-wrap:nowrap!important;align-items:center;gap:0;padding:12px 10px!important;position:relative;}
-    .xp-mfp-hdr-l{order:1;flex:0 0 auto;align-self:center;}
-    .xp-mfp-hdr-c{order:2;flex:1!important;width:auto!important;display:flex!important;align-items:center;gap:8px!important;justify-content:center!important;padding-top:0!important;}
-    .xp-mfp-hdr-r{order:3;flex:0 0 auto;margin-left:0!important;display:flex!important;justify-content:flex-end;align-items:center;gap:0!important;}
+    /* Mobile header: SINGLE ROW — back on left, toggle on right, title TRULY centered (absolute) */
+    .xp-mfp-hdr{display:flex!important;flex-wrap:nowrap!important;align-items:center;justify-content:space-between!important;gap:0;padding:12px 10px!important;position:relative!important;}
+    .xp-mfp-hdr-l{order:1;flex:0 0 auto;align-self:center;position:relative;z-index:2;}
+    /* Center section: absolutely centered in header so title aligns with viewport center */
+    .xp-mfp-hdr-c{
+      position:absolute!important;left:50%!important;top:50%!important;
+      transform:translate(-50%,-50%)!important;
+      flex:none!important;width:auto!important;
+      display:flex!important;align-items:center!important;gap:8px!important;
+      justify-content:center!important;padding-top:0!important;z-index:1;
+    }
+    .xp-mfp-hdr-r{order:3;flex:0 0 auto;margin-left:0!important;display:flex!important;justify-content:flex-end;align-items:center;gap:0!important;position:relative;z-index:2;}
 
     .xp-mfp-hdr-title{min-width:0!important;font-size:12px!important;}
     .xp-mfp-nav{width:28px!important;height:28px!important;font-size:18px!important;}
@@ -61,7 +68,7 @@ const MFP_STYLES = `
     /* Subtle secondary action bar — light background, tertiary hierarchy */
     .xp-mfp-dual-bar{
       display:flex!important;align-items:center;
-      margin:0!important;padding:8px 14px!important;gap:10px!important;
+      margin:0!important;padding:11px 14px!important;gap:10px!important;
       border-radius:0!important;border:none!important;
       border-top:0.5px solid rgba(0,0,0,0.08)!important;
       background:var(--xp-bg)!important;

@@ -42,7 +42,7 @@ const MFP_STYLES = `
     }
     .xp-mfp-hdr-r{order:3;flex:0 0 auto;margin-left:0!important;display:flex!important;justify-content:flex-end;align-items:center;gap:0!important;position:relative;z-index:2;}
 
-    .xp-mfp-hdr-title{min-width:0!important;font-size:12px!important;}
+    .xp-mfp-hdr-title{min-width:0!important;font-size:12px!important;white-space:normal!important;}
     .xp-mfp-nav{width:28px!important;height:28px!important;font-size:18px!important;}
 
     /* Back button: transparent, no focus rectangle on tap */
@@ -71,7 +71,7 @@ const MFP_STYLES = `
       margin:0!important;padding:11px 14px!important;gap:10px!important;
       border-radius:0!important;border:none!important;
       border-top:0.5px solid rgba(0,0,0,0.08)!important;
-      background:var(--xp-bg)!important;
+      background:rgba(124,58,237,0.05)!important;
       box-shadow:none!important;
       flex-shrink:0!important;
     }
@@ -94,10 +94,10 @@ const MFP_STYLES = `
     .xp-mfp-dual-divider{display:none!important;}
     .xp-mfp-dual-icon{color:#7c3aed!important;}
 
-    /* Mobile dashboard header: title only — subtitle moves to content area */
+    /* Mobile dashboard header: title + month/year subtitle inside header */
     .xp-mfp-dash-main-title{display:none!important;}
     .xp-mfp-dash-mobile-title{display:inline!important;}
-    .xp-mfp-dash-mobile-sub{display:block!important;}
+    .xp-mfp-dash-mobile-sub{display:block!important;font-size:9.5px!important;font-weight:500!important;color:rgba(255,255,255,0.65)!important;margin-top:2px!important;line-height:1.2!important;white-space:nowrap;}
   }
 
   /* Desktop defaults */
@@ -114,7 +114,7 @@ const MFP_STYLES = `
   .xp-mfp-dual-icon{font-size:15px;line-height:1;margin-bottom:1px;}
   .xp-mfp-dual-divider{width:1px;background:rgba(124,58,237,0.20);flex-shrink:0;align-self:stretch;margin:10px 0;}
   .xp-mfp-dash-ctx{display:none;text-align:center;font-size:10.5px;font-weight:500;color:var(--xp-txt2,#64748b);padding:8px 0 2px;letter-spacing:0.01em;}
-  @media(max-width:640px){.xp-mfp-dash-ctx{display:block!important;}}
+  @media(max-width:640px){.xp-mfp-dash-ctx{display:none!important;}}
 
   .xp-mfp-back{
     display:inline-flex;align-items:center;gap:6px;
@@ -210,6 +210,33 @@ const MFP_STYLES = `
   @media(prefers-reduced-motion:reduce){
     .xp-mfp-dash-pill{transition:background 180ms ease,border-color 180ms ease!important;}
     .xp-mfp-dash-pill:hover,.xp-mfp-dash-pill:active{transform:none!important;}
+  }
+
+  /* Back-button final override — placed after all global rules so these !important values
+     win over the global .xp-mfp-hdr .xp-mfp-back:hover{background:rgba(...)!important}
+     that would otherwise override the earlier mobile block (same specificity, later position). */
+  @media(max-width:640px){
+    .xp-mfp-hdr .xp-mfp-back{
+      background:transparent!important;border:none!important;
+      box-shadow:none!important;outline:none!important;
+      transition:background 80ms ease!important;
+    }
+    .xp-mfp-hdr .xp-mfp-back:hover{
+      background:transparent!important;border:none!important;
+      box-shadow:none!important;transform:none!important;
+    }
+    .xp-mfp-hdr .xp-mfp-back:focus,.xp-mfp-hdr .xp-mfp-back:focus-visible{
+      outline:none!important;background:transparent!important;
+      box-shadow:none!important;border:none!important;
+    }
+    .xp-mfp-hdr .xp-mfp-back:focus:not(:focus-visible){
+      outline:none!important;background:transparent!important;
+      box-shadow:none!important;border:none!important;
+    }
+    .xp-mfp-hdr .xp-mfp-back:active{
+      background:rgba(255,255,255,0.12)!important;
+      border:none!important;box-shadow:none!important;
+    }
   }
 `
 
@@ -532,8 +559,9 @@ function MonthCalendarLarge({
                 </div>
               )}
 
-              {/* Base circle — shows date and today ring only when no emoji state is active */}
-              {!(rawHyper || rawMil || rawGoal) && (
+              {/* Base circle — always shows when clean mode is on (so toggling emojis never hides dates);
+                   in normal mode only shows when no emoji state is active (preserves status priority). */}
+              {(calendarClean || !(rawHyper || rawMil || rawGoal)) && (
                 <div className="absolute inset-[25%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-105 xp-cal-circle" style={{
                   zIndex: 1,
                   color: todayCell ? 'var(--xp-acc)' : cell.dow === 0 ? '#f97316' : isDark ? 'rgba(255,255,255,0.70)' : '#374151',
@@ -1315,6 +1343,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                     <>
                       <span className="xp-mfp-dash-main-title">{`${MONTHS[currentMonth]} ${APP_YEAR} · Monthly Dashboard`}</span>
                       <span className="xp-mfp-dash-mobile-title">Monthly Dashboard</span>
+                      <span className="xp-mfp-dash-mobile-sub">{MONTHS[currentMonth]} {APP_YEAR}</span>
                     </>
                   ) : `${MONTHS[currentMonth]} ${APP_YEAR}`}
                 </h1>
@@ -1665,7 +1694,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                 </button>
                 <div className="xp-mfp-dual-divider" />
                 <button className="xp-mfp-dual-right" onClick={() => { playTapSound(); openPanel() }}>
-                  <span className="xp-mfp-dual-icon">↗</span>
+                  <span className="xp-mfp-dual-icon" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ShareIcon /></span>
                   Share Progress
                 </button>
               </div>

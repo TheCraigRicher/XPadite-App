@@ -26,11 +26,11 @@ const MFP_STYLES = `
     .xp-mfp-overlay{bottom:56px!important;overflow:hidden!important;display:flex!important;flex-direction:column!important;padding:0!important;background:rgba(0,0,0,1)!important;}
     /* Wrap: fills overlay */
     .xp-mfp-wrap{flex:1!important;min-height:0!important;padding:0!important;display:flex!important;flex-direction:column!important;align-items:stretch!important;justify-content:flex-start!important;}
-    /* Modal box: fills all space; fully opaque background */
-    .xp-mfp-box{flex:1!important;height:auto!important;max-height:none!important;max-width:none!important;width:100%!important;border-radius:0!important;margin:0!important;}
+    /* Modal box: fills all space; background matches calendar surface for seamless fill */
+    .xp-mfp-box{flex:1!important;height:auto!important;max-height:none!important;max-width:none!important;width:100%!important;border-radius:0!important;margin:0!important;background:var(--xp-bg)!important;}
 
-    /* Mobile header: SINGLE ROW — ← | ‹ Month Year › | [toggle] */
-    .xp-mfp-hdr{display:flex!important;flex-wrap:nowrap!important;align-items:center;gap:0;padding:8px 10px!important;position:relative;}
+    /* Mobile header: SINGLE ROW — ← | ‹ Month Year › | [toggle]; slightly taller than minimum */
+    .xp-mfp-hdr{display:flex!important;flex-wrap:nowrap!important;align-items:center;gap:0;padding:12px 10px!important;position:relative;}
     .xp-mfp-hdr-l{order:1;flex:0 0 auto;align-self:center;}
     .xp-mfp-hdr-c{order:2;flex:1!important;width:auto!important;display:flex!important;align-items:center;gap:8px!important;justify-content:center!important;padding-top:0!important;}
     .xp-mfp-hdr-r{order:3;flex:0 0 auto;margin-left:0!important;display:flex!important;justify-content:flex-end;align-items:center;gap:0!important;}
@@ -38,30 +38,54 @@ const MFP_STYLES = `
     .xp-mfp-hdr-title{min-width:0!important;font-size:12px!important;}
     .xp-mfp-nav{width:28px!important;height:28px!important;font-size:18px!important;}
 
-    /* Back button: plain transparent — no capsule, no focus rectangle */
+    /* Back button: transparent, no focus rectangle on tap */
     .xp-mfp-hdr .xp-mfp-back{background:transparent!important;border:none!important;box-shadow:none!important;padding:6px 6px 6px 0!important;font-size:22px!important;line-height:1!important;border-radius:4px!important;-webkit-tap-highlight-color:transparent!important;}
     .xp-mfp-hdr .xp-mfp-back:hover{background:transparent!important;transform:none!important;box-shadow:none!important;}
     .xp-mfp-hdr .xp-mfp-back:focus{outline:none!important;background:transparent!important;box-shadow:none!important;}
+    .xp-mfp-hdr .xp-mfp-back:focus:not(:focus-visible){background:transparent!important;outline:none!important;box-shadow:none!important;}
     .xp-mfp-hdr .xp-mfp-back:active{background:rgba(255,255,255,0.12)!important;}
     .xp-back-txt{display:none;}
 
-    /* Remove dashboard pill from mobile header — moved to bottom dual bar */
+    /* Remove dashboard pill from mobile header */
     .xp-mfp-hdr .xp-mfp-dash-pill{display:none!important;}
 
-    /* Calendar content padding */
+    /* Calendar: slightly increased weekday-bar height + week-row spacing */
     .xp-mfp-cal-body{padding:10px 6px!important;}
-    .xp-mfp-cal-grid{row-gap:18px!important;}
+    .xp-mfp-cal-dh{padding-top:9px!important;padding-bottom:9px!important;}
+    .xp-mfp-cal-grid{row-gap:24px!important;}
     .xp-cal-circle{inset:20%!important;}
 
     /* Mobile: hide desktop share button, show dual bar */
     .xp-mfp-share-desktop{display:none!important;}
+
+    /* Subtle secondary action bar — light background, tertiary hierarchy */
     .xp-mfp-dual-bar{
-      display:flex!important;
-      margin:0!important;border-radius:0!important;
-      border:none!important;border-top:1px solid rgba(124,58,237,0.18)!important;
-      box-shadow:0 -2px 10px rgba(124,58,237,0.07)!important;
+      display:flex!important;align-items:center;
+      margin:0!important;padding:8px 14px!important;gap:10px!important;
+      border-radius:0!important;border:none!important;
+      border-top:0.5px solid rgba(0,0,0,0.08)!important;
+      background:var(--xp-bg)!important;
+      box-shadow:none!important;
       flex-shrink:0!important;
     }
+    .xp-mfp-dual-left,.xp-mfp-dual-right{
+      flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+      padding:7px 8px!important;
+      background:rgba(124,58,237,0.07)!important;
+      border:1px solid rgba(124,58,237,0.20)!important;
+      border-radius:12px!important;cursor:pointer;
+      font-size:11px!important;font-weight:600!important;color:#7c3aed!important;line-height:1.3;
+      box-shadow:0 1px 4px rgba(124,58,237,0.08)!important;
+      -webkit-tap-highlight-color:transparent;
+      transition:transform 120ms ease,background 120ms ease!important;
+    }
+    .xp-mfp-dual-left:active,.xp-mfp-dual-right:active{
+      transform:scale(0.97)!important;
+      background:rgba(124,58,237,0.14)!important;
+      transition:transform 80ms ease,background 80ms ease!important;
+    }
+    .xp-mfp-dual-divider{display:none!important;}
+    .xp-mfp-dual-icon{color:#7c3aed!important;}
 
     /* Mobile dashboard header: title only — subtitle moves to content area */
     .xp-mfp-dash-main-title{display:none!important;}
@@ -73,21 +97,12 @@ const MFP_STYLES = `
   .xp-mfp-dash-mobile-title{display:none;}
   .xp-mfp-dash-mobile-sub{display:none;}
   .xp-mfp-share-desktop{display:flex;}
-  .xp-mfp-dual-bar{
-    display:none;flex-shrink:0;
-    background:var(--xp-bg,#ffffff);
-  }
+  .xp-mfp-dual-bar{display:none;flex-shrink:0;}
   .xp-mfp-dual-left,.xp-mfp-dual-right{
     flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
     padding:13px 8px;background:transparent;border:none;cursor:pointer;
     font-size:11px;font-weight:600;color:#7c3aed;line-height:1.3;
-    transition:transform 120ms ease,background 120ms ease;
     -webkit-tap-highlight-color:transparent;
-  }
-  .xp-mfp-dual-left:active,.xp-mfp-dual-right:active{
-    transform:scale(0.97);
-    background:rgba(124,58,237,0.09);
-    transition:transform 80ms ease,background 80ms ease;
   }
   .xp-mfp-dual-icon{font-size:15px;line-height:1;margin-bottom:1px;}
   .xp-mfp-dual-divider{width:1px;background:rgba(124,58,237,0.20);flex-shrink:0;align-self:stretch;margin:10px 0;}
@@ -409,7 +424,7 @@ function MonthCalendarLarge({
       {/* Day-of-week headers — segmented translucent capsule */}
       <div className="grid grid-cols-7 mb-3" style={{ borderRadius: 10, overflow: 'hidden', background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)', border: isDark ? '0.5px solid rgba(255,255,255,0.09)' : '0.5px solid rgba(0,0,0,0.08)' }}>
         {DAY_HEADERS.map((d, i) => (
-          <div key={d} className="text-center py-2" style={{ fontSize: 11, fontWeight: 600, color: i === 0 ? '#f97316' : 'var(--xp-txt3)', letterSpacing: '0.02em', position: 'relative' }}>
+          <div key={d} className="text-center py-2 xp-mfp-cal-dh" style={{ fontSize: 11, fontWeight: 600, color: i === 0 ? '#f97316' : 'var(--xp-txt3)', letterSpacing: '0.02em', position: 'relative' }}>
             {d}
             {i < 6 && (
               <div style={{ position: 'absolute', right: 0, top: '22%', bottom: '22%', width: '0.5px', background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.09)', pointerEvents: 'none' }} />
@@ -464,7 +479,7 @@ function MonthCalendarLarge({
                 <div className="absolute inset-[25%] xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none', overflow: 'visible' }}>
                   <div className="absolute inset-0 flex items-center justify-center transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
                     <span style={{ position: 'relative', display: 'inline-block', lineHeight: 1 }}>
-                      <span className="xp-fire-emoji" style={{ fontSize: 40, lineHeight: 1, userSelect: 'none', display: 'block' }}>🔥</span>
+                      <span className="xp-fire-emoji" style={{ fontSize: 40, lineHeight: 1, userSelect: 'none', display: 'block', transform: 'translateY(-4px)' }}>🔥</span>
                       <span className="xp-fire-date" style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
                     </span>
                   </div>
@@ -478,7 +493,7 @@ function MonthCalendarLarge({
                     <span style={{ position: 'relative', display: 'inline-block', lineHeight: 1 }}>
                       <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 30, color: 'rgba(167,139,250,0.20)', filter: 'drop-shadow(0 0 6px rgba(167,139,250,0.55))', lineHeight: 1, userSelect: 'none', zIndex: 0, pointerEvents: 'none' }}>★</span>
                       <span style={{ fontSize: 36, lineHeight: 1, userSelect: 'none', display: 'block', position: 'relative', zIndex: 1 }}>🏆</span>
-                      <span style={{ position: 'absolute', top: '42%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
+                      <span style={{ position: 'absolute', top: '26%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 12, fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 6px rgba(255,255,255,1)', zIndex: 3, pointerEvents: 'none' }}>{cell.day}</span>
                     </span>
                   </div>
                 </div>
@@ -510,16 +525,17 @@ function MonthCalendarLarge({
                 </div>
               )}
 
-              {/* Base circle — always visible; shows date only when no emoji is active (ring still shows for today) */}
-              <div className="absolute inset-[25%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-105 xp-cal-circle" style={{
-                zIndex: 1,
-                color: todayCell ? 'var(--xp-acc)' : cell.dow === 0 ? '#f97316' : isDark ? 'rgba(255,255,255,0.70)' : '#374151',
-                fontSize: 14,
-                ...(todayCell && !rawHyper && !rawMil && !rawGoal ? { background: 'rgba(124,58,237,0.08)', outline: '2px solid var(--xp-acc)', outlineOffset: '-1px' } : {}),
-                ...(todayCell && (rawHyper || rawMil || rawGoal) ? { outline: '2px solid var(--xp-acc)', outlineOffset: '-1px', background: 'transparent' } : {}),
-              }}>
-                {!(rawHyper || rawMil || rawGoal) && cell.day}
-              </div>
+              {/* Base circle — shows date and today ring only when no emoji state is active */}
+              {!(rawHyper || rawMil || rawGoal) && (
+                <div className="absolute inset-[25%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-105 xp-cal-circle" style={{
+                  zIndex: 1,
+                  color: todayCell ? 'var(--xp-acc)' : cell.dow === 0 ? '#f97316' : isDark ? 'rgba(255,255,255,0.70)' : '#374151',
+                  fontSize: 14,
+                  ...(todayCell ? { background: 'rgba(124,58,237,0.08)', outline: '2px solid var(--xp-acc)', outlineOffset: '-1px' } : {}),
+                }}>
+                  {cell.day}
+                </div>
+              )}
             </div>
           )
         })}
@@ -938,6 +954,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
   const [view, setView]               = useState<'calendar' | 'dashboard'>('calendar')
   const [currentMonth, setCurrentMonth] = useState(month)
   const [animType, setAnimType]        = useState<'fade' | 'right' | 'left'>('fade')
+  const backBtnRef = useRef<HTMLButtonElement>(null)
 
   // Monthly Achievement fill-bar animation
   const achRef         = useRef<HTMLDivElement>(null)
@@ -985,6 +1002,15 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = prev }
   }, [])
+
+  // Back button focus fix: when returning from dashboard → calendar, the back button
+  // retains focus from the prior tap. Blur it after the view settles.
+  useEffect(() => {
+    if (view === 'calendar') {
+      const t = setTimeout(() => backBtnRef.current?.blur(), 50)
+      return () => clearTimeout(t)
+    }
+  }, [view])
 
   // Share panel Escape — intercepts before modal listener via capture phase
   useEffect(() => {
@@ -1260,7 +1286,12 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
             >
               {/* Left: Back */}
               <div className="xp-mfp-hdr-l">
-                <button onClick={view === 'dashboard' ? () => { setAnimType('fade'); setView('calendar') } : onClose} className="xp-mfp-back"><span className="xp-back-arrow">←</span><span className="xp-back-txt"> Back</span></button>
+                <button
+                  ref={backBtnRef}
+                  onPointerUp={() => setTimeout(() => backBtnRef.current?.blur(), 0)}
+                  onClick={view === 'dashboard' ? () => { setAnimType('fade'); setView('calendar') } : onClose}
+                  className="xp-mfp-back"
+                ><span className="xp-back-arrow">←</span><span className="xp-back-txt"> Back</span></button>
               </div>
 
               {/* Center: ‹ Month Year [· Monthly Dashboard] › */}
@@ -1271,7 +1302,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                   className="xp-mfp-nav"
                   style={navBtnStyle}
                   title="Previous month"
-                ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(-2px)' }}>‹</span></button>
+                ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(1px)' }}>‹</span></button>
                 <h1 className="xp-mfp-hdr-title" style={{ fontSize: 13, fontWeight: 700, color: 'white', textAlign: 'center', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)', margin: 0 }}>
                   {view === 'dashboard' ? (
                     <>
@@ -1286,7 +1317,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPag
                   className="xp-mfp-nav"
                   style={navBtnStyle}
                   title="Next month"
-                ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(-2px)' }}>›</span></button>
+                ><span style={{ display: 'block', lineHeight: 1, transform: 'translateY(1px)' }}>›</span></button>
               </div>
 
               {/* Right: Calendar toggle + Dashboard pill */}

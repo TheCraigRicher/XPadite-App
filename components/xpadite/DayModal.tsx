@@ -6,6 +6,7 @@ import { useApp, EMPTY_DAY } from './AppContext'
 import type { Task, TaskSession, Activity, TaskAttachment, DayData } from './types'
 import { formatMs, formatHMS, formatTime, formatTime12, isProductiveActivity, APP_YEAR } from './utils'
 import { ReminderModal } from './ReminderModal'
+import { TransferTaskModal } from './TransferTaskModal'
 import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
 import { useLockBodyScroll } from './useLockBodyScroll'
 import dynamic from 'next/dynamic'
@@ -588,7 +589,9 @@ interface TaskMenuProps {
   onCreateSubTask: () => void
   onChooseColor: () => void
   onTogglePriority: () => void
+  onTransfer: () => void
   pasteEnabled: boolean
+  transferDisabled: boolean
   isChild: boolean
   isPriority: boolean
   menuAnchor: DOMRect
@@ -596,7 +599,7 @@ interface TaskMenuProps {
   onClose: () => void
 }
 
-function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onChooseColor, onTogglePriority, pasteEnabled, isChild, isPriority, onClose, menuAnchor, isDark }: TaskMenuProps) {
+function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onChooseColor, onTogglePriority, onTransfer, pasteEnabled, transferDisabled, isChild, isPriority, onClose, menuAnchor, isDark }: TaskMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     function onOut(e: PointerEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
@@ -612,6 +615,7 @@ function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, 
     { icon: '📄', label: 'Duplicate Task',   action: onDuplicate, sep: true },
     { icon: '📋', label: 'Copy Task',        action: onCopy        },
     { icon: '📌', label: 'Paste Task',       action: onPaste, disabled: !pasteEnabled },
+    { icon: '📅', label: 'Transfer Task',    action: onTransfer, disabled: transferDisabled },
     ...(!isChild ? [{ icon: '➕', label: 'Create Sub-Task', action: onCreateSubTask }] as MenuItem[] : []),
     { icon: '🎨', label: 'Choose Task Color', action: onChooseColor, sep: true },
     { icon: '⚡', label: isPriority ? 'Remove Priority' : 'Mark as Priority', action: onTogglePriority },
@@ -740,6 +744,9 @@ interface TaskRowProps {
   // Color + priority
   onChooseColor: (color: string) => void
   onTogglePriority: () => void
+  // Transfer (move/copy to another date)
+  onTransfer: () => void
+  transferDisabled: boolean
 }
 
 function TaskRow({
@@ -754,6 +761,7 @@ function TaskRow({
   subTaskCount, subTaskDoneCount,
   onCopy, onPaste, onCreateSubTask, pasteEnabled,
   onChooseColor, onTogglePriority,
+  onTransfer, transferDisabled,
 }: TaskRowProps) {
   const { activities, reminders, isDark, setToast } = useApp()
   const attachments = task.attachments ?? []
@@ -1066,7 +1074,9 @@ function TaskRow({
                 onCreateSubTask={onCreateSubTask}
                 onChooseColor={() => { setMenuOpen(false); setColorPickerOpen(true) }}
                 onTogglePriority={() => { onTogglePriority(); setMenuOpen(false) }}
+                onTransfer={onTransfer}
                 pasteEnabled={pasteEnabled}
+                transferDisabled={transferDisabled}
                 isChild={isChild}
                 isPriority={!!task.isPriority}
                 onClose={() => setMenuOpen(false)}
@@ -1740,6 +1750,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   const [dragItemId,       setDragItemId]        = useState<string | null>(null)
   const [showConfetti,     setShowConfetti]      = useState(false)
   const [reminderTaskId,   setReminderTaskId]    = useState<string | null>(null)
+  const [transferTaskId,   setTransferTaskId]    = useState<string | null>(null)
   const [reminderSavedKey, setReminderSavedKey]  = useState<Record<string, number>>({})
   const [expandedTaskId,   setExpandedTaskId]    = useState<string | null>(null)
   const [dirtyNotesMap,    setDirtyNotesMap]     = useState<Record<string, string>>({})
@@ -2307,6 +2318,12 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                     onCopy: () => copyTask(t.id), onPaste: pasteTask,
                     onCreateSubTask: () => createSubTask(t.id),
                     pasteEnabled: !!taskClipboard,
+                    onTransfer: () => setTransferTaskId(t.id),
+                    transferDisabled: (() => {
+                      const childIds = dayData.tasks.filter(c => c.parentTaskId === t.id).map(c => c.id)
+                      const familyIds = new Set([t.id, ...childIds])
+                      return !!activeTaskTimer && activeTaskTimer.dateKey === dateKey && familyIds.has(activeTaskTimer.taskId)
+                    })(),
                     isChild, childIndex: childIdx,
                     onChooseColor: (color: string) => setTaskColor(t.id, color),
                     onTogglePriority: () => toggleTaskPriority(t.id),
@@ -2554,6 +2571,13 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
         const existing     = reminders.find(r => r.taskId === reminderTaskId && r.dateKey === dateKey && r.isActive) ?? null
         return reminderTask ? (
           <ReminderModal taskId={reminderTaskId} dateKey={dateKey} taskText={reminderTask.text} existingReminder={existing} onClose={() => setReminderTaskId(null)} onSaved={() => setReminderSavedKey(prev => ({ ...prev, [reminderTaskId]: (prev[reminderTaskId] ?? 0) + 1 }))} />
+        ) : null
+      })()}
+
+      {transferTaskId && (() => {
+        const transferTask = dayData.tasks.find(t => t.id === transferTaskId)
+        return transferTask ? (
+          <TransferTaskModal task={transferTask} dateKey={dateKey} onClose={() => setTransferTaskId(null)} />
         ) : null
       })()}
     </div>

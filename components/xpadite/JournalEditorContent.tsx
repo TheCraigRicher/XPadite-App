@@ -2246,55 +2246,60 @@ export function JournalEditorContent({
             }}
           >← Calendar</button>
 
-          {/* Center: circular prev/next flanking the date — absolutely centered regardless of side controls */}
-          <div style={{
-            position: 'absolute', left: 0, right: 0,
-            display: 'flex', justifyContent: 'center', alignItems: 'center',
-            pointerEvents: 'none',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, pointerEvents: 'auto' }}>
-              <button
-                onClick={() => guardedNavigate(() => onNavigateDay(-1))}
-                title="Previous day"
-                style={{
-                  width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.28)',
-                  color: '#fff', cursor: 'pointer', padding: 0,
-                  transition: 'background 120ms, transform 80ms',
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.24)' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.14)' }}
-                onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.92)' }}
-                onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polyline points="15 18 9 12 15 6" />
-                </svg>
-              </button>
-              <span style={{ color: '#fff', fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
-                {fmtEditorDate(dateKey)}
-              </span>
-              <button
-                onClick={() => guardedNavigate(() => onNavigateDay(1))}
-                title="Next day"
-                style={{
-                  width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.28)',
-                  color: '#fff', cursor: 'pointer', padding: 0,
-                  transition: 'background 120ms, transform 80ms',
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.24)' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.14)' }}
-                onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.92)' }}
-                onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-              </button>
-            </div>
+          {/*
+           * Center group: the date is independently centered on the header,
+           * and each triangle is pinned at a FIXED distance (132px) from that
+           * same center point — never from the date's own rendered width.
+           * Changing weekday/month/day/year length never moves a triangle.
+           */}
+          <div style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, pointerEvents: 'none' }}>
+            <span style={{
+              position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
+              textAlign: 'center',
+              color: '#fff', fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap',
+            }}>
+              {fmtEditorDate(dateKey)}
+            </span>
+            <button
+              onClick={() => guardedNavigate(() => onNavigateDay(-1))}
+              title="Previous day"
+              style={{
+                position: 'absolute', left: 'calc(50% - 132px)', top: '50%', transform: 'translateY(-50%)',
+                width: 32, height: 32, flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'transparent', border: 'none',
+                color: '#fff', cursor: 'pointer', padding: 0, pointerEvents: 'auto',
+                transition: 'opacity 120ms, transform 80ms',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.7' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
+              onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-50%) scale(0.88)' }}
+              onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-50%) scale(1)' }}
+            >
+              <svg width="9" height="12" viewBox="0 0 9 12" fill="#fff" aria-hidden="true">
+                <path d="M9 0 L0 6 L9 12 Z" />
+              </svg>
+            </button>
+            <button
+              onClick={() => guardedNavigate(() => onNavigateDay(1))}
+              title="Next day"
+              style={{
+                position: 'absolute', right: 'calc(50% - 132px)', top: '50%', transform: 'translateY(-50%)',
+                width: 32, height: 32, flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'transparent', border: 'none',
+                color: '#fff', cursor: 'pointer', padding: 0, pointerEvents: 'auto',
+                transition: 'opacity 120ms, transform 80ms',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.7' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
+              onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-50%) scale(0.88)' }}
+              onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-50%) scale(1)' }}
+            >
+              <svg width="9" height="12" viewBox="0 0 9 12" fill="#fff" aria-hidden="true">
+                <path d="M0 0 L9 6 L0 12 Z" />
+              </svg>
+            </button>
           </div>
 
           {/* Right: today + close */}
@@ -2302,38 +2307,13 @@ export function JournalEditorContent({
           {!isEditorOnToday && (
             <button
               onClick={() => guardedNavigate(onNavigateToday)}
-              className="hidden sm:block"
+              title="Go to today"
               style={{
                 padding: '3px 8px', borderRadius: 20, border: '0.5px solid rgba(255,255,255,0.22)',
                 background: 'transparent', color: 'rgba(255,255,255,0.60)',
                 fontSize: 11, cursor: 'pointer', flexShrink: 0,
               }}
             >Today</button>
-          )}
-          {/* Mobile-only vertical T-O-D-A-Y capsule — absolutely positioned at far right of header */}
-          {!isEditorOnToday && (
-            <div
-              className="sm:hidden"
-              style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)' }}
-            >
-              <button
-                onClick={() => guardedNavigate(onNavigateToday)}
-                title="Go to today"
-                style={{
-                  display: 'flex', flexDirection: 'column', alignItems: 'center',
-                  padding: '3px 4px', gap: 1,
-                  borderRadius: 8,
-                  border: '0.5px solid rgba(255,255,255,0.28)',
-                  background: 'rgba(255,255,255,0.12)',
-                  cursor: 'pointer',
-                  color: 'rgba(255,255,255,0.85)',
-                }}
-              >
-                {['T','O','D','A','Y'].map(ch => (
-                  <span key={ch} style={{ fontSize: 8, fontWeight: 600, lineHeight: '8px', display: 'block' }}>{ch}</span>
-                ))}
-              </button>
-            </div>
           )}
           {/* Close — hidden on mobile (bottom nav handles close) */}
           <button

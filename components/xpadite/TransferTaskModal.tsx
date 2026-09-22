@@ -55,12 +55,17 @@ export function TransferTaskModal({ task, dateKey, onClose }: TransferTaskModalP
   const [monthCursor, setMonthCursor] = useState(() => new Date(originDate.getFullYear(), originDate.getMonth(), 1))
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [mode, setMode] = useState<TransferMode>(task.done ? 'copy' : 'move')
+  const [showCompletedDialog, setShowCompletedDialog] = useState(false)
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      if (showCompletedDialog) { setShowCompletedDialog(false); return }
+      onClose()
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, showCompletedDialog])
 
   const children = useMemo(
     () => (calData[dateKey]?.tasks ?? []).filter(t => t.parentTaskId === task.id),
@@ -194,35 +199,38 @@ export function TransferTaskModal({ task, dateKey, onClose }: TransferTaskModalP
             </p>
           )}
 
-          {/* Mode selector */}
+          {/* Mode selector — purple = selected, white = available, gray = disabled */}
           <div className="flex flex-col gap-2 mb-3.5">
             <button
               onClick={() => setMode('copy')}
-              className="text-left"
+              className="text-left transition-colors duration-150"
               style={{
                 borderRadius: 10, padding: '9px 11px',
                 border: `1.5px solid ${mode === 'copy' ? '#7c3aed' : 'var(--xp-bdr2)'}`,
-                background: mode === 'copy' ? 'rgba(124,58,237,0.08)' : 'transparent',
+                background: mode === 'copy' ? 'linear-gradient(135deg, #7c3aed, #6d28d9)' : 'var(--xp-card)',
               }}
             >
-              <span className="text-[12.5px] font-semibold" style={{ color: mode === 'copy' ? '#7c3aed' : 'var(--xp-txt)' }}>📋 Copy to Date</span>
-              <p className="text-[10.5px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>Creates a copy on another date. The original task stays here.</p>
+              <span className="text-[12.5px] font-semibold" style={{ color: mode === 'copy' ? '#ffffff' : 'var(--xp-txt)' }}>📋 Copy to Date</span>
+              <p className="text-[10.5px] mt-0.5" style={{ color: mode === 'copy' ? 'rgba(255,255,255,0.80)' : 'var(--xp-txt3)' }}>
+                Creates a copy on another date. The original task stays here.
+              </p>
             </button>
 
             <button
-              onClick={() => { if (!task.done) setMode('move') }}
-              disabled={task.done}
-              className="text-left"
+              onClick={() => { if (task.done) setShowCompletedDialog(true); else setMode('move') }}
+              className="text-left transition-colors duration-150"
               style={{
                 borderRadius: 10, padding: '9px 11px',
-                border: `1.5px solid ${mode === 'move' ? '#7c3aed' : 'var(--xp-bdr2)'}`,
-                background: mode === 'move' ? 'rgba(124,58,237,0.08)' : 'transparent',
-                opacity: task.done ? 0.5 : 1,
+                border: `1.5px solid ${task.done ? 'var(--xp-bdr)' : mode === 'move' ? '#7c3aed' : 'var(--xp-bdr2)'}`,
+                background: task.done ? 'var(--xp-bg3)' : mode === 'move' ? 'linear-gradient(135deg, #7c3aed, #6d28d9)' : 'var(--xp-card)',
+                opacity: task.done ? 0.55 : 1,
                 cursor: task.done ? 'default' : 'pointer',
               }}
             >
-              <span className="text-[12.5px] font-semibold" style={{ color: mode === 'move' ? '#7c3aed' : 'var(--xp-txt)' }}>➡️ Move to Date</span>
-              <p className="text-[10.5px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>
+              <span className="text-[12.5px] font-semibold" style={{ color: task.done ? 'var(--xp-txt3)' : mode === 'move' ? '#ffffff' : 'var(--xp-txt)' }}>
+                ➡️ Move to Date
+              </span>
+              <p className="text-[10.5px] mt-0.5" style={{ color: task.done ? 'var(--xp-txt3)' : mode === 'move' ? 'rgba(255,255,255,0.80)' : 'var(--xp-txt3)' }}>
                 {task.done
                   ? 'Completed tasks cannot be moved because their completion history belongs to the original date.'
                   : 'Moves this task to another date. The original task is removed from this day’s task list.'}
@@ -318,6 +326,44 @@ export function TransferTaskModal({ task, dateKey, onClose }: TransferTaskModalP
           </div>
         </div>
       </div>
+
+      {showCompletedDialog && (
+        <div
+          className="fixed inset-0 z-[210] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.55)' }}
+          onClick={e => { e.stopPropagation(); setShowCompletedDialog(false) }}
+        >
+          <div
+            className="w-full max-w-[300px] rounded-2xl p-4"
+            style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.32)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-2 mb-1.5">
+              <h4 className="text-[13.5px] font-semibold" style={{ color: 'var(--xp-txt)' }}>Completed Task</h4>
+              <button
+                onClick={() => setShowCompletedDialog(false)}
+                aria-label="Close"
+                className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+                style={{ background: 'var(--xp-bg3)', color: 'var(--xp-txt2)' }}
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-[11.5px] leading-relaxed mb-3.5" style={{ color: 'var(--xp-txt3)' }}>
+              This task has already been completed, so it can&apos;t be moved to another date because its completion history belongs to the original date.
+              <br /><br />
+              You can copy it to another date instead.
+            </p>
+            <button
+              onClick={() => setShowCompletedDialog(false)}
+              className="w-full text-[12.5px] font-semibold text-white transition-opacity hover:opacity-90"
+              style={{ padding: '9px 0', borderRadius: 10, background: '#7c3aed' }}
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { useApp } from './AppContext'
 import { useLockBodyScroll } from './useLockBodyScroll'
 import { COLOR_PALETTE } from './utils'
+import { ColorPickerModal } from './ColorPickerModal'
 import type { Activity } from './types'
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -188,6 +189,8 @@ function ActivityForm({ initial, onSave, onCancel, saveLabel }: ActivityFormProp
   const [color, setColor] = useState(initial?.color ?? COLOR_PALETTE[0])
   const [emoji, setEmoji] = useState(initial?.emoji ?? '')
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [showColorPicker, setShowColorPicker] = useState(false)
+  const isCustomColor = !(COLOR_PALETTE as readonly string[]).includes(color)
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -266,8 +269,28 @@ function ActivityForm({ initial, onSave, onCancel, saveLabel }: ActivityFormProp
               }}
             />
           ))}
+          {/* Custom color — shows the exact custom color when one is active, otherwise a neutral rainbow swatch */}
+          <button
+            type="button"
+            onClick={() => setShowColorPicker(true)}
+            title="Custom color"
+            className="w-6 h-6 rounded-full transition-all flex-shrink-0"
+            style={{
+              background: isCustomColor ? color : 'conic-gradient(from 0deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)',
+              transform: isCustomColor ? 'scale(1.2)' : 'scale(1)',
+              boxShadow: isCustomColor ? `0 0 0 2px var(--xp-card), 0 0 0 3.5px ${color}` : 'none',
+            }}
+          />
         </div>
       </div>
+
+      {showColorPicker && (
+        <ColorPickerModal
+          initialColor={color}
+          onCancel={() => setShowColorPicker(false)}
+          onApply={hex => { setColor(hex); setShowColorPicker(false) }}
+        />
+      )}
 
       {/* Buttons */}
       <div className="flex gap-2 pt-1">

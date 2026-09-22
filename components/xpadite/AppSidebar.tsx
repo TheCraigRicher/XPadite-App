@@ -74,13 +74,13 @@ const MENU_ITEMS: MenuItem[] = [
   { icon: '❓', label: 'Help & Feedback',       action: 'help'                                                                       },
 ]
 
-// Mobile-only order (< sm). Tablet/desktop keep MENU_ITEMS as-is.
-const MOBILE_ORDER: MenuAction[] = [
+// Finalized order, labels and icons — used at every screen size.
+const FINAL_ORDER: MenuAction[] = [
   'profile', 'tasks', 'activities', 'journal-notes', 'analytics', 'notifications', 'qotd',
   'ai-coach', 'motivate', 'sync-calendar', 'gallery', 'meetings', 'settings', 'tutorials', 'help',
 ]
 
-const MOBILE_MENU_ITEMS: MenuItem[] = MOBILE_ORDER.map(action => {
+const FINAL_MENU_ITEMS: MenuItem[] = FINAL_ORDER.map(action => {
   const item = MENU_ITEMS.find(m => m.action === action)!
   if (action === 'tasks') return { ...item, icon: <TaskCheckIcon /> }
   if (action === 'qotd')  return { ...item, label: 'Quote of the Day' }
@@ -368,8 +368,7 @@ export function AppSidebar({
 
         {/* Nav items — Sign Out is the final normal scrollable item */}
         <nav className="flex-1 py-1 overflow-y-auto" style={{ overscrollBehavior: 'contain' }}>
-          <div className="sm:hidden">{MOBILE_MENU_ITEMS.map(renderItem)}</div>
-          <div className="hidden sm:block">{MENU_ITEMS.map(renderItem)}</div>
+          {FINAL_MENU_ITEMS.map(renderItem)}
 
           {/* Sign Out — last item in the normal scroll flow, NOT pinned/fixed */}
           <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.06)', margin: '4px 0' }} />

@@ -16,6 +16,7 @@ import { AnalyticsPage } from './AnalyticsPage'
 import { AICoachPage } from './AICoachPage'
 import { JournalWorkspaceModal } from './JournalWorkspaceModal'
 import { NotificationsModal } from './NotificationsModal'
+import { SyncModal } from './SyncModal'
 import { GalleryModal } from './GalleryModal'
 import { SettingsModal } from './SettingsModal'
 import { MobileBottomNav } from './MobileBottomNav'
@@ -674,6 +675,7 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [activityManagerOpen, setActivityManagerOpen]   = useState(false)
   const [journalNotesOpen, setJournalNotesOpen]         = useState(false)
   const [notificationsOpen, setNotificationsOpen]       = useState(false)
+  const [syncOpen, setSyncOpen]                         = useState(false)
 
   // ── Mobile tab ────────────────────────────────────────────────────────────────
   const [mobileTab, setMobileTab] = useState<MobileTab>('calendar')
@@ -909,6 +911,7 @@ function ThemedApp(_props: XpaditeAppProps) {
           }
         }}
         onNotifications={() => setNotificationsOpen(true)}
+        onSync={() => setSyncOpen(true)}
       />
 
       {/* QOTD banner */}
@@ -1144,6 +1147,8 @@ function ThemedApp(_props: XpaditeAppProps) {
       {activityManagerOpen && <ActivityManagerModal onClose={() => setActivityManagerOpen(false)} />}
 
       {journalNotesOpen && <JournalWorkspaceModal onClose={() => setJournalNotesOpen(false)} />}
+
+      {syncOpen && <SyncModal onClose={() => setSyncOpen(false)} />}
 
       {notificationsOpen && (
         <NotificationsModal

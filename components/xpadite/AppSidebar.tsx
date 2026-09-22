@@ -22,6 +22,13 @@ const LogoutIcon = () => (
   </svg>
 )
 
+const TaskCheckIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" className="w-5 h-5 inline-block align-middle" style={{ transform: 'translateY(-1px)' }}>
+    <rect x="3" y="3" width="18" height="18" rx="4" strokeLinecap="round" strokeLinejoin="round" />
+    <polyline points="8 12.5 11 15.5 16.5 9" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
 // ─── Menu structure ───────────────────────────────────────────────────────────
 
 type MenuAction =
@@ -42,7 +49,7 @@ type MenuAction =
   | 'help'
 
 interface MenuItem {
-  icon: string
+  icon: React.ReactNode
   label: string
   action: MenuAction
   dividerBefore?: boolean
@@ -67,6 +74,20 @@ const MENU_ITEMS: MenuItem[] = [
   { icon: '❓', label: 'Help & Feedback',       action: 'help'                                                                       },
 ]
 
+// Mobile-only order (< sm). Tablet/desktop keep MENU_ITEMS as-is.
+const MOBILE_ORDER: MenuAction[] = [
+  'profile', 'tasks', 'activities', 'journal-notes', 'analytics', 'notifications', 'qotd',
+  'ai-coach', 'motivate', 'sync-calendar', 'gallery', 'meetings', 'settings', 'tutorials', 'help',
+]
+
+const MOBILE_MENU_ITEMS: MenuItem[] = MOBILE_ORDER.map(action => {
+  const item = MENU_ITEMS.find(m => m.action === action)!
+  if (action === 'tasks') return { ...item, icon: <TaskCheckIcon /> }
+  if (action === 'qotd')  return { ...item, label: 'Quote of the Day' }
+  if (action === 'sync-calendar') return { ...item, label: 'Sync' }
+  return item
+})
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface AppSidebarProps {
@@ -81,6 +102,7 @@ interface AppSidebarProps {
   onJournalNotes?: () => void
   onNotifications?: () => void
   onTasks?: () => void
+  onSync?: () => void
 }
 
 export function AppSidebar({
@@ -95,6 +117,7 @@ export function AppSidebar({
   onJournalNotes,
   onNotifications,
   onTasks,
+  onSync,
 }: AppSidebarProps) {
   const { sidebarOpen, setSidebarOpen } = useApp()
   const router = useRouter()
@@ -248,13 +271,61 @@ export function AppSidebar({
       case 'ai-coach':       onAICoach?.(); break
       case 'journal-notes':  onJournalNotes?.(); break
       case 'notifications':  onNotifications?.(); break
+      case 'sync-calendar':  onSync?.(); break
       // Stubs — close sidebar only
-      case 'sync-calendar':
       case 'meetings':
       case 'tutorials':
       case 'help':
       default: break
     }
+  }
+
+  function renderItem(item: MenuItem) {
+    return (
+      <div key={item.label}>
+        {item.dividerBefore && (
+          <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.06)', margin: '4px 0' }} />
+        )}
+        {item.href ? (
+          <a
+            href={item.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setSidebarOpen(false)}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors duration-150 hover:bg-white/7"
+            style={{ color: '#cbd5e1', textDecoration: 'none', display: 'flex' }}
+          >
+            <span className="text-base w-5 text-center flex-shrink-0">{item.icon}</span>
+            {item.label}
+          </a>
+        ) : (
+          <button
+            onClick={() => handleAction(item.action)}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors duration-150 hover:bg-white/7"
+            style={{ color: '#cbd5e1' }}
+          >
+            {item.action === 'profile' && avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt=""
+                className="w-5 h-5 rounded-full flex-shrink-0"
+                style={{ objectFit: 'cover' }}
+              />
+            ) : item.action === 'profile' && avatarInitial ? (
+              <span
+                className="w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold"
+                style={{ background: 'linear-gradient(135deg, #7c3aed, #a78bfa)', fontSize: 9 }}
+              >
+                {avatarInitial}
+              </span>
+            ) : (
+              <span className="text-base w-5 text-center flex-shrink-0">{item.icon}</span>
+            )}
+            {item.label}
+          </button>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -297,51 +368,8 @@ export function AppSidebar({
 
         {/* Nav items — Sign Out is the final normal scrollable item */}
         <nav className="flex-1 py-1 overflow-y-auto" style={{ overscrollBehavior: 'contain' }}>
-          {MENU_ITEMS.map(item => (
-            <div key={item.label}>
-              {item.dividerBefore && (
-                <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.06)', margin: '4px 0' }} />
-              )}
-              {item.href ? (
-                <a
-                  href={item.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => setSidebarOpen(false)}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors duration-150 hover:bg-white/7"
-                  style={{ color: '#cbd5e1', textDecoration: 'none', display: 'flex' }}
-                >
-                  <span className="text-base w-5 text-center flex-shrink-0">{item.icon}</span>
-                  {item.label}
-                </a>
-              ) : (
-                <button
-                  onClick={() => handleAction(item.action)}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-colors duration-150 hover:bg-white/7"
-                  style={{ color: '#cbd5e1' }}
-                >
-                  {item.action === 'profile' && avatarUrl ? (
-                    <img
-                      src={avatarUrl}
-                      alt=""
-                      className="w-5 h-5 rounded-full flex-shrink-0"
-                      style={{ objectFit: 'cover' }}
-                    />
-                  ) : item.action === 'profile' && avatarInitial ? (
-                    <span
-                      className="w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-white font-bold"
-                      style={{ background: 'linear-gradient(135deg, #7c3aed, #a78bfa)', fontSize: 9 }}
-                    >
-                      {avatarInitial}
-                    </span>
-                  ) : (
-                    <span className="text-base w-5 text-center flex-shrink-0">{item.icon}</span>
-                  )}
-                  {item.label}
-                </button>
-              )}
-            </div>
-          ))}
+          <div className="sm:hidden">{MOBILE_MENU_ITEMS.map(renderItem)}</div>
+          <div className="hidden sm:block">{MENU_ITEMS.map(renderItem)}</div>
 
           {/* Sign Out — last item in the normal scroll flow, NOT pinned/fixed */}
           <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.06)', margin: '4px 0' }} />

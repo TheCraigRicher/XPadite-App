@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useApp } from './AppContext'
 import { useLockBodyScroll } from './useLockBodyScroll'
-import { COLOR_PALETTE } from './utils'
+import { COLOR_PALETTE, normalizeHexColor } from './utils'
 import { ColorPickerModal } from './ColorPickerModal'
 import type { Activity } from './types'
 
@@ -185,12 +185,28 @@ interface ActivityFormProps {
 }
 
 function ActivityForm({ initial, onSave, onCancel, saveLabel }: ActivityFormProps) {
+  const { customColors, addCustomColor, removeCustomColor, setToast } = useApp()
   const [name, setName] = useState(initial?.name ?? '')
   const [color, setColor] = useState(initial?.color ?? COLOR_PALETTE[0])
   const [emoji, setEmoji] = useState(initial?.emoji ?? '')
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const [showColorPicker, setShowColorPicker] = useState(false)
-  const isCustomColor = !(COLOR_PALETTE as readonly string[]).includes(color)
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const normalizedColor = normalizeHexColor(color)
+  const isSavedCustom = customColors.some(c => normalizeHexColor(c) === normalizedColor)
+  const isPreset = (COLOR_PALETTE as readonly string[]).some(c => normalizeHexColor(c) === normalizedColor)
+  // The rainbow swatch shows the live color only while it's custom AND not
+  // already represented by one of the saved swatches below it.
+  const isCustomColor = !isPreset && !isSavedCustom
+
+  function clearLongPress() {
+    if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null }
+  }
+  function startLongPress(hex: string) {
+    clearLongPress()
+    longPressTimer.current = setTimeout(() => removeCustomColor(hex), 550)
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -269,7 +285,7 @@ function ActivityForm({ initial, onSave, onCancel, saveLabel }: ActivityFormProp
               }}
             />
           ))}
-          {/* Custom color — shows the exact custom color when one is active, otherwise a neutral rainbow swatch */}
+          {/* Custom color — shows the exact custom color when one is active (and unsaved), otherwise a neutral rainbow swatch */}
           <button
             type="button"
             onClick={() => setShowColorPicker(true)}
@@ -284,11 +300,47 @@ function ActivityForm({ initial, onSave, onCancel, saveLabel }: ActivityFormProp
         </div>
       </div>
 
+      {/* Saved custom colors — only shown once the user has at least one */}
+      {customColors.length > 0 && (
+        <div>
+          <label className="block text-[10px] font-semibold mb-1.5" style={{ color: 'var(--xp-txt3)' }}>Custom</label>
+          <div className="flex flex-wrap gap-2">
+            {customColors.map(c => {
+              const selected = normalizeHexColor(c) === normalizedColor
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setColor(c)}
+                  onContextMenu={e => { e.preventDefault(); removeCustomColor(c) }}
+                  onPointerDown={() => startLongPress(c)}
+                  onPointerUp={clearLongPress}
+                  onPointerLeave={clearLongPress}
+                  title="Click to use — right-click or long-press to remove"
+                  className="w-6 h-6 rounded-full transition-all flex-shrink-0"
+                  style={{
+                    background: c,
+                    transform: selected ? 'scale(1.2)' : 'scale(1)',
+                    boxShadow: selected ? `0 0 0 2px var(--xp-card), 0 0 0 3.5px ${c}` : 'none',
+                  }}
+                />
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {showColorPicker && (
         <ColorPickerModal
           initialColor={color}
           onCancel={() => setShowColorPicker(false)}
-          onApply={hex => { setColor(hex); setShowColorPicker(false) }}
+          onApply={hex => {
+            setColor(hex)
+            setShowColorPicker(false)
+            if (!addCustomColor(hex)) {
+              setToast('Custom color limit reached. Remove a saved color to add another.')
+            }
+          }}
         />
       )}
 

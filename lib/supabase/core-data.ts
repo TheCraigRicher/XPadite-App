@@ -8,6 +8,7 @@ type Supabase = ReturnType<typeof createClient>
 export interface UserPreferences {
   isDark: boolean
   progressColor: string
+  customColors: string[]
 }
 
 export async function fetchUserPreferences(
@@ -16,13 +17,14 @@ export async function fetchUserPreferences(
 ): Promise<UserPreferences | null> {
   const { data, error } = await supabase
     .from('user_preferences')
-    .select('is_dark, progress_color')
+    .select('is_dark, progress_color, custom_colors')
     .eq('user_id', userId)
     .single()
   if (error || !data) return null
   return {
     isDark: data.is_dark as boolean,
     progressColor: data.progress_color as string,
+    customColors: (data.custom_colors as string[] | null) ?? [],
   }
 }
 
@@ -34,6 +36,7 @@ export async function upsertUserPreferences(
   const row: Record<string, unknown> = { user_id: userId }
   if (prefs.isDark !== undefined) row.is_dark = prefs.isDark
   if (prefs.progressColor !== undefined) row.progress_color = prefs.progressColor
+  if (prefs.customColors !== undefined) row.custom_colors = prefs.customColors
   const { error } = await supabase
     .from('user_preferences')
     .upsert(row, { onConflict: 'user_id' })

@@ -20,6 +20,11 @@ export const COLOR_PALETTE = [
   '#dc2626', '#e11d48', '#db2777', '#ec4899',
 ] as const
 
+export function normalizeHexColor(hex: string): string {
+  const h = hex.trim()
+  return (h.startsWith('#') ? h : `#${h}`).toLowerCase()
+}
+
 export const APP_YEAR = new Date().getFullYear()
 
 export function dateKey(year: number, month: number, day: number): string {

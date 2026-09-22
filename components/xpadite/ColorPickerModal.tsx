@@ -7,6 +7,7 @@
 // no schema change and no separate rendering path for "custom" colors.
 
 import { useEffect, useRef, useState } from 'react'
+import { normalizeHexColor as normalizeHex } from './utils'
 
 // ── Color math ────────────────────────────────────────────────────────────
 
@@ -62,11 +63,6 @@ function hexToHsv(hex: string): { h: number; s: number; v: number } {
 
 function isValidHex(hex: string): boolean {
   return /^#?[0-9a-fA-F]{6}$/.test(hex.trim())
-}
-
-function normalizeHex(hex: string): string {
-  const h = hex.trim()
-  return h.startsWith('#') ? h.toLowerCase() : `#${h.toLowerCase()}`
 }
 
 // ── Component ────────────────────────────────────────────────────────────

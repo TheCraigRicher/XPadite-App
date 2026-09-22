@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import type { CalendarData, WorkSession, Activity, ActiveSession, DayData, ActiveTaskTimer, Reminder } from './types'
+import { normalizeHexColor } from './utils'
 import {
   upsertReminder as supabaseUpsertReminder,
   deleteReminder as supabaseDeleteReminder,
@@ -93,6 +94,9 @@ interface AppContextValue {
   setToast: (msg: string | null) => void
   progressColor: string
   setProgressColor: (c: string) => void
+  customColors: string[]
+  addCustomColor: (hex: string) => boolean
+  removeCustomColor: (hex: string) => void
   legendVisible: boolean
   setLegendVisible: (v: boolean) => void
   // Reminders
@@ -125,6 +129,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [progressColor, setProgressColorRaw] = useState<string>('#7c3aed')
+  const [customColors, setCustomColorsRaw] = useState<string[]>([])
   const [legendVisible, setLegendVisible] = useState(false)
   const [hydrated, setHydrated] = useState(false)
 
@@ -197,6 +202,10 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     try {
       const pc = localStorage.getItem('xp-progress-color')
       if (pc) setProgressColorRaw(pc)
+    } catch {}
+    try {
+      const cc = localStorage.getItem('xp-custom-colors')
+      if (cc) setCustomColorsRaw(JSON.parse(cc) as string[])
     } catch {}
     try {
       // Theme is now persisted — load from localStorage so it survives page refreshes
@@ -303,6 +312,8 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
           setProgressColorRaw(sbPrefs.progressColor)
           try { localStorage.setItem('xp-progress-color', sbPrefs.progressColor) } catch {}
         }
+        setCustomColorsRaw(sbPrefs.customColors)
+        try { localStorage.setItem('xp-custom-colors', JSON.stringify(sbPrefs.customColors)) } catch {}
       }
 
       // Reminders: merge local + Supabase; Supabase wins per id; keep local-only entries
@@ -653,6 +664,43 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     }
   }, [])
 
+  const customColorsRef = useRef(customColors)
+  customColorsRef.current = customColors
+
+  // Returns false only when the palette is full and this color isn't already
+  // saved — the caller (Activity Manager) uses that to show the limit message.
+  // Applying the color to the Activity itself always succeeds regardless.
+  const addCustomColor = useCallback((hex: string): boolean => {
+    const normalized = normalizeHexColor(hex)
+    const current = customColorsRef.current
+    if (current.some(c => normalizeHexColor(c) === normalized)) return true
+    if (current.length >= 16) return false
+    const next = [...current, normalized]
+    setCustomColorsRaw(next)
+    try { localStorage.setItem('xp-custom-colors', JSON.stringify(next)) } catch {}
+    const uid = userIdRef.current
+    if (uid) {
+      upsertUserPreferences(createClient(), uid, { customColors: next }).catch(err =>
+        console.error('[Prefs] Custom color sync error:', err)
+      )
+    }
+    return true
+  }, [])
+
+  // Only removes the reusable shortcut — never touches Activities that already use this color.
+  const removeCustomColor = useCallback((hex: string) => {
+    const normalized = normalizeHexColor(hex)
+    const next = customColorsRef.current.filter(c => normalizeHexColor(c) !== normalized)
+    setCustomColorsRaw(next)
+    try { localStorage.setItem('xp-custom-colors', JSON.stringify(next)) } catch {}
+    const uid = userIdRef.current
+    if (uid) {
+      upsertUserPreferences(createClient(), uid, { customColors: next }).catch(err =>
+        console.error('[Prefs] Custom color remove sync error:', err)
+      )
+    }
+  }, [])
+
   // Wrapped setters that persist to localStorage so the active clock-in session
   // survives a page refresh. On clock-in (non-null), also creates an in-progress
   // work_session row in Supabase (end_ts=null); clock-out's addSession will update it.
@@ -843,6 +891,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       sidebarOpen, setSidebarOpen,
       toast, setToast,
       progressColor, setProgressColor,
+      customColors, addCustomColor, removeCustomColor,
       legendVisible, setLegendVisible,
       reminders, userEmail,
       upsertReminderCtx, removeReminderCtx, fireReminderCtx, setReminderNotificationsEnabled,

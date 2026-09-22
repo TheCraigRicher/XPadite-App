@@ -25,6 +25,8 @@ function rowToReminder(row: Record<string, any>): Reminder {
     lastSentAt: row.last_sent_at != null ? Number(row.last_sent_at) : null,
     localFiredAt: null,                  // local-only, never stored in Supabase
     timezone: row.timezone ?? undefined, // nullable in DB; undefined triggers fallback
+    // Defaults true for rows saved before this column existed.
+    notificationsEnabled: row.notifications_enabled !== false,
   }
 }
 
@@ -60,6 +62,7 @@ export async function upsertReminder(
     is_active: reminder.isActive,
     next_run_at: reminder.nextRunAt,
     last_sent_at: reminder.lastSentAt,
+    notifications_enabled: reminder.notificationsEnabled,
     timezone: reminder.timezone ?? null,
     updated_at: new Date().toISOString(),
   }
@@ -86,13 +89,14 @@ export async function deleteReminder(id: string): Promise<void> {
 
 export async function patchReminder(
   id: string,
-  patch: Partial<{ isActive: boolean; nextRunAt: number; lastSentAt: number }>,
+  patch: Partial<{ isActive: boolean; nextRunAt: number; lastSentAt: number; notificationsEnabled: boolean }>,
 ): Promise<void> {
   const supabase = createClient()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const row: Record<string, any> = { updated_at: new Date().toISOString() }
-  if (patch.isActive !== undefined)   row.is_active    = patch.isActive
-  if (patch.nextRunAt !== undefined)  row.next_run_at  = patch.nextRunAt
-  if (patch.lastSentAt !== undefined) row.last_sent_at = patch.lastSentAt
+  if (patch.isActive !== undefined)             row.is_active             = patch.isActive
+  if (patch.nextRunAt !== undefined)            row.next_run_at           = patch.nextRunAt
+  if (patch.lastSentAt !== undefined)           row.last_sent_at          = patch.lastSentAt
+  if (patch.notificationsEnabled !== undefined) row.notifications_enabled = patch.notificationsEnabled
   await supabase.from('reminders').update(row).eq('id', id)
 }

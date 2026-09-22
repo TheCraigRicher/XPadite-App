@@ -197,4 +197,5 @@ export interface Reminder {
   lastSentAt: number | null
   localFiredAt: number | null        // local-only, never synced to Supabase; set when in-app/sound/browser alert fires
   timezone?: string                  // IANA timezone captured at save time, e.g. "America/Vancouver"
+  notificationsEnabled: boolean      // false = user muted future delivery; reminder itself stays intact
 }

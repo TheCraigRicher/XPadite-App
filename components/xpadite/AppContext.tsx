@@ -101,6 +101,7 @@ interface AppContextValue {
   upsertReminderCtx: (r: Omit<Reminder, 'id'> & { id?: string }) => Promise<Reminder | null>
   removeReminderCtx: (id: string) => Promise<void>
   fireReminderCtx: (id: string) => Promise<void>
+  setReminderNotificationsEnabled: (id: string, enabled: boolean) => Promise<void>
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -810,6 +811,22 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     }
   }, [])
 
+  // Mute/unmute future delivery for one reminder without touching isActive,
+  // its schedule, or its history. Used by the Notifications "Turn off/on
+  // reminder" action — never called from the fire/checker path.
+  const setReminderNotificationsEnabled = useCallback(async (id: string, enabled: boolean): Promise<void> => {
+    const next = remindersRef.current.map(r => r.id === id ? { ...r, notificationsEnabled: enabled } : r)
+    persistReminders(next)
+    setReminders(next)
+
+    const uid = userIdRef.current
+    if (uid) {
+      supabasePatchReminder(id, { notificationsEnabled: enabled }).catch(err => {
+        console.error('[Reminders] setReminderNotificationsEnabled patch error:', err)
+      })
+    }
+  }, [])
+
   if (!hydrated) return null
 
   return (
@@ -828,7 +845,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       progressColor, setProgressColor,
       legendVisible, setLegendVisible,
       reminders, userEmail,
-      upsertReminderCtx, removeReminderCtx, fireReminderCtx,
+      upsertReminderCtx, removeReminderCtx, fireReminderCtx, setReminderNotificationsEnabled,
     }}>
       {children}
     </AppContext.Provider>

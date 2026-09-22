@@ -137,6 +137,18 @@ function getGroupKey(ts: number): string {
   return new Date(ts).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 }
 
+// ── Small icons ───────────────────────────────────────────────────────────────
+
+function DotsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+      <circle cx="12" cy="5" r="1.9" />
+      <circle cx="12" cy="12" r="1.9" />
+      <circle cx="12" cy="19" r="1.9" />
+    </svg>
+  )
+}
+
 // ── Tag badge ─────────────────────────────────────────────────────────────────
 
 function TagBadge({
@@ -175,17 +187,24 @@ function TagBadge({
 function NotificationItem({
   notification,
   isDark,
+  linkedReminder,
+  menuOpen,
   onMarkRead,
   onAction,
+  onMenuToggle,
 }: {
   notification: XpaditeNotification
   isDark: boolean
+  linkedReminder?: Reminder
+  menuOpen: boolean
   onMarkRead: () => void
   onAction?: (actionType: string, notification: XpaditeNotification) => void
+  onMenuToggle: (rect: DOMRect) => void
 }) {
   const [hovered, setHovered] = useState(false)
   const meta = CATEGORY_META[notification.category]
   const isUnread = !notification.read
+  const notificationsMuted = !!linkedReminder && linkedReminder.notificationsEnabled === false
 
   const bg = isUnread
     ? hovered
@@ -222,14 +241,14 @@ function NotificationItem({
           alignItems: 'center',
           justifyContent: 'center',
           fontSize: 15,
-          background: `${meta.color}15`,
-          border: `0.5px solid ${meta.color}30`,
+          background: notificationsMuted ? 'rgba(100,116,139,0.14)' : `${meta.color}15`,
+          border: `0.5px solid ${notificationsMuted ? 'rgba(100,116,139,0.30)' : `${meta.color}30`}`,
           marginTop: 1,
           opacity: isUnread ? 1 : 0.55,
           transition: 'opacity 150ms',
         }}
       >
-        {meta.icon}
+        {notificationsMuted ? '🔕' : meta.icon}
       </div>
 
       {/* Content */}
@@ -246,18 +265,38 @@ function NotificationItem({
           >
             {notification.title}
           </p>
-          {isUnread && (
-            <span
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginTop: 2 }}>
+            {isUnread && (
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  background: meta.color,
+                  flexShrink: 0,
+                }}
+              />
+            )}
+            <button
+              data-xp-menu-trigger
+              onClick={e => { e.stopPropagation(); onMenuToggle(e.currentTarget.getBoundingClientRect()) }}
+              aria-label="Notification actions"
+              aria-expanded={menuOpen}
               style={{
-                width: 7,
-                height: 7,
-                borderRadius: '50%',
-                background: meta.color,
+                width: 22,
+                height: 22,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 6,
                 flexShrink: 0,
-                marginTop: 4,
+                color: menuOpen ? 'var(--xp-txt)' : 'var(--xp-txt3)',
+                background: menuOpen ? 'var(--xp-bg3)' : 'transparent',
               }}
-            />
-          )}
+            >
+              <DotsIcon />
+            </button>
+          </div>
         </div>
 
         {/* Type + supplementary tags */}
@@ -266,6 +305,7 @@ function NotificationItem({
           {(notification.tags ?? []).map(tag => (
             <TagBadge key={tag} label={tag} color={meta.color} soft />
           ))}
+          {notificationsMuted && <TagBadge label="Notifications Off" color="#64748b" soft />}
         </div>
 
         {/* Message */}
@@ -341,6 +381,178 @@ function GroupHeader({ label }: { label: string }) {
   )
 }
 
+// ── Reminder actions menu (fixed-positioned so it escapes the scroll clip) ─────
+
+const MENU_WIDTH = 190
+
+function ReminderActionsMenu({
+  anchorRect,
+  canMarkRead,
+  isReminder,
+  muted,
+  onViewDetails,
+  onMarkRead,
+  onToggleNotifications,
+  onDeleteFromHistory,
+}: {
+  anchorRect: DOMRect
+  canMarkRead: boolean
+  isReminder: boolean
+  muted: boolean
+  onViewDetails: () => void
+  onMarkRead: () => void
+  onToggleNotifications: () => void
+  onDeleteFromHistory: () => void
+}) {
+  const estHeight = 40 + (canMarkRead ? 34 : 0) + (isReminder ? 34 : 0) + 34 + 8
+  const spaceBelow = window.innerHeight - anchorRect.bottom
+  const openUpward = spaceBelow < estHeight + 12 && anchorRect.top > estHeight
+  const top = openUpward ? anchorRect.top - estHeight - 6 : anchorRect.bottom + 6
+  const left = Math.min(Math.max(8, anchorRect.right - MENU_WIDTH), window.innerWidth - MENU_WIDTH - 8)
+
+  const itemStyle: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 9,
+    width: '100%', textAlign: 'left', padding: '8px 12px',
+    fontSize: 12.5, fontWeight: 500, color: 'var(--xp-txt)',
+    borderRadius: 8,
+  }
+
+  return (
+    <div
+      className="xp-notif-menu"
+      onClick={e => e.stopPropagation()}
+      style={{
+        position: 'fixed', top, left, width: MENU_WIDTH, zIndex: 85,
+        background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', borderRadius: 12,
+        boxShadow: '0 16px 40px rgba(0,0,0,0.24)', padding: 4, overflow: 'hidden',
+      }}
+    >
+      <button style={itemStyle} className="xp-notif-menu-item" onClick={onViewDetails}>
+        <span aria-hidden="true">👁</span> View details
+      </button>
+      {canMarkRead && (
+        <button style={itemStyle} className="xp-notif-menu-item" onClick={onMarkRead}>
+          <span aria-hidden="true">✓</span> Mark as read
+        </button>
+      )}
+      {isReminder && (
+        <button style={{ ...itemStyle, color: muted ? '#16a34a' : '#dc2626' }} className="xp-notif-menu-item" onClick={onToggleNotifications}>
+          <span aria-hidden="true">{muted ? '🔔' : '🔕'}</span> {muted ? 'Turn on reminder' : 'Turn off reminder'}
+        </button>
+      )}
+      <button style={{ ...itemStyle, color: '#dc2626' }} className="xp-notif-menu-item" onClick={onDeleteFromHistory}>
+        <span aria-hidden="true">🗑</span> Delete from history
+      </button>
+    </div>
+  )
+}
+
+// ── Turn-off confirmation dialog ────────────────────────────────────────────────
+
+function TurnOffReminderDialog({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[95] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.55)' }}
+      onClick={e => { e.stopPropagation(); onCancel() }}
+    >
+      <div
+        className="w-full max-w-[360px] rounded-2xl p-6 text-center relative"
+        style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.32)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <button
+          onClick={onCancel}
+          aria-label="Close"
+          className="absolute top-3 right-3 w-7 h-7 rounded-full flex items-center justify-center transition-opacity hover:opacity-75"
+          style={{ background: 'var(--xp-bg3)', color: 'var(--xp-txt2)' }}
+        >
+          ✕
+        </button>
+        <div
+          className="mx-auto mb-4 flex items-center justify-center"
+          style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(220,38,38,0.12)', fontSize: 24 }}
+        >
+          🔕
+        </div>
+        <h3 className="text-[15px] font-semibold mb-2" style={{ color: 'var(--xp-txt)' }}>
+          Turn off this reminder?
+        </h3>
+        <p className="text-[12.5px] leading-relaxed mb-5" style={{ color: 'var(--xp-txt3)' }}>
+          You&apos;ll stop receiving notifications for this reminder. The reminder will remain saved and you can turn notifications back on anytime.
+        </p>
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={onCancel}
+            className="flex-1 text-[12.5px] font-semibold transition-opacity hover:opacity-80"
+            style={{ padding: '10px 0', borderRadius: 10, background: 'var(--xp-bg3)', color: 'var(--xp-txt)', border: '0.5px solid var(--xp-bdr2)' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="flex-1 text-[12.5px] font-semibold text-white transition-opacity hover:opacity-90"
+            style={{ padding: '10px 0', borderRadius: 10, background: '#dc2626' }}
+          >
+            Turn Off
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── View-details dialog ──────────────────────────────────────────────────────
+
+function NotificationDetailDialog({ notification, onClose }: { notification: XpaditeNotification; onClose: () => void }) {
+  const meta = CATEGORY_META[notification.category]
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.55)' }}
+      onClick={e => { e.stopPropagation(); onClose() }}
+    >
+      <div
+        className="w-full max-w-[400px] rounded-2xl p-5"
+        style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.32)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span
+              className="flex items-center justify-center flex-shrink-0"
+              style={{ width: 34, height: 34, borderRadius: '50%', background: `${meta.color}15`, border: `0.5px solid ${meta.color}30`, fontSize: 15 }}
+            >
+              {meta.icon}
+            </span>
+            <h3 className="text-[14px] font-semibold leading-snug" style={{ color: 'var(--xp-txt)' }}>
+              {notification.title}
+            </h3>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 transition-opacity hover:opacity-75"
+            style={{ background: 'var(--xp-bg3)', color: 'var(--xp-txt2)' }}
+          >
+            ✕
+          </button>
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap mb-3">
+          <TagBadge label={CATEGORY_LABELS[notification.category]} color={meta.color} />
+          {(notification.tags ?? []).map(tag => <TagBadge key={tag} label={tag} color={meta.color} soft />)}
+        </div>
+        {notification.message && (
+          <p className="text-[12.5px] leading-relaxed mb-3" style={{ color: 'var(--xp-txt2)' }}>
+            {notification.message}
+          </p>
+        )}
+        <p className="text-[11px]" style={{ color: 'var(--xp-txt3)' }}>{fmtTime(notification.timestamp)}</p>
+      </div>
+    </div>
+  )
+}
+
 // ── Main modal ────────────────────────────────────────────────────────────────
 
 interface NotificationsModalProps {
@@ -363,7 +575,7 @@ const EMPTY_MESSAGES: Record<FilterMode, { heading: string; body: string }> = {
 }
 
 export function NotificationsModal({ onClose, onAction }: NotificationsModalProps) {
-  const { isDark, reminders } = useApp()
+  const { isDark, reminders, setReminderNotificationsEnabled } = useApp()
   const [stored, setStored] = useState<XpaditeNotification[]>(loadNotifications)
   const [filter, setFilter] = useState<FilterMode>('all')
   const [bellAnimating, setBellAnimating] = useState(false)
@@ -371,11 +583,47 @@ export function NotificationsModal({ onClose, onAction }: NotificationsModalProp
   const [hoveredFilter, setHoveredFilter] = useState<FilterMode | null>(null)
   const prevUnreadRef = useRef(-1)
 
+  // Per-notification ⋮ menu, view-details dialog, and turn-off confirmation
+  const [menuFor, setMenuFor] = useState<{ id: string; rect: DOMRect } | null>(null)
+  const [detailNotif, setDetailNotif] = useState<XpaditeNotification | null>(null)
+  const [confirmOffReminder, setConfirmOffReminder] = useState<Reminder | null>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  // Escape closes the topmost open layer first, not the whole modal
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      if (confirmOffReminder) { setConfirmOffReminder(null); return }
+      if (detailNotif) { setDetailNotif(null); return }
+      if (menuFor) { setMenuFor(null); return }
+      onClose()
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, confirmOffReminder, detailNotif, menuFor])
+
+  // Outside click closes the ⋮ menu (trigger buttons manage their own toggle)
+  useEffect(() => {
+    if (!menuFor) return
+    function onDown(e: MouseEvent) {
+      const target = e.target as HTMLElement
+      if (target.closest('.xp-notif-menu')) return
+      if (target.closest('[data-xp-menu-trigger]')) return
+      setMenuFor(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [menuFor])
+
+  // Scrolling the list or resizing the window would strand the fixed menu — close it
+  useEffect(() => {
+    if (!menuFor) return
+    const list = listRef.current
+    function close() { setMenuFor(null) }
+    list?.addEventListener('scroll', close)
+    window.addEventListener('resize', close)
+    return () => { list?.removeEventListener('scroll', close); window.removeEventListener('resize', close) }
+  }, [menuFor])
 
   // Bell rings once when modal opens
   useEffect(() => {
@@ -505,7 +753,35 @@ export function NotificationsModal({ onClose, onAction }: NotificationsModalProp
     onAction?.(actionType, notif)
   }
 
+  function reminderFor(notif: XpaditeNotification): Reminder | undefined {
+    if (notif.category !== 'reminder') return undefined
+    return reminders.find(r => `r-${r.id}` === notif.id)
+  }
+
+  function handleMenuToggle(id: string, rect: DOMRect) {
+    setMenuFor(prev => prev?.id === id ? null : { id, rect })
+  }
+
+  function handleToggleNotifications(notif: XpaditeNotification) {
+    const reminder = reminderFor(notif)
+    if (!reminder) return
+    setMenuFor(null)
+    if (reminder.notificationsEnabled === false) {
+      // Turning back on is low-risk — no confirmation needed
+      setReminderNotificationsEnabled(reminder.id, true)
+    } else {
+      setConfirmOffReminder(reminder)
+    }
+  }
+
+  function confirmTurnOff() {
+    if (confirmOffReminder) setReminderNotificationsEnabled(confirmOffReminder.id, false)
+    setConfirmOffReminder(null)
+  }
+
   const empty = EMPTY_MESSAGES[filter]
+  const menuNotif = menuFor ? notifications.find(n => n.id === menuFor.id) : undefined
+  const menuReminder = menuNotif ? reminderFor(menuNotif) : undefined
 
   return (
     <div
@@ -519,6 +795,8 @@ export function NotificationsModal({ onClose, onAction }: NotificationsModalProp
           40%  { transform: scale(1.20); }
           100% { transform: scale(1);    }
         }
+        .xp-notif-menu-item:hover { background: var(--xp-bg3); }
+        .xp-notif-menu-item:active { background: var(--xp-bdr); }
       `}</style>
       <div
         className="w-full sm:max-w-[560px] sm:rounded-2xl rounded-none max-sm:border-0! overflow-hidden h-full max-h-full sm:h-[86vh] sm:max-h-[86vh]"
@@ -690,7 +968,7 @@ export function NotificationsModal({ onClose, onAction }: NotificationsModalProp
         </div>
 
         {/* ── Notification list or empty state ── */}
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
           {visible.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-8 py-14 text-center">
               <div
@@ -725,8 +1003,11 @@ export function NotificationsModal({ onClose, onAction }: NotificationsModalProp
                     key={n.id}
                     notification={n}
                     isDark={isDark}
+                    linkedReminder={reminderFor(n)}
+                    menuOpen={menuFor?.id === n.id}
                     onMarkRead={() => markRead(n.id)}
                     onAction={handleAction}
+                    onMenuToggle={rect => handleMenuToggle(n.id, rect)}
                   />
                 ))}
               </div>
@@ -734,6 +1015,27 @@ export function NotificationsModal({ onClose, onAction }: NotificationsModalProp
           )}
         </div>
       </div>
+
+      {menuFor && menuNotif && (
+        <ReminderActionsMenu
+          anchorRect={menuFor.rect}
+          canMarkRead={!menuNotif.read}
+          isReminder={!!menuReminder}
+          muted={menuReminder?.notificationsEnabled === false}
+          onViewDetails={() => { setDetailNotif(menuNotif); setMenuFor(null) }}
+          onMarkRead={() => { markRead(menuNotif.id); setMenuFor(null) }}
+          onToggleNotifications={() => handleToggleNotifications(menuNotif)}
+          onDeleteFromHistory={() => { handleAction('dismiss', menuNotif); setMenuFor(null) }}
+        />
+      )}
+
+      {detailNotif && (
+        <NotificationDetailDialog notification={detailNotif} onClose={() => setDetailNotif(null)} />
+      )}
+
+      {confirmOffReminder && (
+        <TurnOffReminderDialog onCancel={() => setConfirmOffReminder(null)} onConfirm={confirmTurnOff} />
+      )}
     </div>
   )
 }

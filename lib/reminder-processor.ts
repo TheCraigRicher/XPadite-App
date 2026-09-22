@@ -107,6 +107,7 @@ export async function processReminders(supabase: SupabaseClient): Promise<Proces
     .select('id, user_id, task_text, reminder_time, repeat_frequency, email_address, next_run_at, last_sent_at, timezone')
     .eq('is_active', true)
     .eq('email_enabled', true)
+    .eq('notifications_enabled', true)
     .lte('next_run_at', now)
 
   if (fetchError) {

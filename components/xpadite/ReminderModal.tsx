@@ -93,6 +93,9 @@ export function ReminderModal({
       lastSentAt: null,
       localFiredAt: null,
       timezone,
+      // Preserve an existing mute when the user edits a reminder (e.g. changing
+      // its time shouldn't silently turn notifications back on); default true.
+      notificationsEnabled: existing?.notificationsEnabled ?? true,
     })
     setSaving(false)
     onSaved?.()

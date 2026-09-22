@@ -259,6 +259,7 @@ function ReminderChecker() {
       const now = Date.now()
       remindersRef.current.forEach(r => {
         if (!r.isActive) return
+        if (r.notificationsEnabled === false) return
         if (r.repeatFrequency === 'once' && r.localFiredAt !== null) return
         if (r.nextRunAt > now) return
         const key = `${r.id}:${r.nextRunAt}`

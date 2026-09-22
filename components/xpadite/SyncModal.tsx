@@ -279,12 +279,23 @@ export function SyncModal({ onClose, connections = {}, onConnect, onManage }: Sy
       onClick={onClose}
     >
       <style>{`
-        @keyframes xp-sync-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
-        .xp-sync-arc, .xp-sync-head { stroke-dasharray: 1 2; stroke-dashoffset: 0; }
-        .xp-sync-arc  { animation: xp-sync-draw 480ms cubic-bezier(0.45, 0, 0.25, 1) both; }
-        .xp-sync-head { animation: xp-sync-draw 180ms ease-out 420ms both; }
+        @keyframes xpSyncHdrFlow {
+          0%   { background-position: 0% 50% }
+          50%  { background-position: 100% 50% }
+          100% { background-position: 0% 50% }
+        }
+        .xp-sync-hdr {
+          background: linear-gradient(135deg, #5b21b6 0%, #6d28d9 22%, #7c3aed 46%, #8b5cf6 65%, #7c3aed 82%, #6d28d9 100%);
+          background-size: 320% 320%;
+          animation: xpSyncHdrFlow 14s ease infinite;
+        }
+        @keyframes xp-sync-orbit-a { from { transform: rotate(-110deg); } to { transform: rotate(0deg); } }
+        @keyframes xp-sync-orbit-b { from { transform: rotate(-80deg); }  to { transform: rotate(0deg); } }
+        .xp-sync-arrow-a, .xp-sync-arrow-b { transform-origin: 12px 12px; transform-box: view-box; }
+        .xp-sync-arrow-a { animation: xp-sync-orbit-a 650ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+        .xp-sync-arrow-b { animation: xp-sync-orbit-b 650ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
         @media (prefers-reduced-motion: reduce) {
-          .xp-sync-arc, .xp-sync-head { animation: none; }
+          .xp-sync-arrow-a, .xp-sync-arrow-b { animation: none; }
         }
       `}</style>
       <div
@@ -299,52 +310,64 @@ export function SyncModal({ onClose, connections = {}, onConnect, onManage }: Sy
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header — fixed, XPadite signature purple */}
+        {/* Header — fixed, animated premium purple (same treatment as Settings) */}
         <div
-          className="flex items-start gap-3 px-5 pt-5 pb-4 flex-shrink-0"
+          className="xp-sync-hdr"
           style={{
-            background: 'linear-gradient(135deg, #3b0f8a 0%, #4c1d95 100%)',
-            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '20px 24px',
+            borderBottom: '0.5px solid rgba(255,255,255,0.12)',
           }}
         >
-          <div
-            className="flex items-center justify-center flex-shrink-0"
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: '50%',
-              background: 'rgba(255,255,255,0.14)',
-              border: '0.5px solid rgba(255,255,255,0.28)',
-              color: '#ffffff',
-            }}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5" aria-hidden="true">
-              <path className="xp-sync-arc" pathLength={1} d="M21 12a9 9 0 0 1-15.5 6.2L3 16" strokeLinecap="round" strokeLinejoin="round" />
-              <path className="xp-sync-arc" pathLength={1} d="M3 12a9 9 0 0 1 15.5-6.2L21 8" strokeLinecap="round" strokeLinejoin="round" />
-              <polyline className="xp-sync-head" pathLength={1} points="3 21 3 16 8 16" strokeLinecap="round" strokeLinejoin="round" />
-              <polyline className="xp-sync-head" pathLength={1} points="21 3 21 8 16 8" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <h2 id="xp-sync-title" className="text-lg font-semibold leading-tight" style={{ color: '#ffffff' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{
+              width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
+              background: 'rgba(255,255,255,0.18)',
+              border: '1.5px solid rgba(255,255,255,0.32)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.20)',
+            }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" aria-hidden="true" style={{ width: 20, height: 20, overflow: 'visible' }}>
+                <g className="xp-sync-arrow-a">
+                  <path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" strokeLinecap="round" strokeLinejoin="round" />
+                  <polyline points="3 21 3 16 8 16" strokeLinecap="round" strokeLinejoin="round" />
+                </g>
+                <g className="xp-sync-arrow-b">
+                  <path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" strokeLinecap="round" strokeLinejoin="round" />
+                  <polyline points="21 3 21 8 16 8" strokeLinecap="round" strokeLinejoin="round" />
+                </g>
+              </svg>
+            </div>
+            <h2 id="xp-sync-title" style={{ fontSize: 18, fontWeight: 700, color: 'white', letterSpacing: '-0.02em', lineHeight: 1.2 }}>
               Sync
             </h2>
-            <p className="text-[12px] mt-1 leading-snug" style={{ color: 'rgba(255,255,255,0.70)' }}>
-              Connect your favorite apps to keep everything in sync and supercharge your productivity.
-            </p>
           </div>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-opacity hover:opacity-75"
-            style={{ background: 'rgba(255,255,255,0.14)', color: 'rgba(255,255,255,0.88)', border: '0.5px solid rgba(255,255,255,0.25)' }}
+            style={{
+              width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'rgba(255,255,255,0.13)',
+              color: 'rgba(255,255,255,0.82)',
+              border: '1px solid rgba(255,255,255,0.22)',
+              cursor: 'pointer',
+            }}
           >
-            ✕
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 13, height: 13 }}>
+              <line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" />
+              <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
+            </svg>
           </button>
         </div>
 
         {/* Body — scrolls internally */}
         <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 flex flex-col gap-3" style={{ overscrollBehavior: 'contain' }}>
+          <p className="text-[12px] leading-snug px-1 pt-4" style={{ color: 'var(--xp-txt2)' }}>
+            Connect your favorite apps to keep everything in sync and supercharge your productivity.
+          </p>
+
           {INTEGRATIONS.map(config => (
             <IntegrationCard
               key={config.id}

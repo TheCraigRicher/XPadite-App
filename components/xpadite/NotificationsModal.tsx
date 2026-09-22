@@ -797,6 +797,16 @@ export function NotificationsModal({ onClose, onAction }: NotificationsModalProp
         }
         .xp-notif-menu-item:hover { background: var(--xp-bg3); }
         .xp-notif-menu-item:active { background: var(--xp-bdr); }
+        @keyframes xpNotifHdrFlow {
+          0%   { background-position: 0% 50% }
+          50%  { background-position: 100% 50% }
+          100% { background-position: 0% 50% }
+        }
+        .xp-notif-hdr {
+          background: linear-gradient(135deg, #5b21b6 0%, #6d28d9 22%, #7c3aed 46%, #8b5cf6 65%, #7c3aed 82%, #6d28d9 100%);
+          background-size: 320% 320%;
+          animation: xpNotifHdrFlow 14s ease infinite;
+        }
       `}</style>
       <div
         className="w-full sm:max-w-[560px] sm:rounded-2xl rounded-none max-sm:border-0! overflow-hidden h-full max-h-full sm:h-[86vh] sm:max-h-[86vh]"
@@ -811,9 +821,8 @@ export function NotificationsModal({ onClose, onAction }: NotificationsModalProp
       >
         {/* ── Header ── */}
         <div
-          className="flex items-center justify-between px-5 py-3.5 flex-shrink-0"
+          className="xp-notif-hdr flex items-center justify-between px-5 py-3.5 flex-shrink-0"
           style={{
-            background: 'linear-gradient(135deg, #3b0f8a 0%, #4c1d95 100%)',
             borderBottom: '1px solid rgba(255,255,255,0.08)',
           }}
         >

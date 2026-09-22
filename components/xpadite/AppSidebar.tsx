@@ -103,6 +103,7 @@ interface AppSidebarProps {
   onNotifications?: () => void
   onTasks?: () => void
   onSync?: () => void
+  onMeetings?: () => void
 }
 
 export function AppSidebar({
@@ -118,6 +119,7 @@ export function AppSidebar({
   onNotifications,
   onTasks,
   onSync,
+  onMeetings,
 }: AppSidebarProps) {
   const { sidebarOpen, setSidebarOpen } = useApp()
   const router = useRouter()
@@ -272,8 +274,8 @@ export function AppSidebar({
       case 'journal-notes':  onJournalNotes?.(); break
       case 'notifications':  onNotifications?.(); break
       case 'sync-calendar':  onSync?.(); break
+      case 'meetings':       onMeetings?.(); break
       // Stubs — close sidebar only
-      case 'meetings':
       case 'tutorials':
       case 'help':
       default: break

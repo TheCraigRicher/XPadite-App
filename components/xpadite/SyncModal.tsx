@@ -292,8 +292,8 @@ export function SyncModal({ onClose, connections = {}, onConnect, onManage }: Sy
         @keyframes xp-sync-orbit-a { from { transform: rotate(-110deg); } to { transform: rotate(0deg); } }
         @keyframes xp-sync-orbit-b { from { transform: rotate(-80deg); }  to { transform: rotate(0deg); } }
         .xp-sync-arrow-a, .xp-sync-arrow-b { transform-origin: 12px 12px; transform-box: view-box; }
-        .xp-sync-arrow-a { animation: xp-sync-orbit-a 650ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
-        .xp-sync-arrow-b { animation: xp-sync-orbit-b 650ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+        .xp-sync-arrow-a { animation: xp-sync-orbit-a 1000ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+        .xp-sync-arrow-b { animation: xp-sync-orbit-b 1000ms cubic-bezier(0.22, 0.61, 0.36, 1) both; }
         @media (prefers-reduced-motion: reduce) {
           .xp-sync-arrow-a, .xp-sync-arrow-b { animation: none; }
         }
@@ -316,19 +316,19 @@ export function SyncModal({ onClose, connections = {}, onConnect, onManage }: Sy
           style={{
             flexShrink: 0,
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '20px 24px',
+            padding: '14px 20px',
             borderBottom: '0.5px solid rgba(255,255,255,0.12)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{
-              width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
+              width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
               background: 'rgba(255,255,255,0.18)',
               border: '1.5px solid rgba(255,255,255,0.32)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               boxShadow: '0 4px 16px rgba(0,0,0,0.20)',
             }}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" aria-hidden="true" style={{ width: 20, height: 20, overflow: 'visible' }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" aria-hidden="true" style={{ width: 18, height: 18, overflow: 'visible' }}>
                 <g className="xp-sync-arrow-a">
                   <path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" strokeLinecap="round" strokeLinejoin="round" />
                   <polyline points="3 21 3 16 8 16" strokeLinecap="round" strokeLinejoin="round" />
@@ -364,7 +364,7 @@ export function SyncModal({ onClose, connections = {}, onConnect, onManage }: Sy
 
         {/* Body — scrolls internally */}
         <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 flex flex-col gap-3" style={{ overscrollBehavior: 'contain' }}>
-          <p className="text-[12px] leading-snug px-1 pt-4" style={{ color: 'var(--xp-txt2)' }}>
+          <p className="text-[12px] leading-snug px-1 pt-4 sm:text-center" style={{ color: 'var(--xp-txt2)' }}>
             Connect your favorite apps to keep everything in sync and supercharge your productivity.
           </p>
 

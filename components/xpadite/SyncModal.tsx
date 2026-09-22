@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react'
 import { useApp } from './AppContext'
+import { useLockBodyScroll } from './useLockBodyScroll'
 
 // ── Connection architecture ───────────────────────────────────────────────────
 // UI + state contract only. No OAuth or backend lives here. A future integration
@@ -257,11 +258,7 @@ export function SyncModal({ onClose, connections = {}, onConnect, onManage }: Sy
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  useEffect(() => {
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = prev }
-  }, [])
+  useLockBodyScroll()
 
   function handleConnect(config: IntegrationConfig) {
     if (onConnect) { onConnect(config.id); return }

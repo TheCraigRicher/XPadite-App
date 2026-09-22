@@ -8,6 +8,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from './AppContext'
+import { useLockBodyScroll } from './useLockBodyScroll'
 import { MOCK_MEETINGS } from './meetingsMockData'
 import type { XpaditeMeeting, MeetingProviderId, MeetingPlatform } from './meetingsMockData'
 
@@ -561,11 +562,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  useEffect(() => {
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = prev }
-  }, [])
+  useLockBodyScroll()
 
   const bySource = useMemo(
     () => meetings.filter(m => sourceFilter === 'all' || m.provider === sourceFilter),

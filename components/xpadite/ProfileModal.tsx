@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useApp } from './AppContext'
 import { createClient } from '@/lib/supabase/client'
+import { useLockBodyScroll } from './useLockBodyScroll'
 
 interface ProfileData {
   firstName: string
@@ -45,6 +46,7 @@ interface ProfileModalProps {
 
 export function ProfileModal({ onClose }: ProfileModalProps) {
   const { userEmail, isDark } = useApp()
+  useLockBodyScroll()
   const [data, setData] = useState<ProfileData>(loadProfile)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)

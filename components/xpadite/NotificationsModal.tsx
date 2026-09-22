@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useApp } from './AppContext'
+import { useLockBodyScroll } from './useLockBodyScroll'
 import type { Reminder } from './types'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -589,6 +590,8 @@ export function NotificationsModal({ onClose, onAction }: NotificationsModalProp
   const [confirmOffReminder, setConfirmOffReminder] = useState<Reminder | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
+  useLockBodyScroll()
+
   // Escape closes the topmost open layer first, not the whole modal
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -977,7 +980,7 @@ export function NotificationsModal({ onClose, onAction }: NotificationsModalProp
         </div>
 
         {/* ── Notification list or empty state ── */}
-        <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }}>
           {visible.length === 0 ? (
             <div className="flex flex-col items-center justify-center px-8 py-14 text-center">
               <div

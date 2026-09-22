@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useApp } from './AppContext'
+import { useLockBodyScroll } from './useLockBodyScroll'
 import { COLOR_PALETTE } from './utils'
 import type { Activity } from './types'
 
@@ -328,11 +329,7 @@ export function ActivityManagerModal({ onClose }: ActivityManagerModalProps) {
   }, [])
 
   // Lock body scroll while any modal layer is open; release on unmount
-  useEffect(() => {
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = prev }
-  }, [])
+  useLockBodyScroll()
 
   // Escape key: close innermost layer
   useEffect(() => {

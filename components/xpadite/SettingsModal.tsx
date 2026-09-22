@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { useApp } from './AppContext'
 import { exportLocalData } from '@/lib/data-backup'
 import { resolveProgressColor } from './utils'
+import { useLockBodyScroll } from './useLockBodyScroll'
 
 const PROGRESS_COLORS: { name: string; value: string; darkCheck?: boolean }[] = [
   { name: 'Green',            value: '#16a34a' },
@@ -562,6 +563,7 @@ export function PlanPopup({ planId, isDark, onClose }: {
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const { isDark, setIsDark, progressColor, setProgressColor } = useApp()
+  useLockBodyScroll()
   const pc = resolveProgressColor(progressColor, isDark)
 
   const [openTheme,  setOpenTheme]  = useState(true)

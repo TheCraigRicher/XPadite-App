@@ -9,6 +9,7 @@ import {
   fetchGalleryItems,
   getSignedUrl,
 } from '@/lib/supabase/gallery'
+import { useLockBodyScroll } from './useLockBodyScroll'
 
 const GALLERY_KEY = 'xp9g'
 
@@ -223,6 +224,8 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
   const [uploading, setUploading] = useState(false)
   const [cameraOpen, setCameraOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useLockBodyScroll()
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }

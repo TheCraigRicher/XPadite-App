@@ -7,6 +7,7 @@ import type { Task, TaskSession, Activity, TaskAttachment, DayData } from './typ
 import { formatMs, formatHMS, formatTime, formatTime12, isProductiveActivity, APP_YEAR } from './utils'
 import { ReminderModal } from './ReminderModal'
 import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
+import { useLockBodyScroll } from './useLockBodyScroll'
 import dynamic from 'next/dynamic'
 import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
@@ -1711,6 +1712,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     activities, activeSession, setActiveSession, selectedActId,
     reminders, isDark, setToast, sessions,
   } = useApp()
+
+  useLockBodyScroll()
 
   const dayData = calData[dateKey] ?? { ...EMPTY_DAY }
 

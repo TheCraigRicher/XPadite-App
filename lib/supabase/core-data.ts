@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/client'
-import type { CalendarData, DayData, WorkSession, Activity } from '@/components/xpadite/types'
+import type { CalendarData, DayData, WorkSession, Activity, JournalLabel, JournalFolder } from '@/components/xpadite/types'
 
 type Supabase = ReturnType<typeof createClient>
 
@@ -174,5 +174,103 @@ export async function deleteUserActivity(
     .delete()
     .eq('user_id', userId)
     .eq('activity_id', activityId)
+  if (error) throw error
+}
+
+// ── Journal Labels (Library custom categories) ──────────────────────────────
+
+export async function fetchJournalLabels(
+  supabase: Supabase,
+  userId: string,
+): Promise<JournalLabel[]> {
+  const { data, error } = await supabase
+    .from('journal_labels')
+    .select('label_id, name, color')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+  if (error || !data || data.length === 0) return []
+  return data.map(row => ({
+    id: row.label_id as string,
+    name: row.name as string,
+    color: row.color as string,
+  }))
+}
+
+export async function upsertAllJournalLabels(
+  supabase: Supabase,
+  userId: string,
+  labels: JournalLabel[],
+): Promise<void> {
+  if (labels.length === 0) return
+  const rows = labels.map(l => ({
+    user_id: userId,
+    label_id: l.id,
+    name: l.name,
+    color: l.color,
+  }))
+  const { error } = await supabase
+    .from('journal_labels')
+    .upsert(rows, { onConflict: 'user_id,label_id' })
+  if (error) throw error
+}
+
+export async function deleteJournalLabel(
+  supabase: Supabase,
+  userId: string,
+  labelId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('journal_labels')
+    .delete()
+    .eq('user_id', userId)
+    .eq('label_id', labelId)
+  if (error) throw error
+}
+
+// ── Journal Folders (Library organization) ──────────────────────────────────
+
+export async function fetchJournalFolders(
+  supabase: Supabase,
+  userId: string,
+): Promise<JournalFolder[]> {
+  const { data, error } = await supabase
+    .from('journal_folders')
+    .select('folder_id, name')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+  if (error || !data || data.length === 0) return []
+  return data.map(row => ({
+    id: row.folder_id as string,
+    name: row.name as string,
+  }))
+}
+
+export async function upsertAllJournalFolders(
+  supabase: Supabase,
+  userId: string,
+  folders: JournalFolder[],
+): Promise<void> {
+  if (folders.length === 0) return
+  const rows = folders.map(f => ({
+    user_id: userId,
+    folder_id: f.id,
+    name: f.name,
+  }))
+  const { error } = await supabase
+    .from('journal_folders')
+    .upsert(rows, { onConflict: 'user_id,folder_id' })
+  if (error) throw error
+}
+
+export async function deleteJournalFolder(
+  supabase: Supabase,
+  userId: string,
+  folderId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('journal_folders')
+    .delete()
+    .eq('user_id', userId)
+    .eq('folder_id', folderId)
   if (error) throw error
 }

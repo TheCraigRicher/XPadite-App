@@ -1,7 +1,7 @@
 'use client'
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
-import type { CalendarData, WorkSession, Activity, ActiveSession, DayData, ActiveTaskTimer, Reminder } from './types'
+import type { CalendarData, WorkSession, Activity, ActiveSession, DayData, ActiveTaskTimer, Reminder, JournalLabel, JournalFolder } from './types'
 import { normalizeHexColor } from './utils'
 import {
   upsertReminder as supabaseUpsertReminder,
@@ -21,6 +21,12 @@ import {
   deleteUserActivity,
   fetchUserPreferences,
   upsertUserPreferences,
+  fetchJournalLabels,
+  upsertAllJournalLabels,
+  deleteJournalLabel,
+  fetchJournalFolders,
+  upsertAllJournalFolders,
+  deleteJournalFolder,
 } from '@/lib/supabase/core-data'
 
 const DEFAULT_ACTIVITIES: Activity[] = [
@@ -99,6 +105,13 @@ interface AppContextValue {
   removeCustomColor: (hex: string) => void
   legendVisible: boolean
   setLegendVisible: (v: boolean) => void
+  // Journal Library organization
+  journalLabels: JournalLabel[]
+  addJournalLabel: (l: JournalLabel) => void
+  removeJournalLabel: (id: string) => void
+  journalFolders: JournalFolder[]
+  addJournalFolder: (f: JournalFolder) => void
+  removeJournalFolder: (id: string) => void
   // Reminders
   reminders: Reminder[]
   userEmail: string
@@ -131,6 +144,8 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const [progressColor, setProgressColorRaw] = useState<string>('#7c3aed')
   const [customColors, setCustomColorsRaw] = useState<string[]>([])
   const [legendVisible, setLegendVisible] = useState(false)
+  const [journalLabels, setJournalLabelsState] = useState<JournalLabel[]>([])
+  const [journalFolders, setJournalFoldersState] = useState<JournalFolder[]>([])
   const [hydrated, setHydrated] = useState(false)
 
   const [reminders, setReminders] = useState<Reminder[]>([])
@@ -144,6 +159,10 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   userIdRef.current = userId
   const activitiesRef = useRef(activities)
   activitiesRef.current = activities
+  const journalLabelsRef = useRef(journalLabels)
+  journalLabelsRef.current = journalLabels
+  const journalFoldersRef = useRef(journalFolders)
+  journalFoldersRef.current = journalFolders
   const activeTaskTimerRef = useRef(activeTaskTimer)
   activeTaskTimerRef.current = activeTaskTimer
   const activeSessionRef = useRef(activeSession)
@@ -208,6 +227,14 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       if (cc) setCustomColorsRaw(JSON.parse(cc) as string[])
     } catch {}
     try {
+      const jl = localStorage.getItem('xp9jl')
+      if (jl) setJournalLabelsState(JSON.parse(jl) as JournalLabel[])
+    } catch {}
+    try {
+      const jf = localStorage.getItem('xp9jf')
+      if (jf) setJournalFoldersState(JSON.parse(jf) as JournalFolder[])
+    } catch {}
+    try {
       // Theme is now persisted — load from localStorage so it survives page refreshes
       const theme = localStorage.getItem('xp-theme')
       if (theme !== null) setIsDarkRaw(theme === 'true')
@@ -248,7 +275,9 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       fetchUserActivities(supabase, userId),
       fetchUserPreferences(supabase, userId),
       supabaseFetchReminders(),
-    ]).then(([sbCalData, sbSessions, sbActivities, sbPrefs, sbReminders]) => {
+      fetchJournalLabels(supabase, userId),
+      fetchJournalFolders(supabase, userId),
+    ]).then(([sbCalData, sbSessions, sbActivities, sbPrefs, sbReminders, sbJournalLabels, sbJournalFolders]) => {
 
       // Calendar days: merge if Supabase has rows; Supabase data wins per date key.
       // Skip days that have a pending local write to avoid a race between a fast
@@ -314,6 +343,16 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
         }
         setCustomColorsRaw(sbPrefs.customColors)
         try { localStorage.setItem('xp-custom-colors', JSON.stringify(sbPrefs.customColors)) } catch {}
+      }
+
+      // Journal labels/folders: replace if Supabase has rows (cross-device truth)
+      if (sbJournalLabels.length > 0) {
+        setJournalLabelsState(sbJournalLabels)
+        try { localStorage.setItem('xp9jl', JSON.stringify(sbJournalLabels)) } catch {}
+      }
+      if (sbJournalFolders.length > 0) {
+        setJournalFoldersState(sbJournalFolders)
+        try { localStorage.setItem('xp9jf', JSON.stringify(sbJournalFolders)) } catch {}
       }
 
       // Reminders: merge local + Supabase; Supabase wins per id; keep local-only entries
@@ -741,6 +780,60 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     }
   }, [])
 
+  // ─── Journal Library organization: Custom Labels + Folders ──────────────────
+  // Same shape as Activities: optimistic local update + localStorage cache +
+  // fire-and-forget Supabase upsert-all. Document→label/folder relationships
+  // are NOT handled here — those live inside each day's own JSON (via
+  // updateDay), same as the existing `title` field.
+
+  const addJournalLabel = useCallback((l: JournalLabel) => {
+    const next = [...journalLabelsRef.current, l]
+    try { localStorage.setItem('xp9jl', JSON.stringify(next)) } catch {}
+    setJournalLabelsState(next)
+    const uid = userIdRef.current
+    if (uid) {
+      upsertAllJournalLabels(createClient(), uid, next).catch(err =>
+        console.error('[JournalLabels] Supabase sync error:', err)
+      )
+    }
+  }, [])
+
+  const removeJournalLabel = useCallback((id: string) => {
+    const next = journalLabelsRef.current.filter(l => l.id !== id)
+    try { localStorage.setItem('xp9jl', JSON.stringify(next)) } catch {}
+    setJournalLabelsState(next)
+    const uid = userIdRef.current
+    if (uid) {
+      deleteJournalLabel(createClient(), uid, id).catch(err =>
+        console.error('[JournalLabels] Supabase delete error:', err)
+      )
+    }
+  }, [])
+
+  const addJournalFolder = useCallback((f: JournalFolder) => {
+    const next = [...journalFoldersRef.current, f]
+    try { localStorage.setItem('xp9jf', JSON.stringify(next)) } catch {}
+    setJournalFoldersState(next)
+    const uid = userIdRef.current
+    if (uid) {
+      upsertAllJournalFolders(createClient(), uid, next).catch(err =>
+        console.error('[JournalFolders] Supabase sync error:', err)
+      )
+    }
+  }, [])
+
+  const removeJournalFolder = useCallback((id: string) => {
+    const next = journalFoldersRef.current.filter(f => f.id !== id)
+    try { localStorage.setItem('xp9jf', JSON.stringify(next)) } catch {}
+    setJournalFoldersState(next)
+    const uid = userIdRef.current
+    if (uid) {
+      deleteJournalFolder(createClient(), uid, id).catch(err =>
+        console.error('[JournalFolders] Supabase delete error:', err)
+      )
+    }
+  }, [])
+
   // ─── Reminder CRUD (localStorage-primary, Supabase background sync) ──────────
 
   const upsertReminderCtx = useCallback(async (
@@ -893,6 +986,8 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       progressColor, setProgressColor,
       customColors, addCustomColor, removeCustomColor,
       legendVisible, setLegendVisible,
+      journalLabels, addJournalLabel, removeJournalLabel,
+      journalFolders, addJournalFolder, removeJournalFolder,
       reminders, userEmail,
       upsertReminderCtx, removeReminderCtx, fireReminderCtx, setReminderNotificationsEnabled,
     }}>

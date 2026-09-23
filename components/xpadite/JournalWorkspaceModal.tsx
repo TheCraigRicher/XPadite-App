@@ -3,8 +3,9 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { useApp } from './AppContext'
-import { parseJournalDoc } from './journalUtils'
+import { parseJournalDoc, mkId } from './journalUtils'
 import { exportToTxt, exportToPdf, exportToDocx, makeFilename, type ExportEntry } from './journalExport'
+import type { JournalFolder } from './types'
 
 const JournalEditorContent = dynamic(
   () => import('./JournalEditorContent').then(m => ({ default: m.JournalEditorContent })),
@@ -28,6 +29,33 @@ const MONTH_NAMES = [
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
 const DOW_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+
+// ─── Library organization: categories/labels vs folders ───────────────────────
+// CATEGORY/LABEL describes what a doc is about (a doc may have several).
+// FOLDER describes where a doc is organized (a doc belongs to at most one).
+// Built-ins are fixed constants — only user-created custom labels/folders
+// need their own identity (persisted via AppContext's journalLabels).
+
+interface LibraryCategory { id: string; name: string; color: string }
+
+const BUILTIN_CATEGORIES: LibraryCategory[] = [
+  { id: 'important',   name: 'Important',   color: '#f87171' },
+  { id: 'priority',    name: 'Priority',    color: '#fb923c' },
+  { id: 'reflections', name: 'Reflections', color: '#a78bfa' },
+  { id: 'planning',    name: 'Planning',    color: '#60a5fa' },
+  { id: 'goals',       name: 'Goals',       color: '#4ade80' },
+]
+
+const LABEL_COLOR_OPTIONS = ['purple', 'yellow', 'green', 'pink', 'blue'] as const
+type LabelColorKey = (typeof LABEL_COLOR_OPTIONS)[number]
+
+const LABEL_COLOR_HEX: Record<LabelColorKey, string> = {
+  purple: '#a78bfa',
+  yellow: '#fde047',
+  green:  '#4ade80',
+  pink:   '#f9a8d4',
+  blue:   '#60a5fa',
+}
 
 // ─── Journal entry summary types & helpers ────────────────────────────────────
 
@@ -343,6 +371,176 @@ function JournalMonthCard({
   )
 }
 
+// ─── Library card ⋮ menu — shared across all 4 view modes ─────────────────────
+// One implementation reused by compact/detail/tile/thumbnail instead of 4
+// duplicated menu blobs. Anchored via its own position:relative wrapper —
+// callers control placement (corner-absolute for grid cards, inline for the
+// Detail row) by passing `wrapperStyle`.
+
+interface LibraryCardMenuProps {
+  isDark: boolean
+  bdr: string
+  isOpen: boolean
+  view: 'main' | 'category' | 'folder'
+  onOpenChange: (open: boolean) => void
+  onViewChange: (view: 'main' | 'category' | 'folder') => void
+  onRename: () => void
+  onExport: () => void
+  onDeleteRequest: () => void
+  categories: LibraryCategory[]
+  activeLabelIds: string[]
+  onToggleLabel: (id: string) => void
+  onDeleteLabel: (id: string) => void
+  onCreateLabel: () => void
+  folders: JournalFolder[]
+  activeFolderId: string | null
+  onSetFolder: (id: string | null) => void
+  onDeleteFolder: (id: string) => void
+  onCreateFolder: () => void
+  wrapperStyle: React.CSSProperties
+}
+
+function LibraryCardMenu({
+  isDark, bdr, isOpen, view, onOpenChange, onViewChange,
+  onRename, onExport, onDeleteRequest,
+  categories, activeLabelIds, onToggleLabel, onDeleteLabel, onCreateLabel,
+  folders, activeFolderId, onSetFolder, onDeleteFolder, onCreateFolder,
+  wrapperStyle,
+}: LibraryCardMenuProps) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!isOpen) return
+    function outside(e: MouseEvent | TouchEvent) {
+      if (ref.current?.contains(e.target as Node)) return
+      onOpenChange(false)
+    }
+    document.addEventListener('mousedown', outside)
+    document.addEventListener('touchstart', outside)
+    return () => {
+      document.removeEventListener('mousedown', outside)
+      document.removeEventListener('touchstart', outside)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen])
+
+  const itemStyle: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 8,
+    width: '100%', padding: '9px 12px',
+    background: 'transparent', border: 'none', cursor: 'pointer',
+    fontSize: 12, fontWeight: 500, textAlign: 'left',
+    color: isDark ? 'rgba(255,255,255,0.80)' : 'rgba(0,0,0,0.70)',
+  }
+  const headerStyle: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 6,
+    width: '100%', padding: '8px 12px', cursor: 'pointer',
+    background: 'transparent', border: 'none', textAlign: 'left',
+    fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em',
+    color: isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.42)',
+  }
+  const dividerStyle: React.CSSProperties = {
+    height: 1, background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)', margin: '4px 0',
+  }
+  const xBtnStyle: React.CSSProperties = {
+    marginLeft: 'auto', flexShrink: 0, width: 16, height: 16, borderRadius: 4,
+    border: 'none', background: 'transparent', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 10, color: isDark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.28)',
+  }
+
+  return (
+    <div ref={ref} style={wrapperStyle} onClick={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()}>
+      <button
+        onClick={() => { onOpenChange(!isOpen); onViewChange('main') }}
+        title="Document actions"
+        aria-label="Document actions"
+        style={{
+          width: 22, height: 22, borderRadius: 6, border: 'none', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: isOpen ? (isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.09)') : (isDark ? 'rgba(0,0,0,0.20)' : 'rgba(255,255,255,0.55)'),
+          color: isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.55)',
+          fontSize: 13, fontWeight: 700, lineHeight: 1,
+        }}
+      >⋮</button>
+
+      {isOpen && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 70,
+          background: isDark ? '#1a1530' : '#ffffff',
+          border: `0.5px solid ${bdr}`,
+          borderRadius: 10, overflow: 'hidden',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.30)',
+          minWidth: 178,
+        }}>
+          {view === 'main' && (
+            <>
+              <button onClick={onRename} style={itemStyle}><span>✏️</span>Rename</button>
+              <button onClick={onExport} style={itemStyle}><span>📤</span>Export</button>
+              <button onClick={() => onViewChange('category')} style={itemStyle}><span>🏷</span>Category<span style={{ marginLeft: 'auto', opacity: 0.5 }}>›</span></button>
+              <button onClick={() => onViewChange('folder')} style={itemStyle}><span>📁</span>Move to Folder<span style={{ marginLeft: 'auto', opacity: 0.5 }}>›</span></button>
+              <div style={dividerStyle} />
+              <button onClick={onDeleteRequest} style={{ ...itemStyle, color: '#f87171' }}><span>🗑</span>Delete</button>
+            </>
+          )}
+
+          {view === 'category' && (
+            <>
+              <button onClick={() => onViewChange('main')} style={headerStyle}>‹ Category</button>
+              <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                {categories.map(cat => {
+                  const checked = activeLabelIds.includes(cat.id)
+                  const isCustom = !BUILTIN_CATEGORIES.some(b => b.id === cat.id)
+                  return (
+                    <div key={cat.id} style={{ display: 'flex', alignItems: 'center' }}>
+                      <button onClick={() => onToggleLabel(cat.id)} style={{ ...itemStyle, flex: 1 }}>
+                        <span style={{
+                          width: 13, height: 13, borderRadius: 4, flexShrink: 0,
+                          border: `1.5px solid ${checked ? cat.color : isDark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.25)'}`,
+                          background: checked ? cat.color : 'transparent',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          {checked && <svg width="8" height="8" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                        </span>
+                        {cat.name}
+                      </button>
+                      {isCustom && (
+                        <button onClick={() => onDeleteLabel(cat.id)} title="Delete label" style={{ ...xBtnStyle, marginRight: 8 }}>✕</button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+              <div style={dividerStyle} />
+              <button onClick={onCreateLabel} style={itemStyle}><span>+</span>Create Custom Label</button>
+            </>
+          )}
+
+          {view === 'folder' && (
+            <>
+              <button onClick={() => onViewChange('main')} style={headerStyle}>‹ Move to Folder</button>
+              <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                <button onClick={() => onSetFolder(null)} style={itemStyle}>
+                  <span style={{ opacity: activeFolderId === null ? 1 : 0 }}>✓</span>No Folder
+                </button>
+                {folders.map(f => (
+                  <div key={f.id} style={{ display: 'flex', alignItems: 'center' }}>
+                    <button onClick={() => onSetFolder(f.id)} style={{ ...itemStyle, flex: 1 }}>
+                      <span style={{ opacity: activeFolderId === f.id ? 1 : 0 }}>✓</span>📁 {f.name}
+                    </button>
+                    <button onClick={() => onDeleteFolder(f.id)} title="Delete folder" style={{ ...xBtnStyle, marginRight: 8 }}>✕</button>
+                  </div>
+                ))}
+              </div>
+              <div style={dividerStyle} />
+              <button onClick={onCreateFolder} style={itemStyle}><span>+</span>New Folder</button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 interface JournalWorkspaceModalProps {
@@ -353,7 +551,11 @@ interface JournalWorkspaceModalProps {
 }
 
 export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, closeIntent }: JournalWorkspaceModalProps) {
-  const { isDark, calData, updateDay } = useApp()
+  const {
+    isDark, calData, updateDay,
+    journalLabels, addJournalLabel, removeJournalLabel,
+    journalFolders, addJournalFolder, removeJournalFolder,
+  } = useApp()
 
   const todayDate = useMemo(() => new Date(), [])
   const todayKey  = useMemo(getTodayKey, [])
@@ -369,7 +571,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   const [isSelectMode, setIsSelectMode]         = useState(false)
   const [selectedKeys, setSelectedKeys]         = useState<Set<string>>(new Set())
   const [deleteConfirmKeys, setDeleteConfirmKeys] = useState<string[] | null>(null)
-  const libTouchRef = useRef<{ key: string; time: number } | null>(null)
   const [libViewMode, setLibViewMode]   = useState<'compact' | 'detail' | 'tile' | 'thumbnail'>('compact')
   const [libSortOrder, setLibSortOrder] = useState<'newer' | 'older'>('newer')
   const [openMobileMonths, setOpenMobileMonths] = useState<Set<number>>(
@@ -383,6 +584,17 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   const [showMoreMenu, setShowMoreMenu]             = useState(false)
   const [exportFormatKeys, setExportFormatKeys]     = useState<string[] | null>(null)
   const [isExporting, setIsExporting]               = useState(false)
+
+  // ── Library organization: filters, per-card ⋮ menu, create modals ───────────
+  const [libFolderFilter, setLibFolderFilter]       = useState<string | null>(null)
+  const [libCategoryFilter, setLibCategoryFilter]   = useState<string | null>(null)
+  const [cardMenuOpen, setCardMenuOpen]             = useState<string | null>(null)
+  const [cardMenuView, setCardMenuView]             = useState<'main' | 'category' | 'folder'>('main')
+  const [showCreateLabel, setShowCreateLabel]       = useState(false)
+  const [newLabelName, setNewLabelName]             = useState('')
+  const [newLabelColor, setNewLabelColor]           = useState<LabelColorKey>('purple')
+  const [showCreateFolder, setShowCreateFolder]     = useState(false)
+  const [newFolderName, setNewFolderName]           = useState('')
 
   // ── ESC key — calendar view only; editor ESC is owned by JournalEditorContent ─
   const escRef = useRef<() => void>(() => {})
@@ -415,28 +627,13 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   function doClose()      { editorFlushRef.current?.(); onClose() }
 
   // ── Library rename + open handlers ───────────────────────────────────────────
-  function handleLibClick(dateKey: string, title: string) {
+  // Single click/tap now opens the document directly (doOpenEditor, defined
+  // above); rename moved entirely into the ⋮ menu's "Rename" action, which
+  // reuses this exact same start/commit pair — no duplicate rename system.
+  function handleLibRenameStart(dateKey: string, title: string) {
     setSelectedLibEntry(dateKey)
     setRenamingEntry(dateKey)
     setRenameValue(title)
-  }
-  function handleLibDoubleClick(dateKey: string) {
-    setRenamingEntry(null)
-    doOpenEditor(dateKey)
-  }
-  function handleLibTouchEnd(dateKey: string, title: string) {
-    const now = Date.now()
-    const last = libTouchRef.current
-    if (last?.key === dateKey && now - last.time < 350) {
-      libTouchRef.current = null
-      setRenamingEntry(null)
-      doOpenEditor(dateKey)
-    } else {
-      libTouchRef.current = { key: dateKey, time: now }
-      setSelectedLibEntry(dateKey)
-      setRenamingEntry(dateKey)
-      setRenameValue(title)
-    }
   }
   function commitLibRename(dateKey: string) {
     const trimmed = renameValue.trim()
@@ -446,6 +643,65 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     else delete updated.title
     updateDay(dateKey, prev => ({ ...prev, notes: JSON.stringify(updated) }))
     setRenamingEntry(null)
+  }
+
+  // ── Library organization: category (label) + folder assignment ──────────────
+  // Read-modify-write against the doc's own JSON, exactly like commitLibRename
+  // does for `title` — reuses the existing per-day persistence/RLS/cross-device
+  // pipeline (updateDay) with zero new sync code for this relationship.
+  function toggleDocLabel(dateKey: string, labelId: string) {
+    const doc = parseJournalDoc(calData[dateKey]?.notes)
+    const current = doc.labelIds ?? []
+    const next = current.includes(labelId) ? current.filter(id => id !== labelId) : [...current, labelId]
+    const updated = { ...doc, labelIds: next }
+    updateDay(dateKey, prev => ({ ...prev, notes: JSON.stringify(updated) }))
+  }
+  function setDocFolder(dateKey: string, folderId: string | null) {
+    const doc = parseJournalDoc(calData[dateKey]?.notes)
+    const updated = { ...doc, folderId }
+    updateDay(dateKey, prev => ({ ...prev, notes: JSON.stringify(updated) }))
+  }
+
+  // Deleting a label/folder only removes its definition + the assignment on
+  // any document that used it — the document's content is never touched.
+  function handleDeleteLabel(labelId: string) {
+    removeJournalLabel(labelId)
+    for (const [key, day] of Object.entries(calData)) {
+      if (!day.notes?.trim()) continue
+      const doc = parseJournalDoc(day.notes)
+      if (doc.labelIds?.includes(labelId)) {
+        const updated = { ...doc, labelIds: doc.labelIds.filter(id => id !== labelId) }
+        updateDay(key, prev => ({ ...prev, notes: JSON.stringify(updated) }))
+      }
+    }
+    if (libCategoryFilter === labelId) setLibCategoryFilter(null)
+  }
+  function handleDeleteFolder(folderId: string) {
+    removeJournalFolder(folderId)
+    for (const [key, day] of Object.entries(calData)) {
+      if (!day.notes?.trim()) continue
+      const doc = parseJournalDoc(day.notes)
+      if (doc.folderId === folderId) {
+        const updated = { ...doc, folderId: null }
+        updateDay(key, prev => ({ ...prev, notes: JSON.stringify(updated) }))
+      }
+    }
+    if (libFolderFilter === folderId) setLibFolderFilter(null)
+  }
+  function commitCreateLabel() {
+    const name = newLabelName.trim()
+    if (!name) return
+    addJournalLabel({ id: mkId(), name, color: newLabelColor })
+    setShowCreateLabel(false)
+    setNewLabelName('')
+    setNewLabelColor('purple')
+  }
+  function commitCreateFolder() {
+    const name = newFolderName.trim()
+    if (!name) return
+    addJournalFolder({ id: mkId(), name })
+    setShowCreateFolder(false)
+    setNewFolderName('')
   }
 
   function enterSelectMode() {
@@ -579,17 +835,35 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         const [y, m, d] = fromKey(key)
         const parsedDoc = parseJournalDoc(calData[key]?.notes)
         const title = parsedDoc.title?.trim() || extractFirstLine(calData[key]?.notes) || 'Untitled'
-        return { dateKey: key, year: y, month: m, day: d, title }
+        return {
+          dateKey: key, year: y, month: m, day: d, title,
+          labelIds: parsedDoc.labelIds ?? [],
+          folderId: parsedDoc.folderId ?? null,
+        }
       })
     return libSortOrder === 'newer'
       ? entries.sort((a, b) => b.dateKey.localeCompare(a.dateKey))
       : entries.sort((a, b) => a.dateKey.localeCompare(b.dateKey))
   }, [calData, libSortOrder])
 
+  // Month/Folder (mutually exclusive, from the "All ▾" control) AND Category
+  // (independent, from "🏷 Category ▾") combine — e.g. newer Priority docs
+  // inside the XPadite folder — without either resetting the other.
   const filteredLibraryEntries = useMemo(() => {
-    if (libMonthFilter === null) return libraryEntries
-    return libraryEntries.filter(e => e.month === libMonthFilter)
-  }, [libraryEntries, libMonthFilter])
+    return libraryEntries.filter(e => {
+      if (libMonthFilter !== null && e.month !== libMonthFilter) return false
+      if (libFolderFilter !== null && e.folderId !== libFolderFilter) return false
+      if (libCategoryFilter !== null && !e.labelIds.includes(libCategoryFilter)) return false
+      return true
+    })
+  }, [libraryEntries, libMonthFilter, libFolderFilter, libCategoryFilter])
+
+  // All categories (built-in + custom), for rendering dots/checkmarks and
+  // resolving a labelId to its display color.
+  const allCategories = useMemo<LibraryCategory[]>(() => [
+    ...BUILTIN_CATEGORIES,
+    ...journalLabels.map(l => ({ id: l.id, name: l.name, color: LABEL_COLOR_HEX[l.color as LabelColorKey] ?? LABEL_COLOR_HEX.purple })),
+  ], [journalLabels])
 
   const availableMonths = useMemo(
     () => Array.from(new Set(libraryEntries.map(e => e.month))).sort((a, b) => a - b),
@@ -1010,9 +1284,11 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         </button>
       </div>
 
-      {/* Controls bar */}
+      {/* Controls bar — wraps to a second line on narrow viewports instead of scrolling,
+          so the "⋮ More menu" dropdown (which opens downward, below the bar) never gets
+          clipped by a scroll container; this keeps everything on-screen with no page overflow. */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 4,
+        display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4,
         padding: '7px 10px', flexShrink: 0, minHeight: 44,
         borderBottom: `0.5px solid ${bdr}`,
         background: isSelectMode
@@ -1093,17 +1369,58 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                     <option value="newer">↓ Newer</option>
                     <option value="older">↑ Older</option>
                   </select>
+                  {/* "All ▾" — month filter, extended with Folders per the Library organization upgrade.
+                      Month and Folder are mutually exclusive (one dropdown, one choice); Category
+                      (below) is a fully independent, additive filter. */}
                   <select
-                    value={libMonthFilter ?? ''}
-                    onChange={e => setLibMonthFilter(e.target.value === '' ? null : Number(e.target.value))}
+                    value={libFolderFilter !== null ? `f:${libFolderFilter}` : libMonthFilter !== null ? `m:${libMonthFilter}` : ''}
+                    onChange={e => {
+                      const v = e.target.value
+                      if (v === '') { setLibMonthFilter(null); setLibFolderFilter(null) }
+                      else if (v.startsWith('m:')) { setLibMonthFilter(Number(v.slice(2))); setLibFolderFilter(null) }
+                      else if (v.startsWith('f:')) { setLibFolderFilter(v.slice(2)); setLibMonthFilter(null) }
+                    }}
                     style={ss}
-                    title="Filter by month"
+                    title="Filter by month or folder"
                   >
                     <option value="">All</option>
                     {availableMonths.map(m => (
-                      <option key={m} value={m}>{MONTH_SHORT[m]}</option>
+                      <option key={m} value={`m:${m}`}>{MONTH_SHORT[m]}</option>
                     ))}
+                    {journalFolders.length > 0 && (
+                      <optgroup label="Folders">
+                        {journalFolders.map(f => (
+                          <option key={f.id} value={`f:${f.id}`}>📁 {f.name}</option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
+
+                  {/* 🏷 Category — FILTERS the Library (finding documents), distinct from the
+                      per-document ⋮ → Category menu which ASSIGNS categories. */}
+                  <select
+                    value={libCategoryFilter ?? ''}
+                    onChange={e => setLibCategoryFilter(e.target.value === '' ? null : e.target.value)}
+                    style={ss}
+                    title="Filter by category"
+                  >
+                    <option value="">🏷 Category</option>
+                    {BUILTIN_CATEGORIES.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                    {journalLabels.length > 0 && (
+                      <optgroup label="Custom Labels">
+                        {journalLabels.map(l => (
+                          <option key={l.id} value={l.id}>{l.name}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+
+                  {/* + New Folder */}
+                  <button onClick={() => setShowCreateFolder(true)} style={ss} title="Create a new folder">
+                    + Folder
+                  </button>
                 </>
               )
             })()}
@@ -1170,7 +1487,11 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           <div style={{ textAlign: 'center', paddingTop: 48, color: muted, fontSize: 13 }}>
             {libraryEntries.length === 0
               ? 'No journal entries yet. Start writing in the Editor.'
-              : `No entries in ${MONTH_NAMES[libMonthFilter!]}.`}
+              : libMonthFilter !== null
+                ? `No entries in ${MONTH_NAMES[libMonthFilter]}.`
+                : libFolderFilter !== null || libCategoryFilter !== null
+                  ? 'No documents match this filter.'
+                  : 'No journal entries yet. Start writing in the Editor.'}
           </div>
         ) : libViewMode === 'compact' ? (
           /* ── Compact/Default mode: desktop-folder style tight grid ────── */
@@ -1210,14 +1531,12 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
-                  onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => handleLibClick(entry.dateKey, entry.title)}
-                  onDoubleClick={isSelectMode ? undefined : () => handleLibDoubleClick(entry.dateKey)}
+                  onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => doOpenEditor(entry.dateKey)}
                   onKeyDown={e => {
                     if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
-                    else if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey)
+                    else if (e.key === 'Enter') doOpenEditor(entry.dateKey)
                   }}
-                  onTouchEnd={e => { e.preventDefault(); if (isSelectMode) toggleSelectKey(entry.dateKey); else handleLibTouchEnd(entry.dateKey, entry.title) }}
-                  title={isSelectMode ? entry.title : `${entry.title} — ${MONTH_NAMES[entry.month]} ${entry.day}, ${entry.year}\nClick/tap to rename · Double-click/tap to open`}
+                  title={isSelectMode ? entry.title : `${entry.title} — ${MONTH_NAMES[entry.month]} ${entry.day}, ${entry.year}`}
                   style={{
                     width: 110, flexShrink: 0, position: 'relative',
                     display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -1245,6 +1564,26 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                     }}>
                       {isChecked && <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                     </div>
+                  )}
+                  {!isSelectMode && (
+                    <LibraryCardMenu
+                      isDark={isDark} bdr={bdr}
+                      isOpen={cardMenuOpen === entry.dateKey} view={cardMenuView}
+                      onOpenChange={open => setCardMenuOpen(open ? entry.dateKey : null)}
+                      onViewChange={setCardMenuView}
+                      onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
+                      onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      categories={allCategories} activeLabelIds={entry.labelIds}
+                      onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
+                      onDeleteLabel={handleDeleteLabel}
+                      onCreateLabel={() => { setShowCreateLabel(true); setCardMenuOpen(null) }}
+                      folders={journalFolders} activeFolderId={entry.folderId}
+                      onSetFolder={id => { setDocFolder(entry.dateKey, id); setCardMenuOpen(null) }}
+                      onDeleteFolder={handleDeleteFolder}
+                      onCreateFolder={() => { setShowCreateFolder(true); setCardMenuOpen(null) }}
+                      wrapperStyle={{ position: 'absolute', top: 5, right: 5 }}
+                    />
                   )}
                   <div style={{
                     width: 52, height: 60, borderRadius: 6,
@@ -1274,6 +1613,14 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   <span style={{ fontSize: 9, lineHeight: 1.2, color: isSel ? 'rgba(167,139,250,0.75)' : muted }}>
                     {MONTH_SHORT[entry.month]} {entry.day}, {entry.year}
                   </span>
+                  {entry.labelIds.length > 0 && (
+                    <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', justifyContent: 'center' }}>
+                      {entry.labelIds.slice(0, 6).map(id => {
+                        const cat = allCategories.find(c => c.id === id)
+                        return cat ? <span key={id} style={{ width: 5, height: 5, borderRadius: '50%', background: cat.color, flexShrink: 0 }} /> : null
+                      })}
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -1290,14 +1637,12 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
-                  onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => handleLibClick(entry.dateKey, entry.title)}
-                  onDoubleClick={isSelectMode ? undefined : () => handleLibDoubleClick(entry.dateKey)}
+                  onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => doOpenEditor(entry.dateKey)}
                   onKeyDown={e => {
                     if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
-                    else if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey)
+                    else if (e.key === 'Enter') doOpenEditor(entry.dateKey)
                   }}
-                  onTouchEnd={e => { e.preventDefault(); if (isSelectMode) toggleSelectKey(entry.dateKey); else handleLibTouchEnd(entry.dateKey, entry.title) }}
-                  title={isSelectMode ? entry.title : 'Click/tap to rename · Double-click/tap to open'}
+                  title={entry.title}
                   style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     padding: '12px 16px', borderRadius: 10, textAlign: 'left',
@@ -1357,11 +1702,39 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       }}>{entry.title}</span>
                     )}
                   </div>
+                  {entry.labelIds.length > 0 && (
+                    <div style={{ display: 'flex', gap: 3, flexShrink: 0, marginLeft: 10 }}>
+                      {entry.labelIds.slice(0, 6).map(id => {
+                        const cat = allCategories.find(c => c.id === id)
+                        return cat ? <span key={id} style={{ width: 5, height: 5, borderRadius: '50%', background: cat.color, flexShrink: 0 }} /> : null
+                      })}
+                    </div>
+                  )}
                   <span style={{
                     fontSize: 11, flexShrink: 0, marginLeft: 12,
                     color: isSel ? 'rgba(167,139,250,0.80)' : muted,
                     whiteSpace: 'nowrap',
                   }}>{MONTH_NAMES[entry.month]} {entry.day}, {entry.year}</span>
+                  {!isSelectMode && (
+                    <LibraryCardMenu
+                      isDark={isDark} bdr={bdr}
+                      isOpen={cardMenuOpen === entry.dateKey} view={cardMenuView}
+                      onOpenChange={open => setCardMenuOpen(open ? entry.dateKey : null)}
+                      onViewChange={setCardMenuView}
+                      onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
+                      onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      categories={allCategories} activeLabelIds={entry.labelIds}
+                      onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
+                      onDeleteLabel={handleDeleteLabel}
+                      onCreateLabel={() => { setShowCreateLabel(true); setCardMenuOpen(null) }}
+                      folders={journalFolders} activeFolderId={entry.folderId}
+                      onSetFolder={id => { setDocFolder(entry.dateKey, id); setCardMenuOpen(null) }}
+                      onDeleteFolder={handleDeleteFolder}
+                      onCreateFolder={() => { setShowCreateFolder(true); setCardMenuOpen(null) }}
+                      wrapperStyle={{ position: 'relative', flexShrink: 0, marginLeft: 8 }}
+                    />
+                  )}
                 </div>
               )
             })}
@@ -1378,14 +1751,12 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
-                  onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => handleLibClick(entry.dateKey, entry.title)}
-                  onDoubleClick={isSelectMode ? undefined : () => handleLibDoubleClick(entry.dateKey)}
+                  onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => doOpenEditor(entry.dateKey)}
                   onKeyDown={e => {
                     if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
-                    else if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey)
+                    else if (e.key === 'Enter') doOpenEditor(entry.dateKey)
                   }}
-                  onTouchEnd={e => { e.preventDefault(); if (isSelectMode) toggleSelectKey(entry.dateKey); else handleLibTouchEnd(entry.dateKey, entry.title) }}
-                  title={isSelectMode ? entry.title : 'Click/tap to rename · Double-click/tap to open'}
+                  title={entry.title}
                   style={{
                     display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
                     padding: '14px 16px', borderRadius: 12, textAlign: 'left', position: 'relative',
@@ -1412,6 +1783,26 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                     }}>
                       {isChecked && <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                     </div>
+                  )}
+                  {!isSelectMode && (
+                    <LibraryCardMenu
+                      isDark={isDark} bdr={bdr}
+                      isOpen={cardMenuOpen === entry.dateKey} view={cardMenuView}
+                      onOpenChange={open => setCardMenuOpen(open ? entry.dateKey : null)}
+                      onViewChange={setCardMenuView}
+                      onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
+                      onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      categories={allCategories} activeLabelIds={entry.labelIds}
+                      onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
+                      onDeleteLabel={handleDeleteLabel}
+                      onCreateLabel={() => { setShowCreateLabel(true); setCardMenuOpen(null) }}
+                      folders={journalFolders} activeFolderId={entry.folderId}
+                      onSetFolder={id => { setDocFolder(entry.dateKey, id); setCardMenuOpen(null) }}
+                      onDeleteFolder={handleDeleteFolder}
+                      onCreateFolder={() => { setShowCreateFolder(true); setCardMenuOpen(null) }}
+                      wrapperStyle={{ position: 'absolute', top: 8, right: 8 }}
+                    />
                   )}
                   <span style={{ fontSize: 22 }}>📝</span>
                   {isRen && !isSelectMode ? (
@@ -1448,6 +1839,14 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   <span style={{ fontSize: 10, marginTop: 2, color: isSel ? 'rgba(167,139,250,0.80)' : muted }}>
                     {MONTH_NAMES[entry.month]} {entry.day}, {entry.year}
                   </span>
+                  {entry.labelIds.length > 0 && (
+                    <div style={{ display: 'flex', gap: 3 }}>
+                      {entry.labelIds.slice(0, 6).map(id => {
+                        const cat = allCategories.find(c => c.id === id)
+                        return cat ? <span key={id} style={{ width: 5, height: 5, borderRadius: '50%', background: cat.color, flexShrink: 0 }} /> : null
+                      })}
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -1464,14 +1863,12 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
-                  onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => handleLibClick(entry.dateKey, entry.title)}
-                  onDoubleClick={isSelectMode ? undefined : () => handleLibDoubleClick(entry.dateKey)}
+                  onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => doOpenEditor(entry.dateKey)}
                   onKeyDown={e => {
                     if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
-                    else if (e.key === 'Enter') handleLibDoubleClick(entry.dateKey)
+                    else if (e.key === 'Enter') doOpenEditor(entry.dateKey)
                   }}
-                  onTouchEnd={e => { e.preventDefault(); if (isSelectMode) toggleSelectKey(entry.dateKey); else handleLibTouchEnd(entry.dateKey, entry.title) }}
-                  title={isSelectMode ? entry.title : 'Click/tap to rename · Double-click/tap to open'}
+                  title={entry.title}
                   style={{
                     display: 'flex', flexDirection: 'column', alignItems: 'center',
                     padding: '20px 14px 16px', borderRadius: 14, textAlign: 'center', position: 'relative',
@@ -1498,6 +1895,26 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                     }}>
                       {isChecked && <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                     </div>
+                  )}
+                  {!isSelectMode && (
+                    <LibraryCardMenu
+                      isDark={isDark} bdr={bdr}
+                      isOpen={cardMenuOpen === entry.dateKey} view={cardMenuView}
+                      onOpenChange={open => setCardMenuOpen(open ? entry.dateKey : null)}
+                      onViewChange={setCardMenuView}
+                      onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
+                      onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      categories={allCategories} activeLabelIds={entry.labelIds}
+                      onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
+                      onDeleteLabel={handleDeleteLabel}
+                      onCreateLabel={() => { setShowCreateLabel(true); setCardMenuOpen(null) }}
+                      folders={journalFolders} activeFolderId={entry.folderId}
+                      onSetFolder={id => { setDocFolder(entry.dateKey, id); setCardMenuOpen(null) }}
+                      onDeleteFolder={handleDeleteFolder}
+                      onCreateFolder={() => { setShowCreateFolder(true); setCardMenuOpen(null) }}
+                      wrapperStyle={{ position: 'absolute', top: 8, right: 8 }}
+                    />
                   )}
                   <div style={{
                     width: '100%', height: 70, borderRadius: 8,
@@ -1540,17 +1957,17 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   <span style={{ fontSize: 10, color: isSel ? 'rgba(167,139,250,0.80)' : muted }}>
                     {MONTH_SHORT[entry.month]} {entry.day}, {entry.year}
                   </span>
+                  {entry.labelIds.length > 0 && (
+                    <div style={{ display: 'flex', gap: 3 }}>
+                      {entry.labelIds.slice(0, 6).map(id => {
+                        const cat = allCategories.find(c => c.id === id)
+                        return cat ? <span key={id} style={{ width: 5, height: 5, borderRadius: '50%', background: cat.color, flexShrink: 0 }} /> : null
+                      })}
+                    </div>
+                  )}
                 </div>
               )
             })}
-          </div>
-        )}
-
-        {filteredLibraryEntries.length > 0 && !isSelectMode && (
-          <div style={{ textAlign: 'center', paddingTop: 14 }}>
-            <span style={{ fontSize: 11, color: muted }}>
-              Click / tap to rename · Double-click / double-tap to open in editor
-            </span>
           </div>
         )}
       </div>
@@ -1679,6 +2096,152 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                 color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)',
               }}
             >Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Create Custom Label modal ───────────────────────────────────── */}
+      {showCreateLabel && (
+        <div
+          style={{
+            position: 'absolute', inset: 0, zIndex: 85,
+            background: 'rgba(0,0,0,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            borderRadius: 'inherit',
+          }}
+          onClick={() => { setShowCreateLabel(false); setNewLabelName(''); setNewLabelColor('purple') }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: isDark ? '#1e1b2e' : '#ffffff',
+              border: `1px solid ${isDark ? 'rgba(124,58,237,0.35)' : 'rgba(124,58,237,0.25)'}`,
+              borderRadius: 14, padding: '22px 24px', maxWidth: 280, width: '88%',
+              boxShadow: '0 8px 40px rgba(0,0,0,0.45)',
+              display: 'flex', flexDirection: 'column', gap: 14,
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase', color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.78)' }}>
+              Create Label
+            </div>
+            <input
+              autoFocus
+              value={newLabelName}
+              onChange={e => setNewLabelName(e.target.value)}
+              placeholder="Label name"
+              maxLength={30}
+              onKeyDown={e => { if (e.key === 'Enter') commitCreateLabel(); if (e.key === 'Escape') setShowCreateLabel(false) }}
+              style={{
+                fontSize: 13, padding: '8px 10px', borderRadius: 8, outline: 'none',
+                border: `1px solid ${isDark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.14)'}`,
+                background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)',
+                color: isDark ? '#fff' : '#0f172a',
+              }}
+            />
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 500, marginBottom: 7, color: muted }}>Choose color</div>
+              <div style={{ display: 'flex', gap: 9 }}>
+                {LABEL_COLOR_OPTIONS.map(c => (
+                  <button
+                    key={c}
+                    onClick={() => setNewLabelColor(c)}
+                    title={c}
+                    style={{
+                      width: 22, height: 22, borderRadius: '50%', border: 'none', cursor: 'pointer', padding: 0,
+                      background: LABEL_COLOR_HEX[c],
+                      outline: newLabelColor === c ? `2px solid ${isDark ? '#fff' : '#0f172a'}` : '1.5px solid rgba(0,0,0,0.12)',
+                      outlineOffset: newLabelColor === c ? 1 : 0,
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => { setShowCreateLabel(false); setNewLabelName(''); setNewLabelColor('purple') }}
+                style={{
+                  padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                  background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                  border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`,
+                  color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)',
+                }}
+              >Cancel</button>
+              <button
+                onClick={commitCreateLabel}
+                disabled={!newLabelName.trim()}
+                style={{
+                  padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                  cursor: newLabelName.trim() ? 'pointer' : 'default',
+                  background: newLabelName.trim() ? 'rgba(124,58,237,0.88)' : 'rgba(124,58,237,0.30)',
+                  border: '0.5px solid rgba(124,58,237,0.60)',
+                  color: '#fff',
+                }}
+              >Create</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── New Folder modal ─────────────────────────────────────────────── */}
+      {showCreateFolder && (
+        <div
+          style={{
+            position: 'absolute', inset: 0, zIndex: 85,
+            background: 'rgba(0,0,0,0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            borderRadius: 'inherit',
+          }}
+          onClick={() => { setShowCreateFolder(false); setNewFolderName('') }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: isDark ? '#1e1b2e' : '#ffffff',
+              border: `1px solid ${isDark ? 'rgba(124,58,237,0.35)' : 'rgba(124,58,237,0.25)'}`,
+              borderRadius: 14, padding: '22px 24px', maxWidth: 280, width: '88%',
+              boxShadow: '0 8px 40px rgba(0,0,0,0.45)',
+              display: 'flex', flexDirection: 'column', gap: 14,
+            }}
+          >
+            <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase', color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.78)' }}>
+              New Folder
+            </div>
+            <input
+              autoFocus
+              value={newFolderName}
+              onChange={e => setNewFolderName(e.target.value)}
+              placeholder="Folder name"
+              maxLength={40}
+              onKeyDown={e => { if (e.key === 'Enter') commitCreateFolder(); if (e.key === 'Escape') setShowCreateFolder(false) }}
+              style={{
+                fontSize: 13, padding: '8px 10px', borderRadius: 8, outline: 'none',
+                border: `1px solid ${isDark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.14)'}`,
+                background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)',
+                color: isDark ? '#fff' : '#0f172a',
+              }}
+            />
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => { setShowCreateFolder(false); setNewFolderName('') }}
+                style={{
+                  padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                  background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+                  border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`,
+                  color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)',
+                }}
+              >Cancel</button>
+              <button
+                onClick={commitCreateFolder}
+                disabled={!newFolderName.trim()}
+                style={{
+                  padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                  cursor: newFolderName.trim() ? 'pointer' : 'default',
+                  background: newFolderName.trim() ? 'rgba(124,58,237,0.88)' : 'rgba(124,58,237,0.30)',
+                  border: '0.5px solid rgba(124,58,237,0.60)',
+                  color: '#fff',
+                }}
+              >+ Create Folder</button>
+            </div>
           </div>
         </div>
       )}

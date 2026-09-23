@@ -105,6 +105,25 @@ export interface JournalDoc {
   title?: string
   blocks: JournalBlock[]
   timerSessions?: JournalTimerSession[]
+  labelIds?: string[]      // assigned category/label ids (built-in + custom); a doc may have several
+  folderId?: string | null // the one folder this doc is organized into; null/undefined = unfiled
+}
+
+// ─── Library organization: Categories/Labels vs Folders ───────────────────────
+// A LABEL describes what a document is about (a doc may have several).
+// A FOLDER describes where a document is organized (a doc belongs to at most one).
+// Built-in labels (Important/Priority/Reflections/Planning/Goals) are fixed
+// constants in the app, not rows here — only user-created ones need identity.
+
+export interface JournalLabel {
+  id: string
+  name: string
+  color: string // one of the curated color keys: 'purple' | 'yellow' | 'green' | 'pink' | 'blue'
+}
+
+export interface JournalFolder {
+  id: string
+  name: string
 }
 
 export interface TaskAttachment {

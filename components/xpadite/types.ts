@@ -90,6 +90,7 @@ export interface JournalBlock {
   name?: string         // display label for image/drawing
   width?: number        // layout width percent (15–100), default 100
   height?: number       // explicit height in px; undefined = auto (natural image height)
+  collapsed?: boolean   // section body hidden (presentational only); undefined/false = expanded
   createdAt: number
   updatedAt: number
 }

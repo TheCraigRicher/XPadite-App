@@ -147,6 +147,7 @@ interface JournalTextBlockProps {
   onResizeActivate?: () => void
   onColorChange?: (color: SectionColorKey) => void
   onNameChange?: (name: string | undefined) => void
+  onCollapseToggle?: () => void
   canMoveUp: boolean
   canMoveDown: boolean
   onMoveUp: () => void
@@ -156,7 +157,7 @@ interface JournalTextBlockProps {
 const JournalTextBlock = React.memo(function JournalTextBlock({
   block, isDark, isOnlyBlock, isFirstBlock = false, forcedContent,
   onContentChange, onFocus, onSelectionUpdate,
-  onDelete, onDuplicate, onMoveActivate, onResizeActivate, onColorChange, onNameChange,
+  onDelete, onDuplicate, onMoveActivate, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
 }: JournalTextBlockProps) {
   const [menuOpen,       setMenuOpen]       = useState(false)
@@ -248,8 +249,9 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
   const sectionStyle = isSection
     ? getSectionStyle(block.sectionColor ?? 'plain', isDark)
     : null
-  const hasTitle = isSection && !!block.name
-  const hasMenu  = isSection ? true : canMoveUp || canMoveDown || (!!onDelete && !isOnlyBlock)
+  const hasTitle  = isSection && !!block.name
+  const hasMenu   = isSection ? true : canMoveUp || canMoveDown || (!!onDelete && !isOnlyBlock)
+  const collapsed = isSection && block.collapsed === true
 
   return (
     <div
@@ -261,66 +263,91 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
         background: sectionStyle ? sectionStyle.background : 'transparent',
         padding: sectionStyle ? '12px 40px 12px 14px' : '0',
         marginBottom: sectionStyle ? 4 : 0,
-        ...(isSection && block.height != null ? { minHeight: block.height } : {}),
+        ...(isSection && block.height != null && !collapsed ? { minHeight: block.height } : {}),
       }}
     >
 
-      {/* Optional section title */}
-      {isSection && (hasTitle || addingTitle) ? (
-        addingTitle ? (
-          <input
-            ref={titleInputRef}
-            value={titleValue}
-            onChange={e => setTitleValue(e.target.value)}
-            onBlur={commitTitle}
-            onKeyDown={e => {
-              if (e.key === 'Enter') { e.preventDefault(); commitTitle() }
-              if (e.key === 'Escape') { setAddingTitle(false); setTitleValue(block.name ?? '') }
-            }}
-            placeholder="Section title…"
+      {/* Section header row: ▶ collapse triangle + title (presentational-only collapse) */}
+      {isSection ? (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5 }}>
+          <button
+            onClick={() => onCollapseToggle?.()}
+            title={collapsed ? 'Expand section' : 'Collapse section'}
+            aria-label={collapsed ? 'Expand section' : 'Collapse section'}
             style={{
-              display: 'block', width: '100%', border: 'none', outline: 'none',
-              background: 'transparent', padding: '0 0 6px',
-              fontFamily: 'inherit', fontSize: 15, fontWeight: 700,
-              letterSpacing: '-0.01em',
-              color: isDark ? '#f1f5f9' : '#0f172a',
-              borderBottom: `1px solid ${isDark ? 'rgba(124,58,237,0.35)' : 'rgba(124,58,237,0.25)'}`,
-              marginBottom: 8,
+              flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 18, height: 18, marginTop: 1, border: 'none', background: 'transparent', cursor: 'pointer',
+              borderRadius: 5, color: isDark ? 'rgba(255,255,255,0.40)' : 'rgba(0,0,0,0.35)',
+              transition: 'background 120ms, color 120ms',
             }}
-          />
-        ) : (
-          <div
-            onClick={() => setAddingTitle(true)}
-            title="Click to edit title"
-            style={{
-              fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em',
-              color: isDark ? '#f1f5f9' : '#0f172a',
-              marginBottom: 6, cursor: 'text',
-              lineHeight: 1.3,
-            }}
-          >{block.name}</div>
-        )
-      ) : isSection ? (
-        /* Faint "+ Add Title" — only visible on hover via CSS */
-        <div
-          className="xp-j-add-title"
-          onClick={() => setAddingTitle(true)}
-          style={{
-            fontSize: 11, cursor: 'text', marginBottom: 4,
-            color: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.25)',
-            opacity: 0, transition: 'opacity 150ms',
-            userSelect: 'none',
-          }}
-        >+ Add Title</div>
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+          >
+            <span style={{ display: 'inline-block', fontSize: 10, lineHeight: 1, transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)', transition: 'transform 200ms cubic-bezier(0.4,0,0.2,1)' }}>▶</span>
+          </button>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {/* Optional section title */}
+            {(hasTitle || addingTitle) ? (
+              addingTitle ? (
+                <input
+                  ref={titleInputRef}
+                  value={titleValue}
+                  onChange={e => setTitleValue(e.target.value)}
+                  onBlur={commitTitle}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') { e.preventDefault(); commitTitle() }
+                    if (e.key === 'Escape') { setAddingTitle(false); setTitleValue(block.name ?? '') }
+                  }}
+                  placeholder="Section title…"
+                  style={{
+                    display: 'block', width: '100%', border: 'none', outline: 'none',
+                    background: 'transparent', padding: '0 0 6px',
+                    fontFamily: 'inherit', fontSize: 15, fontWeight: 700,
+                    letterSpacing: '-0.01em',
+                    color: isDark ? '#f1f5f9' : '#0f172a',
+                    borderBottom: `1px solid ${isDark ? 'rgba(124,58,237,0.35)' : 'rgba(124,58,237,0.25)'}`,
+                    marginBottom: 8,
+                  }}
+                />
+              ) : (
+                <div
+                  onClick={() => setAddingTitle(true)}
+                  title="Click to edit title"
+                  style={{
+                    fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em',
+                    color: isDark ? '#f1f5f9' : '#0f172a',
+                    marginBottom: collapsed ? 0 : 6, cursor: 'text',
+                    lineHeight: 1.3,
+                  }}
+                >{block.name}</div>
+              )
+            ) : (
+              /* Faint "+ Add Title" — only visible on hover via CSS */
+              <div
+                className="xp-j-add-title"
+                onClick={() => setAddingTitle(true)}
+                style={{
+                  fontSize: 11, cursor: 'text', marginBottom: 4,
+                  color: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.25)',
+                  opacity: 0, transition: 'opacity 150ms',
+                  userSelect: 'none',
+                }}
+              >+ Add Title</div>
+            )}
+          </div>
+        </div>
       ) : null}
 
-      {/* Editor */}
-      <div onClick={() => editor?.commands.focus()} style={{ cursor: 'text' }}>
-        <EditorContent editor={editor} />
-      </div>
+      {/* Editor — hidden while collapsed; collapsing never touches its content */}
+      {!collapsed && (
+        <div onClick={() => editor?.commands.focus()} style={{ cursor: 'text' }}>
+          <EditorContent editor={editor} />
+        </div>
+      )}
 
       {/* Section timestamp — bottom-right, quiet metadata */}
-      {isSection && (
+      {isSection && !collapsed && (
         <div style={{
           position: 'absolute', bottom: 6, right: 8,
           fontSize: 10, lineHeight: 1, userSelect: 'none', pointerEvents: 'none',
@@ -592,6 +619,10 @@ declare module '@tiptap/core' {
       setXpHighlight: (color: string) => ReturnType
       unsetXpHighlight: () => ReturnType
     }
+    boxTitle: {
+      setBoxTitle: (color: string) => ReturnType
+      unsetBoxTitle: () => ReturnType
+    }
   }
 }
 
@@ -620,16 +651,31 @@ const XpHighlight = Mark.create({
   },
 })
 
-// ── Box Title: a plain toggle mark (no attributes) wrapping selected text in a
-// compact rounded pill via the .xp-j-box-title CSS class. No custom commands
-// needed — the ▣ button uses TipTap's built-in toggleMark('boxTitle'), which
-// already behaves as a Bold-style toggle and persists through the same
-// editor.getJSON() pipeline as every other mark in this editor.
+// ── Box Title: a toggle mark wrapping selected text in a compact rounded pill
+// via the .xp-j-box-title CSS class, with a `color` attribute (default 'purple')
+// selecting one of five curated pastel treatments via data-box-color. Persists
+// through the same editor.getJSON() pipeline as every other mark in this editor.
+const BOX_TITLE_DEFAULT_COLOR = 'purple'
 const BoxTitle = Mark.create({
   name: 'boxTitle',
+  addAttributes() {
+    return {
+      color: {
+        default: BOX_TITLE_DEFAULT_COLOR,
+        parseHTML: (el: HTMLElement) => el.getAttribute('data-box-color') || BOX_TITLE_DEFAULT_COLOR,
+        renderHTML: (attrs: { color?: string }) => ({ 'data-box-color': attrs.color || BOX_TITLE_DEFAULT_COLOR }),
+      },
+    }
+  },
   parseHTML() { return [{ tag: 'span[data-box-title]' }] },
   renderHTML({ HTMLAttributes }) {
     return ['span', mergeAttributes(HTMLAttributes, { 'data-box-title': 'true', class: 'xp-j-box-title' }), 0]
+  },
+  addCommands() {
+    return {
+      setBoxTitle: (color: string) => ({ commands }) => commands.setMark(this.name, { color }),
+      unsetBoxTitle: () => ({ commands }) => commands.unsetMark(this.name),
+    }
   },
 })
 
@@ -677,6 +723,14 @@ const HIGHLIGHT_COLORS: Array<{ label: string; value: string | null; swatch: str
   { label: 'Light Blue',  value: '#bfdbfe', swatch: '#bfdbfe' },
 ]
 
+const BOX_TITLE_COLORS: Array<{ label: string; value: string; swatch: string }> = [
+  { label: 'Purple', value: 'purple', swatch: '#a78bfa' },
+  { label: 'Yellow', value: 'yellow', swatch: '#fde047' },
+  { label: 'Green',  value: 'green',  swatch: '#4ade80' },
+  { label: 'Pink',   value: 'pink',   swatch: '#f9a8d4' },
+  { label: 'Blue',   value: 'blue',   swatch: '#60a5fa' },
+]
+
 const TEXT_COLORS: Array<{ label: string; value: string | null; swatch: string }> = [
   { label: 'Default',  value: null,      swatch: 'linear-gradient(135deg,rgba(255,255,255,0.55) 0%,rgba(255,255,255,0.20) 100%)' },
   { label: 'Purple',   value: '#a78bfa', swatch: '#a78bfa' },
@@ -694,20 +748,22 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
   const [showSize,      setShowSize]      = useState(false)
   const [showColor,     setShowColor]     = useState(false)
   const [showHighlight, setShowHighlight] = useState(false)
+  const [showBoxColor,  setShowBoxColor]  = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   // Close sub-menus on outside click
   useEffect(() => {
-    if (!showSize && !showColor && !showHighlight) return
+    if (!showSize && !showColor && !showHighlight && !showBoxColor) return
     function outside(e: MouseEvent) {
       if (ref.current?.contains(e.target as Node)) return
       setShowSize(false)
       setShowColor(false)
       setShowHighlight(false)
+      setShowBoxColor(false)
     }
     document.addEventListener('mousedown', outside)
     return () => document.removeEventListener('mousedown', outside)
-  }, [showSize, showColor, showHighlight])
+  }, [showSize, showColor, showHighlight, showBoxColor])
 
   if (!editor) return null
 
@@ -718,6 +774,10 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
   const isH3        = editor.isActive('heading', { level: 3 })
   const isBoxTitle  = editor.isActive('boxTitle')
   const sizeLabel   = isH2 ? 'Heading' : isH3 ? 'Large' : 'Normal'
+
+  // Active Box Title color (falls back to the default when no color attr is set,
+  // e.g. content saved before colors existed)
+  const activeBoxColor: string = (editor.getAttributes('boxTitle').color as string | undefined) ?? BOX_TITLE_DEFAULT_COLOR
 
   // Active color: what the current selection has (null = default)
   const activeColor: string | null = (editor.getAttributes('textStyle').color as string | undefined) ?? null
@@ -779,7 +839,7 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
       <div style={{ position: 'relative' }}>
         <button
           style={{ ...fBtn(hasCustomColor || showColor), minWidth: 26, textAlign: 'center', padding: '3px 6px', position: 'relative' }}
-          onMouseDown={e => { e.preventDefault(); setShowColor(v => !v); setShowSize(false); setShowHighlight(false) }}
+          onMouseDown={e => { e.preventDefault(); setShowColor(v => !v); setShowSize(false); setShowHighlight(false); setShowBoxColor(false) }}
           title="Text color"
         >
           <span style={{ fontSize: 12, fontWeight: 700, lineHeight: 1 }}>A</span>
@@ -841,7 +901,7 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
       <div style={{ position: 'relative' }}>
         <button
           style={{ ...fBtn(hasHighlight || showHighlight), minWidth: 26, textAlign: 'center', padding: '3px 6px', position: 'relative' }}
-          onMouseDown={e => { e.preventDefault(); setShowHighlight(v => !v); setShowColor(false); setShowSize(false) }}
+          onMouseDown={e => { e.preventDefault(); setShowHighlight(v => !v); setShowColor(false); setShowSize(false); setShowBoxColor(false) }}
           title="Text highlight"
         >
           <span style={{ fontSize: 12, fontWeight: 700, lineHeight: 1 }}>H</span>
@@ -906,7 +966,7 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
       <div style={{ position: 'relative' }}>
         <button
           style={{ ...fBtn(false), display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, whiteSpace: 'nowrap' as const }}
-          onMouseDown={e => { e.preventDefault(); setShowSize(v => !v); setShowColor(false); setShowHighlight(false) }}
+          onMouseDown={e => { e.preventDefault(); setShowSize(v => !v); setShowColor(false); setShowHighlight(false); setShowBoxColor(false) }}
         >
           {sizeLabel} <span style={{ fontSize: 8, opacity: 0.65 }}>▾</span>
         </button>
@@ -943,13 +1003,69 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
 
       {divider}
 
-      {/* ▣ Box — toggles the Box Title text format, distinct from Highlight/Heading */}
-      <button
-        style={{ ...fBtn(isBoxTitle), minWidth: 26, textAlign: 'center' }}
-        onMouseDown={e => { e.preventDefault(); editor.chain().focus().toggleMark('boxTitle').run() }}
-        title="Box Title"
-        aria-label="Box Title"
-      >▣</button>
+      {/* ▣ Box — main click toggles Box Title on (purple default)/off; ▾ opens the
+          5-color picker (also usable to apply a non-default color from scratch) */}
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+        <button
+          style={{ ...fBtn(isBoxTitle), minWidth: 22, textAlign: 'center', paddingRight: 4 }}
+          onMouseDown={e => {
+            e.preventDefault()
+            if (isBoxTitle) editor.chain().focus().unsetBoxTitle().run()
+            else editor.chain().focus().setBoxTitle(BOX_TITLE_DEFAULT_COLOR).run()
+          }}
+          title="Box Title"
+          aria-label="Box Title"
+        >▣</button>
+        <button
+          style={{ ...fBtn(showBoxColor), minWidth: 14, padding: '3px 2px', fontSize: 8 }}
+          onMouseDown={e => { e.preventDefault(); setShowBoxColor(v => !v); setShowColor(false); setShowHighlight(false); setShowSize(false) }}
+          title="Box Title color"
+          aria-label="Box Title color"
+        >▾</button>
+
+        {showBoxColor && (
+          <div style={{
+            position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(10,6,30,0.98)',
+            border: '0.5px solid rgba(124,58,237,0.28)',
+            borderRadius: 10, padding: '8px 9px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.65)',
+            zIndex: 10, minWidth: 148,
+          }}>
+            <div style={{ fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'rgba(255,255,255,0.35)', marginBottom: 7, userSelect: 'none' }}>
+              Box Title Color
+            </div>
+            <div style={{ display: 'flex', gap: 7 }}>
+              {BOX_TITLE_COLORS.map(({ label, value, swatch }) => {
+                const isSelected = isBoxTitle && value === activeBoxColor
+                return (
+                  <button
+                    key={value}
+                    title={label}
+                    aria-label={label}
+                    onMouseDown={e => {
+                      e.preventDefault()
+                      editor.chain().focus().setBoxTitle(value).run()
+                      setShowBoxColor(false)
+                    }}
+                    style={{
+                      width: 20, height: 20, borderRadius: '50%', border: 'none', cursor: 'pointer', padding: 0,
+                      background: swatch,
+                      outline: isSelected ? '2px solid #ffffff' : '1.5px solid rgba(255,255,255,0.15)',
+                      outlineOffset: isSelected ? 1 : 0,
+                      transition: 'transform 80ms, outline 80ms',
+                      transform: 'scale(1)',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.18)' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
+                  />
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -1037,6 +1153,17 @@ function menuItemStyle(isDark: boolean): React.CSSProperties {
     fontSize: 12, fontWeight: 500,
     color: isDark ? 'rgba(255,255,255,0.82)' : 'rgba(0,0,0,0.72)',
     transition: 'background 100ms',
+  }
+}
+
+function dockBtn(active = false): React.CSSProperties {
+  return {
+    padding: '5px 11px', borderRadius: 7, cursor: 'pointer',
+    border: `0.5px solid ${active ? 'rgba(124,58,237,0.65)' : 'rgba(255,255,255,0.09)'}`,
+    background: active ? 'rgba(124,58,237,0.28)' : 'rgba(255,255,255,0.04)',
+    color: active ? '#c4b5fd' : 'rgba(255,255,255,0.60)',
+    fontSize: 12, fontWeight: active ? 600 : 400,
+    transition: 'all 120ms', flexShrink: 0, whiteSpace: 'nowrap' as const,
   }
 }
 
@@ -1437,6 +1564,11 @@ export function JournalEditorContent({
   }, [])
 
   const isActive = (name: string) => focusedEditor.current?.isActive(name) ?? false
+  const isSubItem = () => {
+    const ed = focusedEditor.current
+    if (!ed) return false
+    return ed.isActive('listItem', { subItem: true }) || ed.isActive('taskItem', { subItem: true })
+  }
   // focusTick is consumed by the isActive call above — just reference it to avoid lint warning
   void focusTick
 
@@ -1886,15 +2018,45 @@ export function JournalEditorContent({
     }
   }
 
-  // Sub-item — distinct from Indent: creates an explicit one-level parent→child
-  // relationship (flags the nested node so the connector CSS renders a └─ branch)
-  // and refuses to run if the current item is already a sub-item (V1 = one level).
+  // Sub-item — true ON/OFF toggle, distinct from Indent: ON creates an explicit
+  // one-level parent→child relationship (flags the nested node so the connector
+  // CSS renders a branch); pressing it again on an existing sub-item lifts it
+  // back to the parent level and clears the flag, preserving its text, checkbox
+  // state, list type and formatting untouched (only structure/attrs change).
   function handleSubItem() {
     const ed = focusedEditor.current
     if (!ed) return
+    const itemType = ed.isActive('taskList') ? 'taskItem' : 'listItem'
 
-    function listAncestorCount(e: Editor): number {
-      const { $from } = e.state.selection
+    function findItem(state: Editor['state']) {
+      const { $from } = state.selection
+      for (let d = $from.depth; d > 0; d--) {
+        if ($from.node(d).type.name === itemType) return { node: $from.node(d), depth: d }
+      }
+      return null
+    }
+
+    const current = findItem(ed.state)
+    if (!current) return // not inside a list — nothing to toggle
+
+    if (current.node.attrs.subItem) {
+      // TOGGLE OFF: clear the flag, then lift back to the parent level
+      ed.chain()
+        .focus()
+        .command(({ tr, state }) => {
+          const item = findItem(state)
+          if (!item) return false
+          tr.setNodeMarkup(state.selection.$from.before(item.depth), undefined, { ...item.node.attrs, subItem: false })
+          return true
+        })
+        .liftListItem(itemType)
+        .run()
+      return
+    }
+
+    // TOGGLE ON — V1 supports one level of nesting only
+    function listAncestorCount(state: Editor['state']): number {
+      const { $from } = state.selection
       let n = 0
       for (let d = $from.depth; d > 0; d--) {
         const t = $from.node(d).type.name
@@ -1902,25 +2064,16 @@ export function JournalEditorContent({
       }
       return n
     }
+    if (listAncestorCount(ed.state) >= 2) return // already nested via Indent — one level only
 
-    const before = listAncestorCount(ed)
-    if (before === 0) return   // not inside a list — nothing to nest
-    if (before >= 2) return    // already a sub-item — V1 supports one level only
-
-    const itemType = ed.isActive('taskList') ? 'taskItem' : 'listItem'
     ed.chain()
       .focus()
       .sinkListItem(itemType)
       .command(({ tr, state }) => {
-        const { $from } = state.selection
-        for (let d = $from.depth; d > 0; d--) {
-          const node = $from.node(d)
-          if (node.type.name === itemType) {
-            tr.setNodeMarkup($from.before(d), undefined, { ...node.attrs, subItem: true })
-            return true
-          }
-        }
-        return false
+        const item = findItem(state)
+        if (!item) return false
+        tr.setNodeMarkup(state.selection.$from.before(item.depth), undefined, { ...item.node.attrs, subItem: true })
+        return true
       })
       .run()
   }
@@ -2213,17 +2366,6 @@ export function JournalEditorContent({
   }
 
   // Utility buttons: subdued navy/lavender treatment (List, Upload, Camera, Draw)
-  function dockBtn(active = false): React.CSSProperties {
-    return {
-      padding: '5px 11px', borderRadius: 7, cursor: 'pointer',
-      border: `0.5px solid ${active ? 'rgba(124,58,237,0.65)' : 'rgba(255,255,255,0.09)'}`,
-      background: active ? 'rgba(124,58,237,0.28)' : 'rgba(255,255,255,0.04)',
-      color: active ? '#c4b5fd' : 'rgba(255,255,255,0.60)',
-      fontSize: 12, fontWeight: active ? 600 : 400,
-      transition: 'all 120ms', flexShrink: 0, whiteSpace: 'nowrap' as const,
-    }
-  }
-
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
@@ -2278,27 +2420,48 @@ export function JournalEditorContent({
         .xp-j-prose ul[data-type="taskList"] > li > label > input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accent-color: #7c3aed; margin: 0; }
         .xp-j-prose ul[data-type="taskList"] > li > div { flex: 1; min-width: 0; }
         .xp-j-prose ul[data-type="taskList"] > li[data-checked="true"] > div { opacity: 0.52; }
-        /* Sub-item connector — Task Manager-style parent→child branch, distinct from plain Indent */
-        .xp-j-prose li[data-sub-item="true"] { position: relative; margin-left: 8px; }
+        /* Sub-item connector — Task Manager-style: thin trunk + sharp 90° branch +
+           small right-facing arrowhead, no curves. Sub-items always live inside a
+           dedicated nested list under their parent, so :last-child on that nested
+           list scopes exactly to "the final child in this group" with no JS bookkeeping.
+           Geometry is deliberately self-contained: both pseudo-elements sit fully
+           within the li's own reserved margin-left gutter (never past it), so the
+           connector can never depend on — or be clipped by — spacing borrowed from
+           an ancestor (e.g. a checkbox list's zero-padding <ul>), which is what made
+           it disappear on Mobile's tighter layout despite rendering fine on Desktop. */
+        .xp-j-prose li[data-sub-item="true"] { position: relative; margin-left: 20px; }
         .xp-j-prose li[data-sub-item="true"]::before {
-          content: ''; position: absolute; left: -16px; top: 2px; width: 11px; height: 10px;
-          border-left: 1.5px solid rgba(124,58,237,0.45); border-bottom: 1.5px solid rgba(124,58,237,0.45);
-          border-bottom-left-radius: 5px; pointer-events: none;
+          content: ''; position: absolute; left: -16px; top: 0; bottom: -3px; width: 2px;
+          background: ${isDark ? 'rgba(167,139,250,0.55)' : 'rgba(124,58,237,0.50)'}; pointer-events: none;
         }
-        .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"] { position: relative; margin-left: 8px; }
+        .xp-j-prose li[data-sub-item="true"]:last-child::before { bottom: auto; height: 10px; }
+        .xp-j-prose li[data-sub-item="true"]::after {
+          content: ''; position: absolute; left: -16px; top: 5px; width: 12px; height: 9px;
+          background: ${isDark ? 'rgba(167,139,250,0.65)' : 'rgba(124,58,237,0.55)'}; pointer-events: none;
+          clip-path: polygon(0% 42%, 62% 42%, 62% 12%, 100% 50%, 62% 88%, 62% 58%, 0% 58%);
+        }
+        .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"] { position: relative; margin-left: 20px; }
         .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"]::before {
-          content: ''; position: absolute; left: -16px; top: 10px; width: 11px; height: 8px;
-          border-left: 1.5px solid rgba(124,58,237,0.45); border-bottom: 1.5px solid rgba(124,58,237,0.45);
-          border-bottom-left-radius: 5px; pointer-events: none;
+          content: ''; position: absolute; left: -16px; top: 0; bottom: -4px; width: 2px;
+          background: ${isDark ? 'rgba(167,139,250,0.55)' : 'rgba(124,58,237,0.50)'}; pointer-events: none;
+        }
+        .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"]:last-child::before { bottom: auto; height: 15px; }
+        .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"]::after {
+          content: ''; position: absolute; left: -16px; top: 11px; width: 12px; height: 9px;
+          background: ${isDark ? 'rgba(167,139,250,0.65)' : 'rgba(124,58,237,0.55)'}; pointer-events: none;
+          clip-path: polygon(0% 42%, 62% 42%, 62% 12%, 100% 50%, 62% 88%, 62% 58%, 0% 58%);
         }
         @media (max-width: 640px) {
-          .xp-j-prose li[data-sub-item="true"] { margin-left: 4px; }
+          .xp-j-prose li[data-sub-item="true"] { margin-left: 14px; }
+          .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"] { margin-left: 14px; }
           .xp-j-prose li[data-sub-item="true"]::before,
-          .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"]::before { left: -11px; width: 8px; }
+          .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"]::before { left: -11px; }
+          .xp-j-prose li[data-sub-item="true"]::after,
+          .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"]::after { left: -11px; width: 9px; }
         }
         /* Box Title — a text format (toggle mark), not a section or drawn shape.
-           Semi-transparent purple pill so it stays readable over any existing
-           section background color, in both themes. */
+           Five curated pastel pill treatments (default: purple), each readable
+           over any existing section background color, in both themes. */
         .xp-j-box-title {
           display: inline-block;
           padding: 3px 10px;
@@ -2308,9 +2471,31 @@ export function JournalEditorContent({
           line-height: 1.5;
           max-width: 100%;
           overflow-wrap: break-word;
+        }
+        .xp-j-box-title[data-box-color="purple"] {
           background: ${isDark ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.12)'};
           border: 0.5px solid ${isDark ? 'rgba(167,139,250,0.45)' : 'rgba(124,58,237,0.30)'};
           color: ${isDark ? '#e9d5ff' : '#5b21b6'};
+        }
+        .xp-j-box-title[data-box-color="yellow"] {
+          background: ${isDark ? 'rgba(234,179,8,0.28)' : 'rgba(250,204,21,0.22)'};
+          border: 0.5px solid ${isDark ? 'rgba(250,204,21,0.45)' : 'rgba(202,138,4,0.35)'};
+          color: ${isDark ? '#fef08a' : '#713f12'};
+        }
+        .xp-j-box-title[data-box-color="green"] {
+          background: ${isDark ? 'rgba(34,197,94,0.26)' : 'rgba(34,197,94,0.14)'};
+          border: 0.5px solid ${isDark ? 'rgba(74,222,128,0.45)' : 'rgba(22,163,74,0.32)'};
+          color: ${isDark ? '#bbf7d0' : '#166534'};
+        }
+        .xp-j-box-title[data-box-color="pink"] {
+          background: ${isDark ? 'rgba(236,72,153,0.26)' : 'rgba(236,72,153,0.13)'};
+          border: 0.5px solid ${isDark ? 'rgba(244,114,182,0.45)' : 'rgba(219,39,119,0.30)'};
+          color: ${isDark ? '#fbcfe8' : '#9d174d'};
+        }
+        .xp-j-box-title[data-box-color="blue"] {
+          background: ${isDark ? 'rgba(59,130,246,0.26)' : 'rgba(59,130,246,0.13)'};
+          border: 0.5px solid ${isDark ? 'rgba(96,165,250,0.45)' : 'rgba(37,99,235,0.30)'};
+          color: ${isDark ? '#bfdbfe' : '#1e40af'};
         }
         .xp-j-prose p.is-editor-empty:first-child::before {
           content: attr(data-placeholder);
@@ -2635,6 +2820,9 @@ export function JournalEditorContent({
                             onNameChange={block.type === 'section'
                               ? (name) => updateBlock(block.id, { name })
                               : undefined}
+                            onCollapseToggle={block.type === 'section'
+                              ? () => updateBlock(block.id, { collapsed: !block.collapsed })
+                              : undefined}
                             canMoveUp={idx > 0}
                             canMoveDown={idx < blocks.length - 1}
                             onMoveUp={() => moveBlock(block.id, -1)}
@@ -2712,20 +2900,14 @@ export function JournalEditorContent({
                   scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch',
                 } as React.CSSProperties}
               >
-                {/* • List */}
-                <button
-                  className={`xp-jd-btn${isActive('bulletList') ? ' xp-j-active' : ''}`}
-                  style={dockBtn(isActive('bulletList'))}
-                  onClick={() => focusedEditor.current?.chain().focus().toggleBulletList().run()}
-                  title="Bulleted list"
-                >• List</button>
-                {/* 1. List */}
-                <button
-                  className={`xp-jd-btn${isActive('orderedList') ? ' xp-j-active' : ''}`}
-                  style={dockBtn(isActive('orderedList'))}
-                  onClick={() => focusedEditor.current?.chain().focus().toggleOrderedList().run()}
-                  title="Numbered list"
-                >1. List</button>
+                {/* ☷ List ▾ — consolidated Bullet/Numbered picker, same underlying commands */}
+                <ListPicker
+                  activeType={isActive('bulletList') ? 'bullet' : isActive('orderedList') ? 'ordered' : null}
+                  onPick={type => {
+                    if (type === 'bullet') focusedEditor.current?.chain().focus().toggleBulletList().run()
+                    else focusedEditor.current?.chain().focus().toggleOrderedList().run()
+                  }}
+                />
                 {/* ☐ Check */}
                 <button
                   className={`xp-jd-btn${isActive('taskList') ? ' xp-j-active' : ''}`}
@@ -2751,13 +2933,13 @@ export function JournalEditorContent({
                   onClick={handleIndent}
                   title="Indent (nest into sub-item)"
                 >⇥ Indent</button>
-                {/* ↳ Sub-item — parent→child hierarchy with connector line, distinct from Indent */}
+                {/* ↳ Sub-item — ON/OFF toggle: parent→child hierarchy with connector line, distinct from Indent */}
                 <button
-                  className="xp-jd-btn"
-                  style={dockBtn()}
+                  className={`xp-jd-btn${isSubItem() ? ' xp-j-active' : ''}`}
+                  style={dockBtn(isSubItem())}
                   onMouseDown={e => e.preventDefault()}
                   onClick={handleSubItem}
-                  title="Sub-item (nest as a child of the item above)"
+                  title={isSubItem() ? 'Remove sub-item (return to parent level)' : 'Sub-item (nest as a child of the item above)'}
                   aria-label="Sub-item"
                 >↳ Sub-item</button>
                 {/* ↺ Undo — icon only + mobile tap tooltip */}
@@ -3216,6 +3398,80 @@ export function JournalEditorContent({
         />
       )}
     </>
+  )
+}
+
+// ─── List picker inline component — consolidates Bullet/Numbered into one control ──
+
+function ListPicker({ activeType, onPick }: { activeType: 'bullet' | 'ordered' | null; onPick: (type: 'bullet' | 'ordered') => void }) {
+  const [open, setOpen] = useState(false)
+  const [popPos, setPopPos] = useState<{ left: number; bottom: number } | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function outside(e: MouseEvent | TouchEvent) {
+      if (ref.current?.contains(e.target as Node)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', outside)
+    document.addEventListener('touchstart', outside)
+    return () => {
+      document.removeEventListener('mousedown', outside)
+      document.removeEventListener('touchstart', outside)
+    }
+  }, [open])
+
+  function handleToggle() {
+    if (open) { setOpen(false); return }
+    const rect = btnRef.current?.getBoundingClientRect()
+    if (rect) setPopPos({ left: rect.left, bottom: window.innerHeight - rect.top + 6 })
+    setOpen(true)
+  }
+
+  const isActiveList = activeType !== null
+
+  return (
+    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        ref={btnRef}
+        className={`xp-jd-btn${isActiveList ? ' xp-j-active' : ''}`}
+        style={dockBtn(isActiveList || open)}
+        onMouseDown={e => e.preventDefault()}
+        onClick={handleToggle}
+        title="List"
+      >☷ List <span style={{ fontSize: 8, opacity: 0.7, marginLeft: 1 }}>▾</span></button>
+
+      {open && popPos && (
+        <div className="xp-j-sec-menu" style={{
+          position: 'fixed', bottom: popPos.bottom, left: popPos.left, zIndex: 9999,
+          background: '#160a30',
+          border: '0.5px solid rgba(124,58,237,0.32)',
+          borderRadius: 10,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.65)',
+          padding: '6px', overflow: 'hidden', minWidth: 148,
+          display: 'flex', flexDirection: 'column', gap: 2,
+        }}>
+          <button
+            onClick={() => { onPick('bullet'); setOpen(false) }}
+            style={{
+              ...menuItemStyle(true), display: 'flex', alignItems: 'center', gap: 8, borderRadius: 7,
+              color: activeType === 'bullet' ? '#c4b5fd' : undefined,
+              fontWeight: activeType === 'bullet' ? 600 : 400,
+            }}
+          >• Bullet List{activeType === 'bullet' && <span style={{ marginLeft: 'auto', fontSize: 10 }}>✓</span>}</button>
+          <button
+            onClick={() => { onPick('ordered'); setOpen(false) }}
+            style={{
+              ...menuItemStyle(true), display: 'flex', alignItems: 'center', gap: 8, borderRadius: 7,
+              color: activeType === 'ordered' ? '#c4b5fd' : undefined,
+              fontWeight: activeType === 'ordered' ? 600 : 400,
+            }}
+          >1. Numbered List{activeType === 'ordered' && <span style={{ marginLeft: 'auto', fontSize: 10 }}>✓</span>}</button>
+        </div>
+      )}
+    </div>
   )
 }
 

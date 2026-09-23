@@ -242,6 +242,8 @@ export function ShareCardModal({ month, onClose }: ShareCardModalProps) {
         goalDays: stats.goalDays,
         completionRate: stats.completionRate,
       },
+      source: 'Analytics',
+      relatedDateLabel: `${MONTHS[month]} ${APP_YEAR}`,
     }
     addGalleryItem(item)
     setSaved(true)

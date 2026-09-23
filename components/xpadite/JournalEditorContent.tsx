@@ -13,6 +13,7 @@ import { TextStyle } from '@tiptap/extension-text-style'
 import { Color } from '@tiptap/extension-color'
 import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
+import { addGalleryItem } from './GalleryModal'
 import dynamic from 'next/dynamic'
 import { buildAttachments, ATTACHMENT_ACCEPT, CameraModal, ImageLightbox } from './attachmentUtils'
 import type { JournalBlock, JournalTimerSession, TaskAttachment, Task, TaskSession } from './types'
@@ -1767,6 +1768,17 @@ export function JournalEditorContent({
       const drawBlock = createDrawingBlock(dataUrl, `Drawing — ${fmtShortDate(dateKey)}`)
       next = [...blocksRef.current]
       next.splice(drawState.insertAt + 1, 0, drawBlock)
+      // New drawings become Gallery assets automatically; re-editing an existing
+      // one (the branch above) does not create a second Gallery entry.
+      addGalleryItem({
+        id: 'draw-' + Date.now(),
+        type: 'drawing',
+        createdAt: Date.now(),
+        title: `Drawing — ${fmtShortDate(dateKey)}`,
+        dataUri: dataUrl,
+        source: 'Planner/Journal',
+        relatedDateLabel: fmtShortDate(dateKey),
+      })
     }
     blocksRef.current = next
     setBlocks(next)

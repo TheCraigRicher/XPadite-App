@@ -665,6 +665,8 @@ export function YearShareModal({ year, onClose }: { year: number; onClose: () =>
         title:     `${year} Year Progress`,
         year,
         dataUri:   uri,
+        source:    'Analytics',
+        relatedDateLabel: String(year),
       } as GalleryItem)
 
       const result = await executeXpaditeShare(file, platformId, setToast)

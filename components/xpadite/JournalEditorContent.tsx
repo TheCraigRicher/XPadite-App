@@ -7,6 +7,7 @@ import { Mark, mergeAttributes } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
+import ListItem from '@tiptap/extension-list-item'
 import Placeholder from '@tiptap/extension-placeholder'
 import Underline from '@tiptap/extension-underline'
 import { TextStyle } from '@tiptap/extension-text-style'
@@ -22,7 +23,7 @@ import { JournalDrawModal } from './JournalDrawModal'
 import {
   parseJournalDoc, parseJournalContent, serializeJournalContent,
   getSectionStyle, SECTION_COLORS, createTextBlock, createSectionBlock,
-  createDrawingBlock, createImageBlock,
+  createDrawingBlock, createImageBlock, mkId,
 } from './journalUtils'
 import type { SectionColorKey } from './journalUtils'
 
@@ -141,6 +142,7 @@ interface JournalTextBlockProps {
   onFocus: (editor: Editor) => void
   onSelectionUpdate: () => void
   onDelete?: () => void
+  onDuplicate?: () => void
   onMoveActivate?: () => void
   onResizeActivate?: () => void
   onColorChange?: (color: SectionColorKey) => void
@@ -154,7 +156,7 @@ interface JournalTextBlockProps {
 const JournalTextBlock = React.memo(function JournalTextBlock({
   block, isDark, isOnlyBlock, isFirstBlock = false, forcedContent,
   onContentChange, onFocus, onSelectionUpdate,
-  onDelete, onMoveActivate, onResizeActivate, onColorChange, onNameChange,
+  onDelete, onDuplicate, onMoveActivate, onResizeActivate, onColorChange, onNameChange,
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
 }: JournalTextBlockProps) {
   const [menuOpen,       setMenuOpen]       = useState(false)
@@ -172,9 +174,11 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
         codeBlock: false, blockquote: false,
         strike: false, code: false, horizontalRule: false,
         // bold and italic enabled (default)
+        listItem: false, // replaced by SubItemListItem below (adds the sub-item attribute)
       }),
+      SubItemListItem,
       TaskList,
-      TaskItem.configure({ nested: false }),
+      SubItemTaskItem.configure({ nested: true }), // nested:true required for checkbox sub-items
       Placeholder.configure({
         placeholder: (block.type === 'section' && !isFirstBlock)
           ? 'Add section content…'
@@ -184,6 +188,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
       TextStyle,
       Color,
       XpHighlight,
+      BoxTitle,
     ],
     content: { type: 'doc', content: [{ type: 'paragraph' }] },
     editorProps: { attributes: { class: 'xp-j-prose' } },
@@ -412,6 +417,11 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                     <button onClick={() => setShowColorPick(true)} style={menuItemStyle(isDark)}>
                       🎨 Change Color
                     </button>
+                    {!!onDuplicate && (
+                      <button onClick={() => { onDuplicate(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                        📑 Duplicate
+                      </button>
+                    )}
                     {!!onDelete && !isOnlyBlock && (
                       <button onClick={() => { onDelete(); setMenuOpen(false) }} style={{ ...menuItemStyle(isDark), color: '#f87171' }}>
                         🗑 Delete
@@ -610,6 +620,50 @@ const XpHighlight = Mark.create({
   },
 })
 
+// ── Box Title: a plain toggle mark (no attributes) wrapping selected text in a
+// compact rounded pill via the .xp-j-box-title CSS class. No custom commands
+// needed — the ▣ button uses TipTap's built-in toggleMark('boxTitle'), which
+// already behaves as a Bold-style toggle and persists through the same
+// editor.getJSON() pipeline as every other mark in this editor.
+const BoxTitle = Mark.create({
+  name: 'boxTitle',
+  parseHTML() { return [{ tag: 'span[data-box-title]' }] },
+  renderHTML({ HTMLAttributes }) {
+    return ['span', mergeAttributes(HTMLAttributes, { 'data-box-title': 'true', class: 'xp-j-box-title' }), 0]
+  },
+})
+
+// ── Sub-item: a data-only flag on listItem/taskItem marking a node as a
+// one-level-deep child created via the "↳ Sub-item" control (distinct from
+// plain Indent). Persists through the existing editor.getJSON() pipeline —
+// no separate storage needed. Purely additive: normal Indent/nesting is
+// untouched, this only adds an attribute the connector CSS reads.
+const SubItemListItem = ListItem.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      subItem: {
+        default: false,
+        parseHTML: (el: HTMLElement) => el.getAttribute('data-sub-item') === 'true',
+        renderHTML: (attrs: { subItem?: boolean }) => attrs.subItem ? { 'data-sub-item': 'true' } : {},
+      },
+    }
+  },
+})
+
+const SubItemTaskItem = TaskItem.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      subItem: {
+        default: false,
+        parseHTML: (el: HTMLElement) => el.getAttribute('data-sub-item') === 'true',
+        renderHTML: (attrs: { subItem?: boolean }) => attrs.subItem ? { 'data-sub-item': 'true' } : {},
+      },
+    }
+  },
+})
+
 const HIGHLIGHT_COLORS: Array<{ label: string; value: string | null; swatch: string }> = [
   { label: 'None',        value: null,      swatch: 'transparent' },
   { label: 'Yellow',      value: '#fef08a', swatch: '#fef08a' },
@@ -662,6 +716,7 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
   const isUnderline = editor.isActive('underline')
   const isH2        = editor.isActive('heading', { level: 2 })
   const isH3        = editor.isActive('heading', { level: 3 })
+  const isBoxTitle  = editor.isActive('boxTitle')
   const sizeLabel   = isH2 ? 'Heading' : isH3 ? 'Large' : 'Normal'
 
   // Active color: what the current selection has (null = default)
@@ -885,6 +940,16 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
           </div>
         )}
       </div>
+
+      {divider}
+
+      {/* ▣ Box — toggles the Box Title text format, distinct from Highlight/Heading */}
+      <button
+        style={{ ...fBtn(isBoxTitle), minWidth: 26, textAlign: 'center' }}
+        onMouseDown={e => { e.preventDefault(); editor.chain().focus().toggleMark('boxTitle').run() }}
+        title="Box Title"
+        aria-label="Box Title"
+      >▣</button>
     </div>
   )
 }
@@ -1476,6 +1541,23 @@ export function JournalEditorContent({
     pushHistory(true)
   }
 
+  // Duplicate: new id + fresh timestamps, everything else copied by value (content
+  // is a JSON string, so the copy can never share mutable state with the original).
+  // Inserting right after the original and letting the existing CSS Grid auto-flow
+  // place it is what gives "beside if there's room, otherwise below" for free — no
+  // custom collision math needed, and on mobile the grid already collapses to a
+  // single stacked column, so the duplicate always lands below there too.
+  function duplicateBlock(id: string) {
+    const idx = blocksRef.current.findIndex(b => b.id === id)
+    if (idx < 0) return
+    const original = blocksRef.current[idx]
+    const liveContent = contentMapRef.current.get(id) ?? original.content ?? ''
+    const ts = Date.now()
+    const copy: JournalBlock = { ...original, id: mkId(), content: liveContent, createdAt: ts, updatedAt: ts }
+    contentMapRef.current.set(copy.id, liveContent)
+    insertBlock(copy, idx)
+  }
+
   function updateBlock(id: string, updates: Partial<JournalBlock>) {
     const next = blocksRef.current.map(b => b.id === id ? { ...b, ...updates, updatedAt: Date.now() } : b)
     blocksRef.current = next
@@ -1802,6 +1884,45 @@ export function JournalEditorContent({
     } else {
       ed.chain().focus().sinkListItem('listItem').run()
     }
+  }
+
+  // Sub-item — distinct from Indent: creates an explicit one-level parent→child
+  // relationship (flags the nested node so the connector CSS renders a └─ branch)
+  // and refuses to run if the current item is already a sub-item (V1 = one level).
+  function handleSubItem() {
+    const ed = focusedEditor.current
+    if (!ed) return
+
+    function listAncestorCount(e: Editor): number {
+      const { $from } = e.state.selection
+      let n = 0
+      for (let d = $from.depth; d > 0; d--) {
+        const t = $from.node(d).type.name
+        if (t === 'listItem' || t === 'taskItem') n++
+      }
+      return n
+    }
+
+    const before = listAncestorCount(ed)
+    if (before === 0) return   // not inside a list — nothing to nest
+    if (before >= 2) return    // already a sub-item — V1 supports one level only
+
+    const itemType = ed.isActive('taskList') ? 'taskItem' : 'listItem'
+    ed.chain()
+      .focus()
+      .sinkListItem(itemType)
+      .command(({ tr, state }) => {
+        const { $from } = state.selection
+        for (let d = $from.depth; d > 0; d--) {
+          const node = $from.node(d)
+          if (node.type.name === itemType) {
+            tr.setNodeMarkup($from.before(d), undefined, { ...node.attrs, subItem: true })
+            return true
+          }
+        }
+        return false
+      })
+      .run()
   }
 
   // Voice-to-notes
@@ -2157,6 +2278,40 @@ export function JournalEditorContent({
         .xp-j-prose ul[data-type="taskList"] > li > label > input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accent-color: #7c3aed; margin: 0; }
         .xp-j-prose ul[data-type="taskList"] > li > div { flex: 1; min-width: 0; }
         .xp-j-prose ul[data-type="taskList"] > li[data-checked="true"] > div { opacity: 0.52; }
+        /* Sub-item connector — Task Manager-style parent→child branch, distinct from plain Indent */
+        .xp-j-prose li[data-sub-item="true"] { position: relative; margin-left: 8px; }
+        .xp-j-prose li[data-sub-item="true"]::before {
+          content: ''; position: absolute; left: -16px; top: 2px; width: 11px; height: 10px;
+          border-left: 1.5px solid rgba(124,58,237,0.45); border-bottom: 1.5px solid rgba(124,58,237,0.45);
+          border-bottom-left-radius: 5px; pointer-events: none;
+        }
+        .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"] { position: relative; margin-left: 8px; }
+        .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"]::before {
+          content: ''; position: absolute; left: -16px; top: 10px; width: 11px; height: 8px;
+          border-left: 1.5px solid rgba(124,58,237,0.45); border-bottom: 1.5px solid rgba(124,58,237,0.45);
+          border-bottom-left-radius: 5px; pointer-events: none;
+        }
+        @media (max-width: 640px) {
+          .xp-j-prose li[data-sub-item="true"] { margin-left: 4px; }
+          .xp-j-prose li[data-sub-item="true"]::before,
+          .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"]::before { left: -11px; width: 8px; }
+        }
+        /* Box Title — a text format (toggle mark), not a section or drawn shape.
+           Semi-transparent purple pill so it stays readable over any existing
+           section background color, in both themes. */
+        .xp-j-box-title {
+          display: inline-block;
+          padding: 3px 10px;
+          margin: 1px 0;
+          border-radius: 8px;
+          font-weight: 700;
+          line-height: 1.5;
+          max-width: 100%;
+          overflow-wrap: break-word;
+          background: ${isDark ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.12)'};
+          border: 0.5px solid ${isDark ? 'rgba(167,139,250,0.45)' : 'rgba(124,58,237,0.30)'};
+          color: ${isDark ? '#e9d5ff' : '#5b21b6'};
+        }
         .xp-j-prose p.is-editor-empty:first-child::before {
           content: attr(data-placeholder);
           color: ${isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.30)'};
@@ -2465,6 +2620,7 @@ export function JournalEditorContent({
                             onFocus={onEditorFocus}
                             onSelectionUpdate={onEditorSelectionUpdate}
                             onDelete={blocks.length > 1 ? () => deleteBlock(block.id) : undefined}
+                            onDuplicate={block.type === 'section' ? () => duplicateBlock(block.id) : undefined}
                             onMoveActivate={block.type === 'section' ? () => {
                               setMoveModeId(block.id)
                               setSelectedBlockId(block.id)
@@ -2591,9 +2747,19 @@ export function JournalEditorContent({
                 <button
                   className="xp-jd-btn xp-jd-ind-dt"
                   style={dockBtn()}
+                  onMouseDown={e => e.preventDefault()}
                   onClick={handleIndent}
                   title="Indent (nest into sub-item)"
                 >⇥ Indent</button>
+                {/* ↳ Sub-item — parent→child hierarchy with connector line, distinct from Indent */}
+                <button
+                  className="xp-jd-btn"
+                  style={dockBtn()}
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={handleSubItem}
+                  title="Sub-item (nest as a child of the item above)"
+                  aria-label="Sub-item"
+                >↳ Sub-item</button>
                 {/* ↺ Undo — icon only + mobile tap tooltip */}
                 <div style={{ position: 'relative', flexShrink: 0 }}>
                   <button
@@ -2641,6 +2807,7 @@ export function JournalEditorContent({
                 <button
                   className="xp-jd-btn xp-jd-ind-mo"
                   style={dockBtn()}
+                  onMouseDown={e => e.preventDefault()}
                   onClick={handleIndent}
                   title="Indent (nest into sub-item)"
                 >⇥ Indent</button>

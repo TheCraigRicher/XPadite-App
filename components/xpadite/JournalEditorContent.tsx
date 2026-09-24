@@ -2452,12 +2452,22 @@ export function JournalEditorContent({
           clip-path: polygon(0% 42%, 62% 42%, 62% 12%, 100% 50%, 62% 88%, 62% 58%, 0% 58%);
         }
         @media (max-width: 640px) {
-          .xp-j-prose li[data-sub-item="true"] { margin-left: 14px; }
-          .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"] { margin-left: 14px; }
+          /* Mobile-only: horizontal branch lengthened ~10px versus the base mobile
+             values above (margin-left/left both shift by the same 10px so the
+             vertical trunk's on-screen position is unchanged — only the child's
+             own box and the branch itself move). The clip-path split moves from
+             62% to 82% so the arrowhead keeps its original ~3.4px physical width
+             at the new, wider box instead of scaling up with it. Desktop/tablet
+             (the un-media-queried rules above) are untouched. */
+          .xp-j-prose li[data-sub-item="true"] { margin-left: 24px; }
+          .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"] { margin-left: 24px; }
           .xp-j-prose li[data-sub-item="true"]::before,
-          .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"]::before { left: -11px; }
+          .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"]::before { left: -21px; }
           .xp-j-prose li[data-sub-item="true"]::after,
-          .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"]::after { left: -11px; width: 9px; }
+          .xp-j-prose ul[data-type="taskList"] > li[data-sub-item="true"]::after {
+            left: -21px; width: 19px;
+            clip-path: polygon(0% 42%, 82% 42%, 82% 12%, 100% 50%, 82% 88%, 82% 58%, 0% 58%);
+          }
         }
         /* Box Title — a text format (toggle mark), not a section or drawn shape.
            Five curated pastel pill treatments (default: purple), each readable

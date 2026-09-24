@@ -371,6 +371,176 @@ function JournalMonthCard({
   )
 }
 
+// ─── Category/Folder filter dropdown — toolbar-level, custom XPadite popover ───
+// Replaces a native <select> for Category so Mobile never falls back to the
+// OS's large native picker sheet. Also the organization hub: folders are
+// reachable here (alongside the existing "All ▾" month/folder select) and
+// "+ New Folder" lives inside it, so the toolbar no longer needs its own
+// separate "+ Folder" button. Single active selection (radio-style): picking
+// a category clears any folder filter and vice versa; "All Categories" clears
+// both without touching the unrelated month/sort filters.
+
+function CategoryFilterDropdown({
+  isDark, bdr, categoryFilter, folderFilter, categories, folders,
+  onSelectCategory, onSelectFolder, onCreateFolder,
+}: {
+  isDark: boolean
+  bdr: string
+  categoryFilter: string | null
+  folderFilter: string | null
+  categories: LibraryCategory[]
+  folders: JournalFolder[]
+  onSelectCategory: (id: string | null) => void
+  onSelectFolder: (id: string) => void
+  onCreateFolder: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const DROPDOWN_WIDTH = 220
+
+  useEffect(() => {
+    if (!open) return
+    function outside(e: MouseEvent | TouchEvent) {
+      if (ref.current?.contains(e.target as Node)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', outside)
+    document.addEventListener('touchstart', outside)
+    return () => {
+      document.removeEventListener('mousedown', outside)
+      document.removeEventListener('touchstart', outside)
+    }
+  }, [open])
+
+  function handleToggle() {
+    if (open) { setOpen(false); return }
+    const rect = btnRef.current?.getBoundingClientRect()
+    if (rect) {
+      setPos({
+        top: rect.bottom + 6,
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - DROPDOWN_WIDTH - 8)),
+      })
+    }
+    setOpen(true)
+  }
+
+  const active = categoryFilter !== null || folderFilter !== null
+  const activeLabel = categoryFilter !== null
+    ? categories.find(c => c.id === categoryFilter)?.name
+    : folderFilter !== null
+      ? folders.find(f => f.id === folderFilter)?.name
+      : null
+
+  const rowStyle: React.CSSProperties = {
+    display: 'flex', alignItems: 'center', gap: 9,
+    width: '100%', padding: '8px 12px',
+    background: 'transparent', border: 'none', cursor: 'pointer',
+    fontSize: 12.5, fontWeight: 500, textAlign: 'left',
+    color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)',
+  }
+  const headerStyle: React.CSSProperties = {
+    padding: '9px 12px 4px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+    letterSpacing: '0.05em', color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)',
+  }
+  const dividerStyle: React.CSSProperties = {
+    height: 1, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', margin: '4px 0',
+  }
+
+  function radio(checked: boolean, color?: string) {
+    return (
+      <span style={{
+        width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
+        border: `1.5px solid ${checked ? (color ?? '#7c3aed') : isDark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.25)'}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {checked && <span style={{ width: 7, height: 7, borderRadius: '50%', background: color ?? '#7c3aed' }} />}
+      </span>
+    )
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        ref={btnRef}
+        onClick={handleToggle}
+        style={{
+          padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: active ? 600 : 500,
+          cursor: 'pointer', flexShrink: 0, outline: 'none', whiteSpace: 'nowrap',
+          border: `0.5px solid ${active || open ? 'rgba(124,58,237,0.65)' : isDark ? 'rgba(124,58,237,0.32)' : 'rgba(124,58,237,0.28)'}`,
+          background: active || open ? 'rgba(124,58,237,0.22)' : (isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)'),
+          color: isDark ? '#c4b5fd' : '#7c3aed',
+          maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis',
+        }}
+        title="Filter by category or folder"
+      >
+        🏷 {activeLabel ?? 'Category'}
+      </button>
+
+      {open && pos && (
+        <div style={{
+          position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999,
+          background: isDark ? '#1a1530' : '#ffffff',
+          border: `0.5px solid ${bdr}`,
+          borderRadius: 12, overflow: 'hidden',
+          boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.50)' : '0 8px 28px rgba(0,0,0,0.18)',
+          width: DROPDOWN_WIDTH, maxHeight: '65vh', overflowY: 'auto',
+        }}>
+          <button
+            onClick={() => { onSelectCategory(null); setOpen(false) }}
+            style={rowStyle}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.07)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+          >
+            {radio(!active)}
+            🏷 All Categories
+          </button>
+          <div style={dividerStyle} />
+          {categories.map(cat => (
+            <button
+              key={cat.id}
+              onClick={() => { onSelectCategory(cat.id); setOpen(false) }}
+              style={rowStyle}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.07)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+            >
+              {radio(categoryFilter === cat.id, cat.color)}
+              {cat.name}
+            </button>
+          ))}
+          {folders.length > 0 && (
+            <>
+              <div style={headerStyle}>My Folders</div>
+              {folders.map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => { onSelectFolder(f.id); setOpen(false) }}
+                  style={rowStyle}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.07)' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+                >
+                  {radio(folderFilter === f.id)}
+                  📁 {f.name}
+                </button>
+              ))}
+            </>
+          )}
+          <div style={dividerStyle} />
+          <button
+            onClick={() => { onCreateFolder(); setOpen(false) }}
+            style={{ ...rowStyle, color: isDark ? '#c4b5fd' : '#7c3aed', fontWeight: 600 }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.07)' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+          >
+            + New Folder
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Library card ⋮ menu — shared across all 4 view modes ─────────────────────
 // One implementation reused by compact/detail/tile/thumbnail instead of 4
 // duplicated menu blobs. Anchored via its own position:relative wrapper —
@@ -1397,30 +1567,20 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   </select>
 
                   {/* 🏷 Category — FILTERS the Library (finding documents), distinct from the
-                      per-document ⋮ → Category menu which ASSIGNS categories. */}
-                  <select
-                    value={libCategoryFilter ?? ''}
-                    onChange={e => setLibCategoryFilter(e.target.value === '' ? null : e.target.value)}
-                    style={ss}
-                    title="Filter by category"
-                  >
-                    <option value="">🏷 Category</option>
-                    {BUILTIN_CATEGORIES.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                    {journalLabels.length > 0 && (
-                      <optgroup label="Custom Labels">
-                        {journalLabels.map(l => (
-                          <option key={l.id} value={l.id}>{l.name}</option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </select>
-
-                  {/* + New Folder */}
-                  <button onClick={() => setShowCreateFolder(true)} style={ss} title="Create a new folder">
-                    + Folder
-                  </button>
+                      per-document ⋮ → Category menu which ASSIGNS categories. A custom XPadite
+                      popover (not a native <select>) so it looks and behaves the same on every
+                      device instead of falling back to the OS's native picker sheet on Mobile.
+                      Folders are also reachable here (in addition to "All ▾") as the organization
+                      hub, per the Library polish request; "+ New Folder" lives inside it too, so
+                      the toolbar no longer needs its own separate "+ Folder" button. */}
+                  <CategoryFilterDropdown
+                    isDark={isDark} bdr={bdr}
+                    categoryFilter={libCategoryFilter} folderFilter={libFolderFilter}
+                    categories={allCategories} folders={journalFolders}
+                    onSelectCategory={id => { setLibCategoryFilter(id); setLibFolderFilter(null) }}
+                    onSelectFolder={id => { setLibFolderFilter(id); setLibCategoryFilter(null) }}
+                    onCreateFolder={() => setShowCreateFolder(true)}
+                  />
                 </>
               )
             })()}

@@ -235,13 +235,14 @@ export async function fetchJournalFolders(
 ): Promise<JournalFolder[]> {
   const { data, error } = await supabase
     .from('journal_folders')
-    .select('folder_id, name')
+    .select('folder_id, name, color')
     .eq('user_id', userId)
     .order('created_at', { ascending: true })
   if (error || !data || data.length === 0) return []
   return data.map(row => ({
     id: row.folder_id as string,
     name: row.name as string,
+    color: (row.color as string | null) ?? undefined,
   }))
 }
 
@@ -255,6 +256,7 @@ export async function upsertAllJournalFolders(
     user_id: userId,
     folder_id: f.id,
     name: f.name,
+    color: f.color ?? null,
   }))
   const { error } = await supabase
     .from('journal_folders')

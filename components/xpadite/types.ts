@@ -124,6 +124,7 @@ export interface JournalLabel {
 export interface JournalFolder {
   id: string
   name: string
+  color?: string // hex string — either one of the curated presets or a custom picker value
 }
 
 export interface TaskAttachment {

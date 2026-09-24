@@ -38,11 +38,15 @@ const DOW_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
 interface LibraryCategory { id: string; name: string; color: string }
 
+// Built-in label colors — Important=Red/Coral, Priority=Gold/Orange,
+// Reflections=Blue, Planning=XPadite Purple, Goals=Green. This array is the
+// single source of truth both the toolbar Labels filter and each document's
+// ⋮ → Labels assignment menu read from — never hardcode these elsewhere.
 const BUILTIN_CATEGORIES: LibraryCategory[] = [
   { id: 'important',   name: 'Important',   color: '#f87171' },
   { id: 'priority',    name: 'Priority',    color: '#fb923c' },
-  { id: 'reflections', name: 'Reflections', color: '#a78bfa' },
-  { id: 'planning',    name: 'Planning',    color: '#60a5fa' },
+  { id: 'reflections', name: 'Reflections', color: '#60a5fa' },
+  { id: 'planning',    name: 'Planning',    color: '#a78bfa' },
   { id: 'goals',       name: 'Goals',       color: '#4ade80' },
 ]
 
@@ -56,6 +60,11 @@ const LABEL_COLOR_HEX: Record<LabelColorKey, string> = {
   pink:   '#f9a8d4',
   blue:   '#60a5fa',
 }
+
+// Folder color presets share the same curated hex family as custom labels
+// (a shared palette, not a shared concept — Folders and Labels stay distinct).
+const FOLDER_COLOR_PRESETS = Object.values(LABEL_COLOR_HEX)
+const DEFAULT_FOLDER_COLOR = LABEL_COLOR_HEX.purple
 
 // ─── Journal entry summary types & helpers ────────────────────────────────────
 
@@ -466,16 +475,16 @@ function CategoryFilterDropdown({
         ref={btnRef}
         onClick={handleToggle}
         style={{
-          padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: active ? 600 : 500,
+          padding: '4px 6px', borderRadius: 6, fontSize: 11, fontWeight: active ? 600 : 500,
           cursor: 'pointer', flexShrink: 0, outline: 'none', whiteSpace: 'nowrap',
           border: `0.5px solid ${active || open ? 'rgba(124,58,237,0.65)' : isDark ? 'rgba(124,58,237,0.32)' : 'rgba(124,58,237,0.28)'}`,
           background: active || open ? 'rgba(124,58,237,0.22)' : (isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)'),
           color: isDark ? '#c4b5fd' : '#7c3aed',
-          maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis',
+          maxWidth: 82, overflow: 'hidden', textOverflow: 'ellipsis',
         }}
-        title="Filter by category or folder"
+        title="Filter by label or folder"
       >
-        🏷 {activeLabel ?? 'Category'}
+        🏷 {activeLabel ?? 'Labels'}
       </button>
 
       {open && pos && (
@@ -494,7 +503,7 @@ function CategoryFilterDropdown({
             onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
           >
             {radio(!active)}
-            🏷 All Categories
+            🏷 All Labels
           </button>
           <div style={dividerStyle} />
           {categories.map(cat => (
@@ -520,7 +529,8 @@ function CategoryFilterDropdown({
                   onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.07)' }}
                   onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
                 >
-                  {radio(folderFilter === f.id)}
+                  {radio(folderFilter === f.id, f.color)}
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: f.color ?? DEFAULT_FOLDER_COLOR, flexShrink: 0 }} />
                   📁 {f.name}
                 </button>
               ))}
@@ -578,6 +588,9 @@ function LibraryCardMenu({
   wrapperStyle,
 }: LibraryCardMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const MENU_WIDTH = 178
 
   useEffect(() => {
     if (!isOpen) return
@@ -593,6 +606,21 @@ function LibraryCardMenu({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
+
+  // Viewport-aware positioning: default to hugging the trigger's right edge
+  // (matches the original look), then clamp so a far-left card's menu shifts
+  // right/inward instead of running off the left edge of the screen, and a
+  // far-right card's menu shifts left/inward instead of running off the right.
+  function handleToggle() {
+    if (isOpen) { onOpenChange(false); return }
+    const rect = btnRef.current?.getBoundingClientRect()
+    if (rect) {
+      const left = Math.max(8, Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - 8))
+      setPos({ top: rect.bottom + 4, left })
+    }
+    onOpenChange(true)
+    onViewChange('main')
+  }
 
   const itemStyle: React.CSSProperties = {
     display: 'flex', alignItems: 'center', gap: 8,
@@ -621,7 +649,8 @@ function LibraryCardMenu({
   return (
     <div ref={ref} style={wrapperStyle} onClick={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()}>
       <button
-        onClick={() => { onOpenChange(!isOpen); onViewChange('main') }}
+        ref={btnRef}
+        onClick={handleToggle}
         title="Document actions"
         aria-label="Document actions"
         style={{
@@ -633,20 +662,20 @@ function LibraryCardMenu({
         }}
       >⋮</button>
 
-      {isOpen && (
+      {isOpen && pos && (
         <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 70,
+          position: 'fixed', top: pos.top, left: pos.left, zIndex: 70,
           background: isDark ? '#1a1530' : '#ffffff',
           border: `0.5px solid ${bdr}`,
           borderRadius: 10, overflow: 'hidden',
           boxShadow: '0 4px 24px rgba(0,0,0,0.30)',
-          minWidth: 178,
+          width: MENU_WIDTH,
         }}>
           {view === 'main' && (
             <>
               <button onClick={onRename} style={itemStyle}><span>✏️</span>Rename</button>
               <button onClick={onExport} style={itemStyle}><span>📤</span>Export</button>
-              <button onClick={() => onViewChange('category')} style={itemStyle}><span>🏷</span>Category<span style={{ marginLeft: 'auto', opacity: 0.5 }}>›</span></button>
+              <button onClick={() => onViewChange('category')} style={itemStyle}><span>🏷</span>Labels<span style={{ marginLeft: 'auto', opacity: 0.5 }}>›</span></button>
               <button onClick={() => onViewChange('folder')} style={itemStyle}><span>📁</span>Move to Folder<span style={{ marginLeft: 'auto', opacity: 0.5 }}>›</span></button>
               <div style={dividerStyle} />
               <button onClick={onDeleteRequest} style={{ ...itemStyle, color: '#f87171' }}><span>🗑</span>Delete</button>
@@ -655,7 +684,7 @@ function LibraryCardMenu({
 
           {view === 'category' && (
             <>
-              <button onClick={() => onViewChange('main')} style={headerStyle}>‹ Category</button>
+              <button onClick={() => onViewChange('main')} style={headerStyle}>‹ Labels</button>
               <div style={{ maxHeight: 220, overflowY: 'auto' }}>
                 {categories.map(cat => {
                   const checked = activeLabelIds.includes(cat.id)
@@ -695,7 +724,9 @@ function LibraryCardMenu({
                 {folders.map(f => (
                   <div key={f.id} style={{ display: 'flex', alignItems: 'center' }}>
                     <button onClick={() => onSetFolder(f.id)} style={{ ...itemStyle, flex: 1 }}>
-                      <span style={{ opacity: activeFolderId === f.id ? 1 : 0 }}>✓</span>📁 {f.name}
+                      <span style={{ opacity: activeFolderId === f.id ? 1 : 0 }}>✓</span>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: f.color ?? DEFAULT_FOLDER_COLOR, flexShrink: 0 }} />
+                      📁 {f.name}
                     </button>
                     <button onClick={() => onDeleteFolder(f.id)} title="Delete folder" style={{ ...xBtnStyle, marginRight: 8 }}>✕</button>
                   </div>
@@ -765,6 +796,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   const [newLabelColor, setNewLabelColor]           = useState<LabelColorKey>('purple')
   const [showCreateFolder, setShowCreateFolder]     = useState(false)
   const [newFolderName, setNewFolderName]           = useState('')
+  const [newFolderColor, setNewFolderColor]         = useState(DEFAULT_FOLDER_COLOR)
 
   // ── ESC key — calendar view only; editor ESC is owned by JournalEditorContent ─
   const escRef = useRef<() => void>(() => {})
@@ -869,9 +901,10 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   function commitCreateFolder() {
     const name = newFolderName.trim()
     if (!name) return
-    addJournalFolder({ id: mkId(), name })
+    addJournalFolder({ id: mkId(), name, color: newFolderColor })
     setShowCreateFolder(false)
     setNewFolderName('')
+    setNewFolderColor(DEFAULT_FOLDER_COLOR)
   }
 
   function enterSelectMode() {
@@ -1458,8 +1491,8 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           so the "⋮ More menu" dropdown (which opens downward, below the bar) never gets
           clipped by a scroll container; this keeps everything on-screen with no page overflow. */}
       <div style={{
-        display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4,
-        padding: '7px 10px', flexShrink: 0, minHeight: 44,
+        display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 3,
+        padding: '7px 8px', flexShrink: 0, minHeight: 44,
         borderBottom: `0.5px solid ${bdr}`,
         background: isSelectMode
           ? isExportMode
@@ -1521,21 +1554,21 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             {/* Shared select style */}
             {(() => {
               const ss: React.CSSProperties = {
-                padding: '4px 5px', borderRadius: 6, fontSize: 11, fontWeight: 500,
-                cursor: 'pointer', flexShrink: 0, outline: 'none',
+                padding: '4px 4px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+                cursor: 'pointer', flexShrink: 0, outline: 'none', minWidth: 0,
                 border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.32)' : 'rgba(124,58,237,0.28)'}`,
                 background: isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)',
                 color: isDark ? '#c4b5fd' : '#7c3aed',
               }
               return (
                 <>
-                  <select value={libViewMode} onChange={e => setLibViewMode(e.target.value as typeof libViewMode)} style={ss} title="View mode">
+                  <select value={libViewMode} onChange={e => setLibViewMode(e.target.value as typeof libViewMode)} style={{ ...ss, maxWidth: 62 }} title="View mode">
                     <option value="compact">Default</option>
                     <option value="detail">Detail</option>
                     <option value="tile">Tile</option>
                     <option value="thumbnail">Thumb</option>
                   </select>
-                  <select value={libSortOrder} onChange={e => setLibSortOrder(e.target.value as 'newer' | 'older')} style={ss} title="Sort order">
+                  <select value={libSortOrder} onChange={e => setLibSortOrder(e.target.value as 'newer' | 'older')} style={{ ...ss, maxWidth: 60 }} title="Sort order">
                     <option value="newer">↓ Newer</option>
                     <option value="older">↑ Older</option>
                   </select>
@@ -1550,7 +1583,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       else if (v.startsWith('m:')) { setLibMonthFilter(Number(v.slice(2))); setLibFolderFilter(null) }
                       else if (v.startsWith('f:')) { setLibFolderFilter(v.slice(2)); setLibMonthFilter(null) }
                     }}
-                    style={ss}
+                    style={{ ...ss, maxWidth: 48 }}
                     title="Filter by month or folder"
                   >
                     <option value="">All</option>
@@ -1591,7 +1624,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             <button
               onClick={enterSelectMode}
               style={{
-                padding: '4px 9px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+                padding: '4px 7px', borderRadius: 6, fontSize: 11, fontWeight: 500,
                 cursor: 'pointer', flexShrink: 0,
                 background: 'transparent',
                 border: '0.5px solid rgba(239,68,68,0.30)',
@@ -1605,7 +1638,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
               <button
                 onClick={e => { e.stopPropagation(); setShowMoreMenu(v => !v) }}
                 style={{
-                  padding: '4px 8px', borderRadius: 6, fontSize: 16, fontWeight: 700,
+                  padding: '4px 7px', borderRadius: 6, fontSize: 16, fontWeight: 700,
                   lineHeight: '14px', cursor: 'pointer',
                   background: showMoreMenu ? (isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.07)') : 'transparent',
                   border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`,
@@ -2351,7 +2384,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             borderRadius: 'inherit',
           }}
-          onClick={() => { setShowCreateFolder(false); setNewFolderName('') }}
+          onClick={() => { setShowCreateFolder(false); setNewFolderName(''); setNewFolderColor(DEFAULT_FOLDER_COLOR) }}
         >
           <div
             onClick={e => e.stopPropagation()}
@@ -2380,9 +2413,41 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                 color: isDark ? '#fff' : '#0f172a',
               }}
             />
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 500, marginBottom: 7, color: muted }}>Folder Color</div>
+              <div style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
+                {FOLDER_COLOR_PRESETS.map(hex => (
+                  <button
+                    key={hex}
+                    onClick={() => setNewFolderColor(hex)}
+                    title={hex}
+                    style={{
+                      width: 22, height: 22, borderRadius: '50%', border: 'none', cursor: 'pointer', padding: 0,
+                      background: hex,
+                      outline: newFolderColor === hex ? `2px solid ${isDark ? '#fff' : '#0f172a'}` : '1.5px solid rgba(0,0,0,0.12)',
+                      outlineOffset: newFolderColor === hex ? 1 : 0,
+                    }}
+                  />
+                ))}
+                {/* Custom color — native picker, styled to sit alongside the presets as one more swatch */}
+                <input
+                  type="color"
+                  value={newFolderColor}
+                  onChange={e => setNewFolderColor(e.target.value)}
+                  title="Custom color"
+                  style={{
+                    width: 22, height: 22, borderRadius: '50%', padding: 0, cursor: 'pointer',
+                    overflow: 'hidden', background: 'none',
+                    border: !FOLDER_COLOR_PRESETS.includes(newFolderColor)
+                      ? `2px solid ${isDark ? '#fff' : '#0f172a'}`
+                      : `1.5px solid ${isDark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.20)'}`,
+                  }}
+                />
+              </div>
+            </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button
-                onClick={() => { setShowCreateFolder(false); setNewFolderName('') }}
+                onClick={() => { setShowCreateFolder(false); setNewFolderName(''); setNewFolderColor(DEFAULT_FOLDER_COLOR) }}
                 style={{
                   padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer',
                   background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',

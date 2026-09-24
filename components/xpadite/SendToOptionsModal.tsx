@@ -46,6 +46,15 @@ function fmtLongDate(key: string): string {
   return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
 }
 
+// Same solid-triangle glyphs as the main Planner header's day-nav arrows, for
+// visual consistency between the two date-navigation controls.
+const PrevTriangle = () => (
+  <svg width="7" height="10" viewBox="0 0 9 12" fill="currentColor" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
+)
+const NextTriangle = () => (
+  <svg width="7" height="10" viewBox="0 0 9 12" fill="currentColor" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
+)
+
 export function SendToOptionsModal({
   isDark, context, taskTree, onClose, onCreateTasks, onAICoachComingSoon,
 }: SendToOptionsModalProps) {
@@ -149,33 +158,33 @@ export function SendToOptionsModal({
     ])
   }
 
-  // ── Main-screen option definitions (context-aware) ──────────────────────────
+  // ── Main-screen option definitions ──────────────────────────────────────────
+  // Always the same four options, for consistency — image/Mind Map context just
+  // disables the three that don't apply to a single image (no Task Manager
+  // tasks, no partial "selection" of one image) rather than swapping in a
+  // different modal shape.
   type Option = { id: string; icon: string; label: string; tooltip: string; premium?: boolean; disabled?: boolean; onSelect: () => void }
-  const options: Option[] = isImage ? [
+  const options: Option[] = [
     {
-      id: 'ai-image', icon: '🧠', label: 'Send to AI Coach', premium: true,
-      tooltip: 'Send this image or Mind Map to XPadite AI Coach for analysis and personalized assistance.',
-      onSelect: onAICoachComingSoon,
-    },
-  ] : [
-    {
-      id: 'tm-selected', icon: '✅', label: 'Send Selected to Task Manager', disabled: eligibleCount === 0,
+      id: 'tm-selected', icon: '✅', label: 'Send Selected to Task Manager', disabled: isImage || eligibleCount === 0,
       tooltip: 'Choose specific tasks from this section and send them to Task Manager for scheduling, tracking and completion.',
       onSelect: () => { setSelectedIds(new Set()); setView('select') },
     },
     {
-      id: 'tm-all', icon: '✅', label: 'Send All to Task Manager', disabled: eligibleCount === 0,
+      id: 'tm-all', icon: '✅', label: 'Send All to Task Manager', disabled: isImage || eligibleCount === 0,
       tooltip: 'Send all eligible tasks from this section to Task Manager at once.',
       onSelect: sendAll,
     },
     {
-      id: 'ai-selected', icon: '🧠', label: 'Send Selected to AI Coach', premium: true,
+      id: 'ai-selected', icon: '🧠', label: 'Send Selected to AI Coach', premium: true, disabled: isImage,
       tooltip: 'Choose specific content from this section to send to XPadite AI Coach for personalized assistance.',
       onSelect: onAICoachComingSoon,
     },
     {
       id: 'ai-all', icon: '🧠', label: 'Send All to AI Coach', premium: true,
-      tooltip: 'Send the complete eligible section content to XPadite AI Coach for personalized assistance.',
+      tooltip: isImage
+        ? 'Send this image or Mind Map to XPadite AI Coach for analysis and personalized assistance.'
+        : 'Send the complete eligible section content to XPadite AI Coach for personalized assistance.',
       onSelect: onAICoachComingSoon,
     },
   ]
@@ -220,11 +229,20 @@ export function SendToOptionsModal({
           background: rgba(255,255,255,0.22) !important; color: #ffffff !important;
         }
         .xp-sendto-btn:disabled { cursor: default; opacity: 0.45; }
+        /* vh alone measures the tallest possible viewport (address bar hidden) —
+           on mobile, with the address bar showing, that overshoots the actually
+           visible area and the card can run off-screen. dvh tracks the real,
+           current viewport instead; used as a progressive enhancement since vh
+           is still the correct/only option on browsers without dvh support. */
+        .xp-sendto-card { max-height: 88vh; }
+        @supports (height: 88dvh) {
+          .xp-sendto-card { max-height: 88dvh; }
+        }
       `}</style>
 
       <div
-        className="w-full max-w-[380px] rounded-2xl overflow-hidden flex flex-col"
-        style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.32)', maxHeight: '88vh' }}
+        className="xp-sendto-card w-full max-w-[380px] rounded-2xl overflow-hidden flex flex-col"
+        style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.32)' }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -343,7 +361,7 @@ export function SendToOptionsModal({
                           className="flex items-center justify-center flex-shrink-0"
                           style={{ width: 22, height: 22, borderRadius: 7, background: 'var(--xp-bg3)', color: 'var(--xp-txt2)', border: 'none', cursor: 'pointer' }}
                         >
-                          ‹
+                          <PrevTriangle />
                         </button>
                         <span className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt)', minWidth: 110, textAlign: 'center' }}>
                           {MONTHS[monthCursor.getMonth()]} {monthCursor.getFullYear()}
@@ -354,7 +372,7 @@ export function SendToOptionsModal({
                           className="flex items-center justify-center flex-shrink-0"
                           style={{ width: 22, height: 22, borderRadius: 7, background: 'var(--xp-bg3)', color: 'var(--xp-txt2)', border: 'none', cursor: 'pointer' }}
                         >
-                          ›
+                          <NextTriangle />
                         </button>
                       </div>
                       <div className="grid grid-cols-7 gap-0.5 mb-1">

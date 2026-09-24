@@ -615,9 +615,14 @@ function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete }: I
 
   return (
     <div style={{ position: 'relative', margin: '4px 0' }}>
-      {/* Image — explicit height when user has resized vertically */}
+      {/* Image — explicit height when user has resized vertically (desktop/tablet
+          only; mobile always shows the image at its natural aspect ratio via the
+          xp-media-img CSS override below, so a resized box never letterboxes with
+          gray bars on a narrow screen). */}
       {block.src && (
         <img
+          className="xp-media-img"
+          data-has-fixed-height={block.height != null ? 'true' : undefined}
           src={block.thumbnail ?? block.src}
           alt={block.name ?? (block.type === 'drawing' ? 'Drawing' : 'Image')}
           onClick={() => setLightbox(true)}
@@ -2700,6 +2705,12 @@ export function JournalEditorContent({
         @media (max-width: 640px) {
           .xp-j-grid { display: flex !important; flex-direction: column !important; }
           .xp-j-grid > * { width: 100% !important; flex-shrink: 0 !important; }
+          /* A manually-resized image/drawing box uses a fixed height + object-fit:
+             contain on desktop/tablet (unchanged) — on mobile that letterboxes
+             with gray bars whenever the box's aspect ratio doesn't match the
+             image's own, so mobile always shows it at its natural aspect ratio
+             instead, filling the block edge-to-edge with no wasted gray space. */
+          .xp-media-img[data-has-fixed-height="true"] { height: auto !important; object-fit: unset !important; }
           .xp-j-content-scroll { padding-bottom: 24px !important; }
           .xp-j-grid > :first-child .xp-j-prose { min-height: 80px !important; }
           .xp-jd-sec-dt { display: none !important; }

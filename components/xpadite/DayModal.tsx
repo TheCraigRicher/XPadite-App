@@ -1712,11 +1712,12 @@ interface DayModalProps {
   onClose: () => void
   onDashboard?: () => void
   onDirtyChange?: (dirty: boolean) => void
+  onNavigateDay?: (delta: number) => void
   closeIntent?: 'save' | 'discard' | null
   skipEntryAnimation?: boolean
 }
 
-export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyChange, closeIntent, skipEntryAnimation }: DayModalProps) {
+export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyChange, onNavigateDay, closeIntent, skipEntryAnimation }: DayModalProps) {
   const {
     calData, updateDay, activeTaskTimer, setActiveTaskTimer,
     activities, activeSession, setActiveSession, selectedActId,
@@ -2093,6 +2094,17 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     if (hasDirtyChanges) { setShowCloseDialog(true) } else { doClose() }
   }
 
+  // The parent remounts this modal fresh for the new date (key={dateKey} on
+  // <DayModal>), which is the same safe initialization path every normal
+  // open already uses — so navigating never needs a second data-loading
+  // system. It's only blocked while something is genuinely unsaved (an
+  // in-progress "+ Add Task" input, or a still-unsettled notes edit), the
+  // same condition that already gates the Close button.
+  function attemptNavigateDay(delta: number) {
+    if (hasDirtyChanges) { setToast('Finish or save your current changes before switching days'); return }
+    onNavigateDay?.(delta)
+  }
+
   function handleMainSave() {
     flushDirtyNotes()
     openSnapshotRef.current = null
@@ -2223,13 +2235,87 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Modal header */}
-        <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: '0.5px solid rgba(255,255,255,0.08)', background: 'linear-gradient(135deg, #3b0764 0%, #7c3aed 50%, #6d28d9 100%)' }}>
-          <button onClick={attemptClose} className="hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)', color: 'rgba(255,255,255,0.92)' }}>← Back</button>
-          <div className="flex-1 text-center px-2 sm:flex-none sm:px-3">
-            <p className="text-sm font-semibold" style={{ color: '#ffffff' }}>{dateLabel}</p>
+        {/* Desktop/tablet header — three-zone layout so the center date stays
+            visually centered regardless of the Back/Close controls' own widths.
+            Hidden below sm: mobile gets its own bare-triangle header below. */}
+        <div className="hidden sm:flex items-center px-4 py-3 flex-shrink-0" style={{ borderBottom: '0.5px solid rgba(255,255,255,0.08)', background: 'linear-gradient(135deg, #3b0764 0%, #7c3aed 50%, #6d28d9 100%)' }}>
+          <div className="flex-1 flex justify-start min-w-0">
+            <button
+              onClick={attemptClose}
+              title="Back" aria-label="Back"
+              className="flex items-center justify-center flex-shrink-0 transition-opacity hover:opacity-70 active:scale-90"
+              style={{ width: 36, height: 36, background: 'transparent', border: 'none', borderRadius: 8, cursor: 'pointer', transition: 'transform 100ms, opacity 120ms' }}
+            >
+              <svg width="11" height="18" viewBox="0 0 11 18" fill="none" aria-hidden="true">
+                <path d="M9.5 1.5L1.5 9L9.5 16.5" stroke="#ffffff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
           </div>
-          <button onClick={attemptClose} className="hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-medium transition-all hover:opacity-80" style={{ background: 'rgba(239,68,68,0.30)', border: '1px solid rgba(239,68,68,0.40)', color: 'rgba(255,255,255,0.92)' }}>× Close</button>
+
+          <div className="flex items-center justify-center gap-2.5 flex-shrink-0 min-w-0">
+            <button
+              onClick={() => attemptNavigateDay(-1)}
+              title="Previous day" aria-label="Previous day"
+              className="flex items-center justify-center flex-shrink-0 transition-all hover:bg-white/20 active:scale-90"
+              style={{ width: 32, height: 32, background: 'rgba(255,255,255,0.10)', border: 'none', borderRadius: 8, cursor: 'pointer', transition: 'transform 100ms, background 120ms' }}
+            >
+              <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
+            </button>
+            <p className="text-sm font-semibold text-center" style={{ color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '46vw' }}>{dateLabel}</p>
+            <button
+              onClick={() => attemptNavigateDay(1)}
+              title="Next day" aria-label="Next day"
+              className="flex items-center justify-center flex-shrink-0 transition-all hover:bg-white/20 active:scale-90"
+              style={{ width: 32, height: 32, background: 'rgba(255,255,255,0.10)', border: 'none', borderRadius: 8, cursor: 'pointer', transition: 'transform 100ms, background 120ms' }}
+            >
+              <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
+            </button>
+          </div>
+
+          <div className="flex-1 flex justify-end min-w-0">
+            <button
+              onClick={attemptClose}
+              title="Close" aria-label="Close"
+              className="flex items-center justify-center flex-shrink-0 transition-all hover:bg-white/25 active:scale-90"
+              style={{ width: 32, height: 32, background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.20)', borderRadius: 8, cursor: 'pointer', color: '#ffffff', fontSize: 14, fontWeight: 700, transition: 'transform 100ms, background 120ms' }}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* Mobile-only header — no Back/Close, bare triangles with no visible
+            button chrome. Prev/next are pinned at a fixed distance from the
+            header's horizontal center via position:absolute (the same technique
+            already used for the Planner Editor's day-nav arrows), so neither
+            triangle — nor the gap around the date — ever shifts as the date
+            text's own length changes across different weekdays/months; only
+            the text itself changes. */}
+        <div className="flex sm:hidden flex-shrink-0" style={{ position: 'relative', minHeight: 52, borderBottom: '0.5px solid rgba(255,255,255,0.08)', background: 'linear-gradient(135deg, #3b0764 0%, #7c3aed 50%, #6d28d9 100%)' }}>
+          <span style={{
+            position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
+            textAlign: 'center', padding: '0 58px',
+            color: '#ffffff', fontSize: 12.5, fontWeight: 600, letterSpacing: '-0.01em',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {dateLabel}
+          </span>
+          <button
+            onClick={() => attemptNavigateDay(-1)}
+            title="Previous day" aria-label="Previous day"
+            className="transition-transform active:scale-90"
+            style={{ position: 'absolute', left: 'calc(50% - 148px)', top: '50%', transform: 'translateY(-50%)', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+          >
+            <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
+          </button>
+          <button
+            onClick={() => attemptNavigateDay(1)}
+            title="Next day" aria-label="Next day"
+            className="transition-transform active:scale-90"
+            style={{ position: 'absolute', right: 'calc(50% - 148px)', top: '50%', transform: 'translateY(-50%)', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+          >
+            <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
+          </button>
         </div>
 
         {/* Today's Status row */}

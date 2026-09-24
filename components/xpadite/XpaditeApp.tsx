@@ -1091,6 +1091,7 @@ function ThemedApp(_props: XpaditeAppProps) {
 
       {modalDay && (
         <DayModal
+          key={modalDay.key}
           dateKey={modalDay.key}
           month={modalDay.month}
           day={modalDay.day}
@@ -1115,6 +1116,12 @@ function ThemedApp(_props: XpaditeAppProps) {
             }
           }}
           onDirtyChange={(dirty) => { modalDirtyRef.current = dirty }}
+          onNavigateDay={delta => {
+            const [y, m, d] = modalDay.key.split('-').map(Number)
+            const dt = new Date(y, m - 1, d)
+            dt.setDate(dt.getDate() + delta)
+            setModalDay({ key: dateKey(dt.getFullYear(), dt.getMonth(), dt.getDate()), month: dt.getMonth(), day: dt.getDate(), skipAnim: true })
+          }}
           closeIntent={dayModalCloseIntent}
         />
       )}

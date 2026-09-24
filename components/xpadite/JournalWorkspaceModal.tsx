@@ -5,9 +5,8 @@ import dynamic from 'next/dynamic'
 import { useApp } from './AppContext'
 import { parseJournalDoc, mkId } from './journalUtils'
 import { exportToTxt, exportToPdf, exportToDocx, makeFilename, type ExportEntry } from './journalExport'
-import type { JournalFolder } from './types'
 import { ColorPickerModal } from './ColorPickerModal'
-import { COLOR_PALETTE, normalizeHexColor } from './utils'
+import { COLOR_PALETTE, normalizeHexColor, hexToRgba } from './utils'
 
 const JournalEditorContent = dynamic(
   () => import('./JournalEditorContent').then(m => ({ default: m.JournalEditorContent })),
@@ -32,11 +31,10 @@ const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
 
 const DOW_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
-// ─── Library organization: categories/labels vs folders ───────────────────────
-// CATEGORY/LABEL describes what a doc is about (a doc may have several).
-// FOLDER describes where a doc is organized (a doc belongs to at most one).
-// Built-ins are fixed constants — only user-created custom labels/folders
-// need their own identity (persisted via AppContext's journalLabels).
+// ─── Library organization: labels ──────────────────────────────────────────────
+// A LABEL describes what a doc is about (a doc may have several). Built-ins
+// are fixed constants — only user-created custom labels need their own
+// identity (persisted via AppContext's journalLabels).
 
 interface LibraryCategory { id: string; name: string; color: string }
 
@@ -64,11 +62,6 @@ const LABEL_COLOR_HEX: Record<LabelColorKey, string> = {
   pink:   '#f9a8d4',
   blue:   '#60a5fa',
 }
-
-// Folder color presets share the same curated hex family as custom labels
-// (a shared palette, not a shared concept — Folders and Labels stay distinct).
-const FOLDER_COLOR_PRESETS = Object.values(LABEL_COLOR_HEX)
-const DEFAULT_FOLDER_COLOR = LABEL_COLOR_HEX.purple
 
 // Custom labels now store a free-form hex color (reusing the same Activity
 // Manager preset palette + custom picker) — this resolves either that hex,
@@ -430,32 +423,42 @@ function hoverHandlers(isDark: boolean) {
   }
 }
 
-// ─── Date filter dropdown — toolbar-level, replaces the native "All ▾" <select> ─
-// A custom XPadite popover (never a native <select>, so Mobile never falls
-// back to the OS's large native picker sheet) offering "All" or a specific
-// month+year, navigated with ‹ › arrows — the same simple prev/next month
-// interaction as the app's other month browsers. Purely date filtering;
-// Folders are a separate concept and are never listed here.
-function DateFilterDropdown({
-  isDark, bdr, filter, onSelectAll, onSelectMonth,
+// ─── Responsive toolbar select — MOBILE ONLY custom popover ────────────────────
+// Desktop/tablet render is untouched (the same native <select>, same style,
+// same value/onChange). On Mobile that native select is hidden and a custom
+// XPadite popover — matching the Labels/Date dropdowns' visual language —
+// takes over, purely as a presentation swap: same options, same onChange,
+// same underlying state. Used for "Default" (view mode) and "New" (sort).
+function ResponsiveToolbarSelect<T extends string>({
+  isDark, bdr, value, options, onChange, style, title,
 }: {
   isDark: boolean
   bdr: string
-  filter: { year: number; month: number } | null
-  onSelectAll: () => void
-  onSelectMonth: (year: number, month: number) => void
+  value: T
+  options: { value: T; label: string }[]
+  onChange: (v: T) => void
+  style: React.CSSProperties
+  title: string
 }) {
   const [open, setOpen] = useState(false)
+  const [closing, setClosing] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
-  const DROPDOWN_WIDTH = 200
+  const WIDTH = 150
+
+  function requestClose() {
+    const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (reduced) { setOpen(false); return }
+    setClosing(true)
+    setTimeout(() => { setOpen(false); setClosing(false) }, 150)
+  }
 
   useEffect(() => {
     if (!open) return
     function outside(e: MouseEvent | TouchEvent) {
       if (ref.current?.contains(e.target as Node)) return
-      setOpen(false)
+      requestClose()
     }
     document.addEventListener('mousedown', outside)
     document.addEventListener('touchstart', outside)
@@ -466,7 +469,132 @@ function DateFilterDropdown({
   }, [open])
 
   function handleToggle() {
-    if (open) { setOpen(false); return }
+    if (open) { requestClose(); return }
+    const rect = btnRef.current?.getBoundingClientRect()
+    if (rect) {
+      setPos({
+        top: rect.bottom + 6,
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - WIDTH - 8)),
+      })
+    }
+    setOpen(true)
+  }
+
+  const selectedLabel = options.find(o => o.value === value)?.label ?? value
+  const rowStyle = popoverRowStyle(isDark)
+  const hover = hoverHandlers(isDark)
+
+  return (
+    <>
+      <style>{`
+        @keyframes xp-lib-dd-in  { from { opacity: 0; transform: translateY(-4px) scale(0.98) } to { opacity: 1; transform: translateY(0) scale(1) } }
+        @keyframes xp-lib-dd-out { from { opacity: 1; transform: translateY(0) scale(1) } to { opacity: 0; transform: translateY(-4px) scale(0.98) } }
+        @media (prefers-reduced-motion: no-preference) {
+          .xp-lib-dropdown { animation: xp-lib-dd-in 180ms cubic-bezier(0.16,1,0.3,1) forwards; transform-origin: top left; }
+          .xp-lib-dropdown.xp-lib-dropdown-closing { animation: xp-lib-dd-out 150ms ease-in forwards; }
+        }
+        .xp-lib-native-only { display: inline-block; }
+        .xp-lib-mobile-only { display: none; }
+        @media (max-width: 640px) {
+          .xp-lib-native-only { display: none !important; }
+          .xp-lib-mobile-only { display: inline-flex !important; }
+        }
+      `}</style>
+
+      {/* Desktop/Tablet — the exact same native select as before, untouched */}
+      <select
+        className="xp-lib-native-only"
+        value={value}
+        onChange={e => onChange(e.target.value as T)}
+        style={style}
+        title={title}
+      >
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+
+      {/* Mobile — custom XPadite popover instead of the native picker sheet */}
+      <div ref={ref} className="xp-lib-mobile-only" style={{ position: 'relative', flexShrink: 0 }}>
+        <button ref={btnRef} onClick={handleToggle} style={style} title={title}>
+          {selectedLabel}
+        </button>
+        {open && pos && (
+          <div
+            className={`xp-lib-dropdown${closing ? ' xp-lib-dropdown-closing' : ''}`}
+            style={{
+              position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999,
+              background: isDark ? '#1a1530' : '#ffffff',
+              border: `0.5px solid ${bdr}`,
+              borderRadius: 12, overflow: 'hidden',
+              boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.50)' : '0 8px 28px rgba(0,0,0,0.18)',
+              width: WIDTH,
+            }}
+          >
+            {options.map(o => (
+              <button
+                key={o.value}
+                onClick={() => { onChange(o.value); requestClose() }}
+                style={rowStyle}
+                {...hover}
+              >
+                {popoverRadio(isDark, o.value === value)}
+                {o.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
+// ─── Date filter dropdown — toolbar-level, replaces the native "All ▾" <select> ─
+// A custom XPadite popover (never a native <select>, so Mobile never falls
+// back to the OS's large native picker sheet) adapting the same month/year
+// picker language used elsewhere in XPadite's Expanded Month / Monthly
+// Dashboard view (a "jump to X" CTA + a real year row + a month grid) rather
+// than a miniature bespoke prev/next strip. Purely date filtering — Folders
+// are a separate concept and are never listed here.
+function DateFilterDropdown({
+  isDark, bdr, filter, onSelectAll, onSelectMonth,
+}: {
+  isDark: boolean
+  bdr: string
+  filter: { year: number; month: number } | null
+  onSelectAll: () => void
+  onSelectMonth: (year: number, month: number) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [closing, setClosing] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const [browsingYear, setBrowsingYear] = useState(() => filter?.year ?? new Date().getFullYear())
+  const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const DROPDOWN_WIDTH = 212
+
+  function requestClose() {
+    const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (reduced) { setOpen(false); return }
+    setClosing(true)
+    setTimeout(() => { setOpen(false); setClosing(false) }, 150)
+  }
+
+  useEffect(() => {
+    if (!open) return
+    function outside(e: MouseEvent | TouchEvent) {
+      if (ref.current?.contains(e.target as Node)) return
+      requestClose()
+    }
+    document.addEventListener('mousedown', outside)
+    document.addEventListener('touchstart', outside)
+    return () => {
+      document.removeEventListener('mousedown', outside)
+      document.removeEventListener('touchstart', outside)
+    }
+  }, [open])
+
+  function handleToggle() {
+    if (open) { requestClose(); return }
+    setBrowsingYear(filter?.year ?? new Date().getFullYear())
     const rect = btnRef.current?.getBoundingClientRect()
     if (rect) {
       setPos({
@@ -477,19 +605,26 @@ function DateFilterDropdown({
     setOpen(true)
   }
 
-  const today = new Date()
-  const displayed = filter ?? { year: today.getFullYear(), month: today.getMonth() }
-  function shiftMonth(delta: number) {
-    const d = new Date(displayed.year, displayed.month + delta, 1)
-    onSelectMonth(d.getFullYear(), d.getMonth())
-  }
-
-  const rowStyle = popoverRowStyle(isDark)
-  const dividerStyle = popoverDividerStyle(isDark)
-  const hover = hoverHandlers(isDark)
+  const realDate  = new Date()
+  const realMonth = realDate.getMonth()
+  const realYear  = realDate.getFullYear()
+  const isAll     = filter === null
 
   return (
     <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
+      <style>{`
+        @keyframes xp-lib-dd-in  { from { opacity: 0; transform: translateY(-4px) scale(0.98) } to { opacity: 1; transform: translateY(0) scale(1) } }
+        @keyframes xp-lib-dd-out { from { opacity: 1; transform: translateY(0) scale(1) } to { opacity: 0; transform: translateY(-4px) scale(0.98) } }
+        .xp-lib-month-cell:hover { background: ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)'}; }
+        .xp-lib-month-cell.xp-lib-month-cell-selected:hover { background: #7c3aed; }
+        .xp-lib-year-nav:hover { background: ${isDark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.09)'}; }
+        .xp-lib-all-docs:not(:disabled):hover { background: #6d28d9 !important; }
+        @media (prefers-reduced-motion: no-preference) {
+          .xp-lib-month-cell, .xp-lib-year-nav, .xp-lib-all-docs { transition: background 120ms ease; }
+          .xp-lib-dropdown { animation: xp-lib-dd-in 180ms cubic-bezier(0.16,1,0.3,1) forwards; transform-origin: top left; }
+          .xp-lib-dropdown.xp-lib-dropdown-closing { animation: xp-lib-dd-out 150ms ease-in forwards; }
+        }
+      `}</style>
       <button
         ref={btnRef}
         onClick={handleToggle}
@@ -507,37 +642,88 @@ function DateFilterDropdown({
       </button>
 
       {open && pos && (
-        <div style={{
-          position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999,
-          background: isDark ? '#1a1530' : '#ffffff',
-          border: `0.5px solid ${bdr}`,
-          borderRadius: 12, overflow: 'hidden',
-          boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.50)' : '0 8px 28px rgba(0,0,0,0.18)',
-          width: DROPDOWN_WIDTH,
-        }}>
-          <button onClick={() => { onSelectAll(); setOpen(false) }} style={rowStyle} {...hover}>
-            {popoverRadio(isDark, filter === null)}
+        <div
+          className={`xp-lib-dropdown${closing ? ' xp-lib-dropdown-closing' : ''}`}
+          style={{
+            position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999,
+            background: isDark ? '#1a1530' : '#ffffff',
+            border: `0.5px solid ${bdr}`,
+            borderRadius: 12,
+            boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.50)' : '0 8px 28px rgba(0,0,0,0.18)',
+            width: DROPDOWN_WIDTH, padding: 10,
+          }}
+        >
+          {/* All Documents — a CTA, not a radio row: active/purple when a month is
+              currently applied (there's something to clear), dimmed once already showing everything */}
+          <button
+            className="xp-lib-all-docs"
+            onClick={() => { onSelectAll(); requestClose() }}
+            disabled={isAll}
+            style={{
+              width: '100%', padding: '8px 12px', borderRadius: 9, marginBottom: 10,
+              fontSize: 11.5, fontWeight: isAll ? 500 : 700, textAlign: 'center',
+              cursor: isAll ? 'default' : 'pointer',
+              background: isAll ? (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)') : '#7c3aed',
+              border: `0.5px solid ${isAll ? (isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)') : 'rgba(124,58,237,0.90)'}`,
+              color: isAll ? (isDark ? 'rgba(255,255,255,0.32)' : 'rgba(0,0,0,0.30)') : '#ffffff',
+              boxShadow: isAll ? 'none' : '0 2px 12px rgba(124,58,237,0.40)',
+            }}
+          >
             All Documents
           </button>
-          <div style={dividerStyle} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px' }}>
-            {popoverRadio(isDark, filter !== null)}
+
+          {/* Year — functional prev/next (Library entries can span multiple years) */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 2px 8px' }}>
             <button
-              onClick={() => shiftMonth(-1)}
-              title="Previous month"
-              style={{ width: 24, height: 24, flexShrink: 0, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: isDark ? 'rgba(255,255,255,0.60)' : 'rgba(0,0,0,0.55)', fontSize: 14 }}
+              className="xp-lib-year-nav"
+              onClick={() => setBrowsingYear(y => y - 1)}
+              aria-label="Previous year"
+              style={{
+                width: 26, height: 26, borderRadius: '50%', border: 'none', cursor: 'pointer',
+                background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+                color: isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.55)',
+                fontSize: 15, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
             >‹</button>
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: isDark ? 'rgba(255,255,255,0.90)' : '#111827' }}>
+              {browsingYear}
+            </span>
             <button
-              onClick={() => onSelectMonth(displayed.year, displayed.month)}
-              style={{ flex: 1, padding: '4px 2px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', fontSize: 12.5, fontWeight: 600, textAlign: 'center', color: isDark ? 'rgba(255,255,255,0.88)' : 'rgba(0,0,0,0.80)' }}
-            >
-              {MONTH_NAMES[displayed.month]} {displayed.year}
-            </button>
-            <button
-              onClick={() => shiftMonth(1)}
-              title="Next month"
-              style={{ width: 24, height: 24, flexShrink: 0, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: isDark ? 'rgba(255,255,255,0.60)' : 'rgba(0,0,0,0.55)', fontSize: 14 }}
+              className="xp-lib-year-nav"
+              onClick={() => setBrowsingYear(y => y + 1)}
+              aria-label="Next year"
+              style={{
+                width: 26, height: 26, borderRadius: '50%', border: 'none', cursor: 'pointer',
+                background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+                color: isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.55)',
+                fontSize: 15, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
             >›</button>
+          </div>
+
+          {/* Month grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4 }}>
+            {MONTH_SHORT.map((label, i) => {
+              const selected = filter !== null && filter.month === i && filter.year === browsingYear
+              const isRealNow = i === realMonth && browsingYear === realYear && !selected
+              return (
+                <button
+                  key={i}
+                  className={`xp-lib-month-cell${selected ? ' xp-lib-month-cell-selected' : ''}`}
+                  onClick={() => { onSelectMonth(browsingYear, i); requestClose() }}
+                  style={{
+                    padding: '7px 2px', borderRadius: 8, fontSize: 11, fontWeight: selected ? 700 : 500,
+                    textAlign: 'center', cursor: 'pointer',
+                    border: isRealNow ? '1.5px solid rgba(124,58,237,0.55)' : 'none',
+                    background: selected ? '#7c3aed' : 'transparent',
+                    color: selected ? '#ffffff' : (isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.68)'),
+                    boxShadow: selected ? '0 2px 8px rgba(124,58,237,0.40)' : 'none',
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
           </div>
         </div>
       )}
@@ -550,6 +736,19 @@ function DateFilterDropdown({
 // OS's large native picker sheet. Exclusively for labels — Folders are a
 // separate concept and are managed only via each document's ⋮ → Move to
 // Folder menu, never from here. "+ New Label" opens the label creation modal.
+// Color-aware row backgrounds derive their hover/selected tint from the
+// label's own stored hex (via CSS custom properties, set per-row), so a
+// user-created label automatically gets the same treatment as a built-in
+// one — nothing here is hardcoded to the five default labels. "All Labels"
+// and "+ New Label" aren't colored labels, so they use a fixed subtle
+// purple tint instead of a per-item color.
+function rowTintVars(color: string, isDark: boolean, hoverAlpha: number, selectedAlpha: number): React.CSSProperties {
+  return {
+    '--row-hover-bg': hexToRgba(color, isDark ? hoverAlpha + 0.06 : hoverAlpha),
+    '--row-selected-bg': hexToRgba(color, isDark ? selectedAlpha + 0.06 : selectedAlpha),
+  } as React.CSSProperties
+}
+
 function CategoryFilterDropdown({
   isDark, bdr, categoryFilter, categories,
   onSelectCategory, onCreateLabel,
@@ -562,16 +761,24 @@ function CategoryFilterDropdown({
   onCreateLabel: () => void
 }) {
   const [open, setOpen] = useState(false)
+  const [closing, setClosing] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const DROPDOWN_WIDTH = 220
 
+  function requestClose() {
+    const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (reduced) { setOpen(false); return }
+    setClosing(true)
+    setTimeout(() => { setOpen(false); setClosing(false) }, 150)
+  }
+
   useEffect(() => {
     if (!open) return
     function outside(e: MouseEvent | TouchEvent) {
       if (ref.current?.contains(e.target as Node)) return
-      setOpen(false)
+      requestClose()
     }
     document.addEventListener('mousedown', outside)
     document.addEventListener('touchstart', outside)
@@ -582,7 +789,7 @@ function CategoryFilterDropdown({
   }, [open])
 
   function handleToggle() {
-    if (open) { setOpen(false); return }
+    if (open) { requestClose(); return }
     const rect = btnRef.current?.getBoundingClientRect()
     if (rect) {
       setPos({
@@ -593,55 +800,99 @@ function CategoryFilterDropdown({
     setOpen(true)
   }
 
-  const activeLabel = categoryFilter !== null ? categories.find(c => c.id === categoryFilter)?.name : null
-  const rowStyle = popoverRowStyle(isDark)
+  const activeCat = categoryFilter !== null ? categories.find(c => c.id === categoryFilter) : null
+  const rowStyle: React.CSSProperties = { ...popoverRowStyle(isDark), background: undefined }
   const dividerStyle = popoverDividerStyle(isDark)
-  const hover = hoverHandlers(isDark)
+  const purpleTint = rowTintVars('#7c3aed', isDark, 0.08, 0.12)
 
   return (
     <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
+      <style>{`
+        .xp-lib-row { background: transparent; }
+        .xp-lib-row:hover, .xp-lib-row:active { background: var(--row-hover-bg, transparent); }
+        .xp-lib-row.xp-lib-row-selected { background: var(--row-selected-bg, transparent); }
+        .xp-lib-row.xp-lib-row-selected:hover, .xp-lib-row.xp-lib-row-selected:active { background: var(--row-selected-bg, transparent); }
+        .xp-lib-new-label:hover { color: ${isDark ? '#d8c8ff' : '#6d28d9'} !important; }
+        @keyframes xp-lib-dot-pop { 0% { transform: scale(0.85) } 55% { transform: scale(1.1) } 100% { transform: scale(1) } }
+        @keyframes xp-lib-dd-in  { from { opacity: 0; transform: translateY(-4px) scale(0.98) } to { opacity: 1; transform: translateY(0) scale(1) } }
+        @keyframes xp-lib-dd-out { from { opacity: 1; transform: translateY(0) scale(1) } to { opacity: 0; transform: translateY(-4px) scale(0.98) } }
+        @media (prefers-reduced-motion: no-preference) {
+          .xp-lib-row { transition: background 170ms ease; }
+          .xp-lib-new-label { transition: color 170ms ease; }
+          .xp-lib-dot-pop { animation: xp-lib-dot-pop 260ms ease; }
+          .xp-lib-dropdown { animation: xp-lib-dd-in 180ms cubic-bezier(0.16,1,0.3,1) forwards; transform-origin: top left; }
+          .xp-lib-dropdown.xp-lib-dropdown-closing { animation: xp-lib-dd-out 150ms ease-in forwards; }
+        }
+      `}</style>
       <button
         ref={btnRef}
         onClick={handleToggle}
         style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
           padding: '4px 6px', borderRadius: 6, fontSize: 11, fontWeight: categoryFilter ? 600 : 500,
           cursor: 'pointer', flexShrink: 0, outline: 'none', whiteSpace: 'nowrap',
           border: `0.5px solid ${categoryFilter || open ? 'rgba(124,58,237,0.65)' : isDark ? 'rgba(124,58,237,0.32)' : 'rgba(124,58,237,0.28)'}`,
           background: categoryFilter || open ? 'rgba(124,58,237,0.22)' : (isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)'),
           color: isDark ? '#c4b5fd' : '#7c3aed',
-          maxWidth: 82, overflow: 'hidden', textOverflow: 'ellipsis',
+          maxWidth: 88, overflow: 'hidden',
         }}
         title="Filter by label"
       >
-        🏷 {activeLabel ?? 'Labels'}
+        {activeCat ? (
+          <>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: activeCat.color, flexShrink: 0, display: 'inline-block' }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{activeCat.name}</span>
+          </>
+        ) : (
+          <>🏷 Labels</>
+        )}
       </button>
 
       {open && pos && (
-        <div style={{
-          position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999,
-          background: isDark ? '#1a1530' : '#ffffff',
-          border: `0.5px solid ${bdr}`,
-          borderRadius: 12, overflow: 'hidden',
-          boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.50)' : '0 8px 28px rgba(0,0,0,0.18)',
-          width: DROPDOWN_WIDTH, maxHeight: '65vh', overflowY: 'auto',
-        }}>
-          <button onClick={() => { onSelectCategory(null); setOpen(false) }} style={rowStyle} {...hover}>
+        <div
+          className={`xp-lib-dropdown${closing ? ' xp-lib-dropdown-closing' : ''}`}
+          style={{
+            position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999,
+            background: isDark ? '#1a1530' : '#ffffff',
+            border: `0.5px solid ${bdr}`,
+            borderRadius: 12, overflow: 'hidden',
+            boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.50)' : '0 8px 28px rgba(0,0,0,0.18)',
+            width: DROPDOWN_WIDTH, maxHeight: '65vh', overflowY: 'auto',
+          }}
+        >
+          <button
+            className={`xp-lib-row${categoryFilter === null ? ' xp-lib-row-selected' : ''}`}
+            onClick={() => { onSelectCategory(null); requestClose() }}
+            style={{ ...rowStyle, ...purpleTint }}
+          >
             {popoverRadio(isDark, categoryFilter === null)}
             🏷 All Labels
           </button>
           <div style={dividerStyle} />
-          {categories.map(cat => (
-            <button key={cat.id} onClick={() => { onSelectCategory(cat.id); setOpen(false) }} style={rowStyle} {...hover}>
-              {popoverRadio(isDark, categoryFilter === cat.id)}
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: cat.color, flexShrink: 0 }} />
-              {cat.name}
-            </button>
-          ))}
+          {categories.map(cat => {
+            const checked = categoryFilter === cat.id
+            return (
+              <button
+                key={cat.id}
+                className={`xp-lib-row${checked ? ' xp-lib-row-selected' : ''}`}
+                onClick={() => { onSelectCategory(cat.id); requestClose() }}
+                style={{ ...rowStyle, ...rowTintVars(cat.color, isDark, 0.10, 0.14) }}
+              >
+                {popoverRadio(isDark, checked)}
+                <span
+                  key={checked ? 'sel' : 'unsel'}
+                  className={checked ? 'xp-lib-dot-pop' : undefined}
+                  style={{ width: 8, height: 8, borderRadius: '50%', background: cat.color, flexShrink: 0, display: 'inline-block' }}
+                />
+                {cat.name}
+              </button>
+            )
+          })}
           <div style={dividerStyle} />
           <button
-            onClick={() => { onCreateLabel(); setOpen(false) }}
-            style={{ ...rowStyle, color: isDark ? '#c4b5fd' : '#7c3aed', fontWeight: 600 }}
-            {...hover}
+            className="xp-lib-row xp-lib-new-label"
+            onClick={() => { onCreateLabel(); requestClose() }}
+            style={{ ...rowStyle, ...purpleTint, color: isDark ? '#c4b5fd' : '#7c3aed', fontWeight: 600 }}
           >
             + New Label
           </button>
@@ -661,9 +912,9 @@ interface LibraryCardMenuProps {
   isDark: boolean
   bdr: string
   isOpen: boolean
-  view: 'main' | 'category' | 'folder'
+  view: 'main' | 'category'
   onOpenChange: (open: boolean) => void
-  onViewChange: (view: 'main' | 'category' | 'folder') => void
+  onViewChange: (view: 'main' | 'category') => void
   onRename: () => void
   onExport: () => void
   onDeleteRequest: () => void
@@ -672,11 +923,6 @@ interface LibraryCardMenuProps {
   onToggleLabel: (id: string) => void
   onDeleteLabel: (id: string) => void
   onCreateLabel: () => void
-  folders: JournalFolder[]
-  activeFolderId: string | null
-  onSetFolder: (id: string | null) => void
-  onDeleteFolder: (id: string) => void
-  onCreateFolder: () => void
   wrapperStyle: React.CSSProperties
 }
 
@@ -684,7 +930,6 @@ function LibraryCardMenu({
   isDark, bdr, isOpen, view, onOpenChange, onViewChange,
   onRename, onExport, onDeleteRequest,
   categories, activeLabelIds, onToggleLabel, onDeleteLabel, onCreateLabel,
-  folders, activeFolderId, onSetFolder, onDeleteFolder, onCreateFolder,
   wrapperStyle,
 }: LibraryCardMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
@@ -776,7 +1021,6 @@ function LibraryCardMenu({
               <button onClick={onRename} style={itemStyle}><span>✏️</span>Rename</button>
               <button onClick={onExport} style={itemStyle}><span>📤</span>Export</button>
               <button onClick={() => onViewChange('category')} style={itemStyle}><span>🏷</span>Labels<span style={{ marginLeft: 'auto', opacity: 0.5 }}>›</span></button>
-              <button onClick={() => onViewChange('folder')} style={itemStyle}><span>📁</span>Move to Folder<span style={{ marginLeft: 'auto', opacity: 0.5 }}>›</span></button>
               <div style={dividerStyle} />
               <button onClick={onDeleteRequest} style={{ ...itemStyle, color: '#f87171' }}><span>🗑</span>Delete</button>
             </>
@@ -814,29 +1058,6 @@ function LibraryCardMenu({
               <button onClick={onCreateLabel} style={itemStyle}><span>+</span>Create Custom Label</button>
             </>
           )}
-
-          {view === 'folder' && (
-            <>
-              <button onClick={() => onViewChange('main')} style={headerStyle}>‹ Move to Folder</button>
-              <div style={{ maxHeight: 220, overflowY: 'auto' }}>
-                <button onClick={() => onSetFolder(null)} style={itemStyle}>
-                  <span style={{ opacity: activeFolderId === null ? 1 : 0 }}>✓</span>No Folder
-                </button>
-                {folders.map(f => (
-                  <div key={f.id} style={{ display: 'flex', alignItems: 'center' }}>
-                    <button onClick={() => onSetFolder(f.id)} style={{ ...itemStyle, flex: 1 }}>
-                      <span style={{ opacity: activeFolderId === f.id ? 1 : 0 }}>✓</span>
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: f.color ?? DEFAULT_FOLDER_COLOR, flexShrink: 0 }} />
-                      📁 {f.name}
-                    </button>
-                    <button onClick={() => onDeleteFolder(f.id)} title="Delete folder" style={{ ...xBtnStyle, marginRight: 8 }}>✕</button>
-                  </div>
-                ))}
-              </div>
-              <div style={dividerStyle} />
-              <button onClick={onCreateFolder} style={itemStyle}><span>+</span>New Folder</button>
-            </>
-          )}
         </div>
       )}
     </div>
@@ -856,7 +1077,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   const {
     isDark, calData, updateDay,
     journalLabels, addJournalLabel, removeJournalLabel,
-    journalFolders, addJournalFolder, removeJournalFolder,
     customColors, addCustomColor, removeCustomColor, setToast,
   } = useApp()
 
@@ -891,14 +1111,11 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   // ── Library organization: filters, per-card ⋮ menu, create modals ───────────
   const [libCategoryFilter, setLibCategoryFilter]   = useState<string | null>(null)
   const [cardMenuOpen, setCardMenuOpen]             = useState<string | null>(null)
-  const [cardMenuView, setCardMenuView]             = useState<'main' | 'category' | 'folder'>('main')
+  const [cardMenuView, setCardMenuView]             = useState<'main' | 'category'>('main')
   const [showCreateLabel, setShowCreateLabel]       = useState(false)
   const [newLabelName, setNewLabelName]             = useState('')
   const [newLabelColor, setNewLabelColor]           = useState<string>(COLOR_PALETTE[0])
   const [showLabelColorPicker, setShowLabelColorPicker] = useState(false)
-  const [showCreateFolder, setShowCreateFolder]     = useState(false)
-  const [newFolderName, setNewFolderName]           = useState('')
-  const [newFolderColor, setNewFolderColor]         = useState(DEFAULT_FOLDER_COLOR)
 
   // ── ESC key — calendar view only; editor ESC is owned by JournalEditorContent ─
   const escRef = useRef<() => void>(() => {})
@@ -949,7 +1166,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     setRenamingEntry(null)
   }
 
-  // ── Library organization: category (label) + folder assignment ──────────────
+  // ── Library organization: label assignment ───────────────────────────────────
   // Read-modify-write against the doc's own JSON, exactly like commitLibRename
   // does for `title` — reuses the existing per-day persistence/RLS/cross-device
   // pipeline (updateDay) with zero new sync code for this relationship.
@@ -960,14 +1177,8 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     const updated = { ...doc, labelIds: next }
     updateDay(dateKey, prev => ({ ...prev, notes: JSON.stringify(updated) }))
   }
-  function setDocFolder(dateKey: string, folderId: string | null) {
-    const doc = parseJournalDoc(calData[dateKey]?.notes)
-    const updated = { ...doc, folderId }
-    updateDay(dateKey, prev => ({ ...prev, notes: JSON.stringify(updated) }))
-  }
-
-  // Deleting a label/folder only removes its definition + the assignment on
-  // any document that used it — the document's content is never touched.
+  // Deleting a label only removes its definition + the assignment on any
+  // document that used it — the document's content is never touched.
   function handleDeleteLabel(labelId: string) {
     removeJournalLabel(labelId)
     for (const [key, day] of Object.entries(calData)) {
@@ -980,17 +1191,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     }
     if (libCategoryFilter === labelId) setLibCategoryFilter(null)
   }
-  function handleDeleteFolder(folderId: string) {
-    removeJournalFolder(folderId)
-    for (const [key, day] of Object.entries(calData)) {
-      if (!day.notes?.trim()) continue
-      const doc = parseJournalDoc(day.notes)
-      if (doc.folderId === folderId) {
-        const updated = { ...doc, folderId: null }
-        updateDay(key, prev => ({ ...prev, notes: JSON.stringify(updated) }))
-      }
-    }
-  }
   function commitCreateLabel() {
     const name = newLabelName.trim()
     if (!name) return
@@ -998,14 +1198,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     setShowCreateLabel(false)
     setNewLabelName('')
     setNewLabelColor(COLOR_PALETTE[0])
-  }
-  function commitCreateFolder() {
-    const name = newFolderName.trim()
-    if (!name) return
-    addJournalFolder({ id: mkId(), name, color: newFolderColor })
-    setShowCreateFolder(false)
-    setNewFolderName('')
-    setNewFolderColor(DEFAULT_FOLDER_COLOR)
   }
 
   function enterSelectMode() {
@@ -1142,7 +1334,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         return {
           dateKey: key, year: y, month: m, day: d, title,
           labelIds: parsedDoc.labelIds ?? [],
-          folderId: parsedDoc.folderId ?? null,
         }
       })
     return libSortOrder === 'newer'
@@ -1152,9 +1343,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
 
   // Month/Year (from the "All" date filter) AND Labels (independent, from
   // "🏷 Labels ▾") combine — e.g. newer Priority docs in September 2026 —
-  // without either resetting the other. Folder filtering isn't offered from
-  // the toolbar (Labels and date filtering stay separate concepts); documents
-  // still carry a folderId, organized via each document's ⋮ → Move to Folder.
+  // without either resetting the other.
   const filteredLibraryEntries = useMemo(() => {
     return libraryEntries.filter(e => {
       if (libMonthYearFilter !== null && (e.month !== libMonthYearFilter.month || e.year !== libMonthYearFilter.year)) return false
@@ -1666,20 +1855,35 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
               }
               return (
                 <>
-                  <select value={libViewMode} onChange={e => setLibViewMode(e.target.value as typeof libViewMode)} style={{ ...ss, maxWidth: 62 }} title="View mode">
-                    <option value="compact">Default</option>
-                    <option value="detail">Detail</option>
-                    <option value="tile">Tile</option>
-                    <option value="thumbnail">Thumb</option>
-                  </select>
-                  <select value={libSortOrder} onChange={e => setLibSortOrder(e.target.value as 'newer' | 'older')} style={{ ...ss, maxWidth: 60 }} title="Sort order">
-                    <option value="newer">↓ Newer</option>
-                    <option value="older">↑ Older</option>
-                  </select>
-                  {/* "All" — pure date filtering (All Documents, or a specific month/year,
-                      navigated with ‹ › — never a native <select>, and never mixed with
-                      Folders, which stay a separate concept managed via each document's
-                      ⋮ → Move to Folder menu). */}
+                  {/* Default/Sort — desktop/tablet keep the exact native <select> as
+                      before; Mobile only swaps in a custom XPadite popover (same
+                      options, same onChange) so it never opens the OS's native sheet. */}
+                  <ResponsiveToolbarSelect
+                    isDark={isDark} bdr={bdr}
+                    value={libViewMode}
+                    onChange={setLibViewMode}
+                    style={{ ...ss, maxWidth: 62 }}
+                    title="View mode"
+                    options={[
+                      { value: 'compact', label: 'Default' },
+                      { value: 'detail', label: 'Detail' },
+                      { value: 'tile', label: 'Tile' },
+                      { value: 'thumbnail', label: 'Thumb' },
+                    ]}
+                  />
+                  <ResponsiveToolbarSelect
+                    isDark={isDark} bdr={bdr}
+                    value={libSortOrder}
+                    onChange={setLibSortOrder}
+                    style={{ ...ss, maxWidth: 60 }}
+                    title="Sort order"
+                    options={[
+                      { value: 'newer', label: '↓ Newer' },
+                      { value: 'older', label: '↑ Older' },
+                    ]}
+                  />
+                  {/* "All" — pure date filtering (All Documents, or a specific month/year
+                      via the month-grid picker below), never mixed with Folders. */}
                   <DateFilterDropdown
                     isDark={isDark} bdr={bdr}
                     filter={libMonthYearFilter}
@@ -1857,10 +2061,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
                       onDeleteLabel={handleDeleteLabel}
                       onCreateLabel={() => { setShowCreateLabel(true); setCardMenuOpen(null) }}
-                      folders={journalFolders} activeFolderId={entry.folderId}
-                      onSetFolder={id => { setDocFolder(entry.dateKey, id); setCardMenuOpen(null) }}
-                      onDeleteFolder={handleDeleteFolder}
-                      onCreateFolder={() => { setShowCreateFolder(true); setCardMenuOpen(null) }}
                       wrapperStyle={{ position: 'absolute', top: 5, right: 5 }}
                     />
                   )}
@@ -2007,10 +2207,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
                       onDeleteLabel={handleDeleteLabel}
                       onCreateLabel={() => { setShowCreateLabel(true); setCardMenuOpen(null) }}
-                      folders={journalFolders} activeFolderId={entry.folderId}
-                      onSetFolder={id => { setDocFolder(entry.dateKey, id); setCardMenuOpen(null) }}
-                      onDeleteFolder={handleDeleteFolder}
-                      onCreateFolder={() => { setShowCreateFolder(true); setCardMenuOpen(null) }}
                       wrapperStyle={{ position: 'relative', flexShrink: 0, marginLeft: 8 }}
                     />
                   )}
@@ -2076,10 +2272,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
                       onDeleteLabel={handleDeleteLabel}
                       onCreateLabel={() => { setShowCreateLabel(true); setCardMenuOpen(null) }}
-                      folders={journalFolders} activeFolderId={entry.folderId}
-                      onSetFolder={id => { setDocFolder(entry.dateKey, id); setCardMenuOpen(null) }}
-                      onDeleteFolder={handleDeleteFolder}
-                      onCreateFolder={() => { setShowCreateFolder(true); setCardMenuOpen(null) }}
                       wrapperStyle={{ position: 'absolute', top: 8, right: 8 }}
                     />
                   )}
@@ -2188,10 +2380,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
                       onDeleteLabel={handleDeleteLabel}
                       onCreateLabel={() => { setShowCreateLabel(true); setCardMenuOpen(null) }}
-                      folders={journalFolders} activeFolderId={entry.folderId}
-                      onSetFolder={id => { setDocFolder(entry.dateKey, id); setCardMenuOpen(null) }}
-                      onDeleteFolder={handleDeleteFolder}
-                      onCreateFolder={() => { setShowCreateFolder(true); setCardMenuOpen(null) }}
                       wrapperStyle={{ position: 'absolute', top: 8, right: 8 }}
                     />
                   )}
@@ -2513,102 +2701,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   color: '#fff',
                 }}
               >Create</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── New Folder modal ─────────────────────────────────────────────── */}
-      {showCreateFolder && (
-        <div
-          style={{
-            position: 'absolute', inset: 0, zIndex: 85,
-            background: 'rgba(0,0,0,0.55)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            borderRadius: 'inherit',
-          }}
-          onClick={() => { setShowCreateFolder(false); setNewFolderName(''); setNewFolderColor(DEFAULT_FOLDER_COLOR) }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              background: isDark ? '#1e1b2e' : '#ffffff',
-              border: `1px solid ${isDark ? 'rgba(124,58,237,0.35)' : 'rgba(124,58,237,0.25)'}`,
-              borderRadius: 14, padding: '22px 24px', maxWidth: 280, width: '88%',
-              boxShadow: '0 8px 40px rgba(0,0,0,0.45)',
-              display: 'flex', flexDirection: 'column', gap: 14,
-            }}
-          >
-            <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase', color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.78)' }}>
-              New Folder
-            </div>
-            <input
-              autoFocus
-              value={newFolderName}
-              onChange={e => setNewFolderName(e.target.value)}
-              placeholder="Folder name"
-              maxLength={40}
-              onKeyDown={e => { if (e.key === 'Enter') commitCreateFolder(); if (e.key === 'Escape') setShowCreateFolder(false) }}
-              style={{
-                fontSize: 13, padding: '8px 10px', borderRadius: 8, outline: 'none',
-                border: `1px solid ${isDark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.14)'}`,
-                background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)',
-                color: isDark ? '#fff' : '#0f172a',
-              }}
-            />
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 500, marginBottom: 7, color: muted }}>Folder Color</div>
-              <div style={{ display: 'flex', gap: 9, alignItems: 'center' }}>
-                {FOLDER_COLOR_PRESETS.map(hex => (
-                  <button
-                    key={hex}
-                    onClick={() => setNewFolderColor(hex)}
-                    title={hex}
-                    style={{
-                      width: 22, height: 22, borderRadius: '50%', border: 'none', cursor: 'pointer', padding: 0,
-                      background: hex,
-                      outline: newFolderColor === hex ? `2px solid ${isDark ? '#fff' : '#0f172a'}` : '1.5px solid rgba(0,0,0,0.12)',
-                      outlineOffset: newFolderColor === hex ? 1 : 0,
-                    }}
-                  />
-                ))}
-                {/* Custom color — native picker, styled to sit alongside the presets as one more swatch */}
-                <input
-                  type="color"
-                  value={newFolderColor}
-                  onChange={e => setNewFolderColor(e.target.value)}
-                  title="Custom color"
-                  style={{
-                    width: 22, height: 22, borderRadius: '50%', padding: 0, cursor: 'pointer',
-                    overflow: 'hidden', background: 'none',
-                    border: !FOLDER_COLOR_PRESETS.includes(newFolderColor)
-                      ? `2px solid ${isDark ? '#fff' : '#0f172a'}`
-                      : `1.5px solid ${isDark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.20)'}`,
-                  }}
-                />
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button
-                onClick={() => { setShowCreateFolder(false); setNewFolderName(''); setNewFolderColor(DEFAULT_FOLDER_COLOR) }}
-                style={{
-                  padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer',
-                  background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-                  border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`,
-                  color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)',
-                }}
-              >Cancel</button>
-              <button
-                onClick={commitCreateFolder}
-                disabled={!newFolderName.trim()}
-                style={{
-                  padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                  cursor: newFolderName.trim() ? 'pointer' : 'default',
-                  background: newFolderName.trim() ? 'rgba(124,58,237,0.88)' : 'rgba(124,58,237,0.30)',
-                  border: '0.5px solid rgba(124,58,237,0.60)',
-                  color: '#fff',
-                }}
-              >+ Create Folder</button>
             </div>
           </div>
         </div>

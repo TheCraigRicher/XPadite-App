@@ -6,8 +6,12 @@ import { useEffect, useRef, useState } from 'react'
 
 type DrawTool = 'select' | 'pen' | 'eraser' | 'text' | 'line' | 'arrow' | 'rect' | 'rect-r' | 'circle' | 'triangle'
 type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'line' | 'arrow' | 'text' | 'stroke'
-type ConnType = 'straight' | 'curved' | 'elbow'
+// 'elbow' = sharp 90° two-segment connector; 'elbow-curved' = the same two-segment
+// route with a smoothly rounded corner. Both are distinct from the older 'curved'
+// (a single free-form quadratic bezier from start to end, unrelated to the elbow tool).
+type ConnType = 'straight' | 'curved' | 'elbow' | 'elbow-curved'
 type HPos     = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
+type PopoverId = 'pen-size' | 'eraser-size' | 'shapes' | 'flip' | 'text-size' | 'arrow-type'
 
 interface Pt { x: number; y: number }
 
@@ -138,6 +142,16 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj) {
     c.beginPath()
     if (obj.connType === 'curved') { c.moveTo(obj.x1,obj.y1); c.quadraticCurveTo(obj.mx,obj.my,obj.x2,obj.y2) }
     else if (obj.connType === 'elbow') { c.moveTo(obj.x1,obj.y1); c.lineTo(obj.mx,obj.my); c.lineTo(obj.x2,obj.y2) }
+    else if (obj.connType === 'elbow-curved') {
+      // Same two-segment elbow route as 'elbow', but with a rounded corner —
+      // arcTo is the same technique roundRect() already uses for round-rect corners.
+      const leg1 = Math.hypot(obj.mx-obj.x1, obj.my-obj.y1)
+      const leg2 = Math.hypot(obj.x2-obj.mx, obj.y2-obj.my)
+      const r = Math.max(0, Math.min(16, leg1/2, leg2/2))
+      c.moveTo(obj.x1,obj.y1)
+      c.arcTo(obj.mx,obj.my,obj.x2,obj.y2,r)
+      c.lineTo(obj.x2,obj.y2)
+    }
     else { c.moveTo(obj.x1,obj.y1); c.lineTo(obj.x2,obj.y2) }
     c.stroke()
     const tx = obj.connType !== 'straight' ? obj.mx : obj.x1
@@ -185,6 +199,19 @@ const EraserIcon = () => (
   </svg>
 )
 
+// ─── ElbowArrowIcon ───────────────────────────────────────────────────────────
+// Two visual variants of the same connector: identical L-shaped route and arrowhead,
+// differing only in whether the corner is a hard 90° or a smoothly rounded turn.
+
+const ElbowArrowIcon = ({ curved = false, size = 15 }: { curved?: boolean; size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" style={{ display:'block' }}>
+    {curved
+      ? <path d="M7 4 L7 11 Q7 16 12 16 L17 16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" fill="none"/>
+      : <path d="M7 4 L7 16 L17 16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/>}
+    <path d="M13.5 12 L18.5 16 L13.5 20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+  </svg>
+)
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: JournalDrawModalProps) {
@@ -214,7 +241,9 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
   const [objects,     setObjects]     = useState<DrawObj[]>([])
   const [selIds,      setSelIds]      = useState<string[]>([])
   const [textInput,   setTextInput]   = useState<{ x:number; y:number; value:string } | null>(null)
-  const [openPopover, setOpenPopover] = useState<'pen-size'|'eraser-size'|'shapes'|'flip'|'text-size'|null>(null)
+  const [openPopover, setOpenPopover] = useState<PopoverId | null>(null)
+  const [popAnchor,   setPopAnchor]   = useState<{ top:number; left:number } | null>(null)
+  const [arrowConnDefault, setArrowConnDefault] = useState<ConnType>('elbow')
 
   // ── sync helpers ───────────────────────────────────────────────────────────
   function syncObjs(objs: DrawObj[]) { objectsRef.current = objs; setObjects(objs) }
@@ -412,7 +441,20 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
         if (o.id !== dm.id) return o
         if (dm.which === 'start') return {...o,x1:pos.x,y1:pos.y}
         if (dm.which === 'end')   return {...o,x2:pos.x,y2:pos.y}
-        return {...o,mx:pos.x,my:pos.y,connType:'curved' as ConnType}
+        // Mid/bend-handle drag.
+        if (o.connType === 'elbow' || o.connType === 'elbow-curved') {
+          // Only two corner positions keep both segments orthogonal for fixed
+          // endpoints — snap to whichever the cursor is nearer so the bend
+          // always stays a hard 90° while still feeling freely draggable.
+          const cornerH = { x:o.x2, y:o.y1 }
+          const cornerV = { x:o.x1, y:o.y2 }
+          const dH = Math.hypot(pos.x-cornerH.x, pos.y-cornerH.y)
+          const dV = Math.hypot(pos.x-cornerV.x, pos.y-cornerV.y)
+          const corner = dH <= dV ? cornerH : cornerV
+          return {...o,mx:corner.x,my:corner.y}
+        }
+        if (o.type === 'arrow' && o.connType === 'straight') return {...o,mx:pos.x,my:pos.y,connType:'curved' as ConnType}
+        return {...o,mx:pos.x,my:pos.y}
       })
       renderAll(); return
     }
@@ -468,7 +510,14 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     if (active.type === 'line' || active.type === 'arrow') {
       if (!pos||!shapeStart.current){renderAll();return}
       if (Math.hypot(pos.x-shapeStart.current.x,pos.y-shapeStart.current.y)>4) {
-        const obj={...active,x1:shapeStart.current.x,y1:shapeStart.current.y,x2:pos.x,y2:pos.y,mx:(shapeStart.current.x+pos.x)/2,my:(shapeStart.current.y+pos.y)/2}
+        const x1=shapeStart.current.x, y1=shapeStart.current.y, x2=pos.x, y2=pos.y
+        const isElbow = active.type==='arrow' && (arrowConnDefault==='elbow' || arrowConnDefault==='elbow-curved')
+        const obj={
+          ...active, x1,y1,x2,y2,
+          connType: active.type==='arrow' ? arrowConnDefault : active.connType,
+          mx: isElbow ? x2 : (x1+x2)/2,
+          my: isElbow ? y1 : (y1+y2)/2,
+        }
         const n=[...objectsRef.current,obj]; syncObjs(n); snapshot(n); syncSel([obj.id])
       }
     } else {
@@ -559,7 +608,29 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
   function flipSelected(axis: 'x'|'y') {
     if (selIdsRef.current.length===0) return
     const ids=selIdsRef.current
-    const n=objectsRef.current.map(o=>!ids.includes(o.id)?o:axis==='x'?{...o,flipX:!o.flipX}:{...o,flipY:!o.flipY})
+    const n=objectsRef.current.map(o=>{
+      if(!ids.includes(o.id)) return o
+      if (o.type==='text') return o
+      // Lines/arrows/strokes mirror their own exact coordinates around their own
+      // center — this keeps hit-testing/handles in sync with the render, and for
+      // elbow arrows it automatically re-derives a valid orthogonal corner (the
+      // mirrored corner of a mirrored orthogonal route is itself orthogonal).
+      if (o.type==='line' || o.type==='arrow') {
+        if (axis==='x') {
+          const cx=(o.x1+o.x2)/2
+          return {...o,x1:2*cx-o.x1,x2:2*cx-o.x2,mx:2*cx-o.mx}
+        }
+        const cy=(o.y1+o.y2)/2
+        return {...o,y1:2*cy-o.y1,y2:2*cy-o.y2,my:2*cy-o.my}
+      }
+      if (o.type==='stroke') {
+        const bb=getObjBB(o)
+        if (axis==='x') { const cx=(bb.minX+bb.maxX)/2; return {...o,pts:o.pts.map(p=>({x:2*cx-p.x,y:p.y}))} }
+        const cy=(bb.minY+bb.maxY)/2; return {...o,pts:o.pts.map(p=>({x:p.x,y:2*cy-p.y}))}
+      }
+      // Shapes already flip correctly via the render-time flipX/flipY transform — untouched.
+      return axis==='x'?{...o,flipX:!o.flipX}:{...o,flipY:!o.flipY}
+    })
     syncObjs(n); snapshot(n); setOpenPopover(null); renderAll()
   }
 
@@ -567,7 +638,7 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     const ids=selIdsRef.current
     const n=objectsRef.current.map(o=>{
       if(!ids.includes(o.id)||o.type!=='arrow') return o
-      if(ct==='elbow') return {...o,connType:ct,mx:o.x2,my:o.y1}
+      if(ct==='elbow'||ct==='elbow-curved') return {...o,connType:ct,mx:o.x2,my:o.y1}
       return {...o,connType:ct}
     })
     syncObjs(n); snapshot(n); renderAll()
@@ -601,13 +672,14 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement) return
+      if (e.key==='Escape' && openPopover) { e.preventDefault(); setOpenPopover(null); return }
       if ((e.ctrlKey||e.metaKey)&&e.key==='z') { e.preventDefault(); undo() }
       if ((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.shiftKey&&e.key==='z'))) { e.preventDefault(); redo() }
       if ((e.key==='Delete'||e.key==='Backspace')&&selIdsRef.current.length>0) { e.preventDefault(); deleteSelected() }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [openPopover]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Close popover on outside click ────────────────────────────────────────
   useEffect(() => {
@@ -622,6 +694,7 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
   // ── Derived ────────────────────────────────────────────────────────────────
   const selObjs   = objects.filter(o => selIds.includes(o.id))
   const selHasShape = selObjs.some(o => SHAPE_TOOLS.includes(o.type as DrawTool))
+  const selHasFlippable = selIds.length>0 && selObjs.some(o => o.type !== 'text')
   const selArrow    = selObjs.length===1 && selObjs[0].type==='arrow' ? selObjs[0] : null
   const selIsGroup  = selObjs.length>=2 && selObjs.every(o=>o.gid&&o.gid===selObjs[0].gid)
   const canGroup    = selIds.length>=2 && !selIsGroup
@@ -642,11 +715,31 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     }
   }
 
-  const popStyle: React.CSSProperties = {
-    position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:300,
-    background:isDark?'#1e1033':'#ffffff', border:`0.5px solid ${dockBdr}`,
-    borderRadius:10, padding:'6px', display:'flex', flexDirection:'column', gap:2,
-    boxShadow:isDark?'0 8px 24px rgba(0,0,0,0.55)':'0 4px 16px rgba(0,0,0,0.14)', minWidth:130,
+  // Popovers render as position:fixed, anchored via getBoundingClientRect() at open-time —
+  // this escapes the toolbar's own overflowX:'auto' scroll/clip ancestor entirely (unlike
+  // position:absolute, which resolves its containing block inside that scrolling ancestor
+  // and gets clipped/scrolled along with it).
+  function openPop(id: PopoverId, e: React.MouseEvent<HTMLElement>) {
+    const r = e.currentTarget.getBoundingClientRect()
+    setPopAnchor({ top: r.bottom + 4, left: r.left })
+    setOpenPopover(op => op === id ? null : id)
+  }
+
+  function fixedPopStyle(extra?: React.CSSProperties): React.CSSProperties {
+    const width = 150
+    let left = popAnchor?.left ?? 0
+    let top  = popAnchor?.top ?? 0
+    if (typeof window !== 'undefined') {
+      left = Math.min(Math.max(8, left), window.innerWidth - width - 8)
+      top  = Math.min(top, window.innerHeight - 60)
+    }
+    return {
+      position:'fixed', top, left, zIndex:300,
+      background:isDark?'#1e1033':'#ffffff', border:`0.5px solid ${dockBdr}`,
+      borderRadius:10, padding:'6px', display:'flex', flexDirection:'column', gap:2,
+      boxShadow:isDark?'0 8px 24px rgba(0,0,0,0.55)':'0 4px 16px rgba(0,0,0,0.14)', minWidth:130,
+      ...extra,
+    }
   }
 
   function pbtn(lbl: string, fn: ()=>void, active=false) {
@@ -672,14 +765,14 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
         {dvdr}
 
         {/* Pen + size popover */}
-        <div style={{position:'relative',flexShrink:0}} data-pop-trigger="">
-          <button title="Pen" onClick={()=>{if(textInput)commitText();setTool('pen');setOpenPopover(op=>op==='pen-size'?null:'pen-size')}}
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Pen" onClick={(e)=>{if(textInput)commitText();setTool('pen');openPop('pen-size',e)}}
             style={{...dkBtn(tool==='pen'),display:'flex',alignItems:'center',gap:4,padding:'4px 8px'}}>
             <span style={{fontSize:13}}>✏</span>
             <span style={{width:Math.min(PEN_SIZES[penIdx]+2,10),height:Math.min(PEN_SIZES[penIdx]+2,10),borderRadius:'50%',background:'currentColor',display:'inline-block',flexShrink:0}}/>
           </button>
           {openPopover==='pen-size' && (
-            <div data-popover="" style={{...popStyle,flexDirection:'row',gap:4,minWidth:'auto',padding:'6px 8px'}}>
+            <div data-popover="" style={fixedPopStyle({flexDirection:'row',gap:4,minWidth:'auto',padding:'6px 8px'})}>
               {PEN_SIZES.map((sz,i)=>(
                 <button key={i} title={`${sz}px`} onClick={()=>{setPenIdx(i);setOpenPopover(null)}}
                   style={{width:28,height:28,borderRadius:7,padding:0,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,
@@ -693,27 +786,27 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
         </div>
 
         {/* Eraser + size popover */}
-        <div style={{position:'relative',flexShrink:0}} data-pop-trigger="">
-          <button title="Eraser" onClick={()=>{if(textInput)commitText();setTool('eraser');setOpenPopover(op=>op==='eraser-size'?null:'eraser-size')}}
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Eraser" onClick={(e)=>{if(textInput)commitText();setTool('eraser');openPop('eraser-size',e)}}
             style={{...dkBtn(tool==='eraser'),display:'flex',alignItems:'center',gap:3,padding:'4px 8px'}}>
             <EraserIcon/>
             <span style={{fontSize:9,opacity:0.6}}>{['S','M','L','XL'][eraserIdx]}</span>
           </button>
           {openPopover==='eraser-size' && (
-            <div data-popover="" style={popStyle}>
+            <div data-popover="" style={fixedPopStyle()}>
               {(['Small','Medium','Large','Extra Large'] as const).map((lbl,i)=>pbtn(lbl,()=>{setEraserIdx(i);setOpenPopover(null)},eraserIdx===i))}
             </div>
           )}
         </div>
 
         {/* Text */}
-        <div style={{position:'relative',flexShrink:0}} data-pop-trigger="">
-          <button title="Text" onClick={()=>{if(textInput)commitText();setTool('text');setOpenPopover(op=>op==='text-size'?null:'text-size')}}
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Text" onClick={(e)=>{if(textInput)commitText();setTool('text');openPop('text-size',e)}}
             style={{...dkBtn(tool==='text'),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:13,fontWeight:700}}>
             T<span style={{fontSize:9,opacity:0.6,fontWeight:400}}>{TEXT_SIZES[textSzIdx]}</span>
           </button>
           {openPopover==='text-size' && (
-            <div data-popover="" style={popStyle}>
+            <div data-popover="" style={fixedPopStyle()}>
               {TEXT_SIZES.map((sz,i)=>pbtn(`${sz}px`,()=>{setTextSzIdx(i);setOpenPopover(null)},textSzIdx===i))}
             </div>
           )}
@@ -722,13 +815,13 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
         {dvdr}
 
         {/* Shapes popover */}
-        <div style={{position:'relative',flexShrink:0}} data-pop-trigger="">
-          <button title="Shapes" onClick={()=>{if(textInput)commitText();setOpenPopover(op=>op==='shapes'?null:'shapes')}}
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Shapes" onClick={(e)=>{if(textInput)commitText();openPop('shapes',e)}}
             style={{...dkBtn(SHAPE_TOOLS.includes(tool)),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>
             {tool==='rect'?'□':tool==='rect-r'?'⊡':tool==='circle'?'○':tool==='triangle'?'△':'□'} Shapes▾
           </button>
           {openPopover==='shapes' && (
-            <div data-popover="" style={popStyle}>
+            <div data-popover="" style={fixedPopStyle()}>
               {pbtn('□  Rectangle', ()=>{setTool('rect');     setOpenPopover(null)}, tool==='rect')}
               {pbtn('⊡  Round Rect',()=>{setTool('rect-r');   setOpenPopover(null)}, tool==='rect-r')}
               {pbtn('○  Circle',    ()=>{setTool('circle');   setOpenPopover(null)}, tool==='circle')}
@@ -741,7 +834,28 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
         <button title="Line" onClick={()=>{if(textInput)commitText();setTool('line')}} style={{...dkBtn(tool==='line'),minWidth:28,textAlign:'center',padding:'4px 8px'}}>—</button>
 
         {/* Arrow */}
-        <button title="Arrow / Connector" onClick={()=>{if(textInput)commitText();setTool('arrow')}} style={{...dkBtn(tool==='arrow'),minWidth:28,textAlign:'center',padding:'4px 8px'}}>→</button>
+        <button title="Arrow / Connector" onClick={()=>{if(textInput)commitText();setTool('arrow');setArrowConnDefault('straight')}} style={{...dkBtn(tool==='arrow'&&arrowConnDefault==='straight'),minWidth:28,textAlign:'center',padding:'4px 8px'}}>→</button>
+
+        {/* Elbow Arrow — two visual icon choices (sharp / curved corner), primary UI is the icon, tooltip is secondary */}
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Elbow Arrow" onClick={(e)=>{if(textInput)commitText();setTool('arrow');openPop('arrow-type',e)}}
+            style={{...dkBtn(tool==='arrow'&&(arrowConnDefault==='elbow'||arrowConnDefault==='elbow-curved')),display:'flex',alignItems:'center',padding:'4px 8px'}}>
+            <ElbowArrowIcon curved={arrowConnDefault==='elbow-curved'} size={15}/>
+          </button>
+          {openPopover==='arrow-type' && (
+            <div data-popover="" style={fixedPopStyle({flexDirection:'row',gap:4,minWidth:'auto',padding:'6px 8px'})}>
+              {([['elbow',false,'Sharp 90° Arrow'],['elbow-curved',true,'Curved Arrow']] as const).map(([ct,curved,ttl])=>(
+                <button key={ct} title={ttl} onClick={()=>{setArrowConnDefault(ct);setTool('arrow');setOpenPopover(null)}}
+                  style={{width:34,height:30,borderRadius:7,padding:0,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,
+                    border:`0.5px solid ${arrowConnDefault===ct?'rgba(124,58,237,0.55)':isDark?'rgba(255,255,255,0.14)':'rgba(0,0,0,0.15)'}`,
+                    background:arrowConnDefault===ct?'rgba(124,58,237,0.20)':isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.04)',
+                    color:isDark?'rgba(255,255,255,0.78)':'rgba(0,0,0,0.68)'}}>
+                  <ElbowArrowIcon curved={curved} size={17}/>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {dvdr}
 
@@ -769,12 +883,13 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
         {dvdr}
 
         {/* Flip popover */}
-        <div style={{position:'relative',flexShrink:0}} data-pop-trigger="">
-          <button title="Flip" onClick={()=>setOpenPopover(op=>op==='flip'?null:'flip')} style={{...dkBtn(),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>⇆ Flip▾</button>
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Flip" disabled={!selHasFlippable} onClick={(e)=>{if(!selHasFlippable)return;openPop('flip',e)}}
+            style={{...dkBtn(false,false,!selHasFlippable),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>⇆ Flip▾</button>
           {openPopover==='flip' && (
-            <div data-popover="" style={popStyle}>
-              {pbtn('↔  Flip Horizontal', ()=>flipSelected('x'))}
-              {pbtn('↕  Flip Vertical',   ()=>flipSelected('y'))}
+            <div data-popover="" style={fixedPopStyle()}>
+              <button onClick={()=>flipSelected('x')} style={{...dkBtn(),textAlign:'left',width:'100%',padding:'5px 10px'}}>↔  Flip Horizontal</button>
+              <button onClick={()=>flipSelected('y')} style={{...dkBtn(),textAlign:'left',width:'100%',padding:'5px 10px'}}>↕  Flip Vertical</button>
             </div>
           )}
         </div>
@@ -784,7 +899,12 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
           {dvdr}
           <button onClick={()=>setConnType('straight')} style={dkBtn(selArrow.connType==='straight')} title="Straight arrow">⟶</button>
           <button onClick={()=>setConnType('curved')}   style={dkBtn(selArrow.connType==='curved')}   title="Curved arrow">⌒</button>
-          <button onClick={()=>setConnType('elbow')}    style={dkBtn(selArrow.connType==='elbow')}    title="Elbow arrow">⌐</button>
+          <button onClick={()=>setConnType('elbow')}    style={{...dkBtn(selArrow.connType==='elbow'),display:'flex',alignItems:'center',padding:'4px 8px'}} title="Sharp 90° Arrow">
+            <ElbowArrowIcon curved={false} size={13}/>
+          </button>
+          <button onClick={()=>setConnType('elbow-curved')} style={{...dkBtn(selArrow.connType==='elbow-curved'),display:'flex',alignItems:'center',padding:'4px 8px'}} title="Curved Arrow">
+            <ElbowArrowIcon curved={true} size={13}/>
+          </button>
         </>)}
 
         <span style={{flex:1,minWidth:8}}/>
@@ -849,8 +969,25 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     </div>
   )
 
+  // ── Popover micro-interactions ────────────────────────────────────────────
+  const popoverStyleTag = (
+    <style>{`
+      @media (prefers-reduced-motion: no-preference) {
+        [data-popover] { animation: xpJournalDrawPopIn 160ms ease-out; }
+      }
+      @keyframes xpJournalDrawPopIn {
+        from { opacity: 0; transform: translateY(-4px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      [data-popover] button:not(:disabled):hover, [data-pop-trigger] > button:not(:disabled):hover { background: rgba(124,58,237,0.14) !important; }
+      @media (hover: none) {
+        [data-popover] button:not(:disabled):active, [data-pop-trigger] > button:not(:disabled):active { background: rgba(124,58,237,0.22) !important; }
+      }
+    `}</style>
+  )
+
   // ── Render ─────────────────────────────────────────────────────────────────
-  const innerContent = <>{toolbar}{canvasArea}</>
+  const innerContent = <>{popoverStyleTag}{toolbar}{canvasArea}</>
 
   if (fitToScreen) {
     return (

@@ -118,7 +118,7 @@ export interface JournalDoc {
 export interface JournalLabel {
   id: string
   name: string
-  color: string // one of the curated color keys: 'purple' | 'yellow' | 'green' | 'pink' | 'blue'
+  color: string // hex string (e.g. '#7c3aed') — a preset, a saved custom color, or a one-off custom pick
 }
 
 export interface JournalFolder {

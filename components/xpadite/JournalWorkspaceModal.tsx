@@ -6,6 +6,8 @@ import { useApp } from './AppContext'
 import { parseJournalDoc, mkId } from './journalUtils'
 import { exportToTxt, exportToPdf, exportToDocx, makeFilename, type ExportEntry } from './journalExport'
 import type { JournalFolder } from './types'
+import { ColorPickerModal } from './ColorPickerModal'
+import { COLOR_PALETTE, normalizeHexColor } from './utils'
 
 const JournalEditorContent = dynamic(
   () => import('./JournalEditorContent').then(m => ({ default: m.JournalEditorContent })),
@@ -50,8 +52,10 @@ const BUILTIN_CATEGORIES: LibraryCategory[] = [
   { id: 'goals',       name: 'Goals',       color: '#4ade80' },
 ]
 
-const LABEL_COLOR_OPTIONS = ['purple', 'yellow', 'green', 'pink', 'blue'] as const
-type LabelColorKey = (typeof LABEL_COLOR_OPTIONS)[number]
+// Legacy fixed-key color scheme, kept only so labels created before the
+// Activity-Manager-style free-hex picker still resolve to a color (see
+// resolveLabelColor below) — new labels always store a real hex string now.
+type LabelColorKey = 'purple' | 'yellow' | 'green' | 'pink' | 'blue'
 
 const LABEL_COLOR_HEX: Record<LabelColorKey, string> = {
   purple: '#a78bfa',
@@ -65,6 +69,14 @@ const LABEL_COLOR_HEX: Record<LabelColorKey, string> = {
 // (a shared palette, not a shared concept — Folders and Labels stay distinct).
 const FOLDER_COLOR_PRESETS = Object.values(LABEL_COLOR_HEX)
 const DEFAULT_FOLDER_COLOR = LABEL_COLOR_HEX.purple
+
+// Custom labels now store a free-form hex color (reusing the same Activity
+// Manager preset palette + custom picker) — this resolves either that hex,
+// or a color from the older fixed-key scheme, back to a displayable hex.
+function resolveLabelColor(color: string): string {
+  if (/^#[0-9a-fA-F]{6}$/.test(color)) return color
+  return LABEL_COLOR_HEX[color as LabelColorKey] ?? LABEL_COLOR_HEX.purple
+}
 
 // ─── Journal entry summary types & helpers ────────────────────────────────────
 
@@ -380,28 +392,174 @@ function JournalMonthCard({
   )
 }
 
-// ─── Category/Folder filter dropdown — toolbar-level, custom XPadite popover ───
-// Replaces a native <select> for Category so Mobile never falls back to the
-// OS's large native picker sheet. Also the organization hub: folders are
-// reachable here (alongside the existing "All ▾" month/folder select) and
-// "+ New Folder" lives inside it, so the toolbar no longer needs its own
-// separate "+ Folder" button. Single active selection (radio-style): picking
-// a category clears any folder filter and vice versa; "All Categories" clears
-// both without touching the unrelated month/sort filters.
+// ─── Shared popover chrome helpers (used by DateFilterDropdown + LabelsFilterDropdown) ─
+const popoverRowStyle = (isDark: boolean): React.CSSProperties => ({
+  display: 'flex', alignItems: 'center', gap: 9,
+  width: '100%', padding: '8px 12px',
+  background: 'transparent', border: 'none', cursor: 'pointer',
+  fontSize: 12.5, fontWeight: 500, textAlign: 'left',
+  color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)',
+})
+const popoverDividerStyle = (isDark: boolean): React.CSSProperties => ({
+  height: 1, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', margin: '4px 0',
+})
+function popoverRadio(isDark: boolean, checked: boolean) {
+  // Centered via position:absolute + translate(-50%,-50%) rather than flex
+  // align/justify-center: with a 14px ring and a 7px dot, flex centering
+  // divides an odd remainder (3.5px) that some browsers round asymmetrically,
+  // visibly nudging the dot off-center. The transform is computed directly
+  // from each box's own center, so it stays exact regardless of the size pairing.
+  return (
+    <span style={{
+      position: 'relative', width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
+      border: `1.5px solid ${checked ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.25)'}`,
+    }}>
+      {checked && (
+        <span style={{
+          position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+          width: 7, height: 7, borderRadius: '50%', background: '#7c3aed',
+        }} />
+      )}
+    </span>
+  )
+}
+function hoverHandlers(isDark: boolean) {
+  return {
+    onMouseEnter: (e: React.MouseEvent<HTMLButtonElement>) => { e.currentTarget.style.background = isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.07)' },
+    onMouseLeave: (e: React.MouseEvent<HTMLButtonElement>) => { e.currentTarget.style.background = 'transparent' },
+  }
+}
 
+// ─── Date filter dropdown — toolbar-level, replaces the native "All ▾" <select> ─
+// A custom XPadite popover (never a native <select>, so Mobile never falls
+// back to the OS's large native picker sheet) offering "All" or a specific
+// month+year, navigated with ‹ › arrows — the same simple prev/next month
+// interaction as the app's other month browsers. Purely date filtering;
+// Folders are a separate concept and are never listed here.
+function DateFilterDropdown({
+  isDark, bdr, filter, onSelectAll, onSelectMonth,
+}: {
+  isDark: boolean
+  bdr: string
+  filter: { year: number; month: number } | null
+  onSelectAll: () => void
+  onSelectMonth: (year: number, month: number) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const DROPDOWN_WIDTH = 200
+
+  useEffect(() => {
+    if (!open) return
+    function outside(e: MouseEvent | TouchEvent) {
+      if (ref.current?.contains(e.target as Node)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', outside)
+    document.addEventListener('touchstart', outside)
+    return () => {
+      document.removeEventListener('mousedown', outside)
+      document.removeEventListener('touchstart', outside)
+    }
+  }, [open])
+
+  function handleToggle() {
+    if (open) { setOpen(false); return }
+    const rect = btnRef.current?.getBoundingClientRect()
+    if (rect) {
+      setPos({
+        top: rect.bottom + 6,
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - DROPDOWN_WIDTH - 8)),
+      })
+    }
+    setOpen(true)
+  }
+
+  const today = new Date()
+  const displayed = filter ?? { year: today.getFullYear(), month: today.getMonth() }
+  function shiftMonth(delta: number) {
+    const d = new Date(displayed.year, displayed.month + delta, 1)
+    onSelectMonth(d.getFullYear(), d.getMonth())
+  }
+
+  const rowStyle = popoverRowStyle(isDark)
+  const dividerStyle = popoverDividerStyle(isDark)
+  const hover = hoverHandlers(isDark)
+
+  return (
+    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        ref={btnRef}
+        onClick={handleToggle}
+        style={{
+          padding: '4px 6px', borderRadius: 6, fontSize: 11, fontWeight: filter ? 600 : 500,
+          cursor: 'pointer', flexShrink: 0, outline: 'none', whiteSpace: 'nowrap',
+          border: `0.5px solid ${filter || open ? 'rgba(124,58,237,0.65)' : isDark ? 'rgba(124,58,237,0.32)' : 'rgba(124,58,237,0.28)'}`,
+          background: filter || open ? 'rgba(124,58,237,0.22)' : (isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)'),
+          color: isDark ? '#c4b5fd' : '#7c3aed',
+          maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis',
+        }}
+        title="Filter by date"
+      >
+        {filter ? `${MONTH_SHORT[filter.month]} ${filter.year}` : 'All'}
+      </button>
+
+      {open && pos && (
+        <div style={{
+          position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999,
+          background: isDark ? '#1a1530' : '#ffffff',
+          border: `0.5px solid ${bdr}`,
+          borderRadius: 12, overflow: 'hidden',
+          boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.50)' : '0 8px 28px rgba(0,0,0,0.18)',
+          width: DROPDOWN_WIDTH,
+        }}>
+          <button onClick={() => { onSelectAll(); setOpen(false) }} style={rowStyle} {...hover}>
+            {popoverRadio(isDark, filter === null)}
+            All Documents
+          </button>
+          <div style={dividerStyle} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px' }}>
+            {popoverRadio(isDark, filter !== null)}
+            <button
+              onClick={() => shiftMonth(-1)}
+              title="Previous month"
+              style={{ width: 24, height: 24, flexShrink: 0, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: isDark ? 'rgba(255,255,255,0.60)' : 'rgba(0,0,0,0.55)', fontSize: 14 }}
+            >‹</button>
+            <button
+              onClick={() => onSelectMonth(displayed.year, displayed.month)}
+              style={{ flex: 1, padding: '4px 2px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', fontSize: 12.5, fontWeight: 600, textAlign: 'center', color: isDark ? 'rgba(255,255,255,0.88)' : 'rgba(0,0,0,0.80)' }}
+            >
+              {MONTH_NAMES[displayed.month]} {displayed.year}
+            </button>
+            <button
+              onClick={() => shiftMonth(1)}
+              title="Next month"
+              style={{ width: 24, height: 24, flexShrink: 0, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: isDark ? 'rgba(255,255,255,0.60)' : 'rgba(0,0,0,0.55)', fontSize: 14 }}
+            >›</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Labels filter dropdown — toolbar-level, custom XPadite popover ───────────
+// Replaces a native <select> for Labels so Mobile never falls back to the
+// OS's large native picker sheet. Exclusively for labels — Folders are a
+// separate concept and are managed only via each document's ⋮ → Move to
+// Folder menu, never from here. "+ New Label" opens the label creation modal.
 function CategoryFilterDropdown({
-  isDark, bdr, categoryFilter, folderFilter, categories, folders,
-  onSelectCategory, onSelectFolder, onCreateFolder,
+  isDark, bdr, categoryFilter, categories,
+  onSelectCategory, onCreateLabel,
 }: {
   isDark: boolean
   bdr: string
   categoryFilter: string | null
-  folderFilter: string | null
   categories: LibraryCategory[]
-  folders: JournalFolder[]
   onSelectCategory: (id: string | null) => void
-  onSelectFolder: (id: string) => void
-  onCreateFolder: () => void
+  onCreateLabel: () => void
 }) {
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
@@ -435,39 +593,10 @@ function CategoryFilterDropdown({
     setOpen(true)
   }
 
-  const active = categoryFilter !== null || folderFilter !== null
-  const activeLabel = categoryFilter !== null
-    ? categories.find(c => c.id === categoryFilter)?.name
-    : folderFilter !== null
-      ? folders.find(f => f.id === folderFilter)?.name
-      : null
-
-  const rowStyle: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', gap: 9,
-    width: '100%', padding: '8px 12px',
-    background: 'transparent', border: 'none', cursor: 'pointer',
-    fontSize: 12.5, fontWeight: 500, textAlign: 'left',
-    color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)',
-  }
-  const headerStyle: React.CSSProperties = {
-    padding: '9px 12px 4px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-    letterSpacing: '0.05em', color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)',
-  }
-  const dividerStyle: React.CSSProperties = {
-    height: 1, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', margin: '4px 0',
-  }
-
-  function radio(checked: boolean, color?: string) {
-    return (
-      <span style={{
-        width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
-        border: `1.5px solid ${checked ? (color ?? '#7c3aed') : isDark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.25)'}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        {checked && <span style={{ width: 7, height: 7, borderRadius: '50%', background: color ?? '#7c3aed' }} />}
-      </span>
-    )
-  }
+  const activeLabel = categoryFilter !== null ? categories.find(c => c.id === categoryFilter)?.name : null
+  const rowStyle = popoverRowStyle(isDark)
+  const dividerStyle = popoverDividerStyle(isDark)
+  const hover = hoverHandlers(isDark)
 
   return (
     <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
@@ -475,14 +604,14 @@ function CategoryFilterDropdown({
         ref={btnRef}
         onClick={handleToggle}
         style={{
-          padding: '4px 6px', borderRadius: 6, fontSize: 11, fontWeight: active ? 600 : 500,
+          padding: '4px 6px', borderRadius: 6, fontSize: 11, fontWeight: categoryFilter ? 600 : 500,
           cursor: 'pointer', flexShrink: 0, outline: 'none', whiteSpace: 'nowrap',
-          border: `0.5px solid ${active || open ? 'rgba(124,58,237,0.65)' : isDark ? 'rgba(124,58,237,0.32)' : 'rgba(124,58,237,0.28)'}`,
-          background: active || open ? 'rgba(124,58,237,0.22)' : (isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)'),
+          border: `0.5px solid ${categoryFilter || open ? 'rgba(124,58,237,0.65)' : isDark ? 'rgba(124,58,237,0.32)' : 'rgba(124,58,237,0.28)'}`,
+          background: categoryFilter || open ? 'rgba(124,58,237,0.22)' : (isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)'),
           color: isDark ? '#c4b5fd' : '#7c3aed',
           maxWidth: 82, overflow: 'hidden', textOverflow: 'ellipsis',
         }}
-        title="Filter by label or folder"
+        title="Filter by label"
       >
         🏷 {activeLabel ?? 'Labels'}
       </button>
@@ -496,54 +625,25 @@ function CategoryFilterDropdown({
           boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.50)' : '0 8px 28px rgba(0,0,0,0.18)',
           width: DROPDOWN_WIDTH, maxHeight: '65vh', overflowY: 'auto',
         }}>
-          <button
-            onClick={() => { onSelectCategory(null); setOpen(false) }}
-            style={rowStyle}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.07)' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
-          >
-            {radio(!active)}
+          <button onClick={() => { onSelectCategory(null); setOpen(false) }} style={rowStyle} {...hover}>
+            {popoverRadio(isDark, categoryFilter === null)}
             🏷 All Labels
           </button>
           <div style={dividerStyle} />
           {categories.map(cat => (
-            <button
-              key={cat.id}
-              onClick={() => { onSelectCategory(cat.id); setOpen(false) }}
-              style={rowStyle}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.07)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
-            >
-              {radio(categoryFilter === cat.id, cat.color)}
+            <button key={cat.id} onClick={() => { onSelectCategory(cat.id); setOpen(false) }} style={rowStyle} {...hover}>
+              {popoverRadio(isDark, categoryFilter === cat.id)}
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: cat.color, flexShrink: 0 }} />
               {cat.name}
             </button>
           ))}
-          {folders.length > 0 && (
-            <>
-              <div style={headerStyle}>My Folders</div>
-              {folders.map(f => (
-                <button
-                  key={f.id}
-                  onClick={() => { onSelectFolder(f.id); setOpen(false) }}
-                  style={rowStyle}
-                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.07)' }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
-                >
-                  {radio(folderFilter === f.id, f.color)}
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: f.color ?? DEFAULT_FOLDER_COLOR, flexShrink: 0 }} />
-                  📁 {f.name}
-                </button>
-              ))}
-            </>
-          )}
           <div style={dividerStyle} />
           <button
-            onClick={() => { onCreateFolder(); setOpen(false) }}
+            onClick={() => { onCreateLabel(); setOpen(false) }}
             style={{ ...rowStyle, color: isDark ? '#c4b5fd' : '#7c3aed', fontWeight: 600 }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.07)' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+            {...hover}
           >
-            + New Folder
+            + New Label
           </button>
         </div>
       )}
@@ -700,6 +800,7 @@ function LibraryCardMenu({
                         }}>
                           {checked && <svg width="8" height="8" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
                         </span>
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: cat.color, flexShrink: 0 }} />
                         {cat.name}
                       </button>
                       {isCustom && (
@@ -756,6 +857,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     isDark, calData, updateDay,
     journalLabels, addJournalLabel, removeJournalLabel,
     journalFolders, addJournalFolder, removeJournalFolder,
+    customColors, addCustomColor, removeCustomColor, setToast,
   } = useApp()
 
   const todayDate = useMemo(() => new Date(), [])
@@ -780,20 +882,20 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   const [openMobileQuarters, setOpenMobileQuarters] = useState<Record<string, boolean>>(
     { Q1: true, Q2: true, Q3: true, Q4: true }
   )
-  const [libMonthFilter, setLibMonthFilter]         = useState<number | null>(null)
+  const [libMonthYearFilter, setLibMonthYearFilter]   = useState<{ year: number; month: number } | null>(null)
   const [isExportMode, setIsExportMode]             = useState(false)
   const [showMoreMenu, setShowMoreMenu]             = useState(false)
   const [exportFormatKeys, setExportFormatKeys]     = useState<string[] | null>(null)
   const [isExporting, setIsExporting]               = useState(false)
 
   // ── Library organization: filters, per-card ⋮ menu, create modals ───────────
-  const [libFolderFilter, setLibFolderFilter]       = useState<string | null>(null)
   const [libCategoryFilter, setLibCategoryFilter]   = useState<string | null>(null)
   const [cardMenuOpen, setCardMenuOpen]             = useState<string | null>(null)
   const [cardMenuView, setCardMenuView]             = useState<'main' | 'category' | 'folder'>('main')
   const [showCreateLabel, setShowCreateLabel]       = useState(false)
   const [newLabelName, setNewLabelName]             = useState('')
-  const [newLabelColor, setNewLabelColor]           = useState<LabelColorKey>('purple')
+  const [newLabelColor, setNewLabelColor]           = useState<string>(COLOR_PALETTE[0])
+  const [showLabelColorPicker, setShowLabelColorPicker] = useState(false)
   const [showCreateFolder, setShowCreateFolder]     = useState(false)
   const [newFolderName, setNewFolderName]           = useState('')
   const [newFolderColor, setNewFolderColor]         = useState(DEFAULT_FOLDER_COLOR)
@@ -888,7 +990,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         updateDay(key, prev => ({ ...prev, notes: JSON.stringify(updated) }))
       }
     }
-    if (libFolderFilter === folderId) setLibFolderFilter(null)
   }
   function commitCreateLabel() {
     const name = newLabelName.trim()
@@ -896,7 +997,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     addJournalLabel({ id: mkId(), name, color: newLabelColor })
     setShowCreateLabel(false)
     setNewLabelName('')
-    setNewLabelColor('purple')
+    setNewLabelColor(COLOR_PALETTE[0])
   }
   function commitCreateFolder() {
     const name = newFolderName.trim()
@@ -1049,29 +1150,32 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       : entries.sort((a, b) => a.dateKey.localeCompare(b.dateKey))
   }, [calData, libSortOrder])
 
-  // Month/Folder (mutually exclusive, from the "All ▾" control) AND Category
-  // (independent, from "🏷 Category ▾") combine — e.g. newer Priority docs
-  // inside the XPadite folder — without either resetting the other.
+  // Month/Year (from the "All" date filter) AND Labels (independent, from
+  // "🏷 Labels ▾") combine — e.g. newer Priority docs in September 2026 —
+  // without either resetting the other. Folder filtering isn't offered from
+  // the toolbar (Labels and date filtering stay separate concepts); documents
+  // still carry a folderId, organized via each document's ⋮ → Move to Folder.
   const filteredLibraryEntries = useMemo(() => {
     return libraryEntries.filter(e => {
-      if (libMonthFilter !== null && e.month !== libMonthFilter) return false
-      if (libFolderFilter !== null && e.folderId !== libFolderFilter) return false
+      if (libMonthYearFilter !== null && (e.month !== libMonthYearFilter.month || e.year !== libMonthYearFilter.year)) return false
       if (libCategoryFilter !== null && !e.labelIds.includes(libCategoryFilter)) return false
       return true
     })
-  }, [libraryEntries, libMonthFilter, libFolderFilter, libCategoryFilter])
+  }, [libraryEntries, libMonthYearFilter, libCategoryFilter])
 
   // All categories (built-in + custom), for rendering dots/checkmarks and
   // resolving a labelId to its display color.
   const allCategories = useMemo<LibraryCategory[]>(() => [
     ...BUILTIN_CATEGORIES,
-    ...journalLabels.map(l => ({ id: l.id, name: l.name, color: LABEL_COLOR_HEX[l.color as LabelColorKey] ?? LABEL_COLOR_HEX.purple })),
+    ...journalLabels.map(l => ({ id: l.id, name: l.name, color: resolveLabelColor(l.color) })),
   ], [journalLabels])
 
-  const availableMonths = useMemo(
-    () => Array.from(new Set(libraryEntries.map(e => e.month))).sort((a, b) => a - b),
-    [libraryEntries],
-  )
+  // Mirrors ActivityForm's isPreset/isSavedCustom/isCustomColor: the rainbow
+  // swatch in the Create Label modal only shows the live color while it's
+  // genuinely custom (not already one of the presets or saved custom colors).
+  const isCustomLabelColor =
+    !COLOR_PALETTE.some(c => normalizeHexColor(c) === normalizeHexColor(newLabelColor)) &&
+    !customColors.some(c => normalizeHexColor(c) === normalizeHexColor(newLabelColor))
 
   // ── Scroll to today's quarter/month on calendar open ─────────────────────────
   const calContentRef  = useRef<HTMLDivElement>(null)
@@ -1572,47 +1676,29 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                     <option value="newer">↓ Newer</option>
                     <option value="older">↑ Older</option>
                   </select>
-                  {/* "All ▾" — month filter, extended with Folders per the Library organization upgrade.
-                      Month and Folder are mutually exclusive (one dropdown, one choice); Category
-                      (below) is a fully independent, additive filter. */}
-                  <select
-                    value={libFolderFilter !== null ? `f:${libFolderFilter}` : libMonthFilter !== null ? `m:${libMonthFilter}` : ''}
-                    onChange={e => {
-                      const v = e.target.value
-                      if (v === '') { setLibMonthFilter(null); setLibFolderFilter(null) }
-                      else if (v.startsWith('m:')) { setLibMonthFilter(Number(v.slice(2))); setLibFolderFilter(null) }
-                      else if (v.startsWith('f:')) { setLibFolderFilter(v.slice(2)); setLibMonthFilter(null) }
-                    }}
-                    style={{ ...ss, maxWidth: 48 }}
-                    title="Filter by month or folder"
-                  >
-                    <option value="">All</option>
-                    {availableMonths.map(m => (
-                      <option key={m} value={`m:${m}`}>{MONTH_SHORT[m]}</option>
-                    ))}
-                    {journalFolders.length > 0 && (
-                      <optgroup label="Folders">
-                        {journalFolders.map(f => (
-                          <option key={f.id} value={`f:${f.id}`}>📁 {f.name}</option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </select>
+                  {/* "All" — pure date filtering (All Documents, or a specific month/year,
+                      navigated with ‹ › — never a native <select>, and never mixed with
+                      Folders, which stay a separate concept managed via each document's
+                      ⋮ → Move to Folder menu). */}
+                  <DateFilterDropdown
+                    isDark={isDark} bdr={bdr}
+                    filter={libMonthYearFilter}
+                    onSelectAll={() => setLibMonthYearFilter(null)}
+                    onSelectMonth={(year, month) => setLibMonthYearFilter({ year, month })}
+                  />
 
-                  {/* 🏷 Category — FILTERS the Library (finding documents), distinct from the
-                      per-document ⋮ → Category menu which ASSIGNS categories. A custom XPadite
+                  {/* 🏷 Labels — FILTERS the Library (finding documents), distinct from the
+                      per-document ⋮ → Labels menu which ASSIGNS labels. A custom XPadite
                       popover (not a native <select>) so it looks and behaves the same on every
                       device instead of falling back to the OS's native picker sheet on Mobile.
-                      Folders are also reachable here (in addition to "All ▾") as the organization
-                      hub, per the Library polish request; "+ New Folder" lives inside it too, so
-                      the toolbar no longer needs its own separate "+ Folder" button. */}
+                      Exclusively for labels — "+ New Label" opens label creation; Folders are
+                      never listed here. */}
                   <CategoryFilterDropdown
                     isDark={isDark} bdr={bdr}
-                    categoryFilter={libCategoryFilter} folderFilter={libFolderFilter}
-                    categories={allCategories} folders={journalFolders}
-                    onSelectCategory={id => { setLibCategoryFilter(id); setLibFolderFilter(null) }}
-                    onSelectFolder={id => { setLibFolderFilter(id); setLibCategoryFilter(null) }}
-                    onCreateFolder={() => setShowCreateFolder(true)}
+                    categoryFilter={libCategoryFilter}
+                    categories={allCategories}
+                    onSelectCategory={id => setLibCategoryFilter(id)}
+                    onCreateLabel={() => setShowCreateLabel(true)}
                   />
                 </>
               )
@@ -1680,9 +1766,9 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           <div style={{ textAlign: 'center', paddingTop: 48, color: muted, fontSize: 13 }}>
             {libraryEntries.length === 0
               ? 'No journal entries yet. Start writing in the Editor.'
-              : libMonthFilter !== null
-                ? `No entries in ${MONTH_NAMES[libMonthFilter]}.`
-                : libFolderFilter !== null || libCategoryFilter !== null
+              : libMonthYearFilter !== null
+                ? `No entries in ${MONTH_NAMES[libMonthYearFilter.month]} ${libMonthYearFilter.year}.`
+                : libCategoryFilter !== null
                   ? 'No documents match this filter.'
                   : 'No journal entries yet. Start writing in the Editor.'}
           </div>
@@ -2302,14 +2388,14 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             borderRadius: 'inherit',
           }}
-          onClick={() => { setShowCreateLabel(false); setNewLabelName(''); setNewLabelColor('purple') }}
+          onClick={() => { setShowCreateLabel(false); setNewLabelName(''); setNewLabelColor(COLOR_PALETTE[0]) }}
         >
           <div
             onClick={e => e.stopPropagation()}
             style={{
               background: isDark ? '#1e1b2e' : '#ffffff',
               border: `1px solid ${isDark ? 'rgba(124,58,237,0.35)' : 'rgba(124,58,237,0.25)'}`,
-              borderRadius: 14, padding: '22px 24px', maxWidth: 280, width: '88%',
+              borderRadius: 14, padding: '22px 24px', maxWidth: 300, width: '88%',
               boxShadow: '0 8px 40px rgba(0,0,0,0.45)',
               display: 'flex', flexDirection: 'column', gap: 14,
             }}
@@ -2331,27 +2417,84 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                 color: isDark ? '#fff' : '#0f172a',
               }}
             />
+            {/* Color — same preset palette + rainbow custom picker + saved custom colors
+                as Activity Manager's Add Activity form, reusing the same underlying
+                customColors store instead of a separate label-only color system. */}
             <div>
-              <div style={{ fontSize: 11, fontWeight: 500, marginBottom: 7, color: muted }}>Choose color</div>
-              <div style={{ display: 'flex', gap: 9 }}>
-                {LABEL_COLOR_OPTIONS.map(c => (
+              <div style={{ fontSize: 11, fontWeight: 500, marginBottom: 7, color: muted }}>Color</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {COLOR_PALETTE.map(c => (
                   <button
                     key={c}
                     onClick={() => setNewLabelColor(c)}
                     title={c}
                     style={{
-                      width: 22, height: 22, borderRadius: '50%', border: 'none', cursor: 'pointer', padding: 0,
-                      background: LABEL_COLOR_HEX[c],
-                      outline: newLabelColor === c ? `2px solid ${isDark ? '#fff' : '#0f172a'}` : '1.5px solid rgba(0,0,0,0.12)',
-                      outlineOffset: newLabelColor === c ? 1 : 0,
+                      width: 24, height: 24, borderRadius: '50%', border: 'none', cursor: 'pointer', padding: 0,
+                      background: c,
+                      transform: normalizeHexColor(newLabelColor) === normalizeHexColor(c) ? 'scale(1.15)' : 'scale(1)',
+                      boxShadow: normalizeHexColor(newLabelColor) === normalizeHexColor(c) ? `0 0 0 2px ${isDark ? '#1e1b2e' : '#ffffff'}, 0 0 0 3.5px ${c}` : 'none',
+                      transition: 'transform 120ms',
                     }}
                   />
                 ))}
+                {/* Custom color — rainbow swatch shows the live custom color when active, otherwise a neutral rainbow trigger */}
+                <button
+                  onClick={() => setShowLabelColorPicker(true)}
+                  title="Custom color"
+                  style={{
+                    width: 24, height: 24, borderRadius: '50%', border: 'none', cursor: 'pointer', padding: 0,
+                    background: isCustomLabelColor
+                      ? newLabelColor
+                      : 'conic-gradient(from 0deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)',
+                    transform: isCustomLabelColor ? 'scale(1.15)' : 'scale(1)',
+                    boxShadow: isCustomLabelColor ? `0 0 0 2px ${isDark ? '#1e1b2e' : '#ffffff'}, 0 0 0 3.5px ${newLabelColor}` : 'none',
+                    transition: 'transform 120ms',
+                  }}
+                />
               </div>
             </div>
+            {/* Saved custom colors — the same shared palette used everywhere else in XPadite */}
+            {customColors.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 500, marginBottom: 7, color: muted }}>Custom</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {customColors.map(c => {
+                    const selected = normalizeHexColor(c) === normalizeHexColor(newLabelColor)
+                    return (
+                      <button
+                        key={c}
+                        onClick={() => setNewLabelColor(c)}
+                        onContextMenu={e => { e.preventDefault(); removeCustomColor(c) }}
+                        title="Click to use — right-click to remove"
+                        style={{
+                          width: 24, height: 24, borderRadius: '50%', border: 'none', cursor: 'pointer', padding: 0,
+                          background: c,
+                          transform: selected ? 'scale(1.15)' : 'scale(1)',
+                          boxShadow: selected ? `0 0 0 2px ${isDark ? '#1e1b2e' : '#ffffff'}, 0 0 0 3.5px ${c}` : 'none',
+                          transition: 'transform 120ms',
+                        }}
+                      />
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+            {showLabelColorPicker && (
+              <ColorPickerModal
+                initialColor={newLabelColor}
+                onCancel={() => setShowLabelColorPicker(false)}
+                onApply={hex => {
+                  setNewLabelColor(hex)
+                  setShowLabelColorPicker(false)
+                  if (!addCustomColor(hex)) {
+                    setToast('Custom color limit reached. Remove a saved color to add another.')
+                  }
+                }}
+              />
+            )}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button
-                onClick={() => { setShowCreateLabel(false); setNewLabelName(''); setNewLabelColor('purple') }}
+                onClick={() => { setShowCreateLabel(false); setNewLabelName(''); setNewLabelColor(COLOR_PALETTE[0]) }}
                 style={{
                   padding: '7px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer',
                   background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',

@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp, EMPTY_DAY } from './AppContext'
 import type { Task, TaskSession, Activity, TaskAttachment, DayData } from './types'
-import { formatMs, formatHMS, formatTime, formatTime12, isProductiveActivity, APP_YEAR } from './utils'
+import { formatMs, formatHMS, formatTime, formatTime12, isProductiveActivity, APP_YEAR, todayKey } from './utils'
 import { ReminderModal } from './ReminderModal'
 import { TransferTaskModal } from './TransferTaskModal'
 import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
@@ -1713,11 +1713,12 @@ interface DayModalProps {
   onDashboard?: () => void
   onDirtyChange?: (dirty: boolean) => void
   onNavigateDay?: (delta: number) => void
+  onGoToToday?: () => void
   closeIntent?: 'save' | 'discard' | null
   skipEntryAnimation?: boolean
 }
 
-export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyChange, onNavigateDay, closeIntent, skipEntryAnimation }: DayModalProps) {
+export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyChange, onNavigateDay, onGoToToday, closeIntent, skipEntryAnimation }: DayModalProps) {
   const {
     calData, updateDay, activeTaskTimer, setActiveTaskTimer,
     activities, activeSession, setActiveSession, selectedActId,
@@ -2105,6 +2106,13 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     onNavigateDay?.(delta)
   }
 
+  function attemptGoToToday() {
+    if (hasDirtyChanges) { setToast('Finish or save your current changes before switching days'); return }
+    onGoToToday?.()
+  }
+
+  const isViewingToday = dateKey === todayKey()
+
   function handleMainSave() {
     flushDirtyNotes()
     openSnapshotRef.current = null
@@ -2252,21 +2260,35 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             </button>
           </div>
 
-          <div className="flex items-center justify-center gap-2.5 flex-shrink-0 min-w-0">
+          {/* Center nav — bare triangles (no square/background), pinned at a
+              fixed distance from THIS zone's own horizontal center via
+              position:absolute (same technique as the mobile header below),
+              so neither triangle moves as the date text's length changes;
+              only the text itself updates. This zone's own width is set purely
+              by the flex split against the fixed-size Back/Close zones, never
+              by the date text, so the whole nav group also stays centered. */}
+          <div style={{ position: 'relative', flex: '2 1 0%', minWidth: 0, height: 36 }}>
+            <span style={{
+              position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
+              textAlign: 'center', padding: '0 46px',
+              color: '#ffffff', fontSize: 14, fontWeight: 600,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {dateLabel}
+            </span>
             <button
               onClick={() => attemptNavigateDay(-1)}
               title="Previous day" aria-label="Previous day"
-              className="flex items-center justify-center flex-shrink-0 transition-all hover:bg-white/20 active:scale-90"
-              style={{ width: 32, height: 32, background: 'rgba(255,255,255,0.10)', border: 'none', borderRadius: 8, cursor: 'pointer', transition: 'transform 100ms, background 120ms' }}
+              className="flex items-center justify-center transition-all hover:opacity-70 active:scale-90"
+              style={{ position: 'absolute', left: 'calc(50% - 132px)', top: '50%', transform: 'translateY(-50%)', width: 36, height: 36, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
             >
               <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
             </button>
-            <p className="text-sm font-semibold text-center" style={{ color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '46vw' }}>{dateLabel}</p>
             <button
               onClick={() => attemptNavigateDay(1)}
               title="Next day" aria-label="Next day"
-              className="flex items-center justify-center flex-shrink-0 transition-all hover:bg-white/20 active:scale-90"
-              style={{ width: 32, height: 32, background: 'rgba(255,255,255,0.10)', border: 'none', borderRadius: 8, cursor: 'pointer', transition: 'transform 100ms, background 120ms' }}
+              className="flex items-center justify-center transition-all hover:opacity-70 active:scale-90"
+              style={{ position: 'absolute', right: 'calc(50% - 132px)', top: '50%', transform: 'translateY(-50%)', width: 36, height: 36, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
             >
               <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
             </button>
@@ -2567,12 +2589,31 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-4 py-3 flex-shrink-0" style={{ borderTop: '0.5px solid var(--xp-bdr)' }}>
-          <button onClick={attemptClose} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
-          <button onClick={handleMainSave} disabled={mainSaving} className="text-xs px-5 py-1.5 rounded-full text-white font-medium transition-all" style={{ background: mainSaving ? '#16a34a' : '#7c3aed', opacity: mainSaving ? 1 : undefined }}>
-            {mainSaving ? '✓ Saved' : '✓ Save'}
-          </button>
+        {/* Footer — Today pill (bottom-left, only when viewing another date)
+            shares this row with Cancel/Save rather than adding modal height. */}
+        <div className="flex items-center justify-between gap-2 px-4 py-3 flex-shrink-0" style={{ borderTop: '0.5px solid var(--xp-bdr)' }}>
+          <div>
+            {!isViewingToday && (
+              <button
+                onClick={attemptGoToToday}
+                title="Return to today" aria-label="Return to today"
+                className="text-[11px] font-semibold px-3 py-1.5 rounded-full transition-all hover:opacity-85 active:scale-95"
+                style={{
+                  background: isDark ? 'rgba(167,139,250,0.20)' : 'rgba(124,58,237,0.12)',
+                  color: isDark ? '#c4b5fd' : '#7c3aed',
+                  border: `1px solid ${isDark ? 'rgba(167,139,250,0.35)' : 'rgba(124,58,237,0.28)'}`,
+                }}
+              >
+                ⟳ Today
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button onClick={attemptClose} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
+            <button onClick={handleMainSave} disabled={mainSaving} className="text-xs px-5 py-1.5 rounded-full text-white font-medium transition-all" style={{ background: mainSaving ? '#16a34a' : '#7c3aed', opacity: mainSaving ? 1 : undefined }}>
+              {mainSaving ? '✓ Saved' : '✓ Save'}
+            </button>
+          </div>
         </div>
       </div>
 

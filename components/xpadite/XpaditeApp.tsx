@@ -1122,6 +1122,10 @@ function ThemedApp(_props: XpaditeAppProps) {
             dt.setDate(dt.getDate() + delta)
             setModalDay({ key: dateKey(dt.getFullYear(), dt.getMonth(), dt.getDate()), month: dt.getMonth(), day: dt.getDate(), skipAnim: true })
           }}
+          onGoToToday={() => {
+            const t = new Date()
+            setModalDay({ key: dateKey(t.getFullYear(), t.getMonth(), t.getDate()), month: t.getMonth(), day: t.getDate(), skipAnim: true })
+          }}
           closeIntent={dayModalCloseIntent}
         />
       )}

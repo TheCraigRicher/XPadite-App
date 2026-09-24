@@ -33,6 +33,7 @@ const TaskCheckIcon = () => (
 
 type MenuAction =
   | 'profile'
+  | 'whats-new'
   | 'tasks'
   | 'analytics'
   | 'activities'
@@ -58,6 +59,7 @@ interface MenuItem {
 
 const MENU_ITEMS: MenuItem[] = [
   { icon: '👤', label: 'Profile',               action: 'profile'                                                                    },
+  { icon: '✨', label: "What's New",            action: 'whats-new'                                                                  },
   { icon: '✅', label: 'Task Manager',          action: 'tasks'                                                                      },
   { icon: '📊', label: 'Analytics',             action: 'analytics',     dividerBefore: true                                         },
   { icon: '🎯', label: 'Activity Manager',       action: 'activities'                                                                 },
@@ -77,7 +79,7 @@ const MENU_ITEMS: MenuItem[] = [
 // Finalized order, labels and icons — used at every screen size.
 const FINAL_ORDER: MenuAction[] = [
   'profile', 'tasks', 'activities', 'journal-notes', 'analytics', 'notifications', 'qotd',
-  'ai-coach', 'motivate', 'sync-calendar', 'gallery', 'meetings', 'settings', 'tutorials', 'help',
+  'ai-coach', 'motivate', 'sync-calendar', 'gallery', 'meetings', 'settings', 'tutorials', 'help', 'whats-new',
 ]
 
 const FINAL_MENU_ITEMS: MenuItem[] = FINAL_ORDER.map(action => {
@@ -93,6 +95,7 @@ const FINAL_MENU_ITEMS: MenuItem[] = FINAL_ORDER.map(action => {
 interface AppSidebarProps {
   onGallery?: () => void
   onSettings?: () => void
+  onWhatsNew?: () => void
   onAnalytics?: () => void
   onMotivate?: () => void
   onQotd?: () => void
@@ -109,6 +112,7 @@ interface AppSidebarProps {
 export function AppSidebar({
   onGallery,
   onSettings,
+  onWhatsNew,
   onAnalytics,
   onMotivate,
   onQotd,
@@ -263,6 +267,7 @@ export function AppSidebar({
     setSidebarOpen(false)
     switch (action) {
       case 'profile':        onProfile?.(); break
+      case 'whats-new':      onWhatsNew?.(); break
       case 'tasks':          onTasks?.(); break
       case 'analytics':      onAnalytics?.(); break
       case 'activities':     onActivities?.(); break

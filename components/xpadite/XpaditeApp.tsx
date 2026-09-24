@@ -20,6 +20,7 @@ import { SyncModal } from './SyncModal'
 import { MeetingsModal } from './MeetingsModal'
 import { GalleryModal } from './GalleryModal'
 import { SettingsModal } from './SettingsModal'
+import { WhatsNewModal } from './WhatsNewModal'
 import { MobileBottomNav } from './MobileBottomNav'
 import { ProfileModal } from './ProfileModal'
 import { ActivityManagerModal } from './ActivityManagerModal'
@@ -673,6 +674,7 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [galleryOpen, setGalleryOpen]                   = useState(false)
   const [yearShareOpen, setYearShareOpen]               = useState(false)
   const [settingsOpen, setSettingsOpen]                 = useState(false)
+  const [whatsNewOpen, setWhatsNewOpen]                 = useState(false)
   const [profileOpen, setProfileOpen]                   = useState(false)
   const [activityManagerOpen, setActivityManagerOpen]   = useState(false)
   const [journalNotesOpen, setJournalNotesOpen]         = useState(false)
@@ -897,6 +899,7 @@ function ThemedApp(_props: XpaditeAppProps) {
       <AppSidebar
         onGallery={() => setGalleryOpen(true)}
         onSettings={() => setSettingsOpen(true)}
+        onWhatsNew={() => setWhatsNewOpen(true)}
         onAnalytics={() => setAnalyticsOpen(true)}
         onMotivate={() => { setAICoachMotivate(true); setAICoachOpen(true) }}
         onQotd={triggerQotd}
@@ -1145,6 +1148,8 @@ function ThemedApp(_props: XpaditeAppProps) {
       {yearShareOpen && <YearShareModal year={APP_YEAR} onClose={() => setYearShareOpen(false)} />}
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+
+      {whatsNewOpen && <WhatsNewModal onClose={() => setWhatsNewOpen(false)} />}
 
       {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
 

@@ -26,7 +26,11 @@ import {
   createDrawingBlock, createImageBlock, mkId,
 } from './journalUtils'
 import { TransferSectionModal } from './TransferSectionModal'
-import { SendToTaskManagerModal } from './SendToTaskManagerModal'
+import { SendToOptionsModal } from './SendToOptionsModal'
+import {
+  ensureTaskItemIds, extractPlannerTaskTree, makeTaskId,
+} from './plannerTaskBridge'
+import type { PlannerTaskNode } from './plannerTaskBridge'
 import type { SectionColorKey } from './journalUtils'
 
 // Re-export for backward compat — JournalEditorEmbed imports these
@@ -132,118 +136,6 @@ function GridBlockItem({
   )
 }
 
-// ─── Planner → Task Manager bridge ─────────────────────────────────────────────
-// Only actual TipTap `taskItem` nodes are ever eligible — plain paragraphs,
-// headings, bullets and section titles are structurally invisible to this walk,
-// which is what keeps non-checkbox content from ever becoming a Task Manager task.
-
-interface PlannerTaskNode {
-  id: string
-  text: string
-  checked: boolean
-  sentTaskId: string | null
-  children: PlannerTaskNode[]
-}
-
-function flattenTipTapText(node: any): string { // eslint-disable-line @typescript-eslint/no-explicit-any
-  if (!node) return ''
-  if (node.type === 'text') return node.text ?? ''
-  if (Array.isArray(node.content)) return node.content.map(flattenTipTapText).join('')
-  return ''
-}
-
-// Lazily assigns a stable id to any taskItem missing one (older documents predate
-// this feature) — returns a deep-cloned doc plus whether any id was actually added,
-// so the caller only needs to persist when something changed.
-function ensureTaskItemIds(doc: any): { doc: any; changed: boolean } { // eslint-disable-line @typescript-eslint/no-explicit-any
-  let changed = false
-  const cloned = JSON.parse(JSON.stringify(doc ?? {}))
-  function walk(node: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-    if (!node || typeof node !== 'object') return
-    if (node.type === 'taskItem' && !node.attrs?.xpId) {
-      node.attrs = { ...(node.attrs ?? {}), xpId: mkId() }
-      changed = true
-    }
-    if (Array.isArray(node.content)) node.content.forEach(walk)
-  }
-  walk(cloned)
-  return { doc: cloned, changed }
-}
-
-function extractPlannerTaskTree(doc: any): PlannerTaskNode[] { // eslint-disable-line @typescript-eslint/no-explicit-any
-  function walkList(listNode: any): PlannerTaskNode[] { // eslint-disable-line @typescript-eslint/no-explicit-any
-    if (!listNode || listNode.type !== 'taskList' || !Array.isArray(listNode.content)) return []
-    return listNode.content.filter((n: any) => n.type === 'taskItem').map(walkItem) // eslint-disable-line @typescript-eslint/no-explicit-any
-  }
-  function walkItem(item: any): PlannerTaskNode { // eslint-disable-line @typescript-eslint/no-explicit-any
-    const firstPara = (item.content ?? []).find((n: any) => n.type === 'paragraph') // eslint-disable-line @typescript-eslint/no-explicit-any
-    const childList = (item.content ?? []).find((n: any) => n.type === 'taskList') // eslint-disable-line @typescript-eslint/no-explicit-any
-    return {
-      id: item.attrs?.xpId ?? mkId(),
-      text: flattenTipTapText(firstPara).trim(),
-      checked: !!item.attrs?.checked,
-      sentTaskId: item.attrs?.xpSentTaskId ?? null,
-      children: childList ? walkList(childList) : [],
-    }
-  }
-  const roots: PlannerTaskNode[] = []
-  function walkNode(node: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
-    if (!node) return
-    if (node.type === 'taskList') { roots.push(...walkList(node)); return }
-    if (Array.isArray(node.content)) node.content.forEach(walkNode)
-  }
-  walkNode(doc)
-  return roots
-}
-
-// Keeps only selected nodes; a selected node whose ancestor wasn't selected is
-// hoisted up so it never silently disappears (spec: preserve hierarchy only
-// "where necessary for the selected items" — an unselected ancestor is skipped,
-// not required).
-function filterSelectedTaskTree(nodes: PlannerTaskNode[], selected: Set<string>): PlannerTaskNode[] {
-  const out: PlannerTaskNode[] = []
-  for (const n of nodes) {
-    const kids = filterSelectedTaskTree(n.children, selected)
-    if (selected.has(n.id)) out.push({ ...n, children: kids })
-    else out.push(...kids)
-  }
-  return out
-}
-
-// Task Manager only supports one level of parent/subtask — deeper Planner
-// nesting is flattened so every grandchild becomes a direct subtask of the
-// nearest top-level task, rather than inventing a deeper hierarchy TM can't store.
-function flattenTaskTreeToTwoLevels(nodes: PlannerTaskNode[]): PlannerTaskNode[] {
-  function collectDescendants(n: PlannerTaskNode): PlannerTaskNode[] {
-    return n.children.flatMap(c => [{ ...c, children: [] }, ...collectDescendants(c)])
-  }
-  return nodes.map(n => ({ ...n, children: collectDescendants(n) }))
-}
-
-function countPlannerTaskTree(nodes: PlannerTaskNode[]): number {
-  return nodes.reduce((sum, n) => sum + 1 + countPlannerTaskTree(n.children), 0)
-}
-
-function countSentInTaskTree(nodes: PlannerTaskNode[]): number {
-  return nodes.reduce((sum, n) => sum + (n.sentTaskId ? 1 : 0) + countSentInTaskTree(n.children), 0)
-}
-
-// Keeps only never-sent nodes, hoisting a fresh descendant of an already-sent
-// node up a level (mirrors filterSelectedTaskTree's hoisting rule).
-function filterFreshTaskTree(nodes: PlannerTaskNode[]): PlannerTaskNode[] {
-  const out: PlannerTaskNode[] = []
-  for (const n of nodes) {
-    const kids = filterFreshTaskTree(n.children)
-    if (!n.sentTaskId) out.push({ ...n, children: kids })
-    else out.push(...kids)
-  }
-  return out
-}
-
-function makeTaskId(seed: number): string {
-  return 't' + (Date.now() + seed) + Math.random().toString(36).slice(2, 8)
-}
-
 // ─── JournalTextBlock ─────────────────────────────────────────────────────────
 
 interface JournalTextBlockProps {
@@ -285,12 +177,11 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
   const titleInputRef     = useRef<HTMLInputElement>(null)
   const prevForcedSeqRef  = useRef<number>(-1)
 
-  // ── Planner → Task Manager bridge state (this section only) ─────────────────
-  const [tmSelectMode,   setTmSelectMode]   = useState(false)
-  const [tmSelectedIds,  setTmSelectedIds]  = useState<Set<string>>(new Set())
-  const [tmTaskTree,     setTmTaskTree]     = useState<PlannerTaskNode[]>([])
-  const [tmDupPrompt,    setTmDupPrompt]    = useState<{ nodes: PlannerTaskNode[]; total: number; sentCount: number } | null>(null)
-  const [tmSendConfirm,  setTmSendConfirm]  = useState<PlannerTaskNode[] | null>(null)
+  // ── "Send to…" (this section only) — the wizard UI itself lives entirely
+  // inside SendToOptionsModal; this component just supplies a fresh task tree
+  // each time it opens and performs the actual Task Manager write on confirm.
+  const [sendToOpen, setSendToOpen] = useState(false)
+  const [tmTaskTree, setTmTaskTree] = useState<PlannerTaskNode[]>([])
 
   const editor = useEditor({
     extensions: [
@@ -363,70 +254,34 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
     return () => document.removeEventListener('mousedown', outside)
   }, [menuOpen])
 
-  // ── Planner → Task Manager bridge ────────────────────────────────────────────
-  function tmActivateSelectMode() {
-    if (!editor) return
-    const { doc, changed } = ensureTaskItemIds(editor.getJSON())
-    if (changed) editor.commands.setContent(doc, { emitUpdate: true })
-    const tree = extractPlannerTaskTree(doc)
-    if (countPlannerTaskTree(tree) === 0) { setToast('No checklist items in this section yet'); setMenuOpen(false); return }
-    setTmTaskTree(tree)
-    setTmSelectedIds(new Set())
-    setTmSelectMode(true)
+  // ── "Send to…" ────────────────────────────────────────────────────────────────
+  // Builds a fresh task tree for this section and opens the modal — everything
+  // past this point (selection, duplicate handling, TM date) lives inside
+  // SendToOptionsModal itself; this component only supplies data and performs
+  // the actual write.
+  function tmOpenSendTo() {
+    if (editor) {
+      const { doc, changed } = ensureTaskItemIds(editor.getJSON())
+      if (changed) editor.commands.setContent(doc, { emitUpdate: true })
+      setTmTaskTree(extractPlannerTaskTree(doc))
+    }
+    setSendToOpen(true)
     setMenuOpen(false)
   }
 
-  function tmCancelSelectMode() {
-    setTmSelectMode(false)
-    setTmSelectedIds(new Set())
-  }
-
-  function tmToggleSelected(id: string) {
-    setTmSelectedIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id); else next.add(id)
-      return next
-    })
-  }
-
-  function tmProceedToSend(nodes: PlannerTaskNode[]) {
-    const total = countPlannerTaskTree(nodes)
-    const sentCount = countSentInTaskTree(nodes)
-    setTmSelectMode(false)
-    if (sentCount > 0) setTmDupPrompt({ nodes, total, sentCount })
-    else setTmSendConfirm(nodes)
-  }
-
-  function tmConfirmSendSelected() {
-    if (tmSelectedIds.size === 0) return
-    const filtered = filterSelectedTaskTree(tmTaskTree, tmSelectedIds)
-    tmProceedToSend(flattenTaskTreeToTwoLevels(filtered))
-  }
-
-  function tmSendAll() {
-    if (!editor) return
-    const { doc, changed } = ensureTaskItemIds(editor.getJSON())
-    if (changed) editor.commands.setContent(doc, { emitUpdate: true })
-    const tree = extractPlannerTaskTree(doc)
-    if (countPlannerTaskTree(tree) === 0) { setToast('No checklist items in this section yet'); setMenuOpen(false); return }
-    setMenuOpen(false)
-    tmProceedToSend(flattenTaskTreeToTwoLevels(tree))
-  }
-
-  function tmResolveDupChoice(sendAllAgain: boolean) {
-    if (!tmDupPrompt) return
-    const nodes = sendAllAgain ? tmDupPrompt.nodes : filterFreshTaskTree(tmDupPrompt.nodes)
-    setTmDupPrompt(null)
-    if (countPlannerTaskTree(nodes) === 0) return
-    setTmSendConfirm(nodes)
+  // AI Coach send destinations are a planned Premium V2 feature — the action
+  // itself is a lightweight "coming soon" notice, never an attempted send.
+  function tmSendAICoachComingSoon() {
+    setToast('Send to AI Coach — coming soon in Premium V2 🔒')
   }
 
   // Creates the actual Task Manager tasks (existing Task/updateDay data model —
   // no separate storage), then writes xpSentTaskId back onto the corresponding
   // Planner taskItem nodes so the "Sent" badge appears and future duplicate
   // checks see it. The Planner document's own content is otherwise untouched —
-  // this is a send/copy, never a move.
-  function tmCreateTasks(nodes: PlannerTaskNode[], destKey: string) {
+  // this is a send/copy, never a move. Returns the created count so the modal
+  // can show feedback without needing to duplicate this logic.
+  function tmCreateTasks(nodes: PlannerTaskNode[], destKey: string): number {
     const idMap = new Map<string, string>()
     const newTasks: Task[] = []
     let seed = 0
@@ -453,35 +308,12 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
       }
       walk(doc)
       editor.commands.setContent(doc, { emitUpdate: true })
+      setTmTaskTree(extractPlannerTaskTree(doc)) // keep the modal's tree (Sent badges) in sync
     }
 
-    setTmSendConfirm(null)
-    setTmSelectedIds(new Set())
     const n = newTasks.length
     setToast(`${n} ${n === 1 ? 'task' : 'tasks'} sent to Task Manager ✓`)
-  }
-
-  function renderTmTaskList(nodes: PlannerTaskNode[], depth: number): React.ReactNode[] {
-    return nodes.flatMap(n => [
-      <label key={n.id} style={{
-        display: 'flex', alignItems: 'center', gap: 7, padding: '3px 0',
-        paddingLeft: depth * 18, fontSize: 12.5, cursor: 'pointer',
-        color: isDark ? '#e2e8f0' : '#1e293b',
-      }}>
-        <input type="checkbox" checked={tmSelectedIds.has(n.id)} onChange={() => tmToggleSelected(n.id)} style={{ accentColor: '#7c3aed', width: 14, height: 14, flexShrink: 0 }} />
-        <span style={{ textDecoration: n.checked ? 'line-through' : 'none', opacity: n.checked ? 0.55 : 1 }}>
-          {n.text || '(untitled)'}
-        </span>
-        {n.sentTaskId && (
-          <span style={{
-            fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 8, flexShrink: 0,
-            background: isDark ? 'rgba(124,58,237,0.22)' : 'rgba(124,58,237,0.12)',
-            color: isDark ? '#c4b5fd' : '#7c3aed',
-          }}>Sent</span>
-        )}
-      </label>,
-      ...renderTmTaskList(n.children, depth + 1),
-    ])
+    return n
   }
 
   function commitTitle() {
@@ -585,50 +417,12 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
       ) : null}
 
       {/* Editor — hidden while collapsed; collapsing never touches its content.
-          While tmSelectMode is active for THIS section, it's temporarily swapped
-          for a plain checklist picker — bounded, cancelable, and never alters the
-          underlying document (only checkbox items ever appear here). */}
+          Task selection for "Send to…" happens entirely inside SendToOptionsModal,
+          never in-place here — the Planner document itself is never altered for it. */}
       {!collapsed && (
-        tmSelectMode ? (
-          <div style={{
-            border: `1px dashed ${isDark ? 'rgba(167,139,250,0.45)' : 'rgba(124,58,237,0.35)'}`,
-            borderRadius: 8, padding: '9px 11px',
-            background: isDark ? 'rgba(124,58,237,0.08)' : 'rgba(124,58,237,0.05)',
-          }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: isDark ? '#c4b5fd' : '#7c3aed', marginBottom: 7 }}>
-              Select tasks to send to Task Manager
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {renderTmTaskList(tmTaskTree, 0)}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 9 }}>
-              <button
-                onClick={tmCancelSelectMode}
-                style={{ padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                  border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.15)'}`,
-                  background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
-                  color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)' }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={tmConfirmSendSelected}
-                disabled={tmSelectedIds.size === 0}
-                style={{ padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
-                  cursor: tmSelectedIds.size === 0 ? 'default' : 'pointer',
-                  border: '0.5px solid rgba(124,58,237,0.55)',
-                  background: tmSelectedIds.size === 0 ? 'rgba(124,58,237,0.10)' : 'rgba(124,58,237,0.20)',
-                  color: tmSelectedIds.size === 0 ? (isDark ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.30)') : '#a78bfa' }}
-              >
-                Send to Task Manager{tmSelectedIds.size > 0 ? ` (${tmSelectedIds.size})` : ''}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div onClick={() => editor?.commands.focus()} style={{ cursor: 'text' }}>
-            <EditorContent editor={editor} />
-          </div>
-        )
+        <div onClick={() => editor?.commands.focus()} style={{ cursor: 'text' }}>
+          <EditorContent editor={editor} />
+        </div>
       )}
 
       {/* Section timestamp — bottom-right, quiet metadata */}
@@ -739,11 +533,8 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                         📅 Transfer Section
                       </button>
                     )}
-                    <button onClick={tmActivateSelectMode} style={menuItemStyle(isDark)}>
-                      ✅ Send Selected to Task Manager
-                    </button>
-                    <button onClick={tmSendAll} style={menuItemStyle(isDark)}>
-                      ✅ Send All to Task Manager
+                    <button onClick={tmOpenSendTo} style={menuItemStyle(isDark)}>
+                      📤 Send to…
                     </button>
                     {!!onDelete && !isOnlyBlock && (
                       <button onClick={() => { onDelete(); setMenuOpen(false) }} style={{ ...menuItemStyle(isDark), color: '#f87171' }}>
@@ -777,65 +568,18 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
         </div>
       )}
 
-      {/* Duplicate-protection prompt — never a silent second copy */}
-      {tmDupPrompt && (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center p-4"
-          style={{ background: 'rgba(0,0,0,0.55)' }}
-          onClick={() => setTmDupPrompt(null)}
-        >
-          <div
-            className="w-full max-w-[320px] rounded-2xl p-4"
-            style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.32)' }}
-            onClick={e => e.stopPropagation()}
-          >
-            <h4 style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--xp-txt)', marginBottom: 6 }}>
-              {tmDupPrompt.sentCount === tmDupPrompt.total ? 'Already sent to Task Manager' : 'Some items already sent'}
-            </h4>
-            <p style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--xp-txt3)', marginBottom: 14 }}>
-              {tmDupPrompt.sentCount === tmDupPrompt.total
-                ? (tmDupPrompt.total === 1
-                    ? 'This task was previously sent to Task Manager.'
-                    : `All ${tmDupPrompt.total} selected tasks were previously sent to Task Manager.`)
-                : `${tmDupPrompt.sentCount} of ${tmDupPrompt.total} selected tasks were already sent to Task Manager.`}
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {tmDupPrompt.sentCount < tmDupPrompt.total && (
-                <button
-                  onClick={() => tmResolveDupChoice(false)}
-                  style={{ padding: '9px 0', borderRadius: 10, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: 'none', color: '#fff', background: '#7c3aed' }}
-                >
-                  Send only new ({tmDupPrompt.total - tmDupPrompt.sentCount})
-                </button>
-              )}
-              <button
-                onClick={() => tmResolveDupChoice(true)}
-                style={{
-                  padding: '9px 0', borderRadius: 10, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
-                  border: tmDupPrompt.sentCount < tmDupPrompt.total ? '0.5px solid var(--xp-bdr2)' : 'none',
-                  color: tmDupPrompt.sentCount < tmDupPrompt.total ? 'var(--xp-txt)' : '#fff',
-                  background: tmDupPrompt.sentCount < tmDupPrompt.total ? 'var(--xp-bg3)' : '#7c3aed',
-                }}
-              >
-                Send Another Copy ({tmDupPrompt.total})
-              </button>
-              <button
-                onClick={() => setTmDupPrompt(null)}
-                style={{ padding: '9px 0', borderRadius: 10, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', border: '0.5px solid var(--xp-bdr2)', color: 'var(--xp-txt)', background: 'var(--xp-bg3)' }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Date + count confirmation — Send Selected and Send All both land here */}
-      {tmSendConfirm && (
-        <SendToTaskManagerModal
-          count={countPlannerTaskTree(tmSendConfirm)}
-          onCancel={() => setTmSendConfirm(null)}
-          onConfirm={destKey => tmCreateTasks(tmSendConfirm, destKey)}
+      {/* "Send to…" — a self-contained wizard (options → select → duplicate →
+          TM date/calendar) that stays open across actions; only its own explicit
+          Close exits it. Selection/duplicate handling all live inside the modal —
+          this component only supplies the task tree and performs the TM write. */}
+      {sendToOpen && (
+        <SendToOptionsModal
+          isDark={isDark}
+          context="section"
+          taskTree={tmTaskTree}
+          onClose={() => setSendToOpen(false)}
+          onCreateTasks={tmCreateTasks}
+          onAICoachComingSoon={tmSendAICoachComingSoon}
         />
       )}
     </div>
@@ -853,8 +597,10 @@ interface InlineMediaBlockProps {
 }
 
 function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete }: InlineMediaBlockProps) {
+  const { setToast } = useApp()
   const [menuOpen, setMenuOpen] = useState(false)
   const [lightbox, setLightbox] = useState(false)
+  const [sendToOpen, setSendToOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -929,6 +675,9 @@ function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete }: I
                 ✏️ Edit Drawing
               </button>
             )}
+            <button onClick={() => { setSendToOpen(true); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+              📤 Send to →
+            </button>
             <button onClick={() => { onDelete(); setMenuOpen(false) }} style={{ ...menuItemStyle(isDark), color: '#f87171' }}>
               🗑 Delete
             </button>
@@ -938,6 +687,18 @@ function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete }: I
 
       {lightbox && block.src && (
         <ImageLightbox src={block.src} alt={block.name ?? 'Image'} onClose={() => setLightbox(false)} />
+      )}
+
+      {/* Images/Mind Maps are never Task Manager tasks — only AI Coach applies here */}
+      {sendToOpen && (
+        <SendToOptionsModal
+          isDark={isDark}
+          context="image"
+          taskTree={[]}
+          onClose={() => setSendToOpen(false)}
+          onCreateTasks={() => 0}
+          onAICoachComingSoon={() => setToast('Send to AI Coach — coming soon in Premium V2 🔒')}
+        />
       )}
     </div>
   )

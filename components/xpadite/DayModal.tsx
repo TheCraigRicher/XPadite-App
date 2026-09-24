@@ -2229,7 +2229,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
         </div>
       )}
       <div
-        className="w-full sm:max-w-[610px] rounded-none sm:rounded-2xl flex flex-col overflow-hidden flex-1 sm:flex-none max-h-full sm:max-h-[93vh]"
+        className="w-full sm:max-w-[610px] rounded-none sm:rounded-2xl flex flex-col overflow-hidden flex-1 sm:flex-none max-h-full sm:h-[90vh]"
         style={{
           background: 'var(--xp-card)',
           border: '0.5px solid var(--xp-bdr2)',
@@ -2243,6 +2243,15 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
         }}
         onClick={e => e.stopPropagation()}
       >
+        {/* Desktop/tablet-only Close button micro-interaction — a subtle red
+            tint on hover ("this closes the modal") and a quick press-scale on
+            click, purely visual; attemptClose's behavior is untouched. */}
+        <style>{`
+          .xp-dm-close-btn { transition: background 150ms ease, border-color 150ms ease, transform 90ms ease; }
+          .xp-dm-close-btn:hover { background: rgba(239,68,68,0.28) !important; border-color: rgba(239,68,68,0.45) !important; }
+          .xp-dm-close-btn:active { transform: scale(0.93); transition-duration: 60ms; }
+        `}</style>
+
         {/* Desktop/tablet header — three-zone layout so the center date stays
             visually centered regardless of the Back/Close controls' own widths.
             Hidden below sm: mobile gets its own bare-triangle header below. */}
@@ -2298,8 +2307,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             <button
               onClick={attemptClose}
               title="Close" aria-label="Close"
-              className="flex items-center justify-center flex-shrink-0 transition-all hover:bg-white/25 active:scale-90"
-              style={{ width: 32, height: 32, background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.20)', borderRadius: 8, cursor: 'pointer', color: '#ffffff', fontSize: 14, fontWeight: 700, transition: 'transform 100ms, background 120ms' }}
+              className="xp-dm-close-btn flex items-center justify-center flex-shrink-0"
+              style={{ width: 32, height: 32, background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.20)', borderRadius: 8, cursor: 'pointer', color: '#ffffff', fontSize: 14, fontWeight: 700 }}
             >
               ✕
             </button>
@@ -2604,7 +2613,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                   border: `1px solid ${isDark ? 'rgba(167,139,250,0.35)' : 'rgba(124,58,237,0.28)'}`,
                 }}
               >
-                ⟳ Today
+                <span className="text-[13px] sm:text-[11px]">⟳</span> Today
               </button>
             )}
           </div>

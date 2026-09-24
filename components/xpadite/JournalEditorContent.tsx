@@ -143,6 +143,9 @@ interface JournalTextBlockProps {
   onSelectionUpdate: () => void
   onDelete?: () => void
   onDuplicate?: () => void
+  onCopySection?: () => void
+  onPasteAfter?: () => void
+  pasteEnabled?: boolean
   onMoveActivate?: () => void
   onResizeActivate?: () => void
   onColorChange?: (color: SectionColorKey) => void
@@ -157,7 +160,8 @@ interface JournalTextBlockProps {
 const JournalTextBlock = React.memo(function JournalTextBlock({
   block, isDark, isOnlyBlock, isFirstBlock = false, forcedContent,
   onContentChange, onFocus, onSelectionUpdate,
-  onDelete, onDuplicate, onMoveActivate, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
+  onDelete, onDuplicate, onCopySection, onPasteAfter, pasteEnabled,
+  onMoveActivate, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
 }: JournalTextBlockProps) {
   const [menuOpen,       setMenuOpen]       = useState(false)
@@ -447,6 +451,19 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                     {!!onDuplicate && (
                       <button onClick={() => { onDuplicate(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
                         📑 Duplicate
+                      </button>
+                    )}
+                    {!!onCopySection && (
+                      <button onClick={() => { onCopySection(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                        📋 Copy
+                      </button>
+                    )}
+                    {!!onPasteAfter && (
+                      <button
+                        onClick={() => { if (pasteEnabled) { onPasteAfter(); setMenuOpen(false) } }}
+                        style={{ ...menuItemStyle(isDark), cursor: pasteEnabled ? 'pointer' : 'default', opacity: pasteEnabled ? 1 : 0.38 }}
+                      >
+                        📥 Paste
                       </button>
                     )}
                     {!!onDelete && !isOnlyBlock && (
@@ -1235,7 +1252,25 @@ export function JournalEditorContent({
 }: JournalEditorContentProps) {
 
   // ── App context (for Task Manager integration) ───────────────────────────────
-  const { calData, updateDay, activeTaskTimer, setActiveTaskTimer } = useApp()
+  const { calData, updateDay, activeTaskTimer, setActiveTaskTimer, setToast } = useApp()
+
+  // ── Section clipboard — copy on one date, paste on another ───────────────────
+  // Mirrors the existing Task Manager copy/paste pattern exactly (xp9-task-clipboard
+  // in DayModal.tsx): localStorage-backed so it survives this component
+  // remounting when the user navigates to a different Planner/Journal date,
+  // without needing a separate global store. Single-use, like Task copy/paste.
+  const [sectionClipboard, setSectionClipboard] = useState<{
+    content: string
+    sectionColor?: string
+    name?: string
+    width?: number
+    height?: number
+  } | null>(() => {
+    try {
+      const s = localStorage.getItem('xp9-section-clipboard')
+      return s ? JSON.parse(s) : null
+    } catch { return null }
+  })
 
   // ── State ───────────────────────────────────────────────────────────────────
   // ── Editor-wide history (mobile undo/redo) ───────────────────────────────────
@@ -1688,6 +1723,73 @@ export function JournalEditorContent({
     const copy: JournalBlock = { ...original, id: mkId(), content: liveContent, createdAt: ts, updatedAt: ts }
     contentMapRef.current.set(copy.id, liveContent)
     insertBlock(copy, idx)
+  }
+
+  // Resets every checkbox in a section's content to unchecked, preserving text,
+  // hierarchy, sub-items and all other formatting — a pasted section behaves
+  // like a reusable template, not a record of already-completed work.
+  function resetSectionCheckedStates(contentJson: string): string {
+    try {
+      const doc = JSON.parse(contentJson)
+      function walk(node: unknown) {
+        if (!node || typeof node !== 'object') return
+        const n = node as { type?: string; attrs?: { checked?: boolean }; content?: unknown[] }
+        if (n.type === 'taskItem' && n.attrs) n.attrs.checked = false
+        if (Array.isArray(n.content)) n.content.forEach(walk)
+      }
+      walk(doc)
+      return JSON.stringify(doc)
+    } catch {
+      return contentJson
+    }
+  }
+
+  // Copy: snapshots the section's live content + color/title/size into a
+  // clipboard that survives navigating to a different date — mirrors the
+  // existing Task Manager copy/paste exactly (xp9-task-clipboard in
+  // DayModal.tsx), just for a whole section instead of a task.
+  function copySection(id: string) {
+    const block = blocksRef.current.find(b => b.id === id)
+    if (!block) return
+    const liveContent = contentMapRef.current.get(id) ?? block.content ?? ''
+    const clip = {
+      content: liveContent,
+      sectionColor: block.sectionColor,
+      name: block.name,
+      width: block.width,
+      height: block.height,
+    }
+    try { localStorage.setItem('xp9-section-clipboard', JSON.stringify(clip)) } catch {}
+    setSectionClipboard(clip)
+    setToast('Section copied ✓')
+  }
+
+  // Paste: inserts a new, independent section directly after the section whose
+  // ⋮ menu was used (falling back to appending at the end if that section can't
+  // be found). Single-use, like Task copy/paste — consumes the clipboard
+  // immediately so paste can't silently repeat onto multiple sections.
+  function pasteSectionAfter(afterId: string) {
+    if (!sectionClipboard) return
+    const idx = blocksRef.current.findIndex(b => b.id === afterId)
+    const insertAt = idx >= 0 ? idx : blocksRef.current.length - 1
+    const ts = Date.now()
+    const pastedContent = resetSectionCheckedStates(sectionClipboard.content)
+    const pasted: JournalBlock = {
+      id: mkId(),
+      type: 'section',
+      content: pastedContent,
+      sectionColor: sectionClipboard.sectionColor,
+      name: sectionClipboard.name,
+      width: sectionClipboard.width,
+      height: sectionClipboard.height,
+      createdAt: ts,
+      updatedAt: ts,
+    }
+    contentMapRef.current.set(pasted.id, pastedContent)
+    insertBlock(pasted, insertAt)
+    setSectionClipboard(null)
+    try { localStorage.removeItem('xp9-section-clipboard') } catch {}
+    setToast('Section pasted ✓')
   }
 
   function updateBlock(id: string, updates: Partial<JournalBlock>) {
@@ -2816,6 +2918,9 @@ export function JournalEditorContent({
                             onSelectionUpdate={onEditorSelectionUpdate}
                             onDelete={blocks.length > 1 ? () => deleteBlock(block.id) : undefined}
                             onDuplicate={block.type === 'section' ? () => duplicateBlock(block.id) : undefined}
+                            onCopySection={block.type === 'section' ? () => copySection(block.id) : undefined}
+                            onPasteAfter={block.type === 'section' ? () => pasteSectionAfter(block.id) : undefined}
+                            pasteEnabled={!!sectionClipboard}
                             onMoveActivate={block.type === 'section' ? () => {
                               setMoveModeId(block.id)
                               setSelectedBlockId(block.id)

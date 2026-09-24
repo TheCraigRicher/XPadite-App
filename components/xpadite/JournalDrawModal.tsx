@@ -1,19 +1,30 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useApp } from './AppContext'
+import { ColorPickerModal } from './ColorPickerModal'
+import { COLOR_PALETTE, normalizeHexColor } from './utils'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type DrawTool = 'select' | 'pen' | 'eraser' | 'text' | 'line' | 'arrow' | 'rect' | 'rect-r' | 'circle' | 'triangle'
-type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'line' | 'arrow' | 'text' | 'stroke'
+type DrawTool = 'select' | 'pen' | 'eraser' | 'text' | 'line' | 'arrow' | 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starburst'
+type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starburst' | 'line' | 'arrow' | 'text' | 'stroke' | 'image'
 // 'elbow' = sharp 90° two-segment connector; 'elbow-curved' = the same two-segment
 // route with a smoothly rounded corner. Both are distinct from the older 'curved'
 // (a single free-form quadratic bezier from start to end, unrelated to the elbow tool).
+// V1: elbow corners are always DERIVED from the endpoints (x1,y2) — a vertical trunk
+// down from the start, then horizontal to the end — never stored/edited as a draggable
+// vertex. This guarantees a clean, deliberate default and keeps move/resize/flip trivial.
 type ConnType = 'straight' | 'curved' | 'elbow' | 'elbow-curved'
 type HPos     = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
-type PopoverId = 'pen-size' | 'eraser-size' | 'shapes' | 'flip' | 'text-size' | 'arrow-type'
+type PopoverId = 'pen-size' | 'eraser-size' | 'shapes' | 'flip' | 'text-size' | 'arrow-type' | 'fill'
 
 interface Pt { x: number; y: number }
+
+// Shape types (rect/rect-r/circle/triangle/diamond/starburst) double as mind-map
+// nodes: `text`/`fontSize` hold an optional centered label rendered independently
+// of the flip transform so labels are never mirrored.
+const TEXT_CAPABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst']
 
 interface DrawObj {
   id: string; type: ObjType
@@ -24,6 +35,7 @@ interface DrawObj {
   color: string; fillColor: string; filled: boolean; sw: number
   text: string; fontSize: number
   flipX: boolean; flipY: boolean; gid: string
+  src: string // data URL — pasted 'image' objects only
 }
 
 type DragMode =
@@ -43,18 +55,67 @@ interface JournalDrawModalProps {
 const PEN_SIZES    = [2, 4, 8, 14] as const
 const ERASER_SIZES = [8, 16, 28, 44] as const
 const TEXT_SIZES   = [12, 18, 26, 36] as const
-const SHAPE_TOOLS: DrawTool[] = ['rect', 'rect-r', 'circle', 'triangle']
+const SHAPE_TOOLS: DrawTool[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst']
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function uid() { return Math.random().toString(36).slice(2, 9) }
+function now() { return Date.now() }
 
 function mkObj(p: Partial<DrawObj> & { id: string; type: ObjType }): DrawObj {
   return {
     x:0,y:0,w:0,h:0,x1:0,y1:0,x2:0,y2:0,mx:0,my:0,connType:'straight',
     pts:[],eraser:false,color:'#1a1a1a',fillColor:'#7c3aed',filled:false,sw:2,
-    text:'',fontSize:18,flipX:false,flipY:false,gid:'', ...p,
+    text:'',fontSize:18,flipX:false,flipY:false,gid:'',src:'', ...p,
   }
+}
+
+// Loads (and caches) an image for a pasted 'image' object. Returns the element
+// once decoded; while loading, returns null and re-renders via onLoad when ready.
+function getCachedImage(cache: Map<string, HTMLImageElement>, src: string, onLoad: () => void): HTMLImageElement | null {
+  const existing = cache.get(src)
+  if (existing) return existing.complete && existing.naturalWidth > 0 ? existing : null
+  const img = new Image()
+  img.onload = onLoad
+  cache.set(src, img)
+  img.src = src
+  return null
+}
+
+function drawStarburstPath(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+  const cx = x + w / 2, cy = y + h / 2
+  const rx = Math.abs(w) / 2, ry = Math.abs(h) / 2
+  const points = 12
+  c.beginPath()
+  for (let i = 0; i < points * 2; i++) {
+    const frac = i % 2 === 0 ? 1 : 0.72
+    const angle = (Math.PI * i) / points - Math.PI / 2
+    const px = cx + Math.cos(angle) * rx * frac
+    const py = cy + Math.sin(angle) * ry * frac
+    if (i === 0) c.moveTo(px, py); else c.lineTo(px, py)
+  }
+  c.closePath()
+}
+
+// Centered mind-map-node label — drawn after any flip transform is restored so
+// the text itself is never mirrored (a shape's bbox center is unaffected by a
+// flip around its own center, so this still lands in the visually-correct spot).
+function drawShapeText(c: CanvasRenderingContext2D, obj: DrawObj, bb: { minX:number;minY:number;maxX:number;maxY:number }) {
+  if (!obj.text) return
+  const cx = (bb.minX + bb.maxX) / 2, cy = (bb.minY + bb.maxY) / 2
+  const boxW = Math.max(10, (bb.maxX - bb.minX) - 12)
+  const boxH = Math.abs(bb.maxY - bb.minY)
+  let fontSize = Math.max(10, Math.min(28, boxH * 0.28))
+  c.save()
+  c.font = `600 ${fontSize}px sans-serif`
+  while (fontSize > 9 && c.measureText(obj.text).width > boxW) {
+    fontSize -= 1
+    c.font = `600 ${fontSize}px sans-serif`
+  }
+  c.fillStyle = obj.color
+  c.textAlign = 'center'; c.textBaseline = 'middle'
+  c.fillText(obj.text, cx, cy)
+  c.restore()
 }
 
 function getPos(e: React.MouseEvent | React.TouchEvent, canvas: HTMLCanvasElement): Pt | null {
@@ -109,12 +170,12 @@ function hitObj(obj: DrawObj, px: number, py: number, thresh = 8): boolean {
   if (obj.type === 'line' || obj.type === 'arrow') return distToSeg(px,py,obj.x1,obj.y1,obj.x2,obj.y2) < thresh
   if (obj.type === 'stroke') return obj.pts.some(pt => Math.hypot(pt.x-px,pt.y-py) < thresh+obj.sw/2)
   const { minX,minY,maxX,maxY } = getObjBB(obj)
-  if (obj.type === 'text') return px>=minX&&px<=maxX&&py>=minY&&py<=maxY
+  if (obj.type === 'text' || obj.type === 'image') return px>=minX&&px<=maxX&&py>=minY&&py<=maxY
   if (!obj.filled) return (px>=minX-thresh&&px<=maxX+thresh&&py>=minY-thresh&&py<=maxY+thresh&&!(px>minX+thresh&&px<maxX-thresh&&py>minY+thresh&&py<maxY-thresh))
   return px>=minX&&px<=maxX&&py>=minY&&py<=maxY
 }
 
-function renderObj(c: CanvasRenderingContext2D, obj: DrawObj) {
+function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<string, HTMLImageElement>, onImgLoad?: () => void) {
   c.save()
   c.strokeStyle = obj.color; c.fillStyle = obj.filled ? obj.fillColor : obj.color
   c.lineWidth = obj.sw; c.lineCap = 'round'; c.lineJoin = 'round'
@@ -139,38 +200,52 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj) {
   }
 
   if (obj.type === 'arrow') {
+    const isElbow = obj.connType === 'elbow' || obj.connType === 'elbow-curved'
+    // V1: the elbow corner is always derived from the endpoints — a vertical
+    // trunk down from the start, then horizontal to the end — never a stored,
+    // draggable vertex. Guarantees the clean default geometry every time.
+    const cornerX = obj.x1, cornerY = obj.y2
     c.beginPath()
     if (obj.connType === 'curved') { c.moveTo(obj.x1,obj.y1); c.quadraticCurveTo(obj.mx,obj.my,obj.x2,obj.y2) }
-    else if (obj.connType === 'elbow') { c.moveTo(obj.x1,obj.y1); c.lineTo(obj.mx,obj.my); c.lineTo(obj.x2,obj.y2) }
+    else if (obj.connType === 'elbow') { c.moveTo(obj.x1,obj.y1); c.lineTo(cornerX,cornerY); c.lineTo(obj.x2,obj.y2) }
     else if (obj.connType === 'elbow-curved') {
       // Same two-segment elbow route as 'elbow', but with a rounded corner —
       // arcTo is the same technique roundRect() already uses for round-rect corners.
-      const leg1 = Math.hypot(obj.mx-obj.x1, obj.my-obj.y1)
-      const leg2 = Math.hypot(obj.x2-obj.mx, obj.y2-obj.my)
+      const leg1 = Math.hypot(cornerX-obj.x1, cornerY-obj.y1)
+      const leg2 = Math.hypot(obj.x2-cornerX, obj.y2-cornerY)
       const r = Math.max(0, Math.min(16, leg1/2, leg2/2))
       c.moveTo(obj.x1,obj.y1)
-      c.arcTo(obj.mx,obj.my,obj.x2,obj.y2,r)
+      c.arcTo(cornerX,cornerY,obj.x2,obj.y2,r)
       c.lineTo(obj.x2,obj.y2)
     }
     else { c.moveTo(obj.x1,obj.y1); c.lineTo(obj.x2,obj.y2) }
     c.stroke()
-    const tx = obj.connType !== 'straight' ? obj.mx : obj.x1
-    const ty = obj.connType !== 'straight' ? obj.my : obj.y1
+    const tx = isElbow ? cornerX : (obj.connType !== 'straight' ? obj.mx : obj.x1)
+    const ty = isElbow ? cornerY : (obj.connType !== 'straight' ? obj.my : obj.y1)
     drawArrowHead(c, tx, ty, obj.x2, obj.y2, obj.sw)
     c.restore(); return
   }
 
   const bb = getObjBB(obj)
+  c.save()
   if (obj.flipX || obj.flipY) {
     const cx = (bb.minX+bb.maxX)/2, cy = (bb.minY+bb.maxY)/2
     c.translate(cx,cy); c.scale(obj.flipX?-1:1, obj.flipY?-1:1); c.translate(-cx,-cy)
   }
-  if (obj.type === 'rect') { c.beginPath(); c.rect(obj.x,obj.y,obj.w,obj.h) }
-  else if (obj.type === 'rect-r') { roundRect(c,obj.x,obj.y,obj.w,obj.h,10) }
-  else if (obj.type === 'circle') { c.beginPath(); c.ellipse(obj.x+obj.w/2,obj.y+obj.h/2,Math.abs(obj.w)/2,Math.abs(obj.h)/2,0,0,Math.PI*2) }
-  else if (obj.type === 'triangle') { c.beginPath(); c.moveTo(obj.x+obj.w/2,obj.y); c.lineTo(obj.x+obj.w,obj.y+obj.h); c.lineTo(obj.x,obj.y+obj.h); c.closePath() }
-  if (obj.filled) c.fill()
-  c.stroke(); c.restore()
+  if (obj.type === 'image') {
+    const img = imgCache ? getCachedImage(imgCache, obj.src, onImgLoad ?? (() => {})) : null
+    if (img) c.drawImage(img, obj.x, obj.y, obj.w, obj.h)
+  }
+  else if (obj.type === 'rect') { c.beginPath(); c.rect(obj.x,obj.y,obj.w,obj.h); if (obj.filled) c.fill(); c.stroke() }
+  else if (obj.type === 'rect-r') { roundRect(c,obj.x,obj.y,obj.w,obj.h,10); if (obj.filled) c.fill(); c.stroke() }
+  else if (obj.type === 'circle') { c.beginPath(); c.ellipse(obj.x+obj.w/2,obj.y+obj.h/2,Math.abs(obj.w)/2,Math.abs(obj.h)/2,0,0,Math.PI*2); if (obj.filled) c.fill(); c.stroke() }
+  else if (obj.type === 'triangle') { c.beginPath(); c.moveTo(obj.x+obj.w/2,obj.y); c.lineTo(obj.x+obj.w,obj.y+obj.h); c.lineTo(obj.x,obj.y+obj.h); c.closePath(); if (obj.filled) c.fill(); c.stroke() }
+  else if (obj.type === 'diamond') { c.beginPath(); c.moveTo(obj.x+obj.w/2,obj.y); c.lineTo(obj.x+obj.w,obj.y+obj.h/2); c.lineTo(obj.x+obj.w/2,obj.y+obj.h); c.lineTo(obj.x,obj.y+obj.h/2); c.closePath(); if (obj.filled) c.fill(); c.stroke() }
+  else if (obj.type === 'starburst') { drawStarburstPath(c,obj.x,obj.y,obj.w,obj.h); if (obj.filled) c.fill(); c.stroke() }
+  c.restore() // pairs with the flip-transform save above
+
+  if (TEXT_CAPABLE_TYPES.includes(obj.type)) drawShapeText(c, obj, bb)
+  c.restore() // pairs with the outer save at the top of this function
 }
 
 function getHandlePositions(obj: DrawObj): Array<{ pos: HPos; x: number; y: number }> {
@@ -189,13 +264,41 @@ function drawHandleDot(c: CanvasRenderingContext2D, x: number, y: number, fill =
 }
 
 // ─── EraserIcon ───────────────────────────────────────────────────────────────
+// A clean, tilted wedge-eraser silhouette — no size letter baked in, so the
+// toolbar shows only the icon (the size lives in the popover, same as Pen).
 
-const EraserIcon = () => (
-  <svg width="16" height="14" viewBox="0 0 16 14" fill="none" style={{ display:'block' }}>
-    <rect x="2" y="3.5" width="9" height="6.5" rx="1" fill="currentColor" opacity="0.75"/>
-    <rect x="2" y="7" width="9" height="1.5" rx="0.5" fill="currentColor" opacity="0.35"/>
-    <path d="M11 3.5L14 5V10.5L11 12V3.5Z" fill="currentColor" opacity="0.5" stroke="currentColor" strokeWidth="0.5" strokeLinejoin="round"/>
-    <line x1="0.5" y1="12.5" x2="15.5" y2="12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+const EraserIcon = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 20 20" fill="none" style={{ display:'block', transform:'rotate(-25deg)' }}>
+    <rect x="4" y="6.5" width="12" height="8" rx="1.5" fill="currentColor" opacity="0.85"/>
+    <path d="M4 10.5H16V14.5A1.5 1.5 0 0 1 14.5 16H5.5A1.5 1.5 0 0 1 4 14.5Z" fill="currentColor" opacity="0.4"/>
+    <rect x="4" y="6.5" width="12" height="8" rx="1.5" stroke="currentColor" strokeWidth="1"/>
+  </svg>
+)
+
+// ─── TrashIcon ────────────────────────────────────────────────────────────────
+
+const TrashIcon = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ display:'block' }}>
+    <path d="M3 4.5H13" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+    <path d="M5.5 4.5V3.2C5.5 2.7 5.9 2.3 6.4 2.3H9.6C10.1 2.3 10.5 2.7 10.5 3.2V4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M4.2 4.5L4.8 13C4.85 13.55 5.3 14 5.85 14H10.15C10.7 14 11.15 13.55 11.2 13L11.8 4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M6.5 7V11.5M9.5 7V11.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+  </svg>
+)
+
+// ─── Fit / Restore icons ──────────────────────────────────────────────────────
+// Two clearly distinct states: outward corner brackets (expand) vs inward
+// corner brackets (collapse) — communicates the action that will happen next.
+
+const FitIcon = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ display:'block' }}>
+    <path d="M6 2H3a1 1 0 0 0-1 1v3M10 2h3a1 1 0 0 1 1 1v3M6 14H3a1 1 0 0 1-1-1v-3M10 14h3a1 1 0 0 0 1-1v-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+)
+
+const RestoreIcon = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ display:'block' }}>
+    <path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 )
 
@@ -215,6 +318,7 @@ const ElbowArrowIcon = ({ curved = false, size = 15 }: { curved?: boolean; size?
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: JournalDrawModalProps) {
+  const { customColors, addCustomColor, setToast } = useApp()
   const canvasRef   = useRef<HTMLCanvasElement>(null)
   const wrapRef     = useRef<HTMLDivElement>(null)
   const bgImgRef    = useRef<HTMLImageElement | null>(null)
@@ -227,6 +331,8 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
   const isDownRef   = useRef(false)
   const shapeStart  = useRef<Pt | null>(null)
   const textInputRef = useRef<HTMLInputElement>(null)
+  const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map())
+  const lastTapRef  = useRef<{ id: string; ts: number } | null>(null)
 
   const [tool,        setTool]        = useState<DrawTool>('pen')
   const [penIdx,      setPenIdx]      = useState(1)
@@ -240,10 +346,11 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
   const [canRedo,     setCanRedo]     = useState(false)
   const [objects,     setObjects]     = useState<DrawObj[]>([])
   const [selIds,      setSelIds]      = useState<string[]>([])
-  const [textInput,   setTextInput]   = useState<{ x:number; y:number; value:string } | null>(null)
+  const [textInput,   setTextInput]   = useState<{ x:number; y:number; w?:number; value:string; targetId?:string } | null>(null)
   const [openPopover, setOpenPopover] = useState<PopoverId | null>(null)
   const [popAnchor,   setPopAnchor]   = useState<{ top:number; left:number } | null>(null)
   const [arrowConnDefault, setArrowConnDefault] = useState<ConnType>('elbow')
+  const [showCustomFill, setShowCustomFill] = useState(false)
 
   // ── sync helpers ───────────────────────────────────────────────────────────
   function syncObjs(objs: DrawObj[]) { objectsRef.current = objs; setObjects(objs) }
@@ -278,9 +385,9 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     const w = canvas.offsetWidth, h = canvas.offsetHeight
     c.fillStyle = '#ffffff'; c.fillRect(0, 0, w, h)
     if (bgImgRef.current) c.drawImage(bgImgRef.current, 0, 0, w, h)
-    for (const obj of objectsRef.current) renderObj(c, obj)
+    for (const obj of objectsRef.current) renderObj(c, obj, imageCacheRef.current, () => renderAll())
     if (!forSave) {
-      if (activeRef.current) renderObj(c, activeRef.current)
+      if (activeRef.current) renderObj(c, activeRef.current, imageCacheRef.current, () => renderAll())
       const dm = dragRef.current
       if (dm?.kind === 'marquee') {
         const mx = Math.min(dm.start.x,dm.cur.x), my = Math.min(dm.start.y,dm.cur.y)
@@ -310,7 +417,10 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     if (obj.type === 'line' || obj.type === 'arrow') {
       c.beginPath(); c.moveTo(obj.x1,obj.y1); c.lineTo(obj.x2,obj.y2); c.stroke(); c.restore()
       drawHandleDot(c, obj.x1, obj.y1); drawHandleDot(c, obj.x2, obj.y2)
-      drawHandleDot(c, obj.mx, obj.my, '#ede9fe')
+      // V1: elbow corners are derived, not editable — no bend handle for them.
+      if (!(obj.type === 'arrow' && (obj.connType === 'elbow' || obj.connType === 'elbow-curved'))) {
+        drawHandleDot(c, obj.mx, obj.my, '#ede9fe')
+      }
       return
     }
     if (obj.type === 'stroke' || obj.type === 'text') {
@@ -336,7 +446,8 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
       if (obj.type === 'line' || obj.type === 'arrow') {
         if (Math.hypot(obj.x1-px,obj.y1-py) < HR) return {kind:'handle',id,which:'start'}
         if (Math.hypot(obj.x2-px,obj.y2-py) < HR) return {kind:'handle',id,which:'end'}
-        if (Math.hypot(obj.mx-px,obj.my-py) < HR) return {kind:'handle',id,which:'mid'}
+        const hasBendHandle = !(obj.type === 'arrow' && (obj.connType === 'elbow' || obj.connType === 'elbow-curved'))
+        if (hasBendHandle && Math.hypot(obj.mx-px,obj.my-py) < HR) return {kind:'handle',id,which:'mid'}
       } else if (obj.type !== 'stroke' && obj.type !== 'text') {
         for (const h of getHandlePositions(obj)) {
           if (Math.hypot(h.x-px,h.y-py) < HR) return {kind:'handle',id,which:h.pos}
@@ -379,6 +490,20 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
         return
       }
       if (target.kind === 'object') {
+        // Mobile/tablet: a second tap on the same object within 400ms enters
+        // text-edit mode, mirroring desktop's double-click (there's no reliable
+        // native dblclick on touch, so this is detected manually).
+        if ('touches' in e) {
+          const ts = now()
+          const last = lastTapRef.current
+          if (last && last.id === target.id && ts - last.ts < 400) {
+            lastTapRef.current = null
+            const obj = objectsRef.current.find(o => o.id === target.id)
+            if (obj && TEXT_CAPABLE_TYPES.includes(obj.type)) { startShapeTextEdit(obj); return }
+          } else {
+            lastTapRef.current = { id: target.id, ts }
+          }
+        }
         const expanded = expandGroup([target.id])
         const isAlreadySel = selIdsRef.current.includes(target.id)
         const isShift = 'shiftKey' in e && (e as React.MouseEvent).shiftKey
@@ -403,7 +528,7 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
       renderAll(); return
     }
     shapeStart.current = pos
-    activeRef.current = mkObj({id:uid(),type:tool as ObjType,color:drawColor,fillColor,filled,sw:PEN_SIZES[penIdx]})
+    activeRef.current = mkObj({id:uid(),type:tool as ObjType,color:drawColor,fillColor,filled,sw:PEN_SIZES[penIdx],connType: tool==='arrow' ? arrowConnDefault : 'straight'})
   }
 
   function continueStroke(e: React.MouseEvent | React.TouchEvent) {
@@ -432,6 +557,20 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
       const h = dm.handle
       if (h.includes('w')) nx1=pos.x; if (h.includes('e')) nx2=pos.x
       if (h.includes('n')) ny1=pos.y; if (h.includes('s')) ny2=pos.y
+      // Images resize proportionally from a corner handle, like most creative
+      // tools — the axis that moved more wins and the other is derived from it.
+      if (orig.type === 'image' && (h==='nw'||h==='ne'||h==='se'||h==='sw')) {
+        const origW = ox2-ox1, origH = oy2-oy1
+        const ratio = origW / (origH || 1)
+        const newW = nx2-nx1, newH = ny2-ny1
+        if (Math.abs(newW-origW) > Math.abs(newH-origH)) {
+          const adjH = newW / ratio
+          if (h==='nw'||h==='ne') ny1 = ny2-adjH; else ny2 = ny1+adjH
+        } else {
+          const adjW = newH * ratio
+          if (h==='nw'||h==='sw') nx1 = nx2-adjW; else nx2 = nx1+adjW
+        }
+      }
       objectsRef.current = objectsRef.current.map(o => o.id!==dm.id?o:{...o,x:nx1,y:ny1,w:nx2-nx1,h:ny2-ny1})
       renderAll(); return
     }
@@ -441,18 +580,9 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
         if (o.id !== dm.id) return o
         if (dm.which === 'start') return {...o,x1:pos.x,y1:pos.y}
         if (dm.which === 'end')   return {...o,x2:pos.x,y2:pos.y}
-        // Mid/bend-handle drag.
-        if (o.connType === 'elbow' || o.connType === 'elbow-curved') {
-          // Only two corner positions keep both segments orthogonal for fixed
-          // endpoints — snap to whichever the cursor is nearer so the bend
-          // always stays a hard 90° while still feeling freely draggable.
-          const cornerH = { x:o.x2, y:o.y1 }
-          const cornerV = { x:o.x1, y:o.y2 }
-          const dH = Math.hypot(pos.x-cornerH.x, pos.y-cornerH.y)
-          const dV = Math.hypot(pos.x-cornerV.x, pos.y-cornerV.y)
-          const corner = dH <= dV ? cornerH : cornerV
-          return {...o,mx:corner.x,my:corner.y}
-        }
+        // Mid/bend-handle drag — elbow corners are always derived (no handle
+        // is ever hit-tested for them, see getTarget), so this only ever runs
+        // for the free-form 'curved' control point.
         if (o.type === 'arrow' && o.connType === 'straight') return {...o,mx:pos.x,my:pos.y,connType:'curved' as ConnType}
         return {...o,mx:pos.x,my:pos.y}
       })
@@ -511,13 +641,9 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
       if (!pos||!shapeStart.current){renderAll();return}
       if (Math.hypot(pos.x-shapeStart.current.x,pos.y-shapeStart.current.y)>4) {
         const x1=shapeStart.current.x, y1=shapeStart.current.y, x2=pos.x, y2=pos.y
-        const isElbow = active.type==='arrow' && (arrowConnDefault==='elbow' || arrowConnDefault==='elbow-curved')
-        const obj={
-          ...active, x1,y1,x2,y2,
-          connType: active.type==='arrow' ? arrowConnDefault : active.connType,
-          mx: isElbow ? x2 : (x1+x2)/2,
-          my: isElbow ? y1 : (y1+y2)/2,
-        }
+        // Elbow corners are always derived from (x1,y2) at render time — see
+        // renderObj — so no special-cased default coordinates are needed here.
+        const obj={...active,x1,y1,x2,y2,connType: active.type==='arrow' ? arrowConnDefault : active.connType,mx:(x1+x2)/2,my:(y1+y2)/2}
         const n=[...objectsRef.current,obj]; syncObjs(n); snapshot(n); syncSel([obj.id])
       }
     } else {
@@ -563,12 +689,31 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     const w=canvas.offsetWidth, h=canvas.offsetHeight
     c.fillStyle='#ffffff'; c.fillRect(0,0,w,h)
     if (bgImgRef.current) c.drawImage(bgImgRef.current,0,0,w,h)
-    for (const obj of objectsRef.current) renderObj(c, obj)
+    for (const obj of objectsRef.current) renderObj(c, obj, imageCacheRef.current)
     onSave(off.toDataURL('image/png'))
   }
 
   // ── Text ───────────────────────────────────────────────────────────────────
+  // Opens the same floating-input overlay used by the free Text tool, but
+  // centered over a shape's own bounding box and tagged with targetId so
+  // commitText() writes into that shape's label instead of creating a new
+  // free-floating text object.
+  function startShapeTextEdit(obj: DrawObj) {
+    const bb = getObjBB(obj)
+    const cx = (bb.minX+bb.maxX)/2, cy = (bb.minY+bb.maxY)/2
+    const w = Math.max(60, (bb.maxX-bb.minX)-16)
+    syncSel([obj.id])
+    setTextInput({ x: cx-w/2, y: cy-13, w, value: obj.text ?? '', targetId: obj.id })
+  }
+
   function commitText() {
+    if (textInput?.targetId) {
+      const id = textInput.targetId
+      const val = textInput.value.trim()
+      const n = objectsRef.current.map(o => o.id===id ? {...o,text:val} : o)
+      syncObjs(n); snapshot(n); renderAll()
+      setTextInput(null); return
+    }
     const val = textInput?.value?.trim()
     if (val && textInput) {
       const fontSize = TEXT_SIZES[textSzIdx]
@@ -635,12 +780,10 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
   }
 
   function setConnType(ct: ConnType) {
+    // Elbow corners are always derived from (x1,y2) at render time — see
+    // renderObj — so switching connector type never needs to touch mx/my.
     const ids=selIdsRef.current
-    const n=objectsRef.current.map(o=>{
-      if(!ids.includes(o.id)||o.type!=='arrow') return o
-      if(ct==='elbow'||ct==='elbow-curved') return {...o,connType:ct,mx:o.x2,my:o.y1}
-      return {...o,connType:ct}
-    })
+    const n=objectsRef.current.map(o=>(!ids.includes(o.id)||o.type!=='arrow')?o:{...o,connType:ct})
     syncObjs(n); snapshot(n); renderAll()
   }
 
@@ -669,12 +812,17 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
   }
 
   // ── Keyboard ───────────────────────────────────────────────────────────────
+  // Respects active text-editing contexts first (shape-label input, etc.) so
+  // normal typing/backspace/paste inside them is never hijacked as a canvas
+  // command — only once no text field is focused do these become canvas shortcuts.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.target instanceof HTMLInputElement) return
+      const t = e.target as HTMLElement
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t?.isContentEditable) return
       if (e.key==='Escape' && openPopover) { e.preventDefault(); setOpenPopover(null); return }
-      if ((e.ctrlKey||e.metaKey)&&e.key==='z') { e.preventDefault(); undo() }
-      if ((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.shiftKey&&e.key==='z'))) { e.preventDefault(); redo() }
+      if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s') { e.preventDefault(); handleSave(); return }
+      if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return }
+      if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y') { e.preventDefault(); redo(); return }
       if ((e.key==='Delete'||e.key==='Backspace')&&selIdsRef.current.length>0) { e.preventDefault(); deleteSelected() }
     }
     window.addEventListener('keydown', onKey)
@@ -691,6 +839,49 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('touchstart', close as EventListener) }
   }, [openPopover])
 
+  function pasteImageFile(file: File) {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const src = reader.result as string
+      const img = new Image()
+      img.onload = () => {
+        const canvas = canvasRef.current
+        const viewW = canvas?.offsetWidth ?? 720, viewH = canvas?.offsetHeight ?? 480
+        let w = img.naturalWidth || 200, h = img.naturalHeight || 150
+        const maxW = viewW*0.8, maxH = viewH*0.8
+        if (w > maxW || h > maxH) { const scale = Math.min(maxW/w, maxH/h); w *= scale; h *= scale }
+        const x = (viewW-w)/2, y = (viewH-h)/2
+        imageCacheRef.current.set(src, img) // already decoded — avoids a load flicker
+        const obj = mkObj({id:uid(),type:'image',x,y,w,h,src})
+        const n=[...objectsRef.current,obj]; syncObjs(n); snapshot(n); syncSel([obj.id]); setTool('select'); renderAll()
+      }
+      img.src = src
+    }
+    reader.readAsDataURL(file)
+  }
+
+  // ── External image paste (Ctrl/Cmd+V) ─────────────────────────────────────
+  // Text-editing contexts (the shape-label / free-text input) are left alone so
+  // normal text paste keeps working there; only otherwise does an image on the
+  // clipboard get inserted onto the canvas.
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent) {
+      const active = document.activeElement as HTMLElement | null
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active?.isContentEditable) return
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile()
+          if (file) { e.preventDefault(); pasteImageFile(file) }
+          return
+        }
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Derived ────────────────────────────────────────────────────────────────
   const selObjs   = objects.filter(o => selIds.includes(o.id))
   const selHasShape = selObjs.some(o => SHAPE_TOOLS.includes(o.type as DrawTool))
@@ -700,6 +891,10 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
   const canGroup    = selIds.length>=2 && !selIsGroup
   const showFill    = SHAPE_TOOLS.includes(tool) || selHasShape
   const curFilled   = selIds.length>0 ? (selObjs[0]?.filled??false) : filled
+  const normalizedFill   = normalizeHexColor(fillColor)
+  const isPresetFill      = (COLOR_PALETTE as readonly string[]).some(c=>normalizeHexColor(c)===normalizedFill)
+  const isSavedCustomFill = customColors.some(c=>normalizeHexColor(c)===normalizedFill)
+  const isCustomFill      = !isPresetFill && !isSavedCustomFill
 
   // ── Styles ─────────────────────────────────────────────────────────────────
   const dockBg  = isDark ? 'rgba(9,4,22,0.97)' : '#f1f5f9'
@@ -785,12 +980,11 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
           )}
         </div>
 
-        {/* Eraser + size popover */}
+        {/* Eraser + size popover — icon only, no permanent size letter beside it */}
         <div style={{flexShrink:0}} data-pop-trigger="">
           <button title="Eraser" onClick={(e)=>{if(textInput)commitText();setTool('eraser');openPop('eraser-size',e)}}
-            style={{...dkBtn(tool==='eraser'),display:'flex',alignItems:'center',gap:3,padding:'4px 8px'}}>
+            style={{...dkBtn(tool==='eraser'),display:'flex',alignItems:'center',justifyContent:'center',padding:'4px 9px'}}>
             <EraserIcon/>
-            <span style={{fontSize:9,opacity:0.6}}>{['S','M','L','XL'][eraserIdx]}</span>
           </button>
           {openPopover==='eraser-size' && (
             <div data-popover="" style={fixedPopStyle()}>
@@ -818,14 +1012,16 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
         <div style={{flexShrink:0}} data-pop-trigger="">
           <button title="Shapes" onClick={(e)=>{if(textInput)commitText();openPop('shapes',e)}}
             style={{...dkBtn(SHAPE_TOOLS.includes(tool)),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>
-            {tool==='rect'?'□':tool==='rect-r'?'⊡':tool==='circle'?'○':tool==='triangle'?'△':'□'} Shapes▾
+            {tool==='rect'?'□':tool==='rect-r'?'⊡':tool==='circle'?'○':tool==='triangle'?'△':tool==='diamond'?'◇':tool==='starburst'?'✦':'□'} Shapes▾
           </button>
           {openPopover==='shapes' && (
             <div data-popover="" style={fixedPopStyle()}>
-              {pbtn('□  Rectangle', ()=>{setTool('rect');     setOpenPopover(null)}, tool==='rect')}
-              {pbtn('⊡  Round Rect',()=>{setTool('rect-r');   setOpenPopover(null)}, tool==='rect-r')}
-              {pbtn('○  Circle',    ()=>{setTool('circle');   setOpenPopover(null)}, tool==='circle')}
-              {pbtn('△  Triangle',  ()=>{setTool('triangle'); setOpenPopover(null)}, tool==='triangle')}
+              {pbtn('□  Rectangle', ()=>{setTool('rect');      setOpenPopover(null)}, tool==='rect')}
+              {pbtn('⊡  Round Rect',()=>{setTool('rect-r');    setOpenPopover(null)}, tool==='rect-r')}
+              {pbtn('○  Circle',    ()=>{setTool('circle');    setOpenPopover(null)}, tool==='circle')}
+              {pbtn('△  Triangle',  ()=>{setTool('triangle');  setOpenPopover(null)}, tool==='triangle')}
+              {pbtn('◇  Diamond',   ()=>{setTool('diamond');   setOpenPopover(null)}, tool==='diamond')}
+              {pbtn('✦  Starburst', ()=>{setTool('starburst'); setOpenPopover(null)}, tool==='starburst')}
             </div>
           )}
         </div>
@@ -865,12 +1061,44 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
           <input type="color" value={drawColor} onChange={e=>updateSelColor(e.target.value)} style={{position:'absolute',opacity:0,width:0,height:0,pointerEvents:'none'}} tabIndex={-1}/>
         </label>
 
-        {/* Fill color (shape tools / selected shapes) */}
+        {/* Fill color — XPadite palette popover (reuses the same preset swatches +
+            rainbow custom-color trigger + ColorPickerModal used by Activity Manager),
+            not the native browser picker */}
         {showFill && (
-          <label title="Fill Color" style={{position:'relative',cursor:'pointer',flexShrink:0}}>
-            <div style={{width:22,height:22,borderRadius:4,background:fillColor,border:`2px solid ${isDark?'rgba(255,255,255,0.30)':'rgba(0,0,0,0.20)'}`,boxShadow:'0 0 0 1px rgba(124,58,237,0.20)'}}/>
-            <input type="color" value={fillColor} onChange={e=>updateSelFillColor(e.target.value)} style={{position:'absolute',opacity:0,width:0,height:0,pointerEvents:'none'}} tabIndex={-1}/>
-          </label>
+          <div style={{flexShrink:0}} data-pop-trigger="">
+            <button title="Fill Color" onClick={(e)=>{if(textInput)commitText();openPop('fill',e)}}
+              style={{...dkBtn(),display:'flex',alignItems:'center',gap:5,padding:'4px 8px'}}>
+              <span style={{width:16,height:16,borderRadius:4,background:fillColor,border:`1.5px solid ${isDark?'rgba(255,255,255,0.35)':'rgba(0,0,0,0.25)'}`,display:'inline-block',flexShrink:0}}/>
+              Fill
+            </button>
+            {openPopover==='fill' && (
+              <div data-popover="" style={fixedPopStyle({flexDirection:'row',flexWrap:'wrap',gap:6,width:172,minWidth:'auto',padding:'8px'})}>
+                {COLOR_PALETTE.map(c => {
+                  const sel = normalizeHexColor(c)===normalizedFill
+                  return (
+                    <button key={c} title={c} onClick={()=>{updateSelFillColor(c);setOpenPopover(null)}}
+                      style={{width:22,height:22,borderRadius:'50%',flexShrink:0,cursor:'pointer',background:c,border:'none',padding:0,
+                        transform:sel?'scale(1.15)':'scale(1)',
+                        boxShadow:sel?`0 0 0 2px ${isDark?'#1e1033':'#fff'}, 0 0 0 3.5px #7c3aed`:'none'}}/>
+                  )
+                })}
+                {customColors.map(c => {
+                  const sel = normalizeHexColor(c)===normalizedFill
+                  return (
+                    <button key={c} title={c} onClick={()=>{updateSelFillColor(c);setOpenPopover(null)}}
+                      style={{width:22,height:22,borderRadius:'50%',flexShrink:0,cursor:'pointer',background:c,border:'none',padding:0,
+                        transform:sel?'scale(1.15)':'scale(1)',
+                        boxShadow:sel?`0 0 0 2px ${isDark?'#1e1033':'#fff'}, 0 0 0 3.5px #7c3aed`:'none'}}/>
+                  )
+                })}
+                <button title="Custom color" onClick={()=>{setOpenPopover(null);setShowCustomFill(true)}}
+                  style={{width:22,height:22,borderRadius:'50%',flexShrink:0,cursor:'pointer',border:'none',padding:0,
+                    background:isCustomFill?fillColor:'conic-gradient(from 0deg, #ff0000,#ffff00,#00ff00,#00ffff,#0000ff,#ff00ff,#ff0000)',
+                    transform:isCustomFill?'scale(1.15)':'scale(1)',
+                    boxShadow:isCustomFill?`0 0 0 2px ${isDark?'#1e1033':'#fff'}, 0 0 0 3.5px ${fillColor}`:'none'}}/>
+              </div>
+            )}
+          </div>
         )}
 
         {/* Fill toggle */}
@@ -915,7 +1143,9 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
           {canGroup   && <button onClick={groupSelected}   style={dkBtn()}>Group</button>}
           {selIsGroup && <button onClick={ungroupSelected} style={dkBtn()}>Ungroup</button>}
           <button onClick={duplicateSelected} style={dkBtn()}>Dup</button>
-          <button onClick={deleteSelected}    style={{...dkBtn(false,true),padding:'4px 8px'}}>✕</button>
+          <button title="Delete" onClick={deleteSelected} style={{...dkBtn(false,true),display:'flex',alignItems:'center',padding:'4px 8px'}}>
+            <TrashIcon/>
+          </button>
           {dvdr}
         </>)}
 
@@ -926,9 +1156,12 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
 
         {dvdr}
 
-        {/* Fit */}
-        <button onClick={()=>setFitToScreen(f=>!f)} title={fitToScreen?'Exit full screen':'Fit to screen'} style={dkBtn(fitToScreen)}>
-          {fitToScreen?'⊡':'⛶'} Fit
+        {/* Fit / Restore — two clearly distinct icon states communicating the
+            action that will happen next */}
+        <button onClick={()=>setFitToScreen(f=>!f)} title={fitToScreen?'Restore View':'Fit to Screen'} aria-label={fitToScreen?'Restore View':'Fit to Screen'}
+          style={{...dkBtn(fitToScreen),display:'flex',alignItems:'center',gap:5,padding:'4px 8px'}}>
+          {fitToScreen ? <RestoreIcon/> : <FitIcon/>}
+          {fitToScreen?'Restore':'Fit'}
         </button>
       </div>
 
@@ -952,6 +1185,15 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
         style={{display:'block',touchAction:'none'}}
         onMouseDown={beginStroke} onMouseMove={continueStroke} onMouseUp={endStroke} onMouseLeave={endStroke}
         onTouchStart={beginStroke} onTouchMove={continueStroke} onTouchEnd={endStroke}
+        onDoubleClick={e=>{
+          if (tool!=='select') return
+          const canvas = canvasRef.current; if (!canvas) return
+          const pos = getPos(e, canvas); if (!pos) return
+          const target = getTarget(pos.x,pos.y)
+          if (target.kind!=='object') return
+          const obj = objectsRef.current.find(o=>o.id===target.id)
+          if (obj && TEXT_CAPABLE_TYPES.includes(obj.type)) startShapeTextEdit(obj)
+        }}
       />
       {textInput && (
         <input
@@ -959,8 +1201,12 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
           onChange={e=>setTextInput(prev=>prev?{...prev,value:e.target.value}:null)}
           onBlur={commitText}
           onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();commitText()}if(e.key==='Escape'){e.preventDefault();setTextInput(null)}}}
-          style={{position:'absolute',left:textInput.x,top:textInput.y,background:'rgba(255,255,255,0.12)',backdropFilter:'blur(4px)',border:'1px dashed rgba(124,58,237,0.60)',borderRadius:4,color:drawColor,fontSize:TEXT_SIZES[textSzIdx],outline:'none',minWidth:120,padding:'2px 4px',zIndex:10,fontFamily:'sans-serif'}}
-          placeholder="Type here…"
+          style={{
+            position:'absolute',left:textInput.x,top:textInput.y,
+            width: textInput.w, textAlign: textInput.targetId ? 'center' : 'left',
+            background:'rgba(255,255,255,0.12)',backdropFilter:'blur(4px)',border:'1px dashed rgba(124,58,237,0.60)',borderRadius:4,color:drawColor,fontSize:TEXT_SIZES[textSzIdx],outline:'none',minWidth:textInput.w?undefined:120,padding:'2px 4px',zIndex:10,fontFamily:'sans-serif',
+          }}
+          placeholder={textInput.targetId ? 'Label…' : 'Type here…'}
         />
       )}
       <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'none',opacity:objects.length>0?0:0.35,transition:'opacity 300ms'}}>
@@ -986,8 +1232,21 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     `}</style>
   )
 
+  // ── Custom fill color — same shared XPadite picker used by Activity Manager ──
+  const customFillPicker = showCustomFill && (
+    <ColorPickerModal
+      initialColor={fillColor}
+      onCancel={()=>setShowCustomFill(false)}
+      onApply={hex => {
+        updateSelFillColor(hex)
+        setShowCustomFill(false)
+        if (!addCustomColor(hex)) setToast('Custom color limit reached. Remove a saved color to add another.')
+      }}
+    />
+  )
+
   // ── Render ─────────────────────────────────────────────────────────────────
-  const innerContent = <>{popoverStyleTag}{toolbar}{canvasArea}</>
+  const innerContent = <>{popoverStyleTag}{toolbar}{canvasArea}{customFillPicker}</>
 
   if (fitToScreen) {
     return (

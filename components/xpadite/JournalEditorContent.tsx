@@ -21,10 +21,11 @@ import type { JournalBlock, JournalTimerSession, TaskAttachment, Task, TaskSessi
 import { useApp } from './AppContext'
 import { JournalDrawModal } from './JournalDrawModal'
 import {
-  parseJournalDoc, parseJournalContent, serializeJournalContent,
+  parseJournalDoc, parseJournalContent, serializeJournalContent, serializeJournalDoc,
   getSectionStyle, SECTION_COLORS, createTextBlock, createSectionBlock,
   createDrawingBlock, createImageBlock, mkId,
 } from './journalUtils'
+import { TransferSectionModal } from './TransferSectionModal'
 import type { SectionColorKey } from './journalUtils'
 
 // Re-export for backward compat — JournalEditorEmbed imports these
@@ -143,9 +144,7 @@ interface JournalTextBlockProps {
   onSelectionUpdate: () => void
   onDelete?: () => void
   onDuplicate?: () => void
-  onCopySection?: () => void
-  onPasteAfter?: () => void
-  pasteEnabled?: boolean
+  onTransferSection?: () => void
   onMoveActivate?: () => void
   onResizeActivate?: () => void
   onColorChange?: (color: SectionColorKey) => void
@@ -160,7 +159,7 @@ interface JournalTextBlockProps {
 const JournalTextBlock = React.memo(function JournalTextBlock({
   block, isDark, isOnlyBlock, isFirstBlock = false, forcedContent,
   onContentChange, onFocus, onSelectionUpdate,
-  onDelete, onDuplicate, onCopySection, onPasteAfter, pasteEnabled,
+  onDelete, onDuplicate, onTransferSection,
   onMoveActivate, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
 }: JournalTextBlockProps) {
@@ -453,17 +452,9 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                         📑 Duplicate
                       </button>
                     )}
-                    {!!onCopySection && (
-                      <button onClick={() => { onCopySection(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
-                        📋 Copy
-                      </button>
-                    )}
-                    {!!onPasteAfter && (
-                      <button
-                        onClick={() => { if (pasteEnabled) { onPasteAfter(); setMenuOpen(false) } }}
-                        style={{ ...menuItemStyle(isDark), cursor: pasteEnabled ? 'pointer' : 'default', opacity: pasteEnabled ? 1 : 0.38 }}
-                      >
-                        📥 Paste
+                    {!!onTransferSection && (
+                      <button onClick={() => { onTransferSection(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                        📅 Transfer Section
                       </button>
                     )}
                     {!!onDelete && !isOnlyBlock && (
@@ -1254,23 +1245,8 @@ export function JournalEditorContent({
   // ── App context (for Task Manager integration) ───────────────────────────────
   const { calData, updateDay, activeTaskTimer, setActiveTaskTimer, setToast } = useApp()
 
-  // ── Section clipboard — copy on one date, paste on another ───────────────────
-  // Mirrors the existing Task Manager copy/paste pattern exactly (xp9-task-clipboard
-  // in DayModal.tsx): localStorage-backed so it survives this component
-  // remounting when the user navigates to a different Planner/Journal date,
-  // without needing a separate global store. Single-use, like Task copy/paste.
-  const [sectionClipboard, setSectionClipboard] = useState<{
-    content: string
-    sectionColor?: string
-    name?: string
-    width?: number
-    height?: number
-  } | null>(() => {
-    try {
-      const s = localStorage.getItem('xp9-section-clipboard')
-      return s ? JSON.parse(s) : null
-    } catch { return null }
-  })
+  // ── Transfer Section modal (Move/Copy a section to another date) ─────────────
+  const [transferBlockId, setTransferBlockId] = useState<string | null>(null)
 
   // ── State ───────────────────────────────────────────────────────────────────
   // ── Editor-wide history (mobile undo/redo) ───────────────────────────────────
@@ -1725,71 +1701,38 @@ export function JournalEditorContent({
     insertBlock(copy, idx)
   }
 
-  // Resets every checkbox in a section's content to unchecked, preserving text,
-  // hierarchy, sub-items and all other formatting — a pasted section behaves
-  // like a reusable template, not a record of already-completed work.
-  function resetSectionCheckedStates(contentJson: string): string {
-    try {
-      const doc = JSON.parse(contentJson)
-      function walk(node: unknown) {
-        if (!node || typeof node !== 'object') return
-        const n = node as { type?: string; attrs?: { checked?: boolean }; content?: unknown[] }
-        if (n.type === 'taskItem' && n.attrs) n.attrs.checked = false
-        if (Array.isArray(n.content)) n.content.forEach(walk)
-      }
-      walk(doc)
-      return JSON.stringify(doc)
-    } catch {
-      return contentJson
-    }
+  // Appends an independent copy of `block` (with `liveContent` merged in) onto
+  // another date's Planner/Journal doc — used by both Move and Copy below.
+  // Reads/writes calData[destKey].journal directly via updateDay, exactly like
+  // every other cross-date write in this file (e.g. syncStartToTaskManager),
+  // since the destination date's editor isn't mounted here.
+  function appendBlockToDay(destKey: string, block: JournalBlock) {
+    const destDoc = parseJournalDoc(calData[destKey]?.journal)
+    const newDoc = { ...destDoc, blocks: [...destDoc.blocks, block] }
+    updateDay(destKey, prev => ({ ...prev, journal: serializeJournalDoc(newDoc) }))
   }
 
-  // Copy: snapshots the section's live content + color/title/size into a
-  // clipboard that survives navigating to a different date — mirrors the
-  // existing Task Manager copy/paste exactly (xp9-task-clipboard in
-  // DayModal.tsx), just for a whole section instead of a task.
-  function copySection(id: string) {
+  // Transfer: Move relocates the exact same section (same id, unchanged
+  // content/color/title — a true move, so deleteBlock's existing safe-removal
+  // fallback runs on the origin). Copy leaves the origin completely untouched
+  // and appends a fresh-id independent copy (mirrors duplicateBlock's pattern)
+  // — completion states are preserved exactly, never reset.
+  function transferSection(mode: 'move' | 'copy', id: string, destKey: string) {
     const block = blocksRef.current.find(b => b.id === id)
     if (!block) return
     const liveContent = contentMapRef.current.get(id) ?? block.content ?? ''
-    const clip = {
-      content: liveContent,
-      sectionColor: block.sectionColor,
-      name: block.name,
-      width: block.width,
-      height: block.height,
-    }
-    try { localStorage.setItem('xp9-section-clipboard', JSON.stringify(clip)) } catch {}
-    setSectionClipboard(clip)
-    setToast('Section copied ✓')
-  }
-
-  // Paste: inserts a new, independent section directly after the section whose
-  // ⋮ menu was used (falling back to appending at the end if that section can't
-  // be found). Single-use, like Task copy/paste — consumes the clipboard
-  // immediately so paste can't silently repeat onto multiple sections.
-  function pasteSectionAfter(afterId: string) {
-    if (!sectionClipboard) return
-    const idx = blocksRef.current.findIndex(b => b.id === afterId)
-    const insertAt = idx >= 0 ? idx : blocksRef.current.length - 1
     const ts = Date.now()
-    const pastedContent = resetSectionCheckedStates(sectionClipboard.content)
-    const pasted: JournalBlock = {
-      id: mkId(),
-      type: 'section',
-      content: pastedContent,
-      sectionColor: sectionClipboard.sectionColor,
-      name: sectionClipboard.name,
-      width: sectionClipboard.width,
-      height: sectionClipboard.height,
-      createdAt: ts,
-      updatedAt: ts,
+
+    if (mode === 'copy') {
+      const copy: JournalBlock = { ...block, id: mkId(), content: liveContent, createdAt: ts, updatedAt: ts }
+      appendBlockToDay(destKey, copy)
+      setToast('Section copied ✓')
+    } else {
+      const moved: JournalBlock = { ...block, content: liveContent, updatedAt: ts }
+      appendBlockToDay(destKey, moved)
+      deleteBlock(id)
+      setToast('Section moved ✓')
     }
-    contentMapRef.current.set(pasted.id, pastedContent)
-    insertBlock(pasted, insertAt)
-    setSectionClipboard(null)
-    try { localStorage.removeItem('xp9-section-clipboard') } catch {}
-    setToast('Section pasted ✓')
   }
 
   function updateBlock(id: string, updates: Partial<JournalBlock>) {
@@ -2918,9 +2861,7 @@ export function JournalEditorContent({
                             onSelectionUpdate={onEditorSelectionUpdate}
                             onDelete={blocks.length > 1 ? () => deleteBlock(block.id) : undefined}
                             onDuplicate={block.type === 'section' ? () => duplicateBlock(block.id) : undefined}
-                            onCopySection={block.type === 'section' ? () => copySection(block.id) : undefined}
-                            onPasteAfter={block.type === 'section' ? () => pasteSectionAfter(block.id) : undefined}
-                            pasteEnabled={!!sectionClipboard}
+                            onTransferSection={block.type === 'section' ? () => setTransferBlockId(block.id) : undefined}
                             onMoveActivate={block.type === 'section' ? () => {
                               setMoveModeId(block.id)
                               setSelectedBlockId(block.id)
@@ -3500,6 +3441,23 @@ export function JournalEditorContent({
           onClose={() => setCameraInsertAt(null)}
         />
       )}
+
+      {/* ── Transfer Section modal ────────────────────────────────────────── */}
+      {transferBlockId && (() => {
+        const block = blocks.find(b => b.id === transferBlockId)
+        if (!block) return null
+        return (
+          <TransferSectionModal
+            dateKey={dateKey}
+            sectionLabel={block.name ?? ''}
+            onClose={() => setTransferBlockId(null)}
+            onConfirm={(mode, destKey) => {
+              transferSection(mode, transferBlockId, destKey)
+              setTransferBlockId(null)
+            }}
+          />
+        )
+      })()}
 
       {/* ── Unsaved-changes guard dialog ──────────────────────────────────── */}
       {showExitDialog && (

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp, EMPTY_DAY } from './AppContext'
 import type { Task, TaskSession, Activity, TaskAttachment, DayData } from './types'
@@ -1790,41 +1790,126 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   const openSnapshotRef     = useRef<typeof dayData | null>(null)
   const onConfettiDone = useCallback(() => setShowConfetti(false), [])
 
-  // ── Reorder Mode — whole-card pointer drag (mouse + touch), replacing the
+  // ── Reorder Mode — real-time sortable drag (mouse + touch), replacing the
   // old handle-only HTML5 drag/drop (which never fires on most mobile
-  // browsers — HTML5 DnD is effectively desktop-mouse-only). Pointer Events
-  // work identically for mouse/touch/pen, so one implementation covers all 3
-  // devices. Kept fully separate from the pre-existing dragItemId/dragOverId/
-  // handleReorderDrop machinery above (left untouched) to avoid any risk to
-  // that code path. Reorder is a "swap on cross" model: as the pointer
-  // crosses into a different top-level task's row, that task's family is
-  // moved immediately (reusing the exact same family-move math as the
-  // original handleReorderDrop) — an immediate, responsive reflow rather
-  // than an animated floating drag-ghost.
+  // browsers — HTML5 DnD is effectively desktop-mouse-only) AND the earlier
+  // "reorder on drop only" pointer version. Kept fully separate from the
+  // pre-existing dragItemId/dragOverId/handleReorderDrop machinery above
+  // (left untouched) to avoid any risk to that code path.
+  //
+  // Architecture: `localOrder` is a purely-visual top-level task-id order
+  // used ONLY while a drag is in progress (null the rest of the time, in
+  // which case rendering falls back to dayData.tasks' real order). Crossing
+  // into another row during the drag reorders `localOrder` immediately (so
+  // the prospective final order is always visible), but never touches
+  // dayData/Supabase — that only happens ONCE, on drop, via commitLocalOrder.
+  // This satisfies "no intermediate writes" while still giving instant,
+  // fully live visual feedback.
+  //
+  // The dragged row's own "follow the finger" motion and every displaced
+  // sibling's "slide out of the way" motion are both done with the FLIP
+  // technique (measure before reorder → let React reflow → invert the
+  // resulting jump with a transform → play it back to zero), applied via
+  // direct DOM style writes through refs rather than React state, so it
+  // stays smooth at 60fps regardless of render cost elsewhere in the modal.
   const [dragTaskId, setDragTaskId] = useState<string | null>(null)
+  const [localOrder, setLocalOrder]  = useState<string[] | null>(null)
   const dragTaskIdRef       = useRef<string | null>(null)
+  const localOrderRef       = useRef<string[] | null>(null)
   const activePointerIdRef  = useRef<number | null>(null)
   const pointerYRef         = useRef<number>(0)
-  const lastReorderTargetRef = useRef<string | null>(null)
+  const dragOriginRef       = useRef<{ pointerY: number; naturalTop: number } | null>(null)
+  const pendingFlipTopsRef  = useRef<Map<string, number> | null>(null)
   const rowElRefs           = useRef<Map<string, HTMLDivElement>>(new Map())
   const scrollBodyRef       = useRef<HTMLDivElement | null>(null)
   const autoScrollFrameRef  = useRef<number | null>(null)
 
-  function moveFamilyBefore(dragId: string, targetTopLevelId: string) {
-    if (dragId === targetTopLevelId) return
+  function getTopLevelOrderIds(): string[] {
+    return dayData.tasks.filter(t => !t.parentTaskId).map(t => t.id)
+  }
+
+  // Commits the final visual order to real data — called ONCE, on drop.
+  // Moves each top-level task's complete family (itself + its sub-tasks,
+  // sessions, attachments etc. are all part of the same Task object, so
+  // nothing needs to be individually re-attached) as one unit.
+  function commitLocalOrder(order: string[]) {
     updateDay(dateKey, prev => {
       const all = prev.tasks
-      const dragged = all.find(t => t.id === dragId)
-      if (!dragged || dragged.parentTaskId) return prev
-      const dragFamily = all.filter(t => t.id === dragId || t.parentTaskId === dragId)
-      const dragIds = new Set(dragFamily.map(t => t.id))
-      const remaining = all.filter(t => !dragIds.has(t.id))
-      let insertAt = remaining.length
-      for (let i = remaining.length - 1; i >= 0; i--) {
-        if (remaining[i].id === targetTopLevelId || remaining[i].parentTaskId === targetTopLevelId) { insertAt = i + 1; break }
-      }
-      return { ...prev, tasks: [...remaining.slice(0, insertAt), ...dragFamily, ...remaining.slice(insertAt)] }
+      const result: Task[] = []
+      const placed = new Set<string>()
+      order.forEach(id => {
+        const top = all.find(t => t.id === id && !t.parentTaskId)
+        if (!top || placed.has(id)) return
+        placed.add(id)
+        result.push(top, ...all.filter(t => t.parentTaskId === id))
+      })
+      // Safety net: any top-level task not present in `order` (should not
+      // happen — order is always seeded from the live list) keeps its family
+      // and is appended rather than silently dropped.
+      all.forEach(t => {
+        if (!t.parentTaskId && !placed.has(t.id)) { placed.add(t.id); result.push(t, ...all.filter(c => c.parentTaskId === t.id)) }
+      })
+      return { ...prev, tasks: result }
     })
+  }
+
+  function measureRowTops(excludeId?: string): Map<string, number> {
+    const map = new Map<string, number>()
+    rowElRefs.current.forEach((el, id) => { if (id !== excludeId) map.set(id, el.offsetTop) })
+    return map
+  }
+
+  // Plays the FLIP "slide into place" animation for every displaced sibling
+  // after a reorder has already been committed to the DOM (i.e. call from
+  // inside a layout effect keyed on `localOrder`, after React has reflowed).
+  function playFlip(prevTops: Map<string, number>) {
+    rowElRefs.current.forEach((el, id) => {
+      if (id === dragTaskIdRef.current) return
+      const prevTop = prevTops.get(id)
+      if (prevTop == null) return
+      const delta = prevTop - el.offsetTop
+      if (delta === 0) return
+      el.style.transition = 'none'
+      el.style.transform = `translateY(${delta}px)`
+      void el.offsetHeight // force reflow so the browser registers the start position
+      requestAnimationFrame(() => {
+        el.style.transition = 'transform 180ms cubic-bezier(0.2,0,0.2,1)'
+        el.style.transform = ''
+      })
+    })
+  }
+
+  // Keeps the dragged row tightly coupled to the pointer: its natural DOM
+  // position changes every time it's reordered underneath the pointer, so
+  // the transform is always computed relative to a FIXED origin (position +
+  // pointer Y at drag start) rather than accumulated, which is what lets it
+  // track the finger/cursor continuously instead of drifting or jumping.
+  function applyDragTransform(clientY: number) {
+    const id = dragTaskIdRef.current
+    const origin = dragOriginRef.current
+    if (!id || !origin) return
+    const el = rowElRefs.current.get(id)
+    if (!el) return
+    const naturalShift = el.offsetTop - origin.naturalTop
+    el.style.transition = 'none'
+    el.style.transform = `translateY(${clientY - origin.pointerY - naturalShift}px)`
+  }
+
+  function clearRowTransforms() {
+    rowElRefs.current.forEach(el => { el.style.transition = ''; el.style.transform = '' })
+  }
+
+  // Local-only reorder: moves dragId to sit where targetId currently is.
+  // One swap per crossed row — repeated crossings accumulate into exactly
+  // the "drag past B, then C, then D" progression the list should show.
+  function reorderLocal(dragId: string, targetId: string) {
+    const base = localOrderRef.current ?? getTopLevelOrderIds()
+    const without = base.filter(id => id !== dragId)
+    const insertAt = without.indexOf(targetId)
+    if (insertAt === -1) return
+    const next = [...without.slice(0, insertAt), dragId, ...without.slice(insertAt)]
+    localOrderRef.current = next
+    setLocalOrder(next)
   }
 
   function runReorderAutoScroll() {
@@ -1853,8 +1938,12 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     activePointerIdRef.current = e.pointerId
     dragTaskIdRef.current = topLevelId
     setDragTaskId(topLevelId)
-    lastReorderTargetRef.current = null
+    const order = getTopLevelOrderIds()
+    localOrderRef.current = order
+    setLocalOrder(order)
     pointerYRef.current = e.clientY
+    const el = rowElRefs.current.get(topLevelId)
+    dragOriginRef.current = { pointerY: e.clientY, naturalTop: el ? el.offsetTop : 0 }
     try { e.currentTarget.setPointerCapture(e.pointerId) } catch {}
     if (autoScrollFrameRef.current == null) autoScrollFrameRef.current = requestAnimationFrame(runReorderAutoScroll)
   }
@@ -1862,27 +1951,52 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   function onReorderPointerMove(e: React.PointerEvent) {
     if (dragTaskIdRef.current == null || e.pointerId !== activePointerIdRef.current) return
     pointerYRef.current = e.clientY
+    applyDragTransform(e.clientY)
     const dragId = dragTaskIdRef.current
-    for (const [id, el] of rowElRefs.current) {
+    const order = localOrderRef.current ?? []
+    for (const id of order) {
       if (id === dragId) continue
+      const el = rowElRefs.current.get(id)
+      if (!el) continue
       const rect = el.getBoundingClientRect()
       if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
-        if (lastReorderTargetRef.current !== id) {
-          lastReorderTargetRef.current = id
-          moveFamilyBefore(dragId, id)
-        }
+        pendingFlipTopsRef.current = measureRowTops(dragId)
+        reorderLocal(dragId, id)
         break
       }
     }
   }
 
-  function endReorderPointerDrag(e: React.PointerEvent) {
+  // After every `localOrder` change (i.e. every live reorder while
+  // dragging), the DOM has already reflowed by the time this runs — play
+  // the FLIP animation for displaced siblings and re-pin the dragged row's
+  // transform to the pointer using its new natural position.
+  useLayoutEffect(() => {
+    if (localOrder == null) return
+    const prevTops = pendingFlipTopsRef.current
+    if (prevTops) { playFlip(prevTops); pendingFlipTopsRef.current = null }
+    applyDragTransform(pointerYRef.current)
+  }, [localOrder])
+
+  // commit=true on a real drop (pointerup): persist the live order shown.
+  // commit=false on a cancelled/interrupted drag (pointercancel): discard the
+  // in-progress local order instead — since dayData was never touched during
+  // the drag, simply not committing is enough to fall back to the last
+  // genuinely-saved order, with zero risk of corrupting/duplicating/losing
+  // tasks either way.
+  function endReorderPointerDrag(e: React.PointerEvent, commit: boolean) {
     if (dragTaskIdRef.current == null) return
     try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
+    const finalOrder = localOrderRef.current
+    if (commit && finalOrder) commitLocalOrder(finalOrder)
+    clearRowTransforms()
     dragTaskIdRef.current = null
     activePointerIdRef.current = null
-    lastReorderTargetRef.current = null
+    localOrderRef.current = null
+    dragOriginRef.current = null
+    pendingFlipTopsRef.current = null
     setDragTaskId(null)
+    setLocalOrder(null)
     if (autoScrollFrameRef.current != null) { cancelAnimationFrame(autoScrollFrameRef.current); autoScrollFrameRef.current = null }
   }
 
@@ -2547,7 +2661,14 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             {/* Task list — hierarchical */}
             <div className="space-y-2">
               {(() => {
-                const topLevel  = dayData.tasks.filter(t => !t.parentTaskId)
+                const baseTopLevel = dayData.tasks.filter(t => !t.parentTaskId)
+                // While actively dragging, render in the live `localOrder`
+                // instead of the real saved order — this is what makes the
+                // prospective final order visible DURING the drag, without
+                // writing anything to dayData/Supabase until drop.
+                const topLevel = localOrder
+                  ? localOrder.map(id => baseTopLevel.find(t => t.id === id)).filter((t): t is Task => !!t)
+                  : baseTopLevel
                 let topIdx = 0
                 return topLevel.map(task => {
                   const children      = dayData.tasks.filter(t => t.parentTaskId === task.id)
@@ -2620,8 +2741,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                         }}
                         onPointerDown={reorderMode ? (e => onReorderPointerDown(e, task.id)) : undefined}
                         onPointerMove={reorderMode ? onReorderPointerMove : undefined}
-                        onPointerUp={reorderMode ? endReorderPointerDrag : undefined}
-                        onPointerCancel={reorderMode ? endReorderPointerDrag : undefined}
+                        onPointerUp={reorderMode ? (e => endReorderPointerDrag(e, true)) : undefined}
+                        onPointerCancel={reorderMode ? (e => endReorderPointerDrag(e, false)) : undefined}
                       >
                         {/* Drag handle — visual affordance only now; dragging
                             can start from anywhere on the card, not just here. */}

@@ -2142,8 +2142,15 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
 
   function startTimer(taskId: string, taskIndex: number) {
     const task = dayData.tasks.find(t => t.id === taskId); if (!task) return
-    // Global mutual exclusion: block if any other timer is already running
+    // Global mutual exclusion: block if any other timer is already running — this
+    // also covers an independent Calendar Clock-In with no linked task timer,
+    // since Task Manager and Clock In/Out share ONE authoritative running session
+    // (mirrors the equivalent guard in AppHeader's clockIn()).
     if (activeTaskTimer && activeTaskTimer.taskId !== taskId) {
+      setToast('~An active task is already running.\nClock out first to start a new timer.')
+      return
+    }
+    if (!activeTaskTimer && activeSession) {
       setToast('~An active task is already running.\nClock out first to start a new timer.')
       return
     }
@@ -2437,7 +2444,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
 
                   const sharedProps = (t: Task, idx: number, isChild = false, childIdx?: number) => ({
                     task: t, index: idx, isActive: activeTaskTimer?.taskId === t.id && activeTaskTimer.dateKey === dateKey,
-                    blockedByOtherTimer: !!activeTaskTimer && activeTaskTimer.taskId !== t.id,
+                    blockedByOtherTimer: activeTaskTimer ? activeTaskTimer.taskId !== t.id : !!activeSession,
                     now, isEditing: editingTaskId === t.id,
                     onEditStart: () => setEditingTaskId(t.id), onEditEnd: () => setEditingTaskId(null),
                     dateKey, expanded: expandedTaskId === t.id,

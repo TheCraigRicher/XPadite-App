@@ -418,6 +418,84 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     })
   }, [userId])
 
+  // ─── Active-session reconciliation (focus/visibility + reconnect fallback) ───
+  // Realtime is the primary sync mechanism, but it can miss events across a
+  // temporary network drop, browser tab throttling, or mobile backgrounding.
+  // This re-derives BOTH activeSession and activeTaskTimer from the same
+  // authoritative Supabase queries the initial-load effect above already uses,
+  // and corrects local state in either direction — clearing a stale "running"
+  // timer this device didn't hear stop, or reconstructing one it missed the
+  // start of. No Supabase writes happen here, only reads, so it's safe to run
+  // as often as focus/visibility events actually fire (never on a timer).
+  const reconcileActiveSession = useCallback(async () => {
+    const uid = userIdRef.current
+    if (!uid) return
+    const supabase = createClient()
+    try {
+      const [sbSessions, sbCalData] = await Promise.all([
+        fetchWorkSessions(supabase, uid),
+        fetchCalendarDays(supabase, uid),
+      ])
+
+      // activeSession ← authoritative open work_sessions row (endTs === null)
+      const openSession = sbSessions.find(s => s.endTs === null) ?? null
+      const localActive = activeSessionRef.current
+      if (openSession) {
+        if (localActive?.id !== openSession.id) {
+          setActiveSessionRaw(openSession)
+          try { localStorage.setItem('xp9-active-session', JSON.stringify(openSession)) } catch {}
+        }
+      } else if (localActive) {
+        setActiveSessionRaw(null)
+        try { localStorage.removeItem('xp9-active-session') } catch {}
+      }
+
+      // activeTaskTimer ← authoritative running task session (endTs === null) in calendar_days
+      let sbTimer: ActiveTaskTimer | null = null
+      for (const [dayKey, dayData] of Object.entries(sbCalData)) {
+        if (sbTimer) break
+        const tasks = dayData.tasks ?? []
+        for (let i = 0; i < tasks.length; i++) {
+          const runningSess = (tasks[i].sessions ?? []).find(s => s.endTs === null)
+          if (runningSess) {
+            sbTimer = {
+              taskId: tasks[i].id, dateKey: dayKey, sessionId: runningSess.id,
+              startTs: runningSess.startTs, taskText: tasks[i].text, taskIndex: i,
+            }
+            break
+          }
+        }
+      }
+      const localTimer = activeTaskTimerRef.current
+      const sameTimer = !!sbTimer && localTimer?.taskId === sbTimer.taskId && localTimer?.sessionId === sbTimer.sessionId
+      if (sbTimer && !sameTimer) {
+        setActiveTaskTimerRaw(sbTimer)
+        try { localStorage.setItem('xp9-active-task-timer', JSON.stringify(sbTimer)) } catch {}
+      } else if (!sbTimer && localTimer) {
+        setActiveTaskTimerRaw(null)
+        try { localStorage.removeItem('xp9-active-task-timer') } catch {}
+      }
+    } catch (err) {
+      console.error('[XPadite] Active session reconciliation error:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!userId) return
+    function onFocusOrVisible() {
+      if (document.visibilityState === 'hidden') return
+      reconcileActiveSession()
+    }
+    document.addEventListener('visibilitychange', onFocusOrVisible)
+    window.addEventListener('focus', onFocusOrVisible)
+    window.addEventListener('online', onFocusOrVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onFocusOrVisible)
+      window.removeEventListener('focus', onFocusOrVisible)
+      window.removeEventListener('online', onFocusOrVisible)
+    }
+  }, [userId, reconcileActiveSession])
+
   // ─── Supabase Realtime: cross-device active timer sync ───────────────────────
   // Subscribes to postgres_changes on calendar_days and work_sessions for the
   // authenticated user. On remote changes, reconciles activeTaskTimer and
@@ -758,12 +836,44 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     }
   }, [])
 
+  // Task Manager timers and Calendar Clock In/Out are two UI surfaces over the
+  // SAME authoritative running session: starting a Task Manager timer with no
+  // Clock-In already active creates a work_sessions row via setActiveSession
+  // (see below). Every local path that stops a task timer — the Stop button,
+  // deleting a running task, manually adjusting a running session's time, the
+  // Planner→Task-Manager timer link — must finalize that SAME row, or it's
+  // left open in Supabase forever and every other device keeps showing it as
+  // running. Centralizing the close here (rather than patching each call site)
+  // is what makes that guarantee hold everywhere at once.
+  //
+  // This must NOT fire for remote reconciliation: realtime handlers intentionally
+  // call setActiveTaskTimerRaw (not this wrapped setter) specifically to avoid
+  // triggering a Supabase write when just reflecting a change that already
+  // happened elsewhere — see the "no feedback loop" comment on the realtime effect.
   const setActiveTaskTimer = useCallback((t: ActiveTaskTimer | null) => {
     setActiveTaskTimerRaw(t)
     if (t) {
       try { localStorage.setItem('xp9-active-task-timer', JSON.stringify(t)) } catch {}
-    } else {
-      try { localStorage.removeItem('xp9-active-task-timer') } catch {}
+      return
+    }
+    try { localStorage.removeItem('xp9-active-task-timer') } catch {}
+    const linkedSession = activeSessionRef.current
+    if (linkedSession) {
+      const endTs = Date.now()
+      const finalized: WorkSession = { ...linkedSession, endTs }
+      setSessions(prev => {
+        const next = [...prev, finalized]
+        try { localStorage.setItem('xp9s', JSON.stringify(next)) } catch {}
+        return next
+      })
+      const uid = userIdRef.current
+      if (uid) {
+        upsertWorkSession(createClient(), uid, finalized).catch(err =>
+          console.error('[ActiveSession] Supabase upsert error:', err)
+        )
+      }
+      setActiveSessionRaw(null)
+      try { localStorage.removeItem('xp9-active-session') } catch {}
     }
   }, [])
 

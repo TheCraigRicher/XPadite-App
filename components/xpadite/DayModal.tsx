@@ -982,7 +982,13 @@ function TaskRow({
             >
               <span style={{ display: 'inline-block', lineHeight: 1, transform: isParentExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 200ms cubic-bezier(0.4,0,0.2,1)' }}>▶</span>
             </button>
-          ) : (
+          ) : isChild ? null : (
+            /* This alignment spacer only matters for TOP-LEVEL tasks without
+               children, so their "Task N" label lines up with sibling
+               top-level tasks that DO have the expand triangle. Sub-tasks
+               live in their own indented block with their own connector
+               arrow already indicating hierarchy, so repeating this spacer
+               there was pure dead space eating into the title's width. */
             <span className="flex-shrink-0" style={{ width: 18 }} />
           )}
 
@@ -1009,6 +1015,7 @@ function TaskRow({
           {/* Title — always in subtle rounded container, fixed width via flex-1 */}
           <div
             ref={titleContainerRef}
+            data-no-drag="true"
             className="flex-1 min-w-0 rounded-lg px-2.5 py-1 transition-all relative"
             style={{ background: titleBg, border: `0.5px solid ${titleBorder}` }}
             onMouseEnter={handleTitleMouseEnter}
@@ -1778,11 +1785,106 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   const [deleteMode,     setDeleteMode]     = useState(false)
   const [selectedForDel, setSelectedForDel] = useState<Set<string>>(new Set())
   const [deleteConfirm,  setDeleteConfirm]  = useState(false)
-  const [dragOverId,     setDragOverId]     = useState<string | null>(null)
   const journalSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevNotesOpenRef    = useRef(false)
   const openSnapshotRef     = useRef<typeof dayData | null>(null)
   const onConfettiDone = useCallback(() => setShowConfetti(false), [])
+
+  // ── Reorder Mode — whole-card pointer drag (mouse + touch), replacing the
+  // old handle-only HTML5 drag/drop (which never fires on most mobile
+  // browsers — HTML5 DnD is effectively desktop-mouse-only). Pointer Events
+  // work identically for mouse/touch/pen, so one implementation covers all 3
+  // devices. Kept fully separate from the pre-existing dragItemId/dragOverId/
+  // handleReorderDrop machinery above (left untouched) to avoid any risk to
+  // that code path. Reorder is a "swap on cross" model: as the pointer
+  // crosses into a different top-level task's row, that task's family is
+  // moved immediately (reusing the exact same family-move math as the
+  // original handleReorderDrop) — an immediate, responsive reflow rather
+  // than an animated floating drag-ghost.
+  const [dragTaskId, setDragTaskId] = useState<string | null>(null)
+  const dragTaskIdRef       = useRef<string | null>(null)
+  const activePointerIdRef  = useRef<number | null>(null)
+  const pointerYRef         = useRef<number>(0)
+  const lastReorderTargetRef = useRef<string | null>(null)
+  const rowElRefs           = useRef<Map<string, HTMLDivElement>>(new Map())
+  const scrollBodyRef       = useRef<HTMLDivElement | null>(null)
+  const autoScrollFrameRef  = useRef<number | null>(null)
+
+  function moveFamilyBefore(dragId: string, targetTopLevelId: string) {
+    if (dragId === targetTopLevelId) return
+    updateDay(dateKey, prev => {
+      const all = prev.tasks
+      const dragged = all.find(t => t.id === dragId)
+      if (!dragged || dragged.parentTaskId) return prev
+      const dragFamily = all.filter(t => t.id === dragId || t.parentTaskId === dragId)
+      const dragIds = new Set(dragFamily.map(t => t.id))
+      const remaining = all.filter(t => !dragIds.has(t.id))
+      let insertAt = remaining.length
+      for (let i = remaining.length - 1; i >= 0; i--) {
+        if (remaining[i].id === targetTopLevelId || remaining[i].parentTaskId === targetTopLevelId) { insertAt = i + 1; break }
+      }
+      return { ...prev, tasks: [...remaining.slice(0, insertAt), ...dragFamily, ...remaining.slice(insertAt)] }
+    })
+  }
+
+  function runReorderAutoScroll() {
+    const el = scrollBodyRef.current
+    if (!el || dragTaskIdRef.current == null) { autoScrollFrameRef.current = null; return }
+    const rect = el.getBoundingClientRect()
+    const EDGE = 60, MAX_SPEED = 14
+    const y = pointerYRef.current
+    let dy = 0
+    if (y < rect.top + EDGE)         dy = -MAX_SPEED * (1 - Math.max(0, y - rect.top) / EDGE)
+    else if (y > rect.bottom - EDGE) dy = MAX_SPEED * (1 - Math.max(0, rect.bottom - y) / EDGE)
+    if (dy !== 0) el.scrollTop += dy
+    autoScrollFrameRef.current = requestAnimationFrame(runReorderAutoScroll)
+  }
+
+  function isReorderDragBlocked(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) return false
+    return !!target.closest('button, input, textarea, select, a, [contenteditable="true"], [data-no-drag]')
+  }
+
+  function onReorderPointerDown(e: React.PointerEvent, topLevelId: string) {
+    if (!reorderMode) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    if (isReorderDragBlocked(e.target)) return
+    e.preventDefault()
+    activePointerIdRef.current = e.pointerId
+    dragTaskIdRef.current = topLevelId
+    setDragTaskId(topLevelId)
+    lastReorderTargetRef.current = null
+    pointerYRef.current = e.clientY
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch {}
+    if (autoScrollFrameRef.current == null) autoScrollFrameRef.current = requestAnimationFrame(runReorderAutoScroll)
+  }
+
+  function onReorderPointerMove(e: React.PointerEvent) {
+    if (dragTaskIdRef.current == null || e.pointerId !== activePointerIdRef.current) return
+    pointerYRef.current = e.clientY
+    const dragId = dragTaskIdRef.current
+    for (const [id, el] of rowElRefs.current) {
+      if (id === dragId) continue
+      const rect = el.getBoundingClientRect()
+      if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+        if (lastReorderTargetRef.current !== id) {
+          lastReorderTargetRef.current = id
+          moveFamilyBefore(dragId, id)
+        }
+        break
+      }
+    }
+  }
+
+  function endReorderPointerDrag(e: React.PointerEvent) {
+    if (dragTaskIdRef.current == null) return
+    try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
+    dragTaskIdRef.current = null
+    activePointerIdRef.current = null
+    lastReorderTargetRef.current = null
+    setDragTaskId(null)
+    if (autoScrollFrameRef.current != null) { cancelAnimationFrame(autoScrollFrameRef.current); autoScrollFrameRef.current = null }
+  }
 
   const hasDirtyChanges = useMemo(() => {
     if (newTaskText.trim().length > 0) return true
@@ -1966,10 +2068,10 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   }
 
   function handleReorderDrop(targetTopLevelId: string) {
-    if (!dragItemId || dragItemId === targetTopLevelId) { setDragItemId(null); setDragOverId(null); return }
+    if (!dragItemId || dragItemId === targetTopLevelId) { setDragItemId(null); return }
     const all = [...dayData.tasks]
     const dragged = all.find(t => t.id === dragItemId)
-    if (!dragged || dragged.parentTaskId) { setDragItemId(null); setDragOverId(null); return }
+    if (!dragged || dragged.parentTaskId) { setDragItemId(null); return }
     const dragFamily = all.filter(t => t.id === dragItemId || t.parentTaskId === dragItemId)
     const dragIds = new Set(dragFamily.map(t => t.id))
     const remaining = all.filter(t => !dragIds.has(t.id))
@@ -1981,7 +2083,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     }
     const result = [...remaining.slice(0, insertAt), ...dragFamily, ...remaining.slice(insertAt)]
     updateDay(dateKey, prev => ({ ...prev, tasks: result }))
-    setDragItemId(null); setDragOverId(null)
+    setDragItemId(null)
   }
 
   function duplicateTask(id: string) {
@@ -2404,7 +2506,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
         </div>
 
         {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto">
+        <div ref={scrollBodyRef} className="flex-1 overflow-y-auto">
           <div className="px-4 py-3" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
 
             {/* Section header */}
@@ -2494,22 +2596,42 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
 
                   return (
                     <div key={task.id}>
-                      {/* Reorder drag wrapper */}
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-                        {/* Drag handle — reorder mode only */}
+                      {/* Reorder drag wrapper — the ENTIRE card is the drag
+                          surface while Reorder Mode is active (Pointer Events,
+                          not the old HTML5 draggable handle-only approach, so
+                          it works identically for mouse AND touch). A capture
+                          check (isReorderDragBlocked) skips drag-start when the
+                          press lands on an actual control — button/input/
+                          textarea/select/link/the title's editable area — so
+                          every existing interaction (checkboxes, activity
+                          dropdown, three-dot menu, timers, title editing)
+                          keeps working exactly as before; everywhere else on
+                          the card (background, "Task N" label, empty gaps,
+                          the ⠿ handle itself) now starts the drag. */}
+                      <div
+                        ref={el => { if (el) rowElRefs.current.set(task.id, el); else rowElRefs.current.delete(task.id) }}
+                        style={{
+                          display: 'flex', alignItems: 'flex-start', gap: 4, position: 'relative',
+                          borderRadius: 12,
+                          outline: reorderMode && dragTaskId === task.id ? '2px solid rgba(124,58,237,0.9)' : 'none',
+                          touchAction: reorderMode ? 'none' : undefined,
+                          cursor: reorderMode ? (dragTaskId === task.id ? 'grabbing' : 'grab') : undefined,
+                          zIndex: reorderMode && dragTaskId === task.id ? 3 : undefined,
+                        }}
+                        onPointerDown={reorderMode ? (e => onReorderPointerDown(e, task.id)) : undefined}
+                        onPointerMove={reorderMode ? onReorderPointerMove : undefined}
+                        onPointerUp={reorderMode ? endReorderPointerDrag : undefined}
+                        onPointerCancel={reorderMode ? endReorderPointerDrag : undefined}
+                      >
+                        {/* Drag handle — visual affordance only now; dragging
+                            can start from anywhere on the card, not just here. */}
                         {reorderMode && (
                           <div
-                            draggable
-                            onDragStart={() => setDragItemId(task.id)}
-                            style={{ cursor: dragItemId === task.id ? 'grabbing' : 'grab', padding: '12px 4px', color: 'var(--xp-txt3)', flexShrink: 0, fontSize: 13, lineHeight: 1, userSelect: 'none', opacity: 0.6 }}
+                            style={{ cursor: dragTaskId === task.id ? 'grabbing' : 'grab', padding: '12px 4px', color: 'var(--xp-txt3)', flexShrink: 0, fontSize: 13, lineHeight: 1, userSelect: 'none', opacity: 0.6 }}
                             title="Drag to reorder"
                           >⠿</div>
                         )}
-                        <div style={{ flex: 1, minWidth: 0, position: 'relative', outline: reorderMode && dragOverId === task.id ? '2px solid rgba(124,58,237,0.45)' : 'none', borderRadius: 12 }}
-                          onDragOver={reorderMode ? (e => { e.preventDefault(); setDragOverId(task.id) }) : undefined}
-                          onDragLeave={reorderMode ? () => setDragOverId(null) : undefined}
-                          onDrop={reorderMode ? () => { handleReorderDrop(task.id); setDragOverId(null) } : undefined}
-                        >
+                        <div style={{ flex: 1, minWidth: 0, position: 'relative', borderRadius: 12 }}>
                           {/* Multi-delete selection checkbox — PARENT TASKS ONLY,
                               same placement/size on mobile, tablet and desktop:
                               inside the card's own upper-left corner. Built as

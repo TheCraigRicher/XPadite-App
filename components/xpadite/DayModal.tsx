@@ -2279,7 +2279,6 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             .xp-sc-trunk { left: 4px !important; }
             .xp-sc-branch { left: 4px !important; width: 9px !important; }
             .xp-sc-arrow { left: 11px !important; }
-            .xp-sc-delcheck { left: 17px !important; }
           }
         `}</style>
 
@@ -2479,14 +2478,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
 
                   return (
                     <div key={task.id}>
-                      {/* Reorder drag wrapper — also hosts the multi-delete
-                          selection checkbox on desktop/tablet in its own
-                          dedicated left gutter (reorderMode/deleteMode are
-                          mutually exclusive, so only one of these ever renders).
-                          Mobile instead restores the original contained-in-card
-                          overlay (see inside the card div below) — the gutter
-                          checkbox is hidden below sm, the in-card one hidden at
-                          sm and up, so exactly one renders per breakpoint. */}
+                      {/* Reorder drag wrapper */}
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
                         {/* Drag handle — reorder mode only */}
                         {reorderMode && (
@@ -2497,37 +2489,34 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                             title="Drag to reorder"
                           >⠿</div>
                         )}
-                        {/* Multi-delete selection checkbox — desktop/tablet dedicated gutter */}
-                        {deleteMode && (
-                          <button type="button" onClick={() => toggleDeleteSelect(task.id)} className="hidden sm:block"
-                            style={{ flexShrink: 0, marginTop: 9, background: 'none', border: 'none', cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
-                            <div style={{ width: 13, height: 13, borderRadius: 4, border: `1.5px solid ${selectedForDel.has(task.id) ? '#ef4444' : 'var(--xp-bdr2)'}`, background: selectedForDel.has(task.id) ? '#ef4444' : (isDark ? 'rgba(30,22,53,0.9)' : 'rgba(255,255,255,0.92)'), display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.14)' }}>
-                              {selectedForDel.has(task.id) && <span style={{ color: 'white', fontSize: 7, fontWeight: 700, lineHeight: 1 }}>✓</span>}
-                            </div>
-                          </button>
-                        )}
                         <div style={{ flex: 1, minWidth: 0, position: 'relative', outline: reorderMode && dragOverId === task.id ? '2px solid rgba(124,58,237,0.45)' : 'none', borderRadius: 12 }}
                           onDragOver={reorderMode ? (e => { e.preventDefault(); setDragOverId(task.id) }) : undefined}
                           onDragLeave={reorderMode ? () => setDragOverId(null) : undefined}
                           onDrop={reorderMode ? () => { handleReorderDrop(task.id); setDragOverId(null) } : undefined}
                         >
-                          {/* Multi-delete selection checkbox — mobile only,
-                              sits inside the card's own left padding column
-                              (the header row's px-3 leaves that ~12px strip
-                              completely empty for the row's full height, since
-                              it's padding, not content) — so it never overlaps
-                              the expand/collapse triangle, "Task N" label, or
-                              anything else in the header row, and the header
-                              row's own content never has to move. zIndex kept
+                          {/* Multi-delete selection checkbox — PARENT TASKS ONLY,
+                              same placement/size on mobile, tablet and desktop:
+                              inside the card's own upper-left corner, matching
+                              the normal 17x17 completion checkbox's footprint so
+                              the two read as the same scale of control. The inset
+                              purple ring (boxShadow, not a border) is what tells
+                              them apart without growing the checkbox's own
+                              footprint or pushing any row content. zIndex kept
                               BELOW the sticky delete-mode action bar's zIndex:5
-                              (unlike the old zIndex:10 this replaces) so it can
-                              never paint over "0 selected / Cancel / Delete"
-                              while scrolling — the bug fixed two rounds ago. */}
+                              so it can never paint over "0 selected / Cancel /
+                              Delete" while scrolling — the bug fixed two rounds
+                              ago; this box never returns to zIndex:10. */}
                           {deleteMode && (
-                            <button type="button" onClick={() => toggleDeleteSelect(task.id)} className="sm:hidden"
-                              style={{ position: 'absolute', top: 3, left: 0, zIndex: 2, background: 'none', border: 'none', cursor: 'pointer', padding: 2, WebkitTapHighlightColor: 'transparent' }}>
-                              <div style={{ width: 9, height: 9, borderRadius: 3, border: `1.5px solid ${selectedForDel.has(task.id) ? '#ef4444' : 'var(--xp-bdr2)'}`, background: selectedForDel.has(task.id) ? '#ef4444' : (isDark ? 'rgba(30,22,53,0.9)' : 'rgba(255,255,255,0.92)'), display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.14)' }}>
-                                {selectedForDel.has(task.id) && <span style={{ color: 'white', fontSize: 6, fontWeight: 700, lineHeight: 1 }}>✓</span>}
+                            <button type="button" onClick={() => toggleDeleteSelect(task.id)}
+                              style={{ position: 'absolute', top: 3, left: 0, zIndex: 2, background: 'none', border: 'none', cursor: 'pointer', padding: 3, WebkitTapHighlightColor: 'transparent' }}>
+                              <div style={{
+                                width: 17, height: 17, borderRadius: 6,
+                                border: `2px solid ${selectedForDel.has(task.id) ? '#ef4444' : 'var(--xp-bdr2)'}`,
+                                background: selectedForDel.has(task.id) ? '#ef4444' : (isDark ? 'rgba(30,22,53,0.9)' : 'rgba(255,255,255,0.92)'),
+                                boxShadow: 'inset 0 0 0 1.5px rgba(124,58,237,0.85), 0 1px 3px rgba(0,0,0,0.14)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              }}>
+                                {selectedForDel.has(task.id) && <span style={{ color: 'white', fontSize: 10, fontWeight: 700, lineHeight: 1 }}>✓</span>}
                               </div>
                             </button>
                           )}
@@ -2559,14 +2548,10 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                                 <div className="xp-sc-branch" style={{ position: 'absolute', left: 7, top: '50%', width: 14, height: 1.5, background: connColor, transform: 'translateY(-50%)', pointerEvents: 'none', borderRadius: 1 }} />
                                 {/* Arrowhead */}
                                 <div className="xp-sc-arrow" style={{ position: 'absolute', left: 19, top: '50%', transform: 'translateY(-50%)', width: 0, height: 0, borderTop: '3px solid transparent', borderBottom: '3px solid transparent', borderLeft: `4px solid ${connColor}`, pointerEvents: 'none' }} />
-                                {/* Delete checkbox for sub-tasks */}
-                                {deleteMode && (
-                                  <button type="button" onClick={() => toggleDeleteSelect(child.id)} className="xp-sc-delcheck" style={{ position: 'absolute', left: 22, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', zIndex: 2, padding: 2 }}>
-                                    <div style={{ width: 13, height: 13, borderRadius: 3, border: `1.5px solid ${selectedForDel.has(child.id) ? '#ef4444' : 'var(--xp-bdr2)'}`, background: selectedForDel.has(child.id) ? '#ef4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                      {selectedForDel.has(child.id) && <span style={{ color: 'white', fontSize: 8, fontWeight: 700, lineHeight: 1 }}>✓</span>}
-                                    </div>
-                                  </button>
-                                )}
+                                {/* No Multi-delete selector on sub-tasks — only
+                                    parent tasks are independently selectable;
+                                    deleting a parent already cascades to all of
+                                    its sub-tasks (see executeDeleteSelected). */}
                                 <TaskRow
                                   {...sharedProps(child, ci, true, ci)}
                                   hasChildren={false}

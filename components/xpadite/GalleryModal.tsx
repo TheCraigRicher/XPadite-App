@@ -168,12 +168,6 @@ function fmtShortDate(ts: number): string {
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
-function IconAll()      { return <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg> }
-function IconCards()    { return <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20V8"/></svg> }
-function IconPalette()  { return <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22a9 9 0 1 1 0-18c4 0 8 2 8 6.5 0 2-1.5 3.5-3.5 3.5H15a1.5 1.5 0 0 0-1 2.6l.2.2a1.5 1.5 0 0 1-1 2.6"/><circle cx="7.5" cy="10.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="10.5" cy="6.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="6.8" r="1.2" fill="currentColor" stroke="none"/></svg> }
-function IconPhoto()    { return <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5.5-5.5a2 2 0 0 0-2.8 0L4 19"/></svg> }
-function IconFile()     { return <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg> }
-function IconSearch()   { return <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg> }
 function IconChevron()  { return <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg> }
 function IconGridView() { return <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> }
 function IconListView() { return <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg> }
@@ -185,10 +179,6 @@ function IconDownload() { return <svg viewBox="0 0 24 24" width="13" height="13"
 function IconDrive()    { return <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3h8l6 10-4 8H6l-4-8z"/><line x1="2" y1="13" x2="22" y2="13"/></svg> }
 function IconTrash()    { return <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> }
 function IconCheck()    { return <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg> }
-
-const CATEGORY_ICONS: Record<CategoryKey, () => React.JSX.Element> = {
-  all: IconAll, cards: IconCards, drawings: IconPalette, photos: IconPhoto, files: IconFile,
-}
 
 // ─── Camera Modal ─────────────────────────────────────────────────────────────
 
@@ -527,8 +517,6 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
   const [cameraOpen, setCameraOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [category, setCategory] = useState<CategoryKey>('all')
-  const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<'all' | GalleryItemType>('all')
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest')
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
@@ -642,29 +630,19 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
   }
 
   // ── Derived views — all read from the same `items` array; nothing is duplicated ──
+  // The old `category` (tab) + `typeFilter` (dropdown) + `search` pipeline had
+  // three filtering stages that overlapped almost entirely — category and
+  // typeFilter both selected the same asset-type dimension, just through two
+  // separate controls. Now that the redundant tabs and the search box are
+  // gone, `typeFilter` alone drives filtering, straight off `items`.
 
-  const counts = useMemo(() => {
-    const c: Record<CategoryKey, number> = { all: items.length, cards: 0, drawings: 0, photos: 0, files: 0 }
-    items.forEach(i => { c[categoryOf(i.type)]++ })
-    return c
-  }, [items])
-
-  const categoryFiltered = useMemo(
-    () => category === 'all' ? items : items.filter(i => categoryOf(i.type) === category),
-    [items, category],
-  )
   const typeFilteredItems = useMemo(
-    () => typeFilter === 'all' ? categoryFiltered : categoryFiltered.filter(i => i.type === typeFilter),
-    [categoryFiltered, typeFilter],
+    () => typeFilter === 'all' ? items : items.filter(i => i.type === typeFilter),
+    [items, typeFilter],
   )
-  const searched = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return typeFilteredItems
-    return typeFilteredItems.filter(i => i.title.toLowerCase().includes(q))
-  }, [typeFilteredItems, search])
   const sorted = useMemo(
-    () => [...searched].sort((a, b) => sort === 'newest' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt),
-    [searched, sort],
+    () => [...typeFilteredItems].sort((a, b) => sort === 'newest' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt),
+    [typeFilteredItems, sort],
   )
 
   const monthGroups = useMemo(() => {
@@ -730,7 +708,10 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
     exitSelectMode()
   }
 
-  const empty = EMPTY_STATES[category]
+  // Empty-state copy is keyed by the same asset-type dimension as before,
+  // just read from the surviving `typeFilter` control instead of the removed
+  // category tabs — reuses the existing EMPTY_STATES/categoryOf, no new data.
+  const empty = typeFilter === 'all' ? EMPTY_STATES.all : EMPTY_STATES[categoryOf(typeFilter)]
   const showEmpty = sorted.length === 0
 
   const gridClass = viewMode === 'grid'
@@ -787,52 +768,14 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
             </button>
           </div>
 
-          {/* Category tabs */}
-          <div className="flex items-center gap-1.5 px-4 pt-3 pb-2 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
-            {(['all', 'cards', 'drawings', 'photos', 'files'] as CategoryKey[]).map(cat => {
-              const Icon = CATEGORY_ICONS[cat]
-              const active = category === cat
-              return (
-                <button
-                  key={cat}
-                  onClick={() => setCategory(cat)}
-                  className="flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 transition-colors"
-                  style={{
-                    padding: '7px 12px', borderRadius: 9, fontSize: 12, fontWeight: active ? 700 : 500,
-                    background: active ? '#7c3aed' : 'var(--xp-bg3)',
-                    color: active ? '#ffffff' : 'var(--xp-txt2)',
-                  }}
-                >
-                  <Icon />
-                  {cat === 'all' ? 'All' : CATEGORY_LABELS[cat]}
-                  <span
-                    className="text-[10px] font-bold"
-                    style={{
-                      padding: '1px 6px', borderRadius: 999,
-                      background: active ? 'rgba(255,255,255,0.22)' : 'rgba(124,58,237,0.14)',
-                      color: active ? '#ffffff' : '#7c3aed',
-                    }}
-                  >
-                    {counts[cat]}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Control bar */}
-          <div className="flex flex-wrap items-center gap-2 px-4 pb-3 flex-shrink-0" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
-            <div className="flex items-center gap-1.5 flex-1 min-w-[140px]" style={{ padding: '6px 10px', borderRadius: 9, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)' }}>
-              <span style={{ color: 'var(--xp-txt3)' }}><IconSearch /></span>
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search your gallery…"
-                className="flex-1 min-w-0 text-[12px] bg-transparent outline-none"
-                style={{ color: 'var(--xp-txt)' }}
-              />
-            </div>
-
+          {/* Control bar — a single compact toolbar. The old asset-type tab
+              row and the search box are gone: "All Types" below is now the
+              ONE place that filters by asset type (the tabs did the same
+              job through a second, redundant control), and the search field
+              had no other purpose left once removed. Removing both lets the
+              Gallery content start right under the header instead of below
+              a second cramped row. */}
+          <div className="flex flex-wrap items-center gap-2 px-4 pt-3 pb-3 flex-shrink-0" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
             <SimpleDropdown
               value={typeFilter}
               onChange={setTypeFilter}
@@ -877,7 +820,7 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
               {selectMode ? 'Cancel' : 'Select'}
             </button>
 
-            {category === 'photos' && (
+            {typeFilter === 'photo' && (
               <>
                 <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
                   className="text-[11.5px] font-medium whitespace-nowrap disabled:opacity-50"

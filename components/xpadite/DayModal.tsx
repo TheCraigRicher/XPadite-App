@@ -1095,8 +1095,14 @@ function TaskRow({
           </div>
         </div>
 
-        {/* ── DETAILS ROW — fixed layout across all timer states ── */}
-        <div className="flex items-center gap-1.5 px-3 pb-2">
+        {/* ── DETAILS ROW — fixed layout across all timer states.
+            [Total][Play][Stop] and [Active][Sub-task count][▶] are protected,
+            flex-shrink-0 controls; the time-range text between them is the ONE
+            flexible region (flex:1, min-width:0, ellipsis) — it absorbs any
+            width shortfall by truncating instead of letting the row overflow
+            the card. min-width:0 + overflow:hidden on the row itself is a
+            second line of defense against horizontal overflow. ── */}
+        <div className="flex items-center gap-1.5 px-3 pb-2" style={{ minWidth: 0, overflow: 'hidden' }}>
 
           {/* Total — always shown; placeholder when task not yet started */}
           <span className="text-[10px] flex-shrink-0 flex items-center gap-1 mr-0.5">
@@ -1129,8 +1135,9 @@ function TaskRow({
             <StopIcon />
           </button>
 
-          {/* Time range — always shown; placeholder when no session yet */}
-          <span className="text-[9px] flex-shrink-0 tabular-nums" style={{ minWidth: 110, color: 'var(--xp-txt3)', opacity: (latestSession || (isActive && runningSession)) ? 1 : 0.32 }}>
+          {/* Time range — the flexible region: shrinks and truncates with an
+              ellipsis before anything else is allowed to move or overflow. */}
+          <span className="text-[9px] tabular-nums" style={{ flex: '1 1 0%', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', color: 'var(--xp-txt3)', opacity: (latestSession || (isActive && runningSession)) ? 1 : 0.32 }}>
             {/* Desktop: locale default (may be 24h) */}
             <span className="hidden sm:inline">
               {isActive && runningSession
@@ -1150,8 +1157,6 @@ function TaskRow({
               }
             </span>
           </span>
-
-          <div className="flex-1" />
 
           {/* Active indicator — pulsing green dot */}
           {isActive && (
@@ -2250,6 +2255,17 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
           .xp-dm-close-btn { transition: background 150ms ease, border-color 150ms ease, transform 90ms ease; }
           .xp-dm-close-btn:hover { background: rgba(239,68,68,0.28) !important; border-color: rgba(239,68,68,0.45) !important; }
           .xp-dm-close-btn:active { transform: scale(0.93); transition-duration: 60ms; }
+          /* Mobile-only: the sub-task connector's own geometry (trunk/branch/
+             arrowhead) needs ~22px of internal gutter, but the outer indent
+             pushing that whole block in from the parent task's edge was pure
+             margin with no connector depending on it — shrinking it on mobile
+             hands that width straight to the sub-task title, which was
+             truncating to just 1-2 characters. Desktop/tablet keep the
+             original 16/24px margin untouched. */
+          @media (max-width: 640px) {
+            .xp-subtask-indent { margin-left: 4px !important; }
+            .xp-subtask-indent[data-reorder="true"] { margin-left: 14px !important; }
+          }
         `}</style>
 
         {/* Desktop/tablet header — three-zone layout so the center date stays
@@ -2486,7 +2502,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
 
                       {/* Sub-tasks hierarchy — corrected connector geometry */}
                       {hasKids && isExpanded && (
-                        <div style={{ marginLeft: reorderMode ? 24 : 16, marginTop: 6 }}>
+                        <div className="xp-subtask-indent" data-reorder={reorderMode ? 'true' : 'false'} style={{ marginLeft: reorderMode ? 24 : 16, marginTop: 6 }}>
                           {children.map((child, ci) => {
                             const isLast = ci === children.length - 1
                             return (

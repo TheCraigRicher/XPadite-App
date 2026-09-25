@@ -11,7 +11,7 @@ import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
 import {
   parseJournalDoc, parseJournalContent, serializeJournalContent,
-  getSectionStyle, SECTION_COLORS,
+  getSectionStyle,
 } from './journalUtils'
 import type { JournalBlock, JournalDoc } from './types'
 import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
@@ -223,12 +223,46 @@ export function JournalEditorEmbed({
         )}
       </div>
 
-      {/* Other blocks — read-only preview */}
+      {/* Other blocks — structured, section-grouped, read-only preview.
+          A section's TITLE is block.name (the same field the Planner editor's
+          own "Add Title" affordance writes to — see JournalEditorContent.tsx)
+          — never block.sectionColor, which is presentational metadata only.
+          Image/drawing blocks immediately following a section (until the
+          next section, or a stray text block breaks the run) are grouped
+          under it as thumbnails: JournalBlock has no explicit "belongs to
+          section" field, so adjacency in the already-saved block order is
+          the most faithful read of what the user actually built in the
+          Planner, without inventing a second parallel data structure. */}
       {otherBlocks.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
-          {otherBlocks.map(block => (
-            <BlockReadOnly key={block.id} block={block} isDark={isDark} onPreview={src => setLightbox(src)} />
-          ))}
+          {(() => {
+            const untitledTotal = otherBlocks.filter(b => b.type === 'section' && !b.name?.trim()).length
+            let untitledSeen = 0
+            type ReadGroup =
+              | { kind: 'section'; section: JournalBlock; images: JournalBlock[]; label: string }
+              | { kind: 'block'; block: JournalBlock }
+            const groups: ReadGroup[] = []
+            let current: Extract<ReadGroup, { kind: 'section' }> | null = null
+            for (const b of otherBlocks) {
+              if (b.type === 'section') {
+                const trimmed = b.name?.trim()
+                let label: string
+                if (trimmed) { label = trimmed }
+                else { untitledSeen += 1; label = untitledTotal > 1 ? `Untitled Section ${untitledSeen}` : 'Untitled Section' }
+                current = { kind: 'section', section: b, images: [], label }
+                groups.push(current)
+              } else if ((b.type === 'image' || b.type === 'drawing') && current) {
+                current.images.push(b)
+              } else {
+                current = null
+                groups.push({ kind: 'block', block: b })
+              }
+            }
+            return groups.map(g => g.kind === 'section'
+              ? <SectionReadOnly key={g.section.id} section={g.section} label={g.label} images={g.images} isDark={isDark} onPreview={src => setLightbox(src)} />
+              : <BlockReadOnly key={g.block.id} block={g.block} isDark={isDark} onPreview={src => setLightbox(src)} />
+            )
+          })()}
         </div>
       )}
 
@@ -276,25 +310,60 @@ function BlockReadOnly({ block, isDark, onPreview }: { block: JournalBlock; isDa
     )
   }
 
-  if (block.type === 'section') {
-    const s = getSectionStyle(block.sectionColor ?? 'lavender', isDark)
-    const colorLabel = SECTION_COLORS.find(c => c.key === block.sectionColor)?.label ?? 'Section'
-    const text = extractPlainText(block.content)
-    return (
-      <div style={{ borderRadius: 8, border: `0.5px solid ${s.border}`, background: s.background, padding: '8px 10px' }}>
-        <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: s.labelColor, marginBottom: 4 }}>{colorLabel}</div>
-        {text && <div style={{ fontSize: 11, color: isDark ? 'rgba(255,255,255,0.72)' : 'rgba(0,0,0,0.68)', lineHeight: 1.5 }}>{text}</div>}
-      </div>
-    )
-  }
-
-  // Secondary text block — show as plain text
+  // Secondary text block — show as plain text (sections are handled by SectionReadOnly)
   const text = extractPlainText(block.content)
   if (!text) return null
   return (
     <div style={{ fontSize: 11, color: isDark ? 'rgba(255,255,255,0.58)' : 'rgba(0,0,0,0.55)', lineHeight: 1.5, paddingLeft: 8,
       borderLeft: `2px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}` }}>
       {text}
+    </div>
+  )
+}
+
+// ─── SectionReadOnly — a saved Planner section (title + text + grouped images),
+// collapsible independently of every other section. Title is block.name, the
+// same field the Planner editor's own title affordance writes; color remains
+// purely a visual accent (background/border/label tint), never the heading. ──
+
+function SectionReadOnly({ section, label, images, isDark, onPreview }: {
+  section: JournalBlock; label: string; images: JournalBlock[]; isDark: boolean; onPreview: (src: string) => void
+}) {
+  const [collapsed, setCollapsed] = useState(section.collapsed ?? false)
+  const s = getSectionStyle(section.sectionColor ?? 'lavender', isDark)
+  const text = extractPlainText(section.content)
+  return (
+    <div style={{ borderRadius: 8, border: `0.5px solid ${s.border}`, background: s.background, padding: '8px 10px' }}>
+      <button
+        type="button"
+        onClick={() => setCollapsed(c => !c)}
+        style={{ display: 'flex', alignItems: 'flex-start', gap: 5, width: '100%', background: 'none', border: 'none', padding: 0, margin: 0, cursor: 'pointer', textAlign: 'left' }}
+        title={collapsed ? 'Expand section' : 'Collapse section'}
+      >
+        <span style={{ display: 'inline-block', flexShrink: 0, fontSize: 9, lineHeight: '15px', color: s.labelColor, transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)', transition: 'transform 180ms cubic-bezier(0.4,0,0.2,1)' }}>▶</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: s.labelColor, minWidth: 0, overflowWrap: 'break-word', lineHeight: 1.4 }}>{label}</span>
+      </button>
+      {!collapsed && (
+        <div style={{ marginTop: 5, paddingLeft: 14 }}>
+          {text && <div style={{ fontSize: 11, color: isDark ? 'rgba(255,255,255,0.72)' : 'rgba(0,0,0,0.68)', lineHeight: 1.5 }}>{text}</div>}
+          {images.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: text ? 8 : 0 }}>
+              {images.map(img => img.thumbnail && (
+                <img
+                  key={img.id}
+                  src={img.thumbnail}
+                  alt={img.name ?? (img.type === 'drawing' ? 'Drawing' : 'Image')}
+                  onClick={() => img.src && onPreview(img.src)}
+                  style={{
+                    width: 56, height: 56, objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in', flexShrink: 0,
+                    border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'}`,
+                  }}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

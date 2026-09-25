@@ -917,6 +917,54 @@ function TaskRow({
     }
   }
 
+  // Notes textarea is plain text (• /1. /☐ are literal characters this
+  // component inserts and interprets itself — there's no rich-text list
+  // extension underneath), so unlike a TipTap editor it has no built-in
+  // "continue list on Enter" behavior at all. This reproduces that behavior
+  // by hand for all three marker styles — "• ", "N. ", and "☐ "/"☑ " (a new
+  // checklist item always continues unchecked, matching the other two modes
+  // always continuing with a fresh marker) — splitting the line and
+  // continuing the same marker; Enter on an EMPTY marker line exits that
+  // list mode instead, matching standard editor convention. Backspace needs
+  // no special handling — it's plain text, so it already deletes the marker
+  // character-by-character with nothing trapping the cursor.
+  function handleNotesKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key !== 'Enter') return
+    const ta = e.currentTarget
+    const value = ta.value
+    const cursor = ta.selectionStart
+    const lineStart = value.lastIndexOf('\n', cursor - 1) + 1
+    const lineEndIdx = value.indexOf('\n', lineStart)
+    const lineEnd = lineEndIdx === -1 ? value.length : lineEndIdx
+    const line = value.slice(lineStart, lineEnd)
+
+    const bulletMatch = line.match(/^• (.*)$/)
+    const numberMatch = line.match(/^(\d+)\. (.*)$/)
+    const checkMatch  = line.match(/^[☐☑] (.*)$/)
+    if (!bulletMatch && !numberMatch && !checkMatch) return // not a list line — normal Enter behavior
+
+    const markerLen = bulletMatch ? 2 : numberMatch ? numberMatch[1].length + 2 : 2
+    const content   = bulletMatch ? bulletMatch[1] : numberMatch ? numberMatch[2] : checkMatch![1]
+
+    e.preventDefault()
+
+    if (content.trim() === '') {
+      // Empty item — exit list mode: drop the marker, leave a plain blank line
+      const next = value.slice(0, lineStart) + value.slice(lineStart + markerLen)
+      onNotesDraftChange(next)
+      requestAnimationFrame(() => { ta.setSelectionRange(lineStart, lineStart); ta.focus() })
+      return
+    }
+
+    const marker = bulletMatch ? '• ' : numberMatch ? `${Number(numberMatch[1]) + 1}. ` : '☐ '
+    const before = value.slice(0, cursor)
+    const after  = value.slice(cursor)
+    const next   = before + '\n' + marker + after
+    onNotesDraftChange(next)
+    const newCursor = cursor + 1 + marker.length
+    requestAnimationFrame(() => { ta.setSelectionRange(newCursor, newCursor); ta.focus() })
+  }
+
   const notesDirty     = draftJournal !== null
   const totalMs        = getTaskTotalMs(task, isActive, now)
   const runningSession = getRunningSession(task)
@@ -1259,6 +1307,7 @@ function TaskRow({
                   autoFocus
                   value={draftJournal ?? task.journal}
                   onChange={e => onNotesDraftChange(e.target.value)}
+                  onKeyDown={handleNotesKeyDown}
                   placeholder="Add notes, or type ☐ to start a checklist item..."
                   rows={3}
                   tabIndex={expanded ? 0 : -1}

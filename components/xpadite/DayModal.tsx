@@ -1269,7 +1269,7 @@ function TaskRow({
                     className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
                     style={{ color: 'var(--xp-txt3)' }}
                   >
-                    {notesViewMode === 'preview' ? '✏️ Edit notes' : '👁 Preview'}
+                    {notesViewMode === 'preview' ? <>✏️ <span className="hidden sm:inline">Edit notes</span><span className="sm:hidden">Edit</span></> : '👁 Preview'}
                   </button>
 
                   {notesViewMode === 'edit' && (
@@ -1287,7 +1287,7 @@ function TaskRow({
                     className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
                     style={{ color: 'var(--xp-txt3)', opacity: uploading ? 0.5 : 1, cursor: 'pointer' }}
                   >
-                    📎 Upload File
+                    📎 <span className="hidden sm:inline">Upload File</span><span className="sm:hidden">Upload</span>
                   </button>
 
                   <button
@@ -2255,16 +2255,24 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
           .xp-dm-close-btn { transition: background 150ms ease, border-color 150ms ease, transform 90ms ease; }
           .xp-dm-close-btn:hover { background: rgba(239,68,68,0.28) !important; border-color: rgba(239,68,68,0.45) !important; }
           .xp-dm-close-btn:active { transform: scale(0.93); transition-duration: 60ms; }
-          /* Mobile-only: the sub-task connector's own geometry (trunk/branch/
-             arrowhead) needs ~22px of internal gutter, but the outer indent
-             pushing that whole block in from the parent task's edge was pure
-             margin with no connector depending on it — shrinking it on mobile
-             hands that width straight to the sub-task title, which was
-             truncating to just 1-2 characters. Desktop/tablet keep the
-             original 16/24px margin untouched. */
+          /* Mobile-only: shrink BOTH the outer indent that pushes the whole
+             sub-task block in from the parent task's edge, AND the connector's
+             own internal geometry (trunk/branch/arrowhead) proportionally, so
+             the sub-task card starts noticeably further left overall — every
+             recovered pixel goes straight to the sub-task title, which is the
+             only flex:1 element in that row. The connector's trunk/branch/
+             arrowhead keep the exact same 2px overlap relationship to each
+             other (just at smaller absolute offsets), so it stays visually
+             identical in miniature — never redesigned, never overlapping the
+             title. Desktop/tablet keep the original values untouched. */
           @media (max-width: 640px) {
-            .xp-subtask-indent { margin-left: 4px !important; }
-            .xp-subtask-indent[data-reorder="true"] { margin-left: 14px !important; }
+            .xp-subtask-indent { margin-left: 2px !important; }
+            .xp-subtask-indent[data-reorder="true"] { margin-left: 10px !important; }
+            .xp-sc-item { padding-left: 17px !important; }
+            .xp-sc-trunk { left: 4px !important; }
+            .xp-sc-branch { left: 4px !important; width: 9px !important; }
+            .xp-sc-arrow { left: 11px !important; }
+            .xp-sc-delcheck { left: 17px !important; }
           }
         `}</style>
 
@@ -2464,7 +2472,14 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
 
                   return (
                     <div key={task.id}>
-                      {/* Reorder drag wrapper */}
+                      {/* Reorder drag wrapper — also hosts the multi-delete
+                          selection checkbox on desktop/tablet in its own
+                          dedicated left gutter (reorderMode/deleteMode are
+                          mutually exclusive, so only one of these ever renders).
+                          Mobile instead restores the original contained-in-card
+                          overlay (see inside the card div below) — the gutter
+                          checkbox is hidden below sm, the in-card one hidden at
+                          sm and up, so exactly one renders per breakpoint. */}
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
                         {/* Drag handle — reorder mode only */}
                         {reorderMode && (
@@ -2475,17 +2490,37 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                             title="Drag to reorder"
                           >⠿</div>
                         )}
+                        {/* Multi-delete selection checkbox — desktop/tablet dedicated gutter */}
+                        {deleteMode && (
+                          <button type="button" onClick={() => toggleDeleteSelect(task.id)} className="hidden sm:block"
+                            style={{ flexShrink: 0, marginTop: 9, background: 'none', border: 'none', cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
+                            <div style={{ width: 13, height: 13, borderRadius: 4, border: `1.5px solid ${selectedForDel.has(task.id) ? '#ef4444' : 'var(--xp-bdr2)'}`, background: selectedForDel.has(task.id) ? '#ef4444' : (isDark ? 'rgba(30,22,53,0.9)' : 'rgba(255,255,255,0.92)'), display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.14)' }}>
+                              {selectedForDel.has(task.id) && <span style={{ color: 'white', fontSize: 7, fontWeight: 700, lineHeight: 1 }}>✓</span>}
+                            </div>
+                          </button>
+                        )}
                         <div style={{ flex: 1, minWidth: 0, position: 'relative', outline: reorderMode && dragOverId === task.id ? '2px solid rgba(124,58,237,0.45)' : 'none', borderRadius: 12 }}
                           onDragOver={reorderMode ? (e => { e.preventDefault(); setDragOverId(task.id) }) : undefined}
                           onDragLeave={reorderMode ? () => setDragOverId(null) : undefined}
                           onDrop={reorderMode ? () => { handleReorderDrop(task.id); setDragOverId(null) } : undefined}
                         >
-                          {/* Delete checkbox — inside top-left of card, overlay */}
+                          {/* Multi-delete selection checkbox — mobile only,
+                              sits inside the card's own left padding column
+                              (the header row's px-3 leaves that ~12px strip
+                              completely empty for the row's full height, since
+                              it's padding, not content) — so it never overlaps
+                              the expand/collapse triangle, "Task N" label, or
+                              anything else in the header row, and the header
+                              row's own content never has to move. zIndex kept
+                              BELOW the sticky delete-mode action bar's zIndex:5
+                              (unlike the old zIndex:10 this replaces) so it can
+                              never paint over "0 selected / Cancel / Delete"
+                              while scrolling — the bug fixed two rounds ago. */}
                           {deleteMode && (
-                            <button type="button" onClick={() => toggleDeleteSelect(task.id)}
-                              style={{ position: 'absolute', top: 3, left: 3, zIndex: 10, background: 'none', border: 'none', cursor: 'pointer', padding: 4, WebkitTapHighlightColor: 'transparent' }}>
-                              <div style={{ width: 14, height: 14, borderRadius: 4, border: `1.5px solid ${selectedForDel.has(task.id) ? '#ef4444' : 'var(--xp-bdr2)'}`, background: selectedForDel.has(task.id) ? '#ef4444' : (isDark ? 'rgba(30,22,53,0.9)' : 'rgba(255,255,255,0.92)'), display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.14)' }}>
-                                {selectedForDel.has(task.id) && <span style={{ color: 'white', fontSize: 8, fontWeight: 700, lineHeight: 1 }}>✓</span>}
+                            <button type="button" onClick={() => toggleDeleteSelect(task.id)} className="sm:hidden"
+                              style={{ position: 'absolute', top: 3, left: 0, zIndex: 2, background: 'none', border: 'none', cursor: 'pointer', padding: 2, WebkitTapHighlightColor: 'transparent' }}>
+                              <div style={{ width: 9, height: 9, borderRadius: 3, border: `1.5px solid ${selectedForDel.has(task.id) ? '#ef4444' : 'var(--xp-bdr2)'}`, background: selectedForDel.has(task.id) ? '#ef4444' : (isDark ? 'rgba(30,22,53,0.9)' : 'rgba(255,255,255,0.92)'), display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.14)' }}>
+                                {selectedForDel.has(task.id) && <span style={{ color: 'white', fontSize: 6, fontWeight: 700, lineHeight: 1 }}>✓</span>}
                               </div>
                             </button>
                           )}
@@ -2506,20 +2541,20 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                           {children.map((child, ci) => {
                             const isLast = ci === children.length - 1
                             return (
-                              <div key={child.id} style={{ position: 'relative', paddingLeft: 22, marginBottom: isLast ? 0 : 8 }}>
+                              <div key={child.id} className="xp-sc-item" style={{ position: 'relative', paddingLeft: 22, marginBottom: isLast ? 0 : 8 }}>
                                 {/* Upper vertical: top → midpoint */}
-                                <div style={{ position: 'absolute', left: 7, top: 0, height: '50%', width: 1.5, background: connColor, pointerEvents: 'none' }} />
+                                <div className="xp-sc-trunk" style={{ position: 'absolute', left: 7, top: 0, height: '50%', width: 1.5, background: connColor, pointerEvents: 'none' }} />
                                 {/* Lower vertical: midpoint → bottom + gap (non-last only) */}
                                 {!isLast && (
-                                  <div style={{ position: 'absolute', left: 7, top: '50%', height: 'calc(50% + 8px)', width: 1.5, background: connColor, pointerEvents: 'none' }} />
+                                  <div className="xp-sc-trunk" style={{ position: 'absolute', left: 7, top: '50%', height: 'calc(50% + 8px)', width: 1.5, background: connColor, pointerEvents: 'none' }} />
                                 )}
                                 {/* Horizontal branch at exact midpoint */}
-                                <div style={{ position: 'absolute', left: 7, top: '50%', width: 14, height: 1.5, background: connColor, transform: 'translateY(-50%)', pointerEvents: 'none', borderRadius: 1 }} />
+                                <div className="xp-sc-branch" style={{ position: 'absolute', left: 7, top: '50%', width: 14, height: 1.5, background: connColor, transform: 'translateY(-50%)', pointerEvents: 'none', borderRadius: 1 }} />
                                 {/* Arrowhead */}
-                                <div style={{ position: 'absolute', left: 19, top: '50%', transform: 'translateY(-50%)', width: 0, height: 0, borderTop: '3px solid transparent', borderBottom: '3px solid transparent', borderLeft: `4px solid ${connColor}`, pointerEvents: 'none' }} />
+                                <div className="xp-sc-arrow" style={{ position: 'absolute', left: 19, top: '50%', transform: 'translateY(-50%)', width: 0, height: 0, borderTop: '3px solid transparent', borderBottom: '3px solid transparent', borderLeft: `4px solid ${connColor}`, pointerEvents: 'none' }} />
                                 {/* Delete checkbox for sub-tasks */}
                                 {deleteMode && (
-                                  <button type="button" onClick={() => toggleDeleteSelect(child.id)} style={{ position: 'absolute', left: 22, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', zIndex: 2, padding: 2 }}>
+                                  <button type="button" onClick={() => toggleDeleteSelect(child.id)} className="xp-sc-delcheck" style={{ position: 'absolute', left: 22, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', zIndex: 2, padding: 2 }}>
                                     <div style={{ width: 13, height: 13, borderRadius: 3, border: `1.5px solid ${selectedForDel.has(child.id) ? '#ef4444' : 'var(--xp-bdr2)'}`, background: selectedForDel.has(child.id) ? '#ef4444' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                       {selectedForDel.has(child.id) && <span style={{ color: 'white', fontSize: 8, fontWeight: 700, lineHeight: 1 }}>✓</span>}
                                     </div>

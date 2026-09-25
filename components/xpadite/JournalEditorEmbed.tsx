@@ -66,8 +66,11 @@ export function JournalEditorEmbed({
   const docRef         = useRef<JournalDoc>({ v: 1, blocks: [] })
 
   const acc   = '#7c3aed'
-  const bdr   = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'
-  const muted = isDark ? 'rgba(255,255,255,0.38)' : 'rgba(0,0,0,0.36)'
+  // Same tokens the Task Notes toolbar buttons use (DayModal.tsx) — this row
+  // was using hand-rolled low-alpha rgba values instead, which read as
+  // washed-out/disabled next to Task Notes' properly-calibrated theme colors.
+  const bdr   = 'var(--xp-bdr2)'
+  const muted = 'var(--xp-txt3)'
 
   // Parse current doc and find editable first text block
   const doc = useMemo(() => parseJournalDoc(rawContent), [rawContent]) // eslint-disable-line react-hooks/exhaustive-deps

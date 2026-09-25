@@ -60,7 +60,7 @@ export function computeYearStats(
 
 // ─── Platforms ────────────────────────────────────────────────────────────────
 
-interface Platform {
+export interface Platform {
   id: string
   label: string
   sublabel?: string
@@ -69,7 +69,7 @@ interface Platform {
   abbr: string
 }
 
-const PLATFORMS: Platform[] = [
+export const PLATFORMS: Platform[] = [
   { id: 'ig-story', label: 'Instagram', sublabel: 'Story', color: '#fff', bg: 'linear-gradient(135deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888)', abbr: 'IG' },
   { id: 'ig-post',  label: 'Instagram', sublabel: 'Post',  color: '#fff', bg: 'linear-gradient(135deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888)', abbr: 'IG' },
   { id: 'fb-post',  label: 'Facebook',  sublabel: 'Post',  color: '#fff', bg: '#1877F2',  abbr: 'f'  },
@@ -82,7 +82,7 @@ const PLATFORMS: Platform[] = [
 
 // ─── Mobile / PWA detection ──────────────────────────────────────────────────
 
-function isMobileOrPWA(): boolean {
+export function isMobileOrPWA(): boolean {
   if (typeof window === 'undefined') return false
   // Installed PWA on any device
   if (window.matchMedia?.('(display-mode: standalone)').matches) return true
@@ -92,7 +92,7 @@ function isMobileOrPWA(): boolean {
 
 // ─── Platform desktop destinations ───────────────────────────────────────────
 
-const PLATFORM_DESTINATIONS: Record<string, { url: string; name: string }> = {
+export const PLATFORM_DESTINATIONS: Record<string, { url: string; name: string }> = {
   'ig-story':  { url: 'https://www.instagram.com/',             name: 'Instagram'  },
   'ig-post':   { url: 'https://www.instagram.com/',             name: 'Instagram'  },
   'fb-post':   { url: 'https://www.facebook.com/',              name: 'Facebook'   },
@@ -149,7 +149,7 @@ export async function executeXpaditeShare(
   return 'downloaded'
 }
 
-function triggerDownloadFromFile(file: File) {
+export function triggerDownloadFromFile(file: File) {
   const url = URL.createObjectURL(file)
   const a   = document.createElement('a')
   a.href     = url
@@ -602,7 +602,7 @@ export async function generateYearShareCardDataUri(
 
 // ─── Platform badge ───────────────────────────────────────────────────────────
 
-function PlatformBadge({ p }: { p: Platform }) {
+export function PlatformBadge({ p }: { p: Platform }) {
   return (
     <div
       style={{

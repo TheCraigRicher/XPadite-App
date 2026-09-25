@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import type { CalendarData, WorkSession, Activity, ActiveSession, DayData, ActiveTaskTimer, Reminder, JournalLabel, JournalFolder } from './types'
-import { normalizeHexColor } from './utils'
+import { normalizeHexColor, todayKey } from './utils'
 import {
   upsertReminder as supabaseUpsertReminder,
   deleteReminder as supabaseDeleteReminder,
@@ -13,8 +13,10 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import {
   fetchCalendarDays,
+  fetchCalendarDay,
   upsertDayData,
   fetchWorkSessions,
+  fetchOpenWorkSessions,
   upsertWorkSession,
   fetchUserActivities,
   upsertAllActivities,
@@ -421,24 +423,42 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   // ─── Active-session reconciliation (focus/visibility + reconnect fallback) ───
   // Realtime is the primary sync mechanism, but it can miss events across a
   // temporary network drop, browser tab throttling, or mobile backgrounding.
-  // This re-derives BOTH activeSession and activeTaskTimer from the same
-  // authoritative Supabase queries the initial-load effect above already uses,
-  // and corrects local state in either direction — clearing a stale "running"
-  // timer this device didn't hear stop, or reconstructing one it missed the
-  // start of. No Supabase writes happen here, only reads, so it's safe to run
-  // as often as focus/visibility events actually fire (never on a timer).
+  // This re-derives BOTH activeSession and activeTaskTimer, and corrects local
+  // state in either direction — clearing a stale "running" timer this device
+  // didn't hear stop, or reconstructing one it missed the start of.
+  //
+  // EGRESS FIX: this used to call fetchWorkSessions/fetchCalendarDays — the
+  // SAME full-table queries the one-time initial-load hydration uses — on
+  // every focus/visibility/online event. Those events fire constantly (every
+  // tab switch, phone unlock, app switch), so every one of them was
+  // re-downloading the user's ENTIRE calendar_days history (including any
+  // embedded attachment/journal image data) and entire work_sessions history.
+  // Reconciliation only ever needs "is a session/timer currently open," so it
+  // now uses two narrow, targeted queries instead:
+  //   - fetchOpenWorkSessions: only rows with end_ts IS NULL, only the columns
+  //     needed to reconstruct one (never completed historical sessions).
+  //   - fetchCalendarDay: a single row, by exact date_key, never the whole
+  //     table. A live task timer can only be running against "today" (it's an
+  //     open-ended session that started now) or, if this device already has
+  //     one running, the exact date it already knows about — both are known
+  //     values, so no scan of every day is ever needed to find it.
+  // No Supabase writes happen here, only reads, so it's still safe to run as
+  // often as focus/visibility events actually fire (never on a timer).
   const reconcileActiveSession = useCallback(async () => {
     const uid = userIdRef.current
     if (!uid) return
     const supabase = createClient()
     try {
-      const [sbSessions, sbCalData] = await Promise.all([
-        fetchWorkSessions(supabase, uid),
-        fetchCalendarDays(supabase, uid),
+      const localTimer = activeTaskTimerRef.current
+      const datesToCheck = Array.from(new Set([todayKey(), ...(localTimer ? [localTimer.dateKey] : [])]))
+
+      const [openSessions, dayRows] = await Promise.all([
+        fetchOpenWorkSessions(supabase, uid),
+        Promise.all(datesToCheck.map(async dateKey => ({ dateKey, dayData: await fetchCalendarDay(supabase, uid, dateKey) }))),
       ])
 
-      // activeSession ← authoritative open work_sessions row (endTs === null)
-      const openSession = sbSessions.find(s => s.endTs === null) ?? null
+      // activeSession ← authoritative open work_sessions row (end_ts IS NULL)
+      const openSession = openSessions[0] ?? null
       const localActive = activeSessionRef.current
       if (openSession) {
         if (localActive?.id !== openSession.id) {
@@ -450,28 +470,30 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
         try { localStorage.removeItem('xp9-active-session') } catch {}
       }
 
-      // activeTaskTimer ← authoritative running task session (endTs === null) in calendar_days
+      // activeTaskTimer ← authoritative running task session (endTs === null),
+      // scanning only the 1-2 targeted day rows fetched above.
       let sbTimer: ActiveTaskTimer | null = null
-      for (const [dayKey, dayData] of Object.entries(sbCalData)) {
-        if (sbTimer) break
+      for (const { dateKey, dayData } of dayRows) {
+        if (sbTimer || !dayData) continue
         const tasks = dayData.tasks ?? []
         for (let i = 0; i < tasks.length; i++) {
           const runningSess = (tasks[i].sessions ?? []).find(s => s.endTs === null)
           if (runningSess) {
             sbTimer = {
-              taskId: tasks[i].id, dateKey: dayKey, sessionId: runningSess.id,
+              taskId: tasks[i].id, dateKey, sessionId: runningSess.id,
               startTs: runningSess.startTs, taskText: tasks[i].text, taskIndex: i,
             }
             break
           }
         }
       }
-      const localTimer = activeTaskTimerRef.current
       const sameTimer = !!sbTimer && localTimer?.taskId === sbTimer.taskId && localTimer?.sessionId === sbTimer.sessionId
       if (sbTimer && !sameTimer) {
         setActiveTaskTimerRaw(sbTimer)
         try { localStorage.setItem('xp9-active-task-timer', JSON.stringify(sbTimer)) } catch {}
-      } else if (!sbTimer && localTimer) {
+      } else if (!sbTimer && localTimer && datesToCheck.includes(localTimer.dateKey)) {
+        // Only clear the local timer if we actually checked its date and found
+        // it gone — never clear it based on dates we didn't look at.
         setActiveTaskTimerRaw(null)
         try { localStorage.removeItem('xp9-active-task-timer') } catch {}
       }

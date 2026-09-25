@@ -61,6 +61,26 @@ export async function fetchCalendarDays(
   return result
 }
 
+// Narrow single-row lookup for active-session reconciliation (focus/visibility/
+// online) — deliberately separate from fetchCalendarDays above, which returns
+// the ENTIRE table and must stay reserved for the one-time initial-load hydration.
+// Reconciliation only ever needs to check a specific day's row for a running
+// task timer, never the whole history.
+export async function fetchCalendarDay(
+  supabase: Supabase,
+  userId: string,
+  dateKey: string,
+): Promise<DayData | null> {
+  const { data, error } = await supabase
+    .from('calendar_days')
+    .select('day_data')
+    .eq('user_id', userId)
+    .eq('date_key', dateKey)
+    .maybeSingle()
+  if (error || !data) return null
+  return data.day_data as DayData
+}
+
 export async function upsertDayData(
   supabase: Supabase,
   userId: string,
@@ -120,6 +140,31 @@ export async function upsertWorkSession(
       { onConflict: 'user_id,session_id' },
     )
   if (error) throw error
+}
+
+// Narrow lookup for active-session reconciliation — only currently-open
+// sessions (end_ts IS NULL), and only the columns needed to reconstruct one.
+// fetchWorkSessions above (full history, every column) stays reserved for the
+// one-time initial-load hydration.
+export async function fetchOpenWorkSessions(
+  supabase: Supabase,
+  userId: string,
+): Promise<WorkSession[]> {
+  const { data, error } = await supabase
+    .from('work_sessions')
+    .select('session_id, act_id, act_name, act_color, start_ts, date_key')
+    .eq('user_id', userId)
+    .is('end_ts', null)
+  if (error || !data || data.length === 0) return []
+  return data.map(row => ({
+    id: row.session_id as string,
+    actId: row.act_id as string,
+    actName: row.act_name as string,
+    actColor: row.act_color as string,
+    startTs: row.start_ts as number,
+    endTs: null,
+    dateKey: row.date_key as string,
+  }))
 }
 
 // ── User Activities ──────────────────────────────────────────────────────────

@@ -976,7 +976,7 @@ function TaskRow({
           {hasChildren ? (
             <button
               onClick={e => { e.stopPropagation(); onParentExpandToggle?.() }}
-              className="flex-shrink-0 flex items-center justify-center transition-colors hover:bg-black/5 rounded"
+              className="xp-parent-expand-btn flex-shrink-0 flex items-center justify-center transition-colors hover:bg-black/5 rounded"
               style={{ width: 18, height: 18, color: 'var(--xp-txt3)', fontSize: 10 }}
               title={isParentExpanded ? 'Collapse sub-tasks' : 'Expand sub-tasks'}
             >
@@ -2262,6 +2262,17 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
           .xp-dm-close-btn { transition: background 150ms ease, border-color 150ms ease, transform 90ms ease; }
           .xp-dm-close-btn:hover { background: rgba(239,68,68,0.28) !important; border-color: rgba(239,68,68,0.45) !important; }
           .xp-dm-close-btn:active { transform: scale(0.93); transition-duration: 60ms; }
+          /* The Multi-delete selector's inline style can't reach :focus/:active/
+             :focus-visible — a platform default focus/tap ring on some mobile
+             browsers can render its own glow around a <button> on press, which
+             is what was showing as the selected state "bleeding" past the
+             purple square. Re-asserting the exact intended inset ring (and
+             nothing else) for those pseudo-states forces it back to only ever
+             showing what the base style already shows. */
+          .xp-dm-mdel-cb:focus, .xp-dm-mdel-cb:active, .xp-dm-mdel-cb:focus-visible {
+            outline: none !important;
+            box-shadow: inset 0 0 0 1.5px rgba(124,58,237,0.85) !important;
+          }
           /* Mobile-only: shrink BOTH the outer indent that pushes the whole
              sub-task block in from the parent task's edge, AND the connector's
              own internal geometry (trunk/branch/arrowhead) proportionally, so
@@ -2279,6 +2290,11 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             .xp-sc-trunk { left: 4px !important; }
             .xp-sc-branch { left: 4px !important; width: 9px !important; }
             .xp-sc-arrow { left: 11px !important; }
+            /* Mobile-only: the parent expand/collapse triangle keeps its exact
+               18x18 slot (so the "Task N" label and everything after it never
+               moves) — only its glyph's alignment WITHIN that slot shifts from
+               centered to right-aligned, closer to the gap before the label. */
+            .xp-parent-expand-btn { justify-content: flex-end !important; }
           }
         `}</style>
 
@@ -2496,28 +2512,42 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                         >
                           {/* Multi-delete selection checkbox — PARENT TASKS ONLY,
                               same placement/size on mobile, tablet and desktop:
-                              inside the card's own upper-left corner, matching
-                              the normal 17x17 completion checkbox's footprint so
-                              the two read as the same scale of control. The inset
-                              purple ring (boxShadow, not a border) is what tells
-                              them apart without growing the checkbox's own
-                              footprint or pushing any row content. zIndex kept
-                              BELOW the sticky delete-mode action bar's zIndex:5
-                              so it can never paint over "0 selected / Cancel /
-                              Delete" while scrolling — the bug fixed two rounds
-                              ago; this box never returns to zIndex:10. */}
+                              inside the card's own upper-left corner. Built as
+                              ONE 16x16 element (no separate padded wrapper button
+                              around an inner div) — the same structure as the
+                              normal completion checkbox just above it in this
+                              file — so its rendered footprint IS the purple box,
+                              nothing larger around it. Unchecked interior gets a
+                              subtle fill via backgroundClip:'padding-box', which
+                              keeps that fill confined INSIDE the (transparent)
+                              border — the border itself never paints, so nothing
+                              can bleed past the purple inset ring as a halo (the
+                              bug from two rounds ago). The border itself stays
+                              transparent in BOTH states — selected uses a red
+                              fill, not a red border — because an inset box-shadow
+                              ring is drawn starting at the border's inner edge,
+                              so a colored border paints in the band OUTSIDE that
+                              ring (the earlier red-bleed bug). The .xp-dm-mdel-cb
+                              :focus/:active rule above guards the same ring
+                              against platform focus/tap outlines. zIndex
+                              kept BELOW the sticky delete-mode action bar's
+                              zIndex:5 so it can never paint over "0 selected /
+                              Cancel / Delete" while scrolling. */}
                           {deleteMode && (
-                            <button type="button" onClick={() => toggleDeleteSelect(task.id)}
-                              style={{ position: 'absolute', top: 3, left: 0, zIndex: 2, background: 'none', border: 'none', cursor: 'pointer', padding: 3, WebkitTapHighlightColor: 'transparent' }}>
-                              <div style={{
-                                width: 17, height: 17, borderRadius: 6,
-                                border: `2px solid ${selectedForDel.has(task.id) ? '#ef4444' : 'var(--xp-bdr2)'}`,
-                                background: selectedForDel.has(task.id) ? '#ef4444' : (isDark ? 'rgba(30,22,53,0.9)' : 'rgba(255,255,255,0.92)'),
-                                boxShadow: 'inset 0 0 0 1.5px rgba(124,58,237,0.85), 0 1px 3px rgba(0,0,0,0.14)',
+                            <button type="button" onClick={() => toggleDeleteSelect(task.id)} className="xp-dm-mdel-cb"
+                              style={{
+                                position: 'absolute', top: 3, left: 2, zIndex: 2,
+                                width: 16, height: 16, borderRadius: 6, margin: 0, padding: 0,
+                                border: '2px solid transparent',
+                                backgroundColor: selectedForDel.has(task.id) ? 'rgba(124,58,237,0.85)' : (isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.035)'),
+                                backgroundClip: 'padding-box',
+                                boxShadow: 'inset 0 0 0 1.5px rgba(124,58,237,0.85)',
+                                overflow: 'hidden',
                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                cursor: 'pointer', outline: 'none', appearance: 'none', WebkitAppearance: 'none',
+                                WebkitTapHighlightColor: 'transparent',
                               }}>
-                                {selectedForDel.has(task.id) && <span style={{ color: 'white', fontSize: 10, fontWeight: 700, lineHeight: 1 }}>✓</span>}
-                              </div>
+                              {selectedForDel.has(task.id) && <span style={{ color: 'white', fontSize: 10, fontWeight: 700, lineHeight: 1 }}>✓</span>}
                             </button>
                           )}
                           <TaskRow

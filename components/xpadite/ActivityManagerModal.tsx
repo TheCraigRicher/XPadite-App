@@ -459,6 +459,33 @@ export function ActivityManagerModal({ onClose }: ActivityManagerModalProps) {
 
   return (
     <>
+      {/* Row micro-interactions — hover lift/shadow/tint on hover-capable
+          pointers (desktop, and tablets with a mouse/trackpad/stylus, via
+          the hover:hover + pointer:fine media query), a tiny press-scale for
+          touch (:active fires on touchstart and releases naturally on
+          touchend/lift), and prefers-reduced-motion support that drops the
+          transform-based motion while keeping the border/shadow feedback.
+          Selected-state background/border are still set inline per-row
+          (persistent, independent of hover) — this only adds the temporary
+          layer on top, per "hover elevation works ON TOP of selected". */}
+      <style>{`
+        .xp-am-row {
+          transition: transform 150ms cubic-bezier(0.2,0,0.2,1), box-shadow 150ms ease, border-color 150ms ease;
+        }
+        @media (hover: hover) and (pointer: fine) {
+          .xp-am-row:hover {
+            border-color: rgba(124,58,237,0.38) !important;
+            box-shadow: 0 3px 12px rgba(0,0,0,0.07);
+          }
+        }
+        @media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+          .xp-am-row:hover { transform: translateY(-1.5px); }
+        }
+        .xp-am-row:active { transition-duration: 90ms; }
+        @media (prefers-reduced-motion: no-preference) {
+          .xp-am-row:active { transform: scale(0.99); }
+        }
+      `}</style>
       {/*
        * ── Primary overlay + Activity Manager panel ─────────────────────────
        *
@@ -595,10 +622,10 @@ export function ActivityManagerModal({ onClose }: ActivityManagerModalProps) {
                     return (
                       <div
                         key={act.id}
-                        className="flex items-center gap-3 px-3 py-3 rounded-xl cursor-pointer transition-all duration-150"
+                        className="xp-am-row flex items-center gap-3 px-3 py-3 rounded-xl cursor-pointer"
                         style={{
-                          background: isSelected ? 'rgba(124,58,237,0.08)' : 'var(--xp-bg3)',
-                          border: `0.5px solid ${isSelected ? 'rgba(124,58,237,0.3)' : 'var(--xp-bdr)'}`,
+                          background: isSelected ? 'rgba(124,58,237,0.14)' : 'var(--xp-bg3)',
+                          border: `${isSelected ? '1px solid rgba(124,58,237,0.48)' : '0.5px solid var(--xp-bdr)'}`,
                         }}
                         onClick={() => setSelectedActId(act.id)}
                       >

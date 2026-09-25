@@ -16,6 +16,7 @@ import {
   PLATFORMS, PLATFORM_DESTINATIONS, PlatformBadge,
   triggerDownloadFromFile,
 } from './YearProgressShare'
+import type { Platform } from './YearProgressShare'
 
 const GALLERY_KEY = 'xp9g'
 
@@ -24,6 +25,23 @@ const GALLERY_KEY = 'xp9g'
 // possible contents), applied identically to both states so swapping
 // between them never reflows the surrounding toolbar.
 const SELECT_CANCEL_WIDTH = 80
+
+// Gallery-only addition to the shared PLATFORMS list (kept local rather than
+// added to the exported array in YearProgressShare.tsx, so it can't add an
+// extra tile to the unrelated Year/Month share grid, which maps that array
+// directly). Same tile styling convention as the existing Facebook entry.
+const FB_STORY_PLATFORM: Platform = { id: 'fb-story', label: 'Facebook', sublabel: 'Story', color: '#fff', bg: '#1877F2', abbr: 'f' }
+
+// Organizes the Gallery share panel into named sections. Grouping is purely
+// presentational — every id here still resolves to the same PLATFORMS/
+// FB_STORY_PLATFORM entry and goes through the exact same executeGalleryShare
+// call as before; nothing about how a share is executed differs by group.
+const SHARE_GROUPS: { heading: string; ids: string[] }[] = [
+  { heading: 'Posts', ids: ['ig-post', 'fb-post', 'x', 'linkedin'] },
+  { heading: 'Stories', ids: ['ig-story', 'fb-story'] },
+  { heading: 'Other', ids: ['tiktok', 'snapchat', 'whatsapp'] },
+]
+const SHARE_PLATFORM_BY_ID = new Map<string, Platform>([...PLATFORMS, FB_STORY_PLATFORM].map(p => [p.id, p]))
 
 // ── Data model ───────────────────────────────────────────────────────────────
 // Same store as before (localStorage 'xp9g' + Supabase 'gallery_items'), just
@@ -925,8 +943,8 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
       // only launch WhatsApp/Instagram/etc. with no image attached, which
       // looks like it worked but didn't. Leave the panel open (Download is
       // already one of its own tiles) and say so plainly instead.
-      const dest = PLATFORM_DESTINATIONS[platformId]
-      setToast(`Direct file sharing isn't available in this browser${dest ? ` for ${dest.name}` : ''} — use Download below instead`)
+      const destName = PLATFORM_DESTINATIONS[platformId]?.name ?? (platformId === 'fb-story' ? 'Facebook' : undefined)
+      setToast(`Direct file sharing isn't available in this browser${destName ? ` for ${destName}` : ''} — use Download below instead`)
     } catch {
       setToast('Unable to share — please try again')
     } finally {
@@ -1128,19 +1146,25 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
           </div>
 
           {/* Control bar (MOBILE ONLY) — final structure, ONE row:
-              [All Types ▾] [Newest ▾] [View ▾] [Select ▾], Select pinned to
-              the far right via marginLeft:auto. The By Month/By Type
-              grouping toggle is removed entirely (all 3 devices now — see
-              the desktop block above), so this row's only job is these four
-              controls. The photo-only Import/Camera buttons fold into the
-              same row after Select (flex-wrap only kicks in for that rarer,
-              filtered case — the default 4-control row always fits on one
-              line). typeFilter/sort use `triggerWidth` (mobile-only — the
-              separate desktop instances above don't pass it) so the OUTER
-              button size is fixed regardless of which option is selected;
-              only a GENUINELY too-long label (e.g. "Progress Card") would
-              truncate — "Newest"/"Oldest" get a wide-enough allocation to
-              always render in full, never abbreviated. */}
+              [All Types ▾] [Newest ▾] [View ▾] [Select ▾]. All four are
+              plain flex children sharing the row's own uniform `gap` — Select
+              used to carry marginLeft:'auto' to pin it to the container's
+              true right edge, but that made an elastic (and visually uneven)
+              gap between View and Select while the other three stayed at a
+              fixed 4px — removing it lets all three gaps read as equal,
+              using only the width the row already had (no wider row, no
+              bigger buttons). The By Month/By Type grouping toggle is removed
+              entirely (all 3 devices — see the desktop block above), so this
+              row's only job is these four controls. The photo-only Import/
+              Camera buttons fold into the same row after Select (flex-wrap
+              only kicks in for that rarer, filtered case — the default
+              4-control row always fits on one line). typeFilter/sort use
+              `triggerWidth` (mobile-only — the separate desktop instances
+              above don't pass it) so the OUTER button size is fixed
+              regardless of which option is selected; only a GENUINELY
+              too-long label (e.g. "Progress Card") would truncate —
+              "Newest"/"Oldest" get a wide-enough allocation to always render
+              in full, never abbreviated. */}
           <div className="flex sm:hidden flex-wrap items-center gap-1 px-4 pt-3 pb-3 flex-shrink-0" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
             <SimpleDropdown
               value={typeFilter}
@@ -1170,7 +1194,7 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
               ]}
             />
 
-            <div style={{ marginLeft: 'auto', flexShrink: 0 }}>
+            <div style={{ flexShrink: 0 }}>
               {selectMode ? (
                 <button
                   onClick={exitSelectMode}
@@ -1399,48 +1423,73 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
             <div className="flex justify-center pt-3 pb-1">
               <div style={{ width: 36, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.15)' }} />
             </div>
-            <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: '0.5px solid rgba(255,255,255,0.07)' }}>
-              <div>
+            {/* Header — title/subtitle centered against the modal's full
+                width (relative container + absolutely-positioned X), so the
+                X sitting independently top-right never pulls them left. */}
+            <div className="relative px-5 py-3" style={{ borderBottom: '0.5px solid rgba(255,255,255,0.07)' }}>
+              <div className="text-center px-8">
                 <p className="text-sm font-semibold text-white">
                   Share {shareItems.length > 1 ? `${shareItems.length} items` : (shareItems[0].title || 'item')}
                 </p>
                 <p className="text-[10px] mt-0.5" style={{ color: 'rgba(255,255,255,0.4)' }}>Choose where to share</p>
               </div>
-              <button onClick={closeSharePanel} className="text-xs transition-colors" style={{ color: 'rgba(255,255,255,0.4)' }}>✕</button>
+              <button onClick={closeSharePanel} className="absolute top-3 right-5 text-xs transition-colors" style={{ color: 'rgba(255,255,255,0.4)' }}>✕</button>
             </div>
-            <div className="grid grid-cols-4 gap-3 px-4 py-4">
-              {PLATFORMS.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => executeGalleryShare(shareItems, p.id)}
-                  disabled={actionBusy}
-                  className="flex flex-col items-center gap-2 py-3 rounded-xl transition-all active:scale-95 disabled:opacity-40"
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.08)' }}
-                >
-                  <PlatformBadge p={p} />
-                  <div className="text-center" style={{ lineHeight: 1.2 }}>
-                    <p style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>{p.label}</p>
-                    {p.sublabel ? <p style={{ fontSize: 8, color: 'rgba(255,255,255,0.4)' }}>{p.sublabel}</p> : null}
+            {/* Posts / Stories / Other — purely organizational grouping over
+                the same tiles/executeGalleryShare call as before (see
+                SHARE_GROUPS above); scrollable so a short viewport never
+                clips the last group instead of breaking the sheet's own
+                open/close behavior. */}
+            <div className="overflow-y-auto" style={{ maxHeight: '58vh' }}>
+              {SHARE_GROUPS.map(group => (
+                <div key={group.heading} className="px-4 pt-3">
+                  <p className="text-[10.5px] font-semibold uppercase tracking-wide mb-2 px-1" style={{ color: 'rgba(255,255,255,0.42)', letterSpacing: '0.04em' }}>
+                    {group.heading}
+                  </p>
+                  <div className="grid grid-cols-4 gap-3">
+                    {group.ids.map(id => {
+                      const p = SHARE_PLATFORM_BY_ID.get(id)
+                      if (!p) return null
+                      return (
+                        <button
+                          key={id}
+                          onClick={() => executeGalleryShare(shareItems, id)}
+                          disabled={actionBusy}
+                          className="flex flex-col items-center gap-2 py-3 rounded-xl transition-all active:scale-95 disabled:opacity-40"
+                          style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.08)' }}
+                        >
+                          <PlatformBadge p={p} />
+                          <div className="text-center" style={{ lineHeight: 1.2 }}>
+                            <p style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>{p.label}</p>
+                            {p.sublabel ? <p style={{ fontSize: 8, color: 'rgba(255,255,255,0.4)' }}>{p.sublabel}</p> : null}
+                          </div>
+                        </button>
+                      )
+                    })}
+                    {group.heading === 'Other' && (
+                      <button
+                        onClick={() => handleShareDownload(shareItems)}
+                        disabled={actionBusy}
+                        className="flex flex-col items-center gap-2 py-3 rounded-xl transition-all active:scale-95 disabled:opacity-40"
+                        style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.08)' }}
+                      >
+                        <div style={{ width: 36, height: 36, borderRadius: 10, background: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
+                          <IconDownload />
+                        </div>
+                        <div className="text-center" style={{ lineHeight: 1.2 }}>
+                          <p style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>Download</p>
+                        </div>
+                      </button>
+                    )}
                   </div>
-                </button>
+                </div>
               ))}
-              <button
-                onClick={() => handleShareDownload(shareItems)}
-                disabled={actionBusy}
-                className="flex flex-col items-center gap-2 py-3 rounded-xl transition-all active:scale-95 disabled:opacity-40"
-                style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.08)' }}
-              >
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: '#4f46e5', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' }}>
-                  <IconDownload />
-                </div>
-                <div className="text-center" style={{ lineHeight: 1.2 }}>
-                  <p style={{ fontSize: 9, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>Download</p>
-                </div>
-              </button>
+              <div className="pb-4">
+                {actionBusy && (
+                  <p className="text-center text-[10px] pt-2" style={{ color: 'rgba(255,255,255,0.4)' }}>Preparing…</p>
+                )}
+              </div>
             </div>
-            {actionBusy && (
-              <p className="text-center text-[10px] pb-3" style={{ color: 'rgba(255,255,255,0.4)' }}>Preparing…</p>
-            )}
           </div>
         </div>
       )}

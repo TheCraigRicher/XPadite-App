@@ -176,7 +176,7 @@ function Toast({ message, exiting, onDismiss }: { message: string; exiting: bool
 
   return (
     <div
-      className={exiting ? 'xp-toast-out' : ''}
+      className={exiting ? 'xp-toast-out' : 'xp-toast-in'}
       style={{
         display: 'flex',
         alignItems: 'flex-start',
@@ -190,7 +190,6 @@ function Toast({ message, exiting, onDismiss }: { message: string; exiting: bool
         WebkitBackdropFilter: 'blur(10px)',
         border: '0.5px solid rgba(167,139,250,0.32)',
         boxShadow: '3px 8px 14px rgba(109,40,217,0.28), 5px 14px 30px rgba(109,40,217,0.14), 2px 6px 48px rgba(88,28,135,0.07)',
-        animation: exiting ? undefined : 'toast-in 0.25s ease-out',
       }}
     >
       <div style={{ flex: 1, minWidth: 0 }}>

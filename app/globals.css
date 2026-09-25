@@ -165,9 +165,23 @@ body {
   0%, 100% { opacity: 0.04; }
   50%       { opacity: 0.09; }
 }
+/* XPadite signature toast motion — ONE shared entrance/exit language for
+   every toast in the app (there is only the one Toast component/xp-toast
+   state; nothing else implements its own toast animation). Entrance: a
+   smooth rise from below into resting position, tasteful deceleration, no
+   bounce/overshoot. Exit is the distinctive part: a small upward
+   anticipation, then a fast downward whoosh off-screen — noticeably quicker
+   than the entrance. Duration here (0.3s) matches the existing auto-dismiss
+   JS timing (XpaditeApp.tsx sets toastExiting 300ms before clearing the
+   toast) exactly, so no JS timing changes were needed for this upgrade —
+   this is a presentational-only change; the toast content/trigger logic
+   throughout the app is untouched. */
 @keyframes toast-in {
-  from { opacity: 0; transform: translateY(12px) scale(0.96); }
-  to   { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(36px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.xp-toast-in {
+  animation: toast-in 0.36s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 @keyframes streak-grow {
   from { transform: scaleX(0); opacity: 0; }
@@ -364,17 +378,31 @@ body {
   cursor: pointer;
 }
 
-/* Toast fade-out */
+/* Toast exit — tiny upward anticipation, then a fast downward whoosh
+   off-screen (see the .xp-toast-in comment above for the full rationale). */
 @keyframes xp-toast-out {
-  from { opacity: 1; transform: translateY(0) scale(1); }
-  to   { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  0%   { opacity: 1; transform: translateY(0); }
+  15%  { opacity: 1; transform: translateY(-6px); }
+  100% { opacity: 0; transform: translateY(120px); }
 }
 .xp-toast-out {
-  animation: xp-toast-out 0.3s ease-in forwards !important;
+  animation: xp-toast-out 0.3s cubic-bezier(0.4, 0, 1, 1) forwards !important;
 }
+/* prefers-reduced-motion fallback for the toast — opacity-only, no rise/whoosh */
+@keyframes xp-toast-fade-in  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes xp-toast-fade-out { from { opacity: 1; } to { opacity: 0; } }
 
 /* Respect prefers-reduced-motion */
 @media (prefers-reduced-motion: reduce) {
+  .xp-toast-in, .xp-toast-out {
+    animation-duration: 0.15s !important;
+  }
+  .xp-toast-in {
+    animation-name: xp-toast-fade-in !important;
+  }
+  .xp-toast-out {
+    animation-name: xp-toast-fade-out !important;
+  }
   .xp-badge-shine-overlay {
     display: none !important;
   }

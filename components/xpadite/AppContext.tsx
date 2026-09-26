@@ -2,7 +2,8 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import type { CalendarData, WorkSession, Activity, ActiveSession, DayData, ActiveTaskTimer, Reminder, JournalLabel, JournalFolder } from './types'
-import { normalizeHexColor, todayKey } from './utils'
+import { normalizeHexColor, todayKey, detectBrowserTimezone } from './utils'
+import { resolveLocale, type Locale } from './i18n'
 import {
   upsertReminder as supabaseUpsertReminder,
   deleteReminder as supabaseDeleteReminder,
@@ -102,6 +103,14 @@ interface AppContextValue {
   setToast: (msg: string | null) => void
   progressColor: string
   setProgressColor: (c: string) => void
+  // null = "Automatic" (device-detected). A non-null value is a manual
+  // override and stays authoritative until changed or reset back to null.
+  language: string | null
+  setLanguage: (v: string | null) => void
+  effectiveLocale: Locale
+  timezone: string | null
+  setTimezone: (v: string | null) => void
+  effectiveTimezone: string
   customColors: string[]
   addCustomColor: (hex: string) => boolean
   removeCustomColor: (hex: string) => void
@@ -144,6 +153,8 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [progressColor, setProgressColorRaw] = useState<string>('#7c3aed')
+  const [language, setLanguageRaw] = useState<string | null>(null)
+  const [timezone, setTimezoneRaw] = useState<string | null>(null)
   const [customColors, setCustomColorsRaw] = useState<string[]>([])
   const [legendVisible, setLegendVisible] = useState(false)
   const [journalLabels, setJournalLabelsState] = useState<JournalLabel[]>([])
@@ -169,6 +180,11 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   activeTaskTimerRef.current = activeTaskTimer
   const activeSessionRef = useRef(activeSession)
   activeSessionRef.current = activeSession
+
+  // null timezone = "Automatic" → fall back to the device-detected zone.
+  const effectiveTimezone = timezone ?? detectBrowserTimezone()
+  const effectiveTimezoneRef = useRef(effectiveTimezone)
+  effectiveTimezoneRef.current = effectiveTimezone
 
   // Per-dateKey debounce timers for Supabase day upserts (1 second idle = flush)
   const pendingDaySyncTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
@@ -240,6 +256,16 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       // Theme is now persisted — load from localStorage so it survives page refreshes
       const theme = localStorage.getItem('xp-theme')
       if (theme !== null) setIsDarkRaw(theme === 'true')
+    } catch {}
+    try {
+      // Absence of these keys IS the meaningful "Automatic" state — do not
+      // write a default value here, only restore an explicit prior choice.
+      const lang = localStorage.getItem('xp-language')
+      if (lang) setLanguageRaw(lang)
+    } catch {}
+    try {
+      const tz = localStorage.getItem('xp-timezone')
+      if (tz) setTimezoneRaw(tz)
     } catch {}
     // Restore active clock-in session so page refresh doesn't lose an in-progress timer
     try {
@@ -345,6 +371,21 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
         }
         setCustomColorsRaw(sbPrefs.customColors)
         try { localStorage.setItem('xp-custom-colors', JSON.stringify(sbPrefs.customColors)) } catch {}
+
+        // Language/timezone: Supabase is the cross-device source of truth
+        // once a preferences row exists, and unlike isDark/progressColor a
+        // null value here is meaningful ("Automatic"), not "absent" — so we
+        // always apply it, including null, rather than guarding on truthiness.
+        setLanguageRaw(sbPrefs.language)
+        try {
+          if (sbPrefs.language) localStorage.setItem('xp-language', sbPrefs.language)
+          else localStorage.removeItem('xp-language')
+        } catch {}
+        setTimezoneRaw(sbPrefs.timezone)
+        try {
+          if (sbPrefs.timezone) localStorage.setItem('xp-timezone', sbPrefs.timezone)
+          else localStorage.removeItem('xp-timezone')
+        } catch {}
       }
 
       // Journal labels/folders: replace if Supabase has rows (cross-device truth)
@@ -450,7 +491,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const supabase = createClient()
     try {
       const localTimer = activeTaskTimerRef.current
-      const datesToCheck = Array.from(new Set([todayKey(), ...(localTimer ? [localTimer.dateKey] : [])]))
+      const datesToCheck = Array.from(new Set([todayKey(effectiveTimezoneRef.current), ...(localTimer ? [localTimer.dateKey] : [])]))
 
       const [openSessions, dayRows] = await Promise.all([
         fetchOpenWorkSessions(supabase, uid),
@@ -744,8 +785,13 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   }, [])
 
   const addSession = useCallback((s: WorkSession) => {
+    // Upsert by id, never blind-append — the same session finalizing twice
+    // (e.g. a rapid double Clock-Out click before the disabled state takes
+    // effect, or a race with the setActiveTaskTimer(null) finalization path
+    // below) must still contribute exactly once to every duration total that
+    // sums `sessions`. See "Total Focus Time Today" comment in DayModal.tsx.
     setSessions(prev => {
-      const next = [...prev, s]
+      const next = prev.some(p => p.id === s.id) ? prev.map(p => p.id === s.id ? s : p) : [...prev, s]
       try { localStorage.setItem('xp9s', JSON.stringify(next)) } catch {}
       return next
     })
@@ -802,6 +848,38 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       )
     }
   }, [])
+
+  // v === null resets to "Automatic" — persisted as an explicit null so it
+  // isn't reinterpreted as "no preference set yet" on next load.
+  const setLanguage = useCallback((v: string | null) => {
+    setLanguageRaw(v)
+    try {
+      if (v) localStorage.setItem('xp-language', v)
+      else localStorage.removeItem('xp-language')
+    } catch {}
+    const uid = userIdRef.current
+    if (uid) {
+      upsertUserPreferences(createClient(), uid, { language: v }).catch(err =>
+        console.error('[Prefs] Language sync error:', err)
+      )
+    }
+  }, [])
+
+  const setTimezone = useCallback((v: string | null) => {
+    setTimezoneRaw(v)
+    try {
+      if (v) localStorage.setItem('xp-timezone', v)
+      else localStorage.removeItem('xp-timezone')
+    } catch {}
+    const uid = userIdRef.current
+    if (uid) {
+      upsertUserPreferences(createClient(), uid, { timezone: v }).catch(err =>
+        console.error('[Prefs] Timezone sync error:', err)
+      )
+    }
+  }, [])
+
+  const effectiveLocale = resolveLocale(language)
 
   const customColorsRef = useRef(customColors)
   customColorsRef.current = customColors
@@ -883,8 +961,13 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     if (linkedSession) {
       const endTs = Date.now()
       const finalized: WorkSession = { ...linkedSession, endTs }
+      // Upsert by id (see the same guard in addSession above) — this path and
+      // addSession/clockOut can both finalize the SAME underlying session id
+      // depending on which UI surface (Task Manager Stop vs header Clock Out)
+      // closes it first; without this, that session's duration is summed
+      // twice in every "Total Focus Time Today" calculation from then on.
       setSessions(prev => {
-        const next = [...prev, finalized]
+        const next = prev.some(p => p.id === finalized.id) ? prev.map(p => p.id === finalized.id ? finalized : p) : [...prev, finalized]
         try { localStorage.setItem('xp9s', JSON.stringify(next)) } catch {}
         return next
       })
@@ -1116,6 +1199,8 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       sidebarOpen, setSidebarOpen,
       toast, setToast,
       progressColor, setProgressColor,
+      language, setLanguage, effectiveLocale,
+      timezone, setTimezone, effectiveTimezone,
       customColors, addCustomColor, removeCustomColor,
       legendVisible, setLegendVisible,
       journalLabels, addJournalLabel, removeJournalLabel,

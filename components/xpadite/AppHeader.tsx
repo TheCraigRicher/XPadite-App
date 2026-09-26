@@ -44,6 +44,7 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
     setSidebarOpen,
     updateDay,
     setToast,
+    effectiveTimezone,
   } = useApp()
 
   const [now, setNow] = useState(Date.now())
@@ -64,7 +65,7 @@ export function AppHeader({ onAnalytics, onAICoach }: AppHeaderProps) {
     const workSessId = 's' + startTs
     const taskSessId = 'tsci-' + startTs
     const taskId     = 'tci-' + startTs
-    const dk         = todayKey()
+    const dk         = todayKey(effectiveTimezone)
     const newTask: Task = {
       id: taskId,
       text: '',

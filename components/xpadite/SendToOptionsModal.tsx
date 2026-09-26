@@ -15,6 +15,7 @@
 // TransferSectionModal/TransferTaskModal for date selection.
 
 import { useMemo, useState } from 'react'
+import { useApp } from './AppContext'
 import { useLockBodyScroll } from './useLockBodyScroll'
 import { dateKey as buildDateKey, isToday, todayKey, MONTHS, DAY_HEADERS } from './utils'
 import {
@@ -59,15 +60,16 @@ export function SendToOptionsModal({
   isDark, context, taskTree, onClose, onCreateTasks, onAICoachComingSoon,
 }: SendToOptionsModalProps) {
   useLockBodyScroll()
+  const { effectiveTimezone } = useApp()
 
   const [view, setView]               = useState<View>('main')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [dupInfo, setDupInfo]         = useState<{ nodes: PlannerTaskNode[]; total: number; sentCount: number } | null>(null)
   const [openTip, setOpenTip]         = useState<string | null>(null)
 
-  const [tmDateKey, setTmDateKey]     = useState(() => todayKey())
+  const [tmDateKey, setTmDateKey]     = useState(() => todayKey(effectiveTimezone))
   const [calendarOpen, setCalendarOpen] = useState(false)
-  const [monthCursor, setMonthCursor] = useState(() => { const t = parseDateKey(todayKey()); return new Date(t.getFullYear(), t.getMonth(), 1) })
+  const [monthCursor, setMonthCursor] = useState(() => { const t = parseDateKey(todayKey(effectiveTimezone)); return new Date(t.getFullYear(), t.getMonth(), 1) })
 
   const isImage = context === 'image'
   const eligibleCount = countPlannerTaskTree(taskTree)
@@ -347,7 +349,7 @@ export function SendToOptionsModal({
                       Task Manager Date
                     </span>
                     <span className="flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: 'var(--xp-txt)' }}>
-                      {tmDateKey === todayKey() ? 'Today' : fmtLongDate(tmDateKey)}
+                      {tmDateKey === todayKey(effectiveTimezone) ? 'Today' : fmtLongDate(tmDateKey)}
                       <span style={{ fontSize: 9, transform: calendarOpen ? 'rotate(180deg)' : 'none', transition: 'transform 140ms', color: 'var(--xp-txt3)' }}>▾</span>
                     </span>
                   </button>
@@ -387,7 +389,7 @@ export function SendToOptionsModal({
                               if (!d) return <div key={ci} />
                               const key = buildDateKey(d.getFullYear(), d.getMonth(), d.getDate())
                               const selected = key === tmDateKey
-                              const isTodayCell = isToday(d.getFullYear(), d.getMonth(), d.getDate())
+                              const isTodayCell = isToday(d.getFullYear(), d.getMonth(), d.getDate(), effectiveTimezone)
                               return (
                                 <button
                                   key={ci}

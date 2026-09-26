@@ -31,12 +31,53 @@ export function dateKey(year: number, month: number, day: number): string {
   return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
-export function todayKey(): string {
+// Raw browser/device IANA timezone (e.g. "America/Vancouver"), independent of
+// any curated dropdown list. This is the "Automatic" detection source — never
+// restrict it to a fixed set of options, and never fall back to a hardcoded
+// zone: a caller with no better fallback should fall back to UTC, since that's
+// the one zone that's never wrong, just possibly unhelpful.
+export function detectBrowserTimezone(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    return tz || 'UTC'
+  } catch {
+    return 'UTC'
+  }
+}
+
+// Local calendar date (YYYY-MM-DD) as it reads in an arbitrary IANA zone,
+// derived via Intl rather than manual offset math so DST transitions are
+// handled correctly by the zone's own rules.
+export function todayKeyInTz(tz: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date())
+    const y = parts.find(p => p.type === 'year')?.value
+    const m = parts.find(p => p.type === 'month')?.value
+    const d = parts.find(p => p.type === 'day')?.value
+    if (y && m && d) return `${y}-${m}-${d}`
+  } catch {
+    // fall through to system-local below
+  }
   const d = new Date()
   return dateKey(d.getFullYear(), d.getMonth(), d.getDate())
 }
 
-export function isToday(year: number, month: number, day: number): boolean {
+// `tz` is optional and backward-compatible: existing call sites that don't
+// pass it keep today's exact system-local behavior. Callers that know the
+// user's effective timezone preference can opt in explicitly.
+export function todayKey(tz?: string): string {
+  if (tz) return todayKeyInTz(tz)
+  const d = new Date()
+  return dateKey(d.getFullYear(), d.getMonth(), d.getDate())
+}
+
+export function isToday(year: number, month: number, day: number, tz?: string): boolean {
+  if (tz) return dateKey(year, month, day) === todayKeyInTz(tz)
   const t = new Date()
   return t.getFullYear() === year && t.getMonth() === month && t.getDate() === day
 }

@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import { MonthCard } from './MonthCard'
-import { APP_YEAR } from './utils'
+import { APP_YEAR, todayKeyInTz } from './utils'
+import { useApp } from './AppContext'
 
 const QUARTERS: { label: string; months: [number, number, number] }[] = [
   { label: 'Q1', months: [0, 1, 2] },
@@ -24,10 +25,6 @@ const ChevronIcon = ({ open }: { open: boolean }) => (
   </svg>
 )
 
-const today = new Date()
-const currentRealMonth = today.getMonth()
-const currentQuarterLabel = QUARTERS[Math.floor(currentRealMonth / 3)].label
-
 interface CalendarSectionProps {
   onDayDoubleClick?: (key: string, month: number, day: number) => void
   onMonthZoom?: (month: number) => void
@@ -37,6 +34,16 @@ interface CalendarSectionProps {
 }
 
 export function CalendarSection({ onDayDoubleClick, onMonthZoom, activeMonth, onShareYear, cleanView }: CalendarSectionProps) {
+  const { effectiveTimezone } = useApp()
+  // Derived from the user's effective timezone (not a stale module-level
+  // constant) so "today"/"current quarter" stay correct across a midnight
+  // boundary and for users whose timezone differs from the device's.
+  const currentRealMonth = useMemo(() => {
+    const [, m] = todayKeyInTz(effectiveTimezone).split('-')
+    return parseInt(m, 10) - 1
+  }, [effectiveTimezone])
+  const currentQuarterLabel = QUARTERS[Math.floor(currentRealMonth / 3)].label
+
   const [open, setOpen] = useState<Record<string, boolean>>({
     Q1: true, Q2: true, Q3: true, Q4: true,
   })

@@ -18,7 +18,7 @@ interface MonthZoomModalProps {
 }
 
 export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomModalProps) {
-  const { calData, updateDay, setToast, isDark } = useApp()
+  const { calData, updateDay, setToast, isDark, effectiveTimezone } = useApp()
   const gapColor = isDark ? '#1a1a28' : '#ffffff'
   const [shareOpen, setShareOpen] = useState(false)
 
@@ -196,7 +196,7 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
               const hyper = !!dayData?.hyper
               const milestone = !!dayData?.milestone
               const goal = !!dayData?.goal
-              const todayCell = isToday(APP_YEAR, month, cell.day)
+              const todayCell = isToday(APP_YEAR, month, cell.day, effectiveTimezone)
               const isSun = cell.dayOfWeek === 0
 
               const prevKey = cell.day > 1 ? dateKey(APP_YEAR, month, cell.day - 1) : null

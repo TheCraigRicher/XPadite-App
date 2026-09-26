@@ -233,7 +233,7 @@ export function MonthCard({
   onMonthZoom,
   cleanView = false,
 }: MonthCardProps) {
-  const { calData, updateDay, setToast, isDark, progressColor: _rawColor, reminders, calendarClean } = useApp();
+  const { calData, updateDay, setToast, isDark, progressColor: _rawColor, reminders, calendarClean, effectiveTimezone } = useApp();
   const progressColor = resolveProgressColor(_rawColor, isDark);
   const reminderDates = useUpcomingReminderDates(reminders, calData);
   // Match the actual card surface so the productive-circle inner ring blends in
@@ -549,7 +549,7 @@ export function MonthCard({
             const hyper = !effectiveClean && !!dayData?.hyper;
             const milestone = !effectiveClean && !!dayData?.milestone;
             const goal = !effectiveClean && !!dayData?.goal;
-            const todayCell = isToday(APP_YEAR, month, cell.day);
+            const todayCell = isToday(APP_YEAR, month, cell.day, effectiveTimezone);
             const isSun = cell.dayOfWeek === 0;
             const reminderCount = reminderDates.get(cell.key) ?? 0;
 

@@ -4,8 +4,9 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp } from './AppContext'
 import { exportLocalData } from '@/lib/data-backup'
-import { resolveProgressColor } from './utils'
+import { resolveProgressColor, detectBrowserTimezone } from './utils'
 import { useLockBodyScroll } from './useLockBodyScroll'
+import { SUPPORTED_LOCALES, t } from './i18n'
 
 const PROGRESS_COLORS: { name: string; value: string; darkCheck?: boolean }[] = [
   { name: 'Green',            value: '#16a34a' },
@@ -24,10 +25,16 @@ const PROGRESS_COLORS: { name: string; value: string; darkCheck?: boolean }[] = 
 
 const DEFAULT_COLOR = '#7c3aed'
 
-const LANGUAGES = [
-  'English (US)', 'English (UK)', 'French', 'Spanish',
-  'German', 'Portuguese', 'Hindi',
+// "Automatic" is a real sentinel in the dropdown, mapped to a null preference
+// (device-detected) everywhere else. Only locales with a complete i18n
+// dictionary (see i18n.ts) are listed — no incomplete-translation entries.
+const AUTO_LANGUAGE = 'auto'
+const LANGUAGE_OPTIONS: { value: string; label: string }[] = [
+  { value: AUTO_LANGUAGE, label: 'Automatic — Device Language' },
+  ...SUPPORTED_LOCALES,
 ]
+
+const AUTO_TIMEZONE = 'auto'
 
 const TIMEZONES: { value: string; label: string }[] = [
   { value: 'Australia/Sydney',    label: 'Australia — Sydney'               },
@@ -45,6 +52,11 @@ const TIMEZONES: { value: string; label: string }[] = [
   { value: 'America/Los_Angeles', label: 'USA — Los Angeles (Pacific)'      },
   { value: 'America/New_York',    label: 'USA — New York (Eastern)'         },
   { value: 'UTC',                 label: 'UTC (Coordinated Universal Time)' },
+]
+
+const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
+  { value: AUTO_TIMEZONE, label: 'Automatic — Device Time Zone' },
+  ...TIMEZONES,
 ]
 
 // ── Plan popup data ────────────────────────────────────────────────────────
@@ -205,15 +217,6 @@ export const PLAN_CONFIGS: Record<string, PlanConfig> = {
     excludedFeatures: AI_FEATURES,
     note: 'Limited to the first 100 customers for this offer. AI features are not included and require a separate Premium subscription.',
   },
-}
-
-function getBrowserTimezone(): string {
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-    return TIMEZONES.some(t => t.value === tz) ? tz : 'America/Vancouver'
-  } catch {
-    return 'America/Vancouver'
-  }
 }
 
 function SectionIcon({ emoji }: { emoji: string }) {
@@ -562,7 +565,11 @@ export function PlanPopup({ planId, isDark, onClose }: {
 }
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
-  const { isDark, setIsDark, progressColor, setProgressColor } = useApp()
+  const {
+    isDark, setIsDark, progressColor, setProgressColor,
+    language, setLanguage, effectiveLocale,
+    timezone, setTimezone,
+  } = useApp()
   useLockBodyScroll()
   const pc = resolveProgressColor(progressColor, isDark)
 
@@ -571,11 +578,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [openPlan,   setOpenPlan]   = useState(true)
   const [openLocale, setOpenLocale] = useState(true)
 
-  const [language, setLanguage] = useState('English (US)')
-  const [timezone, setTimezone] = useState(() => getBrowserTimezone())
+  // The live detected zone is shown alongside "Automatic" so picking it is
+  // an informed choice, not a leap of faith.
+  const detectedTz = detectBrowserTimezone()
+  const timezoneOptions = TIMEZONE_OPTIONS.map(o =>
+    o.value === AUTO_TIMEZONE ? { ...o, label: `Automatic — Device Time Zone (${detectedTz})` } : o
+  )
 
-  // Capture committed state when modal opens
-  const initialRef = useRef({ isDark, progressColor, language: 'English (US)', timezone: getBrowserTimezone() })
+  // Capture committed state when modal opens — same live-apply-then-revert
+  // pattern already used for isDark/progressColor below.
+  const initialRef = useRef({ isDark, progressColor, language, timezone })
 
   const hasChanges =
     isDark !== initialRef.current.isDark ||
@@ -610,6 +622,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     setShowPrompt(false)
     onClose()
   }
+
+  const tt = (key: string, fallback: string) => t(effectiveLocale, key, fallback)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -889,7 +903,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '18px 22px' }}>
                 <SectionIcon emoji="🎨" />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: 14, fontWeight: 700, color: titleColor, lineHeight: 1.3 }}>Theme Color</p>
+                  <p style={{ fontSize: 14, fontWeight: 700, color: titleColor, lineHeight: 1.3 }}>{tt('settings.themeColor', 'Theme Color')}</p>
                   <p style={{ fontSize: 11.5, color: subtitleColor, marginTop: 2 }}>Used for productive day circles &amp; streak lines</p>
                 </div>
                 <button
@@ -905,7 +919,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     opacity: progressColor === DEFAULT_COLOR ? 0.55 : 1,
                   }}
                 >
-                  Set to default
+                  {tt('settings.setToDefault', 'Set to default')}
                 </button>
                 <button
                   onClick={() => setOpenColor(v => !v)}
@@ -1086,21 +1100,21 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
 
                     <div style={{ minWidth: 0 }}>
-                      <p style={{ fontSize: 11.5, fontWeight: 600, color: subtitleColor, marginBottom: 9 }}>Language</p>
+                      <p style={{ fontSize: 11.5, fontWeight: 600, color: subtitleColor, marginBottom: 9 }}>{tt('settings.language', 'Language')}</p>
                       <SelectMenu
-                        value={language}
-                        onChange={setLanguage}
-                        options={LANGUAGES}
+                        value={language ?? AUTO_LANGUAGE}
+                        onChange={v => setLanguage(v === AUTO_LANGUAGE ? null : v)}
+                        options={LANGUAGE_OPTIONS}
                         isDark={isDark}
                       />
                     </div>
 
                     <div style={{ minWidth: 0 }}>
-                      <p style={{ fontSize: 11.5, fontWeight: 600, color: subtitleColor, marginBottom: 9 }}>Time Zone</p>
+                      <p style={{ fontSize: 11.5, fontWeight: 600, color: subtitleColor, marginBottom: 9 }}>{tt('settings.timezone', 'Time Zone')}</p>
                       <SelectMenu
-                        value={timezone}
-                        onChange={setTimezone}
-                        options={TIMEZONES}
+                        value={timezone ?? AUTO_TIMEZONE}
+                        onChange={v => setTimezone(v === AUTO_TIMEZONE ? null : v)}
+                        options={timezoneOptions}
                         isDark={isDark}
                       />
                     </div>
@@ -1162,8 +1176,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               onClick={() => {
                 setIsDark(false)
                 setProgressColor(DEFAULT_COLOR)
-                setLanguage('English (US)')
-                setTimezone(getBrowserTimezone())
+                // Reset means Automatic, never a hardcoded concrete value —
+                // null defers back to device-detected language/timezone.
+                setLanguage(null)
+                setTimezone(null)
               }}
               style={{ color: isDark ? 'rgba(255,255,255,0.38)' : 'rgba(0,0,0,0.38)' }}
             >

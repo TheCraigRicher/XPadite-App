@@ -455,7 +455,7 @@ function MonthCalendarLarge({
   calData: Record<string, unknown>
   onDayDoubleClick?: (key: string, month: number, day: number) => void
 }) {
-  const { progressColor: _rawColor, isDark, updateDay, setToast, reminders, calData: appCalData, calendarClean } = useApp()
+  const { progressColor: _rawColor, isDark, updateDay, setToast, reminders, calData: appCalData, calendarClean, effectiveTimezone } = useApp()
   const progressColor = resolveProgressColor(_rawColor, isDark)
   const gapColor = isDark ? '#1a1a28' : '#ffffff'
   const reminderDates = useUpcomingReminderDates(reminders, appCalData)
@@ -543,7 +543,7 @@ function MonthCalendarLarge({
           const visStreak = !calendarClean && rawStreak
           const streak    = rawStreak
 
-          const todayCell     = isToday(APP_YEAR, month, cell.day)
+          const todayCell     = isToday(APP_YEAR, month, cell.day, effectiveTimezone)
           const reminderCount = reminderDates.get(cell.key) ?? 0
 
           const prevKey = cell.day > 1 ? dateKey(APP_YEAR, month, cell.day - 1) : null

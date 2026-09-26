@@ -1783,7 +1783,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   const {
     calData, updateDay, activeTaskTimer, setActiveTaskTimer,
     activities, activeSession, setActiveSession, selectedActId,
-    reminders, isDark, setToast, sessions,
+    reminders, isDark, setToast, sessions, effectiveTimezone, effectiveLocale,
   } = useApp()
 
   useLockBodyScroll()
@@ -2056,10 +2056,13 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     return JSON.stringify(calData[dateKey] ?? EMPTY_DAY) !== JSON.stringify(openSnapshotRef.current)
   }, [newTaskText, dirtyNotesMap, calData, dateKey])
 
+  // Locale-aware: e.g. "Friday, September 25, 2026" (en-US) vs
+  // "Friday, 25 September 2026" (en-GB) — real Intl formatting, not just a
+  // hardcoded en-US string.
   const dateLabel = useMemo(() => {
     const d = new Date(APP_YEAR, month, day)
-    return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-  }, [month, day])
+    return new Intl.DateTimeFormat(effectiveLocale, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }).format(d)
+  }, [month, day, effectiveLocale])
 
   // Notify parent whenever dirty state changes (for nav guard)
   useEffect(() => {
@@ -2381,7 +2384,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     onGoToToday?.()
   }
 
-  const isViewingToday = dateKey === todayKey()
+  const isViewingToday = dateKey === todayKey(effectiveTimezone)
 
   function handleMainSave() {
     flushDirtyNotes()

@@ -49,7 +49,7 @@ function fmtShort(d: Date): string {
 }
 
 export function TransferTaskModal({ task, dateKey, onClose }: TransferTaskModalProps) {
-  const { calData, updateDay, activeTaskTimer, setToast } = useApp()
+  const { calData, updateDay, activeTaskTimer, setToast, effectiveTimezone } = useApp()
 
   const originDate = useMemo(() => parseDateKey(dateKey), [dateKey])
   const [monthCursor, setMonthCursor] = useState(() => new Date(originDate.getFullYear(), originDate.getMonth(), 1))
@@ -273,7 +273,7 @@ export function TransferTaskModal({ task, dateKey, onClose }: TransferTaskModalP
                   if (!d) return <div key={ci} />
                   const key = buildDateKey(d.getFullYear(), d.getMonth(), d.getDate())
                   const selected = key === selectedKey
-                  const today = isToday(d.getFullYear(), d.getMonth(), d.getDate())
+                  const today = isToday(d.getFullYear(), d.getMonth(), d.getDate(), effectiveTimezone)
                   const isOriginDate = key === dateKey
                   return (
                     <button

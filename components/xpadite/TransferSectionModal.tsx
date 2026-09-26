@@ -16,6 +16,7 @@
 // state (blocksRef/contentMapRef) — happens in the onConfirm callback.
 
 import { useEffect, useMemo, useState } from 'react'
+import { useApp } from './AppContext'
 import { dateKey as buildDateKey, isToday, MONTHS, DAY_HEADERS } from './utils'
 
 type TransferMode = 'move' | 'copy'
@@ -37,6 +38,7 @@ function fmtShort(d: Date): string {
 }
 
 export function TransferSectionModal({ dateKey, sectionLabel, onClose, onConfirm }: TransferSectionModalProps) {
+  const { effectiveTimezone } = useApp()
   const originDate = useMemo(() => parseDateKey(dateKey), [dateKey])
   const [monthCursor, setMonthCursor] = useState(() => new Date(originDate.getFullYear(), originDate.getMonth(), 1))
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
@@ -180,7 +182,7 @@ export function TransferSectionModal({ dateKey, sectionLabel, onClose, onConfirm
                   if (!d) return <div key={ci} />
                   const key = buildDateKey(d.getFullYear(), d.getMonth(), d.getDate())
                   const selected = key === selectedKey
-                  const today = isToday(d.getFullYear(), d.getMonth(), d.getDate())
+                  const today = isToday(d.getFullYear(), d.getMonth(), d.getDate(), effectiveTimezone)
                   const isOriginDate = key === dateKey
                   return (
                     <button

@@ -303,7 +303,7 @@ function mtrId(key: string): string {
 // ─── Missing-Time Reminder checker ───────────────────────────────────────────
 
 function MissingTimeChecker() {
-  const { calData, sessions } = useApp()
+  const { calData, sessions, effectiveTimezone } = useApp()
 
   const calDataRef = useRef(calData)
   calDataRef.current = calData
@@ -312,7 +312,7 @@ function MissingTimeChecker() {
 
   // Auto-resolve when focus time is added while the app is open
   useEffect(() => {
-    const key = todayKey()
+    const key = todayKey(effectiveTimezone)
     const dayData = calData[key]
     if (!dayData) return
     const focusMs = computeTotalFocusMs(dayData, sessions.filter(s => s.dateKey === key))
@@ -325,7 +325,7 @@ function MissingTimeChecker() {
     saveStoredNotifications(
       stored.map(n => n.id === id ? { ...n, lifecycle: 'resolved' as const, read: true } : n),
     )
-  }, [calData, sessions])
+  }, [calData, sessions, effectiveTimezone])
 
   // Scheduled checker: 8 PM trigger + 10 AM snooze follow-up
   useEffect(() => {
@@ -659,7 +659,7 @@ function MobileMoreView({ onGallery, onSettings }: { onGallery: () => void; onSe
 interface ModalDay { key: string; month: number; day: number; skipAnim?: boolean }
 
 function ThemedApp(_props: XpaditeAppProps) {
-  const { isDark, toast, setToast, legendVisible } = useApp()
+  const { isDark, toast, setToast, legendVisible, effectiveTimezone } = useApp()
 
   const [toastExiting, setToastExiting]             = useState(false)
   const [modalDay, setModalDay]                     = useState<ModalDay | null>(null)
@@ -1176,7 +1176,7 @@ function ThemedApp(_props: XpaditeAppProps) {
           onClose={() => setNotificationsOpen(false)}
           onAction={(actionType, notif) => {
             if (actionType === 'add-time') {
-              const dKey = notif.targetDateKey ?? todayKey()
+              const dKey = notif.targetDateKey ?? todayKey(effectiveTimezone)
               const parts = dKey.split('-')
               const month = parseInt(parts[1], 10) - 1  // 0-indexed
               const day   = parseInt(parts[2], 10)

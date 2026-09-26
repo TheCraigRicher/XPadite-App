@@ -9,6 +9,11 @@ export interface UserPreferences {
   isDark: boolean
   progressColor: string
   customColors: string[]
+  // null = "Automatic" — defer to browser/device detection at read time
+  // rather than persisting a device-specific guess as an explicit choice.
+  // A non-null value is a manual override and is authoritative until reset.
+  language: string | null
+  timezone: string | null
 }
 
 export async function fetchUserPreferences(
@@ -17,7 +22,7 @@ export async function fetchUserPreferences(
 ): Promise<UserPreferences | null> {
   const { data, error } = await supabase
     .from('user_preferences')
-    .select('is_dark, progress_color, custom_colors')
+    .select('is_dark, progress_color, custom_colors, language, timezone')
     .eq('user_id', userId)
     .single()
   if (error || !data) return null
@@ -25,6 +30,8 @@ export async function fetchUserPreferences(
     isDark: data.is_dark as boolean,
     progressColor: data.progress_color as string,
     customColors: (data.custom_colors as string[] | null) ?? [],
+    language: (data.language as string | null) ?? null,
+    timezone: (data.timezone as string | null) ?? null,
   }
 }
 
@@ -37,6 +44,10 @@ export async function upsertUserPreferences(
   if (prefs.isDark !== undefined) row.is_dark = prefs.isDark
   if (prefs.progressColor !== undefined) row.progress_color = prefs.progressColor
   if (prefs.customColors !== undefined) row.custom_colors = prefs.customColors
+  // `!== undefined` (not a truthy check): explicit `null` must reach the DB
+  // so "reset to Automatic" is persisted, not silently dropped.
+  if (prefs.language !== undefined) row.language = prefs.language
+  if (prefs.timezone !== undefined) row.timezone = prefs.timezone
   const { error } = await supabase
     .from('user_preferences')
     .upsert(row, { onConflict: 'user_id' })

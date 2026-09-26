@@ -2117,19 +2117,30 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     prevNotesOpenRef.current = notesOpen
   }, [notesOpen])
 
-  // Total Focus Time Today — productive activities only; Meal/Break excluded
+  // Total Focus Time Today — sum of FINALIZED/LOGGED time from tasks that
+  // currently exist in this Task Manager. Deliberately excludes:
+  //   - a running/in-progress timer (Clock In or task-level) — only counts
+  //     once it's stopped and the session is finalized
+  //   - a WorkSession whose Clock-In task was deleted — historical
+  //     work_sessions rows are kept for analytics/audit, but a deleted task
+  //     must contribute zero to this header, so only sessions still
+  //     referenced by a currently-existing task's linkedSessionId count
   const totalFocusMsToday = useMemo(() => {
-    const workMs   = sessions
-      .filter(s => s.dateKey === dateKey && s.endTs !== null && isProductiveActivity(activities, s.actId))
+    const currentLinkedSessionIds = new Set(
+      (dayData.tasks ?? []).map(task => task.linkedSessionId).filter((id): id is string => !!id)
+    )
+    const workMs = sessions
+      .filter(s =>
+        s.dateKey === dateKey && s.endTs !== null &&
+        currentLinkedSessionIds.has(s.id) && isProductiveActivity(activities, s.actId)
+      )
       .reduce((sum, s) => sum + (s.endTs! - s.startTs), 0)
     // Clock-in-linked tasks are excluded: their time is already captured by the WorkSession in workMs
-    const taskMs   = (dayData.tasks ?? [])
+    const taskMs = (dayData.tasks ?? [])
       .filter(task => !task.linkedSessionId && isProductiveActivity(activities, task.actId))
       .reduce((t, task) => t + (task.sessions ?? []).filter(s => s.endTs !== null).reduce((sum, s) => sum + (s.endTs! - s.startTs), 0), 0)
-    const activeMs = isSessionHere && isProductiveActivity(activities, activeSession!.actId)
-      ? Math.max(0, now - activeSession!.startTs) : 0
-    return workMs + taskMs + activeMs
-  }, [sessions, activities, dayData.tasks, activeSession, isSessionHere, dateKey, now])
+    return workMs + taskMs
+  }, [sessions, activities, dayData.tasks, dateKey])
 
   // On open: snapshot for dirty-change detection
   useEffect(() => {

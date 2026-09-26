@@ -1,9 +1,81 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { useApp } from './AppContext'
 import { createClient } from '@/lib/supabase/client'
 import { useLockBodyScroll } from './useLockBodyScroll'
+
+const FIELD_STYLE: React.CSSProperties = {
+  width: '100%',
+  padding: '9px 12px',
+  borderRadius: 10,
+  border: '0.5px solid var(--xp-bdr2)',
+  background: 'var(--xp-bg3)',
+  color: 'var(--xp-txt)',
+  fontSize: 13,
+  outline: 'none',
+}
+
+// Every user-owned localStorage key XPadite writes — mirrors the wipe list
+// AppSidebar's Sign Out already uses (plus xp-language/xp-timezone/
+// xp-custom-colors/xp9jl/xp9jf/xp-stats-collapsed, which that list predates)
+// so the next account on this device never inherits a deleted user's data.
+const USER_LOCAL_STORAGE_KEYS = [
+  'xp9d', 'xp9s', 'xp9a', 'xp9r', 'xp9g', 'xp9jl', 'xp9jf',
+  'xp9-active-session', 'xp9-active-task-timer', 'xp9-task-clipboard',
+  'xp9-profile', 'xp9-aic', 'xp9-journal', 'xp9-notifications', 'xp9_connections',
+  'xp-theme', 'xp-progress-color', 'xp-custom-colors', 'xp-language', 'xp-timezone',
+  'xp-stats-collapsed',
+]
+
+const MailIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4">
+    <rect x="2" y="4" width="20" height="16" rx="2" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M22 7l-10 7L2 7" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
+const LockIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4">
+    <rect x="3" y="11" width="18" height="11" rx="2" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M7 11V7a5 5 0 0110 0v4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
+const TrashIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4">
+    <polyline points="3 6 5 6 21 6" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
+const WarningIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
+    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" strokeLinecap="round" strokeLinejoin="round" />
+    <line x1="12" y1="9" x2="12" y2="13" strokeLinecap="round" />
+    <line x1="12" y1="17" x2="12.01" y2="17" strokeLinecap="round" />
+  </svg>
+)
+
+const ChevronRightIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
+    <polyline points="9 18 15 12 9 6" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
+const EyeIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="w-4 h-4">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" strokeLinecap="round" strokeLinejoin="round" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+)
+
+const EyeOffIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="w-4 h-4">
+    <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24M1 1l22 22" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
 
 interface ProfileData {
   firstName: string
@@ -46,10 +118,12 @@ interface ProfileModalProps {
 
 export function ProfileModal({ onClose }: ProfileModalProps) {
   const { userEmail, isDark } = useApp()
+  const router = useRouter()
   useLockBodyScroll()
   const [data, setData] = useState<ProfileData>(loadProfile)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [activeSecurityModal, setActiveSecurityModal] = useState<'email' | 'password' | 'delete' | null>(null)
 
   // Avatar display & upload state
   const [signedAvatarUrl, setSignedAvatarUrl] = useState('')   // signed URL for display
@@ -147,10 +221,21 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
   }, [])
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      if (activeSecurityModal) setActiveSecurityModal(null)
+      else onClose()
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, activeSecurityModal])
+
+  async function handleAccountDeleted() {
+    const sb = createClient()
+    await sb.auth.signOut()
+    try { USER_LOCAL_STORAGE_KEYS.forEach(k => localStorage.removeItem(k)) } catch {}
+    router.push('/login')
+  }
 
   function handleAvatarFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -278,17 +363,7 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
   // Priority: local preview > signed storage URL > legacy data: URI > nothing
   const avatarSrc = pendingPreview || signedAvatarUrl || (data.avatarUrl.startsWith('data:') ? data.avatarUrl : '')
   const hasAvatar = !!avatarSrc
-
-  const inputStyle: React.CSSProperties = {
-    width: '100%',
-    padding: '9px 12px',
-    borderRadius: 10,
-    border: '0.5px solid var(--xp-bdr2)',
-    background: 'var(--xp-bg3)',
-    color: 'var(--xp-txt)',
-    fontSize: 13,
-    outline: 'none',
-  }
+  const inputStyle = FIELD_STYLE
 
   return (
     <>
@@ -299,17 +374,18 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
       onClick={onClose}
     >
       <div
-        className="w-full sm:max-w-[400px] sm:rounded-2xl rounded-t-2xl overflow-hidden"
+        className="w-full sm:max-w-[640px] lg:max-w-[720px] sm:rounded-2xl rounded-t-2xl overflow-hidden"
         style={{
           background: 'var(--xp-card)',
           border: '0.5px solid var(--xp-bdr2)',
           boxShadow: '0 24px 64px rgba(0,0,0,0.30)',
+          display: 'grid',
+          gridTemplateRows: 'auto 1fr',
           maxHeight: '90vh',
-          overflowY: 'auto',
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
+        {/* Header — fixed, never scrolls away */}
         <div
           className="flex items-center justify-between px-5 py-4"
           style={{
@@ -332,7 +408,8 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
           </button>
         </div>
 
-        <div className="px-5 py-5 space-y-5">
+        {/* Body — only this region scrolls when content exceeds the modal's max height */}
+        <div className="px-5 py-5 space-y-4" style={{ minHeight: 0, overflowY: 'auto' }}>
           {/* Avatar */}
           <div className="flex flex-col items-center gap-3">
             <div
@@ -461,6 +538,25 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
             </p>
           </div>
 
+          {/* Account & Security — side-by-side on tablet/desktop, stacked on mobile */}
+          <div>
+            <p className="text-[11px] font-semibold mb-2" style={{ color: 'var(--xp-txt3)' }}>Account &amp; Security</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <SecurityRow
+                icon={<MailIcon />}
+                title="Change Email"
+                subtitle="Update your account email address."
+                onClick={() => setActiveSecurityModal('email')}
+              />
+              <SecurityRow
+                icon={<LockIcon />}
+                title="Change Password"
+                subtitle="Update your account password."
+                onClick={() => setActiveSecurityModal('password')}
+              />
+            </div>
+          </div>
+
           {/* Plan badge */}
           <div
             className="flex items-center justify-between px-3 py-2.5 rounded-xl"
@@ -478,6 +574,27 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
             </span>
           </div>
 
+          {/* Delete Account — destructive, kept separate from Account & Security */}
+          <button
+            onClick={() => setActiveSecurityModal('delete')}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-opacity hover:opacity-85"
+            style={{ background: 'rgba(239,68,68,0.08)', border: '0.5px solid rgba(239,68,68,0.22)' }}
+          >
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+              style={{ background: 'rgba(239,68,68,0.14)', color: '#ef4444' }}
+            >
+              <TrashIcon />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[12.5px] font-semibold" style={{ color: '#ef4444' }}>Delete Account</p>
+              <p className="text-[10.5px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>
+                Permanently delete your account and associated XPadite data.
+              </p>
+            </div>
+            <span style={{ color: '#ef4444' }}><ChevronRightIcon /></span>
+          </button>
+
           {/* Save */}
           <button
             onClick={handleSave}
@@ -494,6 +611,368 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
         </div>
       </div>
     </div>
+
+    {activeSecurityModal === 'email' && (
+      <ChangeEmailModal currentEmail={userEmail} onClose={() => setActiveSecurityModal(null)} />
+    )}
+    {activeSecurityModal === 'password' && (
+      <ChangePasswordModal currentEmail={userEmail} onClose={() => setActiveSecurityModal(null)} />
+    )}
+    {activeSecurityModal === 'delete' && (
+      <DeleteAccountModal
+        onClose={() => setActiveSecurityModal(null)}
+        onDeleted={handleAccountDeleted}
+      />
+    )}
     </>
+  )
+}
+
+// ── Account & Security row ────────────────────────────────────────────────────
+
+function SecurityRow({ icon, title, subtitle, onClick }: {
+  icon: React.ReactNode; title: string; subtitle: string; onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-opacity hover:opacity-80"
+      style={{ background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)' }}
+    >
+      <div
+        className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+        style={{ background: 'rgba(124,58,237,0.12)', color: '#7c3aed' }}
+      >
+        {icon}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[12.5px] font-semibold" style={{ color: 'var(--xp-txt)' }}>{title}</p>
+        <p className="text-[10.5px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>{subtitle}</p>
+      </div>
+      <span style={{ color: 'var(--xp-txt3)' }}><ChevronRightIcon /></span>
+    </button>
+  )
+}
+
+// ── Shared show/hide password field ───────────────────────────────────────────
+
+function PasswordField({ label, value, onChange, show, onToggleShow, autoComplete }: {
+  label: string; value: string; onChange: (v: string) => void
+  show: boolean; onToggleShow: () => void; autoComplete: string
+}) {
+  return (
+    <div>
+      <label className="block text-[11px] font-medium mb-1.5" style={{ color: 'var(--xp-txt3)' }}>{label}</label>
+      <div className="relative">
+        <input
+          type={show ? 'text' : 'password'}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          autoComplete={autoComplete}
+          style={{ ...FIELD_STYLE, paddingRight: 38 }}
+        />
+        <button
+          type="button"
+          onClick={onToggleShow}
+          aria-label={show ? 'Hide password' : 'Show password'}
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 transition-opacity hover:opacity-70"
+          style={{ color: 'var(--xp-txt3)' }}
+        >
+          {show ? <EyeOffIcon /> : <EyeIcon />}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Change Email ───────────────────────────────────────────────────────────────
+
+function ChangeEmailModal({ currentEmail, onClose }: { currentEmail: string; onClose: () => void }) {
+  const [newEmail, setNewEmail] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (loading) return
+    setError('')
+    const trimmed = newEmail.trim()
+    if (!trimmed) { setError('Enter a new email address.'); return }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) { setError('Enter a valid email address.'); return }
+    if (trimmed.toLowerCase() === currentEmail.toLowerCase()) { setError('That is already your current email address.'); return }
+
+    setLoading(true)
+    const sb = createClient()
+    const { error: updateError } = await sb.auth.updateUser({ email: trimmed })
+    setLoading(false)
+    if (updateError) { setError(updateError.message); return }
+    setSuccess(true)
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.55)' }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[380px] rounded-2xl overflow-hidden"
+        style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.30)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-5 py-4" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--xp-txt)' }}>Change Email</h3>
+        </div>
+        <div className="px-5 py-5">
+          {success ? (
+            <div className="space-y-4">
+              <p className="text-[13px] leading-relaxed" style={{ color: 'var(--xp-txt2)' }}>
+                We&apos;ve sent a confirmation link to <strong>{newEmail.trim()}</strong>. Your email will
+                update once you confirm it there.
+              </p>
+              <button
+                onClick={onClose}
+                className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-85"
+                style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)' }}
+              >
+                Done
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-medium mb-1.5" style={{ color: 'var(--xp-txt3)' }}>Current Email</label>
+                <div style={{ ...FIELD_STYLE, opacity: 0.6, cursor: 'not-allowed' }}>{currentEmail || '—'}</div>
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium mb-1.5" style={{ color: 'var(--xp-txt3)' }}>New Email</label>
+                <input
+                  type="email"
+                  value={newEmail}
+                  onChange={e => setNewEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  style={FIELD_STYLE}
+                />
+              </div>
+              {error && <p className="text-[11.5px]" style={{ color: '#ef4444' }}>{error}</p>}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"
+                  style={{ background: 'var(--xp-bg3)', color: 'var(--xp-txt2)', border: '0.5px solid var(--xp-bdr2)' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-85 disabled:opacity-60"
+                  style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)' }}
+                >
+                  {loading ? 'Sending…' : 'Change Email'}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Change Password ─────────────────────────────────────────────────────────
+
+function ChangePasswordModal({ currentEmail, onClose }: { currentEmail: string; onClose: () => void }) {
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword]         = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showCurrent, setShowCurrent] = useState(false)
+  const [showNew, setShowNew]         = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState('')
+  const [success, setSuccess] = useState(false)
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (loading) return
+    setError('')
+    if (!currentPassword || !newPassword || !confirmPassword) { setError('Fill in all fields.'); return }
+    if (newPassword.length < 6) { setError('New password must be at least 6 characters.'); return }
+    if (newPassword !== confirmPassword) { setError('New password and confirmation do not match.'); return }
+
+    setLoading(true)
+    const sb = createClient()
+    // Verify the current password by re-authenticating with it — Supabase's
+    // updateUser() has no separate "current password" check of its own.
+    const { error: verifyError } = await sb.auth.signInWithPassword({ email: currentEmail, password: currentPassword })
+    if (verifyError) { setLoading(false); setError('Current password is incorrect.'); return }
+
+    const { error: updateError } = await sb.auth.updateUser({ password: newPassword })
+    setLoading(false)
+    if (updateError) { setError(updateError.message); return }
+    setSuccess(true)
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.55)' }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[380px] rounded-2xl overflow-hidden"
+        style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.30)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-5 py-4" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--xp-txt)' }}>Change Password</h3>
+        </div>
+        <div className="px-5 py-5">
+          {success ? (
+            <div className="space-y-4">
+              <p className="text-[13px]" style={{ color: 'var(--xp-txt2)' }}>Your password has been updated.</p>
+              <button
+                onClick={onClose}
+                className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-85"
+                style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)' }}
+              >
+                Done
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <PasswordField
+                label="Current Password" value={currentPassword} onChange={setCurrentPassword}
+                show={showCurrent} onToggleShow={() => setShowCurrent(s => !s)} autoComplete="current-password"
+              />
+              <PasswordField
+                label="New Password" value={newPassword} onChange={setNewPassword}
+                show={showNew} onToggleShow={() => setShowNew(s => !s)} autoComplete="new-password"
+              />
+              <PasswordField
+                label="Confirm New Password" value={confirmPassword} onChange={setConfirmPassword}
+                show={showConfirm} onToggleShow={() => setShowConfirm(s => !s)} autoComplete="new-password"
+              />
+              {error && <p className="text-[11.5px]" style={{ color: '#ef4444' }}>{error}</p>}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"
+                  style={{ background: 'var(--xp-bg3)', color: 'var(--xp-txt2)', border: '0.5px solid var(--xp-bdr2)' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-85 disabled:opacity-60"
+                  style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)' }}
+                >
+                  {loading ? 'Updating…' : 'Update Password'}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Delete Account ─────────────────────────────────────────────────────────────
+
+function DeleteAccountModal({ onClose, onDeleted }: { onClose: () => void; onDeleted: () => void }) {
+  const [confirmText, setConfirmText] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState('')
+  const canDelete = confirmText === 'DELETE'
+
+  async function handleDelete() {
+    if (!canDelete || loading) return
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch('/api/account/delete', { method: 'DELETE' })
+      const body = await res.json().catch(() => ({} as { error?: string }))
+      if (!res.ok) {
+        setError(body.error || 'Failed to delete account. Please try again.')
+        setLoading(false)
+        return
+      }
+      onDeleted()
+    } catch {
+      setError('Network error — could not reach the server. Your account was not deleted.')
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.6)' }}
+      onClick={loading ? undefined : onClose}
+    >
+      <div
+        className="w-full max-w-[380px] rounded-2xl overflow-hidden"
+        style={{ background: 'var(--xp-card)', border: '0.5px solid rgba(239,68,68,0.3)', boxShadow: '0 24px 64px rgba(0,0,0,0.35)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 flex items-center gap-2.5" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
+          <div
+            className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: 'rgba(239,68,68,0.14)', color: '#ef4444' }}
+          >
+            <WarningIcon />
+          </div>
+          <h3 className="text-sm font-semibold" style={{ color: '#ef4444' }}>Delete Account?</h3>
+        </div>
+        <div className="px-5 py-5 space-y-4">
+          <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--xp-txt2)' }}>
+            This will permanently delete your XPadite account and all associated data — tasks,
+            calendar history, journal entries, activities, and photos. <strong>This cannot be undone.</strong>
+          </p>
+          <div>
+            <label className="block text-[11px] font-medium mb-1.5" style={{ color: 'var(--xp-txt3)' }}>
+              Type <strong>DELETE</strong> to confirm
+            </label>
+            <input
+              type="text"
+              value={confirmText}
+              onChange={e => setConfirmText(e.target.value)}
+              placeholder="DELETE"
+              autoComplete="off"
+              disabled={loading}
+              style={FIELD_STYLE}
+            />
+          </div>
+          {error && <p className="text-[11.5px]" style={{ color: '#ef4444' }}>{error}</p>}
+          <div className="flex gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80 disabled:opacity-60"
+              style={{ background: 'var(--xp-bg3)', color: 'var(--xp-txt2)', border: '0.5px solid var(--xp-bdr2)' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={!canDelete || loading}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-45"
+              style={{ background: '#dc2626' }}
+            >
+              {loading ? 'Deleting…' : 'Permanently Delete Account'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

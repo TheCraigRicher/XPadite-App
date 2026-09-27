@@ -745,15 +745,17 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
             stops right there). Desktop/tablet: this row renders nothing
             (sm:hidden), so it takes no space and the unchanged saveButtonNode
             stays in the body, full width, exactly as before. Light mode: the
-            exact requested #E2E2E2 with a subtle divider. Dark mode: the
-            EXACT same footerBg/dividerColor SettingsModal's own fixed footer
-            already uses (rgba(0,0,0,0.15) over the card, rgba(255,255,255,0.07)
-            border), reused verbatim for cross-modal consistency. */}
+            EXACT same lavender tint the Expanded Monthly Calendar's own mobile
+            dual-action bar uses (.xp-mfp-dual-bar in MonthFullPage.tsx —
+            rgba(124,58,237,0.05) with a rgba(0,0,0,0.08) top hairline), reused
+            verbatim for cross-modal consistency. Dark mode: the EXACT same
+            footerBg/dividerColor SettingsModal's own fixed footer already uses
+            (rgba(0,0,0,0.15) over the card, rgba(255,255,255,0.07) border). */}
         <div
           className="sm:hidden px-5 py-3 flex-shrink-0"
           style={{
             borderTop: `0.5px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)'}`,
-            background: isDark ? 'rgba(0,0,0,0.15)' : '#E2E2E2',
+            background: isDark ? 'rgba(0,0,0,0.15)' : 'rgba(124,58,237,0.05)',
           }}
         >
           {/* Always the full vivid purple/green gradient at full opacity —

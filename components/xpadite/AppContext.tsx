@@ -849,6 +849,27 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     }
   }, [])
 
+  // Supabase/Postgrest errors carry their real detail on .message/.code/
+  // .details/.hint — logging the raw object (as this used to) can print as
+  // "{}" depending on how it gets serialized, hiding the actual cause. This
+  // pulls those fields out explicitly so a real failure is diagnosable, and
+  // flags the specific, common "column doesn't exist yet" case (Postgrest
+  // code 42703 / PGRST204) — which is exactly what every language/timezone
+  // sync attempt produces if migration 012_user_locale_preferences.sql (the
+  // one that adds the language/timezone columns to user_preferences) hasn't
+  // been run against this Supabase project yet.
+  function describePrefsError(err: unknown): string {
+    if (err && typeof err === 'object') {
+      const e = err as { message?: string; code?: string; details?: string; hint?: string }
+      if (e.code === '42703' || e.code === 'PGRST204') {
+        return `column missing on user_preferences (code ${e.code}) — has supabase/migrations/012_user_locale_preferences.sql been applied? ${e.message ?? ''}`
+      }
+      const parts = [e.message, e.code && `code=${e.code}`, e.details, e.hint].filter(Boolean)
+      if (parts.length) return parts.join(' | ')
+    }
+    try { return JSON.stringify(err) } catch { return String(err) }
+  }
+
   // v === null resets to "Automatic" — persisted as an explicit null so it
   // isn't reinterpreted as "no preference set yet" on next load.
   const setLanguage = useCallback((v: string | null) => {
@@ -860,7 +881,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const uid = userIdRef.current
     if (uid) {
       upsertUserPreferences(createClient(), uid, { language: v }).catch(err =>
-        console.error('[Prefs] Language sync error:', err)
+        console.error('[Prefs] Language sync error:', describePrefsError(err))
       )
     }
   }, [])
@@ -874,7 +895,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const uid = userIdRef.current
     if (uid) {
       upsertUserPreferences(createClient(), uid, { timezone: v }).catch(err =>
-        console.error('[Prefs] Timezone sync error:', err)
+        console.error('[Prefs] Timezone sync error:', describePrefsError(err))
       )
     }
   }, [])

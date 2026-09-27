@@ -174,12 +174,19 @@ interface ProfileModalProps {
 }
 
 export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
-  const { userEmail } = useApp()
+  const { userEmail, isDark } = useApp()
   const router = useRouter()
   useLockBodyScroll()
   const [data, setData] = useState<ProfileData>(loadProfile)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Last loaded/saved profile values — used only to detect unsaved changes for
+  // the mobile Save Changes button's muted/active visual state. State (not a
+  // ref) so the render-time comparison below stays correct. Kept in sync
+  // wherever `data` is set by load/bootstrap/save (never by direct typing).
+  const [savedProfile, setSavedProfile] = useState({
+    firstName: data.firstName, lastName: data.lastName, displayName: data.displayName, avatarUrl: data.avatarUrl,
+  })
   const [activeSecurityModal, setActiveSecurityModal] = useState<'email' | 'password' | 'delete' | null>(null)
   const [planOpen, setPlanOpen] = useState(false)
   const [planInfoTarget, setPlanInfoTarget] = useState<string | null>(null)
@@ -269,10 +276,16 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
         const spaceIdx = fullName.indexOf(' ')
         const firstName = spaceIdx === -1 ? fullName : fullName.slice(0, spaceIdx)
         const lastName  = spaceIdx === -1 ? '' : fullName.slice(spaceIdx + 1)
+        // This whole bootstrap effect only runs when there's no cached local
+        // profile yet (see the guard above), so `data.displayName` is still
+        // empty at this point — `d.displayName || firstName` below therefore
+        // always resolves to `firstName`, which is what's mirrored here.
         setData(d => ({ ...d, firstName, lastName, displayName: d.displayName || firstName }))
+        setSavedProfile(sp => ({ ...sp, firstName, lastName, displayName: firstName }))
       }
       const avatarPath = row?.avatar_url ?? ''
       if (isStoragePath(avatarPath)) {
+        setSavedProfile(sp => ({ ...sp, avatarUrl: avatarPath }))
         setData(d => ({ ...d, avatarUrl: avatarPath }))
         const { data: signed, error: signErr } = await sb.storage.from('avatars').createSignedUrl(avatarPath, 3600)
         if (signErr || !signed?.signedUrl) { setAvatarLoading(false); return }
@@ -425,6 +438,9 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
     // ── Persist to localStorage and notify sidebar ──────────────────────────
     const newData = { ...data, avatarUrl: storagePath }
     setData(newData)
+    setSavedProfile({
+      firstName: newData.firstName, lastName: newData.lastName, displayName: newData.displayName, avatarUrl: newData.avatarUrl,
+    })
     saveProfile(newData)
     window.dispatchEvent(new CustomEvent('xp9-avatar-changed'))
 
@@ -440,9 +456,8 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
   const hasAvatar = !!avatarSrc
   const inputStyle = FIELD_STYLE
 
-  // Rendered in two places (desktop/tablet inline in the scrolling body, mobile
-  // in the sticky footer row) — same element, same behavior, just shown/hidden
-  // per breakpoint via CSS so there is exactly one Save Changes implementation.
+  // Desktop/tablet Save Changes — inline in the scrolling body, unchanged:
+  // always fully active regardless of dirty state (this task is mobile-only).
   const saveButtonNode = (
     <button
       onClick={handleSave}
@@ -457,6 +472,19 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
       {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Changes'}
     </button>
   )
+
+  // Mobile-only dirty check: is there anything a tap on Save would actually
+  // persist? A Remove already persists immediately (see handleRemove) — its
+  // effect on data.avatarUrl still registers here, so Save stays "active"
+  // until the user taps it once more (a harmless no-op re-save that just
+  // clears the indicator), matching the requested "removal counts as a
+  // change" behavior without altering Remove's own immediate persistence.
+  const hasUnsavedChanges =
+    data.firstName !== savedProfile.firstName ||
+    data.lastName !== savedProfile.lastName ||
+    data.displayName !== savedProfile.displayName ||
+    data.avatarUrl !== savedProfile.avatarUrl ||
+    !!pendingFile
 
   return (
     <>
@@ -700,7 +728,7 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[12.5px] font-semibold" style={{ color: '#ef4444' }}>Delete Account</p>
-              <p className="text-[10.5px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>
+              <p className="text-[10.5px] mt-0.5" style={{ color: isDark ? 'rgba(252,165,165,0.75)' : 'var(--xp-txt3)' }}>
                 Permanently delete your account and associated XPadite data.
               </p>
             </div>
@@ -708,25 +736,44 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
           </button>
 
           {/* Save — desktop/tablet only here; reached by scrolling, unchanged.
-              Mobile shows the sticky instance below instead (see saveButtonNode). */}
+              Mobile shows its own dedicated sticky-footer button instead. */}
           <div className="hidden sm:block">{saveButtonNode}</div>
         </div>
 
         {/* Mobile-only sticky Save Changes — sits directly above the locked
             5-slot bottom nav (the modal's own bottom-14 backdrop inset already
             stops right there). Desktop/tablet: this row renders nothing
-            (sm:hidden), so it takes no space and Save stays in the body,
-            full width, exactly as before. The bar itself uses the same
-            neutral gray token (--xp-bg3) already used throughout Profile's
-            own inputs/rows — full width for clean separation from the 5-slot
-            nav — while the button inside is narrowed/centered to ~60% width,
-            just for this mobile instance; the desktop button above is
-            untouched (still saveButtonNode's own full-width className). */}
+            (sm:hidden), so it takes no space and the unchanged saveButtonNode
+            stays in the body, full width, exactly as before. Light mode: the
+            exact requested #E2E2E2 with a subtle divider. Dark mode: the
+            EXACT same footerBg/dividerColor SettingsModal's own fixed footer
+            already uses (rgba(0,0,0,0.15) over the card, rgba(255,255,255,0.07)
+            border), reused verbatim for cross-modal consistency. */}
         <div
-          className="sm:hidden px-5 py-3 flex-shrink-0 flex justify-center"
-          style={{ borderTop: '0.5px solid var(--xp-bdr)', background: 'var(--xp-bg3)' }}
+          className="sm:hidden px-5 py-3 flex-shrink-0"
+          style={{
+            borderTop: `0.5px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)'}`,
+            background: isDark ? 'rgba(0,0,0,0.15)' : '#E2E2E2',
+          }}
         >
-          <div className="w-[60%] min-w-[200px]">{saveButtonNode}</div>
+          {/* Always the full vivid purple/green gradient at full opacity —
+              disabled (via hasUnsavedChanges) still guards the tap when
+              there's nothing to save, but that state is no longer shown as a
+              faded/washed-out button; only its click-guard is dirty-aware.
+              Width/margins match saveButtonNode (full width within the bar's
+              own px-5 padding). */}
+          <button
+            onClick={handleSave}
+            disabled={saving || !hasUnsavedChanges}
+            className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150"
+            style={{
+              background: saved
+                ? 'linear-gradient(135deg, #16a34a, #15803d)'
+                : 'linear-gradient(135deg, #7c3aed, #6d28d9)',
+            }}
+          >
+            {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Changes'}
+          </button>
         </div>
       </div>
     </div>

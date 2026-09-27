@@ -233,11 +233,6 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
 
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Revoke blob preview URL when it changes or on unmount
-  useEffect(() => {
-    return () => { if (pendingPreview) URL.revokeObjectURL(pendingPreview) }
-  }, [pendingPreview])
-
   // On mount: generate signed URL from existing storage path
   useEffect(() => {
     const raw = localStorage.getItem('xp9-profile')
@@ -320,10 +315,21 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
       return
     }
     setAvatarError('')
-    if (pendingPreview) URL.revokeObjectURL(pendingPreview)
     setPendingFile(file)
-    setPendingPreview(URL.createObjectURL(file))
-    setAvatarLoading(true)  // cleared by img.onLoad once the blob is decoded
+    setAvatarLoading(true)  // cleared by img.onLoad once the staged preview is decoded
+
+    // FileReader → data: URI, not URL.createObjectURL — blob: URLs have shown
+    // mobile-webview-specific staged-preview failures (broken-image icon)
+    // even though the file itself is valid (Save Changes' persistence path,
+    // which never touches this preview, works fine). data: URIs are the same
+    // format avatarSrc already treats as a legitimate value (see the legacy
+    // data: URI branch below) and render reliably everywhere.
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') setPendingPreview(reader.result)
+    }
+    reader.onerror = () => setAvatarError('Could not read the selected image.')
+    reader.readAsDataURL(file)
   }
 
   async function handleRemove() {
@@ -398,7 +404,6 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
         setSignedAvatarUrl(signed.signedUrl)
       }
 
-      URL.revokeObjectURL(pendingPreview)
       setPendingPreview('')
       setPendingFile(null)
     }
@@ -710,15 +715,18 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
         {/* Mobile-only sticky Save Changes — sits directly above the locked
             5-slot bottom nav (the modal's own bottom-14 backdrop inset already
             stops right there). Desktop/tablet: this row renders nothing
-            (sm:hidden), so it takes no space and Save stays in the body.
-            Background reuses the exact deep-navy dock treatment already
-            established for the Planner Editor's bottom toolbar (dockBg/dockBdr
-            in JournalEditorContent.tsx) — Save Changes itself stays purple. */}
+            (sm:hidden), so it takes no space and Save stays in the body,
+            full width, exactly as before. The bar itself uses the same
+            neutral gray token (--xp-bg3) already used throughout Profile's
+            own inputs/rows — full width for clean separation from the 5-slot
+            nav — while the button inside is narrowed/centered to ~60% width,
+            just for this mobile instance; the desktop button above is
+            untouched (still saveButtonNode's own full-width className). */}
         <div
-          className="sm:hidden px-5 py-3 flex-shrink-0"
-          style={{ borderTop: '0.5px solid rgba(124,58,237,0.20)', background: 'rgba(8,20,58,0.98)' }}
+          className="sm:hidden px-5 py-3 flex-shrink-0 flex justify-center"
+          style={{ borderTop: '0.5px solid var(--xp-bdr)', background: 'var(--xp-bg3)' }}
         >
-          {saveButtonNode}
+          <div className="w-[60%] min-w-[200px]">{saveButtonNode}</div>
         </div>
       </div>
     </div>

@@ -687,11 +687,13 @@ function ThemedApp(_props: XpaditeAppProps) {
   // ── Mobile nav guard (unsaved changes protection) ─────────────────────────────
   const modalDirtyRef                = useRef(false)
   const plannerDirtyRef              = useRef(false)
+  const profileDirtyRef              = useRef(false)
   const [navGuardOpen, setNavGuardOpen]         = useState(false)
-  const [navGuardSource, setNavGuardSource]     = useState<'tasks' | 'planner'>('tasks')
+  const [navGuardSource, setNavGuardSource]     = useState<'tasks' | 'planner' | 'profile'>('tasks')
   const pendingNavRef                = useRef<(() => void) | null>(null)
   const [dayModalCloseIntent, setDayModalCloseIntent]     = useState<'save' | 'discard' | null>(null)
   const [plannerCloseIntent, setPlannerCloseIntent]       = useState<'save' | 'discard' | null>(null)
+  const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'discard' | null>(null)
 
   function executeNav(tab: MobileTab) {
     setDashboardDay(null)
@@ -710,6 +712,12 @@ function ThemedApp(_props: XpaditeAppProps) {
   }
 
   function handleMobileNav(tab: MobileTab) {
+    if (profileOpen && profileDirtyRef.current) {
+      pendingNavRef.current = () => executeNav(tab)
+      setNavGuardSource('profile')
+      setNavGuardOpen(true)
+      return
+    }
     if (modalDay && modalDirtyRef.current) {
       pendingNavRef.current = () => executeNav(tab)
       setNavGuardSource('tasks')
@@ -722,14 +730,33 @@ function ThemedApp(_props: XpaditeAppProps) {
       setNavGuardOpen(true)
       return
     }
+    // Profile is clean (or wasn't open) — close it out of the way, same as
+    // the modalDay case just above, so it never lingers visually over
+    // whatever destination the tap is about to switch to.
+    if (profileOpen) setProfileOpen(false)
     if (modalDay) setModalDay(null)
     executeNav(tab)
+  }
+
+  // Profile's own mobile X close button routes through here too (via
+  // ProfileModal's onRequestClose) — same dialog, but with no pending
+  // destination, so navGuardSave/Discard just close Profile in place.
+  function handleProfileRequestClose() {
+    if (profileDirtyRef.current) {
+      pendingNavRef.current = null
+      setNavGuardSource('profile')
+      setNavGuardOpen(true)
+    } else {
+      setProfileOpen(false)
+    }
   }
 
   function navGuardSave() {
     setNavGuardOpen(false)
     if (navGuardSource === 'planner') {
       setPlannerCloseIntent('save')
+    } else if (navGuardSource === 'profile') {
+      setProfileCloseIntent('save')
     } else {
       setDayModalCloseIntent('save')
     }
@@ -739,6 +766,8 @@ function ThemedApp(_props: XpaditeAppProps) {
     setNavGuardOpen(false)
     if (navGuardSource === 'planner') {
       setPlannerCloseIntent('discard')
+    } else if (navGuardSource === 'profile') {
+      setProfileCloseIntent('discard')
     } else {
       setDayModalCloseIntent('discard')
     }
@@ -1163,8 +1192,20 @@ function ThemedApp(_props: XpaditeAppProps) {
 
       {profileOpen && (
         <ProfileModal
-          onClose={() => setProfileOpen(false)}
+          onClose={() => {
+            setProfileOpen(false)
+            setProfileCloseIntent(null)
+            const pending = pendingNavRef.current
+            if (pending) {
+              pendingNavRef.current = null
+              pending()
+            }
+          }}
           onOpenSettings={() => { setProfileOpen(false); setSettingsOpen(true) }}
+          onDirtyChange={dirty => { profileDirtyRef.current = dirty }}
+          closeIntent={profileCloseIntent}
+          onCloseIntentFailed={() => setProfileCloseIntent(null)}
+          onRequestClose={handleProfileRequestClose}
         />
       )}
 
@@ -1212,7 +1253,9 @@ function ThemedApp(_props: XpaditeAppProps) {
             <div style={{ padding: '20px 20px 12px', textAlign: 'center' }}>
               <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--xp-txt)', margin: 0 }}>Unsaved Changes</p>
               <p style={{ fontSize: 11, color: 'var(--xp-txt3)', marginTop: 6, marginBottom: 0 }}>
-                You have unsaved changes in your {navGuardSource === 'planner' ? 'Planner' : 'Task Manager'}.
+                {navGuardSource === 'profile'
+                  ? 'You have unsaved changes to your profile. What would you like to do?'
+                  : `You have unsaved changes in your ${navGuardSource === 'planner' ? 'Planner' : 'Task Manager'}.`}
               </p>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '0 16px 20px' }}>
@@ -1220,7 +1263,7 @@ function ThemedApp(_props: XpaditeAppProps) {
                 Save &amp; Continue
               </button>
               <button onClick={navGuardDiscard} style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: isDark ? 'rgba(239,68,68,0.10)' : 'rgba(239,68,68,0.06)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.22)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
-                Exit Without Saving
+                {navGuardSource === 'profile' ? 'Discard Changes' : 'Exit Without Saving'}
               </button>
               <button onClick={navGuardCancel} style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: 'transparent', color: 'var(--xp-txt2)', border: '1px solid var(--xp-bdr2)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
                 Cancel

@@ -171,9 +171,21 @@ function extFromMime(mime: string): string {
 interface ProfileModalProps {
   onClose: () => void
   onOpenSettings?: () => void
+  // Mobile nav-guard integration (mirrors DayModal/JournalWorkspaceModal's own
+  // onDirtyChange/closeIntent props in XpaditeApp.tsx) — lets the shared mobile
+  // bottom-nav "Unsaved Changes" dialog cover Profile too, reusing that exact
+  // mechanism instead of a separate one. All optional/no-ops on desktop/tablet.
+  onDirtyChange?: (dirty: boolean) => void
+  closeIntent?: 'save' | 'discard' | null
+  onCloseIntentFailed?: () => void
+  // Mobile-only: X tap defers the close decision to the parent (which knows
+  // about the shared nav-guard dialog) instead of closing immediately.
+  onRequestClose?: () => void
 }
 
-export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
+export function ProfileModal({
+  onClose, onOpenSettings, onDirtyChange, closeIntent, onCloseIntentFailed, onRequestClose,
+}: ProfileModalProps) {
   const { userEmail, isDark } = useApp()
   const router = useRouter()
   useLockBodyScroll()
@@ -374,13 +386,17 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
     if (dbError) console.error('AVATAR DB CLEAR ERROR:', dbError)
   }
 
-  async function handleSave() {
+  // Returns whether the save actually succeeded, so callers driven by the
+  // mobile nav-guard's "Save & Continue" (see closeIntent effect below) know
+  // whether it's safe to close, without changing the existing Save Changes
+  // button's own call site, which never looked at the return value.
+  async function handleSave(): Promise<boolean> {
     setSaving(true)
     setAvatarError('')
 
     const sb = createClient()
     const { data: { user } } = await sb.auth.getUser()
-    if (!user) { setSaving(false); return }
+    if (!user) { setSaving(false); return false }
 
     let storagePath = data.avatarUrl   // may be updated by upload below
 
@@ -402,7 +418,7 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
         console.error('AVATAR UPLOAD ERROR:', uploadError)
         setAvatarError(`Upload failed: ${uploadError.message}`)
         setSaving(false)
-        return
+        return false
       }
 
       storagePath = newPath
@@ -447,6 +463,7 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
     setSaving(false)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
+    return true
   }
 
   const displayInitial = (data.firstName || data.displayName || userEmail || 'U').charAt(0).toUpperCase()
@@ -486,6 +503,45 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
     data.avatarUrl !== savedProfile.avatarUrl ||
     !!pendingFile
 
+  // Tell the parent (mobile nav-guard, see XpaditeApp.tsx) whenever dirtiness
+  // changes — mirrors DayModal's own onDirtyChange effect exactly.
+  useEffect(() => {
+    onDirtyChange?.(hasUnsavedChanges)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasUnsavedChanges])
+
+  // External close intent from the mobile nav-guard dialog ('save' or
+  // 'discard'), same pattern as DayModal's closeIntent effect. Unlike
+  // DayModal's synchronous local save, this one can genuinely fail (network),
+  // so a failed save reports back via onCloseIntentFailed instead of closing —
+  // that resets the parent's intent state so a later retry isn't a no-op.
+  useEffect(() => {
+    if (!closeIntent) return
+    if (closeIntent === 'save') {
+      handleSave().then(ok => {
+        if (ok) onClose()
+        else onCloseIntentFailed?.()
+      })
+    } else if (closeIntent === 'discard') {
+      setData(d => ({ ...d, firstName: savedProfile.firstName, lastName: savedProfile.lastName, displayName: savedProfile.displayName }))
+      setPendingFile(null)
+      setPendingPreview('')
+      onClose()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeIntent])
+
+  // Mobile-only: defer the close decision to the parent's nav-guard (which
+  // shows the same "Unsaved Changes" dialog used for bottom-nav taps) instead
+  // of closing immediately. Desktop/tablet: unchanged, always closes directly.
+  function handleHeaderClose() {
+    if (typeof window !== 'undefined' && window.innerWidth < 640 && onRequestClose) {
+      onRequestClose()
+    } else {
+      onClose()
+    }
+  }
+
   return (
     <>
     <style>{`
@@ -515,7 +571,7 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
         onClick={e => e.stopPropagation()}
         onAnimationEnd={() => setAttentionPulsing(false)}
       >
-        <PremiumModalHeader title="Profile" subtitle="Manage your account details" onClose={onClose} />
+        <PremiumModalHeader title="Profile" subtitle="Manage your account details" onClose={handleHeaderClose} />
 
         {/* Body — only this region scrolls when content exceeds the modal's max height.
             overscrollBehavior: 'contain' is the same fix already applied to every other

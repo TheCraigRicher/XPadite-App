@@ -5,6 +5,12 @@ import { useRouter } from 'next/navigation'
 import { useApp } from './AppContext'
 import { createClient } from '@/lib/supabase/client'
 import { useLockBodyScroll } from './useLockBodyScroll'
+import { PLAN_CONFIGS } from './SettingsModal'
+
+// The same fixed brand-purple gradient the Task Manager (DayModal) header
+// already uses — the established XPadite premium-header treatment, reused
+// verbatim here rather than inventing a new one.
+const PREMIUM_HEADER_GRADIENT = 'linear-gradient(135deg, #3b0764 0%, #7c3aed 50%, #6d28d9 100%)'
 
 const FIELD_STYLE: React.CSSProperties = {
   width: '100%',
@@ -64,6 +70,12 @@ const ChevronRightIcon = () => (
   </svg>
 )
 
+const ChevronDownIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
+    <polyline points="6 9 12 15 18 9" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
 const EyeIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" className="w-4 h-4">
     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" strokeLinecap="round" strokeLinejoin="round" />
@@ -76,6 +88,41 @@ const EyeOffIcon = () => (
     <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24M1 1l22 22" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 )
+
+// ── Shared XPadite premium modal header (Task Manager header treatment) ───────
+
+function PremiumModalHeader({ title, subtitle, onClose, icon }: {
+  title: string; subtitle?: string; onClose: () => void; icon?: React.ReactNode
+}) {
+  return (
+    <div
+      className="flex items-center justify-between px-5 py-4 flex-shrink-0"
+      style={{ background: PREMIUM_HEADER_GRADIENT, borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}
+    >
+      <div className="flex items-center gap-3 min-w-0">
+        {icon && (
+          <div
+            className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: 'rgba(255,255,255,0.16)', color: 'white' }}
+          >
+            {icon}
+          </div>
+        )}
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-white truncate">{title}</h2>
+          {subtitle && <p className="text-[11px] mt-0.5 truncate" style={{ color: 'rgba(255,255,255,0.65)' }}>{subtitle}</p>}
+        </div>
+      </div>
+      <button
+        onClick={onClose}
+        className="w-8 h-8 rounded-full flex items-center justify-center hover:opacity-80 transition-opacity flex-shrink-0"
+        style={{ background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.20)', color: 'white' }}
+      >
+        ✕
+      </button>
+    </div>
+  )
+}
 
 interface ProfileData {
   firstName: string
@@ -114,16 +161,19 @@ function extFromMime(mime: string): string {
 
 interface ProfileModalProps {
   onClose: () => void
+  onOpenSettings?: () => void
 }
 
-export function ProfileModal({ onClose }: ProfileModalProps) {
-  const { userEmail, isDark } = useApp()
+export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
+  const { userEmail } = useApp()
   const router = useRouter()
   useLockBodyScroll()
   const [data, setData] = useState<ProfileData>(loadProfile)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [activeSecurityModal, setActiveSecurityModal] = useState<'email' | 'password' | 'delete' | null>(null)
+  const [planOpen, setPlanOpen] = useState(false)
+  const [planInfoTarget, setPlanInfoTarget] = useState<string | null>(null)
 
   // Avatar display & upload state
   const [signedAvatarUrl, setSignedAvatarUrl] = useState('')   // signed URL for display
@@ -223,12 +273,13 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'Escape') return
-      if (activeSecurityModal) setActiveSecurityModal(null)
+      if (planInfoTarget) setPlanInfoTarget(null)
+      else if (activeSecurityModal) setActiveSecurityModal(null)
       else onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, activeSecurityModal])
+  }, [onClose, activeSecurityModal, planInfoTarget])
 
   async function handleAccountDeleted() {
     const sb = createClient()
@@ -385,28 +436,7 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Header — fixed, never scrolls away */}
-        <div
-          className="flex items-center justify-between px-5 py-4"
-          style={{
-            background: isDark
-              ? 'linear-gradient(135deg, #0a0a1a 0%, #1a0a30 100%)'
-              : 'linear-gradient(135deg, #f3f0ff 0%, #ede9fe 100%)',
-            borderBottom: '0.5px solid var(--xp-bdr)',
-          }}
-        >
-          <div>
-            <h2 className="text-sm font-semibold" style={{ color: 'var(--xp-txt)' }}>Profile</h2>
-            <p className="text-[11px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>Manage your account details</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center hover:opacity-70 transition-opacity"
-            style={{ background: 'rgba(124,58,237,0.12)', color: '#7c3aed' }}
-          >
-            ✕
-          </button>
-        </div>
+        <PremiumModalHeader title="Profile" subtitle="Manage your account details" onClose={onClose} />
 
         {/* Body — only this region scrolls when content exceeds the modal's max height */}
         <div className="px-5 py-5 space-y-4" style={{ minHeight: 0, overflowY: 'auto' }}>
@@ -557,21 +587,43 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
             </div>
           </div>
 
-          {/* Plan badge */}
-          <div
-            className="flex items-center justify-between px-3 py-2.5 rounded-xl"
-            style={{ background: 'rgba(124,58,237,0.07)', border: '0.5px solid rgba(124,58,237,0.18)' }}
-          >
-            <div>
-              <p className="text-[11px] font-semibold" style={{ color: 'var(--xp-txt)' }}>Current Plan</p>
-              <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>XPadite Free</p>
-            </div>
-            <span
-              className="text-[10px] font-semibold px-2.5 py-1 rounded-full"
-              style={{ background: 'rgba(124,58,237,0.15)', color: '#a78bfa' }}
+          {/* Current Plan — compact overview; upgrades happen in Settings, not here */}
+          <div className="rounded-xl overflow-hidden" style={{ border: '0.5px solid rgba(124,58,237,0.18)' }}>
+            <button
+              onClick={() => setPlanOpen(v => !v)}
+              className="w-full flex items-center justify-between px-3 py-2.5 transition-opacity hover:opacity-90"
+              style={{ background: 'rgba(124,58,237,0.07)' }}
             >
-              Free
-            </span>
+              <div className="text-left">
+                <p className="text-[11px] font-semibold" style={{ color: 'var(--xp-txt)' }}>Current Plan</p>
+                <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>XPadite Free</p>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span
+                  className="text-[10px] font-semibold px-2.5 py-1 rounded-full"
+                  style={{ background: 'rgba(124,58,237,0.15)', color: '#a78bfa' }}
+                >
+                  Free
+                </span>
+                <span
+                  style={{ color: 'var(--xp-txt3)', transition: 'transform 200ms', transform: planOpen ? 'rotate(180deg)' : 'none' }}
+                >
+                  <ChevronDownIcon />
+                </span>
+              </div>
+            </button>
+            {planOpen && (
+              <div className="px-3 py-3 space-y-2.5" style={{ borderTop: '0.5px solid rgba(124,58,237,0.14)', background: 'var(--xp-bg3)' }}>
+                <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>
+                  Other available XPadite plans — manage upgrades from Settings.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {Object.entries(PLAN_CONFIGS).map(([id, cfg]) => (
+                    <PlanPreviewCard key={id} cfg={cfg} onClick={() => setPlanInfoTarget(id)} />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Delete Account — destructive, kept separate from Account & Security */}
@@ -624,24 +676,53 @@ export function ProfileModal({ onClose }: ProfileModalProps) {
         onDeleted={handleAccountDeleted}
       />
     )}
+    {planInfoTarget && PLAN_CONFIGS[planInfoTarget] && (
+      <PlanRedirectModal
+        planTitle={PLAN_CONFIGS[planInfoTarget].title}
+        onClose={() => setPlanInfoTarget(null)}
+        onGoToSettings={() => {
+          setPlanInfoTarget(null)
+          onOpenSettings?.()
+          onClose()
+        }}
+      />
+    )}
     </>
   )
 }
 
 // ── Account & Security row ────────────────────────────────────────────────────
 
+// Hover/focus treatment mirrors SettingsModal's Language/Timezone SelectMenu
+// trigger exactly (border → #7c3aed, soft glow ring, smooth transition) so
+// Account & Security feels like the same established XPadite control.
 function SecurityRow({ icon, title, subtitle, onClick }: {
   icon: React.ReactNode; title: string; subtitle: string; onClick: () => void
 }) {
+  const [active, setActive] = useState(false)
   return (
     <button
       onClick={onClick}
-      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-opacity hover:opacity-80"
-      style={{ background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)' }}
+      onMouseEnter={() => setActive(true)}
+      onMouseLeave={() => setActive(false)}
+      onFocus={() => setActive(true)}
+      onBlur={() => setActive(false)}
+      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left outline-none"
+      style={{
+        background: active ? 'rgba(124,58,237,0.06)' : 'var(--xp-bg3)',
+        border: active ? '1.5px solid #7c3aed' : '1px solid var(--xp-bdr2)',
+        boxShadow: active ? '0 0 0 3px rgba(124,58,237,0.12)' : 'none',
+        transform: active ? 'translateY(-1px)' : 'none',
+        transition: 'background 150ms, border 150ms, box-shadow 150ms, transform 150ms',
+      }}
     >
       <div
         className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
-        style={{ background: 'rgba(124,58,237,0.12)', color: '#7c3aed' }}
+        style={{
+          background: active ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.12)',
+          color: '#7c3aed',
+          transition: 'background 150ms',
+        }}
       >
         {icon}
       </div>
@@ -649,7 +730,15 @@ function SecurityRow({ icon, title, subtitle, onClick }: {
         <p className="text-[12.5px] font-semibold" style={{ color: 'var(--xp-txt)' }}>{title}</p>
         <p className="text-[10.5px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>{subtitle}</p>
       </div>
-      <span style={{ color: 'var(--xp-txt3)' }}><ChevronRightIcon /></span>
+      <span
+        style={{
+          color: active ? '#7c3aed' : 'var(--xp-txt3)',
+          transform: active ? 'translateX(2px)' : 'none',
+          transition: 'transform 150ms, color 150ms',
+        }}
+      >
+        <ChevronRightIcon />
+      </span>
     </button>
   )
 }
@@ -721,15 +810,14 @@ function ChangeEmailModal({ currentEmail, onClose }: { currentEmail: string; onC
         style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.30)' }}
         onClick={e => e.stopPropagation()}
       >
-        <div className="px-5 py-4" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
-          <h3 className="text-sm font-semibold" style={{ color: 'var(--xp-txt)' }}>Change Email</h3>
-        </div>
+        <PremiumModalHeader title="Change Email" subtitle="Update your account email address" onClose={onClose} />
         <div className="px-5 py-5">
           {success ? (
             <div className="space-y-4">
               <p className="text-[13px] leading-relaxed" style={{ color: 'var(--xp-txt2)' }}>
-                We&apos;ve sent a confirmation link to <strong>{newEmail.trim()}</strong>. Your email will
-                update once you confirm it there.
+                We&apos;ve sent confirmation messages to both your current email and <strong>{newEmail.trim()}</strong>.
+                Confirm the request from <strong>both</strong> to finish updating your email — your account still
+                uses your current email until both are confirmed.
               </p>
               <button
                 onClick={onClose}
@@ -828,9 +916,7 @@ function ChangePasswordModal({ currentEmail, onClose }: { currentEmail: string; 
         style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.30)' }}
         onClick={e => e.stopPropagation()}
       >
-        <div className="px-5 py-4" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
-          <h3 className="text-sm font-semibold" style={{ color: 'var(--xp-txt)' }}>Change Password</h3>
-        </div>
+        <PremiumModalHeader title="Change Password" subtitle="Update your account password" onClose={onClose} />
         <div className="px-5 py-5">
           {success ? (
             <div className="space-y-4">
@@ -922,15 +1008,7 @@ function DeleteAccountModal({ onClose, onDeleted }: { onClose: () => void; onDel
         style={{ background: 'var(--xp-card)', border: '0.5px solid rgba(239,68,68,0.3)', boxShadow: '0 24px 64px rgba(0,0,0,0.35)' }}
         onClick={e => e.stopPropagation()}
       >
-        <div className="px-5 py-4 flex items-center gap-2.5" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
-          <div
-            className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
-            style={{ background: 'rgba(239,68,68,0.14)', color: '#ef4444' }}
-          >
-            <WarningIcon />
-          </div>
-          <h3 className="text-sm font-semibold" style={{ color: '#ef4444' }}>Delete Account?</h3>
-        </div>
+        <PremiumModalHeader title="Delete Account" subtitle="This action is permanent" onClose={loading ? () => {} : onClose} icon={<WarningIcon />} />
         <div className="px-5 py-5 space-y-4">
           <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--xp-txt2)' }}>
             This will permanently delete your XPadite account and all associated data — tasks,
@@ -969,6 +1047,74 @@ function DeleteAccountModal({ onClose, onDeleted }: { onClose: () => void; onDel
               style={{ background: '#dc2626' }}
             >
               {loading ? 'Deleting…' : 'Permanently Delete Account'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Current Plan — compact preview card for a plan Profile doesn't manage ──────
+
+function PlanPreviewCard({ cfg, onClick }: { cfg: (typeof PLAN_CONFIGS)[string]; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="text-left rounded-lg px-2.5 py-2 transition-all duration-150"
+      style={{
+        background: cfg.headerGradient,
+        transform: hovered ? 'translateY(-1px) scale(1.01)' : 'none',
+        boxShadow: hovered ? '0 4px 14px rgba(0,0,0,0.20)' : '0 2px 8px rgba(0,0,0,0.12)',
+      }}
+    >
+      <p className="text-[11px] font-bold text-white truncate">{cfg.title}</p>
+      <p className="text-[10px] truncate" style={{ color: 'rgba(255,255,255,0.75)' }}>
+        {cfg.price} {cfg.priceLabel}
+      </p>
+    </button>
+  )
+}
+
+// ── "Manage plans in Settings" redirect dialog ──────────────────────────────────
+
+function PlanRedirectModal({ planTitle, onClose, onGoToSettings }: {
+  planTitle: string; onClose: () => void; onGoToSettings: () => void
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.55)' }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[360px] rounded-2xl overflow-hidden"
+        style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.30)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <PremiumModalHeader title={planTitle} onClose={onClose} />
+        <div className="px-5 py-5 space-y-4">
+          <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--xp-txt2)' }}>
+            Plan upgrades and billing are managed from Settings, not from Profile. Head to Settings to view
+            or change your XPadite plan.
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"
+              style={{ background: 'var(--xp-bg3)', color: 'var(--xp-txt2)', border: '0.5px solid var(--xp-bdr2)' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onGoToSettings}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-85"
+              style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)' }}
+            >
+              Go to Settings
             </button>
           </div>
         </div>

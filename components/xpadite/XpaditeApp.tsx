@@ -1161,7 +1161,12 @@ function ThemedApp(_props: XpaditeAppProps) {
 
       {whatsNewOpen && <WhatsNewModal onClose={() => setWhatsNewOpen(false)} />}
 
-      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
+      {profileOpen && (
+        <ProfileModal
+          onClose={() => setProfileOpen(false)}
+          onOpenSettings={() => { setProfileOpen(false); setSettingsOpen(true) }}
+        />
+      )}
 
       {activityManagerOpen && <ActivityManagerModal onClose={() => setActivityManagerOpen(false)} />}
 

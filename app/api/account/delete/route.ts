@@ -12,9 +12,15 @@
  * work_sessions, user_activities, user_preferences, gallery_items,
  * reminders, journal_labels, journal_folders) has its user_id column
  * declared `references auth.users(id) on delete cascade` — so deleting the
- * auth user here cascades through Postgres and removes all of it. Avatar
- * files in Supabase Storage are not covered by that cascade and are left in
- * place; this endpoint does not attempt to also erase Storage objects.
+ * auth user here cascades through Postgres and removes all of it.
+ *
+ * Avatar files in Supabase Storage are NOT covered by that cascade, so this
+ * route resolves the caller's actual avatar path from their own `profiles`
+ * row (trusted server-side read, never a path supplied by the client) and
+ * removes it from the `avatars` bucket before deleting the auth user. A
+ * missing/already-removed avatar, or an unexpected Storage error, is logged
+ * and does not block the account deletion itself — losing one orphaned file
+ * is a far smaller problem than refusing a legitimate delete request.
  *
  * Required env vars: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
  * (same convention as app/api/reminders/process/route.ts).
@@ -43,7 +49,23 @@ export async function DELETE() {
     auth: { persistSession: false, autoRefreshToken: false },
   })
 
-  // 3. Delete — id comes only from the verified session above.
+  // 3. Resolve and remove the avatar Storage object, if any — read scoped to
+  // this verified user's own id, never a path from the request.
+  const { data: profileRow } = await admin
+    .from('profiles')
+    .select('avatar_url')
+    .eq('id', user.id)
+    .maybeSingle()
+  const avatarPath = (profileRow as { avatar_url?: string | null } | null)?.avatar_url
+  if (avatarPath) {
+    const { error: storageError } = await admin.storage.from('avatars').remove([avatarPath])
+    if (storageError) {
+      console.error('[Account Delete] Avatar storage cleanup failed (continuing with deletion):', storageError)
+    }
+  }
+
+  // 4. Delete the auth user — id comes only from the verified session above.
+  // Postgres cascade removes the rest of this user's rows automatically.
   const { error: deleteError } = await admin.auth.admin.deleteUser(user.id)
   if (deleteError) {
     console.error('[Account Delete] Failed:', deleteError)

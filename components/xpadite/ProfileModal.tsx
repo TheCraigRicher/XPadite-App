@@ -99,6 +99,15 @@ function PremiumModalHeader({ title, subtitle, onClose, icon }: {
       className="flex items-center justify-between px-5 py-4 flex-shrink-0"
       style={{ background: PREMIUM_HEADER_GRADIENT, borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}
     >
+      {/* Close-button hover/active feel reused verbatim from the Task Manager
+          header's own .xp-dm-close-btn (background response + press scale)
+          combined with Settings' .xp-set-close hover brighten — the two
+          existing XPadite close-button interaction references. */}
+      <style>{`
+        .xp-pm-close { transition: background 150ms ease, transform 90ms ease; }
+        .xp-pm-close:hover { background: rgba(255,255,255,0.24) !important; }
+        .xp-pm-close:active { transform: scale(0.90); transition-duration: 60ms; }
+      `}</style>
       <div className="flex items-center gap-3 min-w-0">
         {icon && (
           <div
@@ -115,7 +124,7 @@ function PremiumModalHeader({ title, subtitle, onClose, icon }: {
       </div>
       <button
         onClick={onClose}
-        className="w-8 h-8 rounded-full flex items-center justify-center hover:opacity-80 transition-opacity flex-shrink-0"
+        className="xp-pm-close w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
         style={{ background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.20)', color: 'white' }}
       >
         ✕
@@ -174,6 +183,16 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
   const [activeSecurityModal, setActiveSecurityModal] = useState<'email' | 'password' | 'delete' | null>(null)
   const [planOpen, setPlanOpen] = useState(false)
   const [planInfoTarget, setPlanInfoTarget] = useState<string | null>(null)
+
+  // Backdrop click never closes Profile — it only gives a brief, subtle
+  // "still open" pulse. Toggling false→true on the next frame (rather than
+  // just setting true) reliably restarts the CSS animation even on rapid
+  // repeated clicks, since the class is genuinely removed and re-added.
+  const [attentionPulsing, setAttentionPulsing] = useState(false)
+  function triggerAttentionPulse() {
+    setAttentionPulsing(false)
+    requestAnimationFrame(() => setAttentionPulsing(true))
+  }
 
   // Avatar display & upload state
   const [signedAvatarUrl, setSignedAvatarUrl] = useState('')   // signed URL for display
@@ -416,25 +435,52 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
   const hasAvatar = !!avatarSrc
   const inputStyle = FIELD_STYLE
 
+  // Rendered in two places (desktop/tablet inline in the scrolling body, mobile
+  // in the sticky footer row) — same element, same behavior, just shown/hidden
+  // per breakpoint via CSS so there is exactly one Save Changes implementation.
+  const saveButtonNode = (
+    <button
+      onClick={handleSave}
+      disabled={saving}
+      className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:opacity-85 disabled:opacity-60"
+      style={{
+        background: saved
+          ? 'linear-gradient(135deg, #16a34a, #15803d)'
+          : 'linear-gradient(135deg, #7c3aed, #6d28d9)',
+      }}
+    >
+      {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Changes'}
+    </button>
+  )
+
   return (
     <>
-    <style>{`@keyframes xp-avatar-spin { to { transform: rotate(360deg) } }`}</style>
+    <style>{`
+      @keyframes xp-avatar-spin { to { transform: rotate(360deg) } }
+      @keyframes xp-pm-attention { 0%, 100% { transform: scale(1) } 40% { transform: scale(1.015) } }
+      .xp-pm-attention { animation: xp-pm-attention 220ms ease; }
+    `}</style>
+    {/* Mobile: inset bottom-14 keeps the fixed 5-slot bottom nav visible/tappable
+        beneath the backdrop, same pattern already used by ActivityManagerModal
+        and other Burger Menu modals. Desktop/tablet (sm+): full-viewport overlay.
+        Backdrop click never closes Profile — it only triggers the attention pulse
+        on the card below (unsaved edits shouldn't vanish from a stray tap). */}
     <div
-      className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4"
+      className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4"
       style={{ background: 'rgba(0,0,0,0.55)' }}
-      onClick={onClose}
+      onClick={triggerAttentionPulse}
     >
       <div
-        className="w-full sm:max-w-[640px] lg:max-w-[720px] sm:rounded-2xl rounded-t-2xl overflow-hidden"
+        className={`w-full h-full sm:h-auto sm:max-h-[88vh] sm:max-w-[640px] lg:max-w-[720px] sm:rounded-2xl overflow-hidden ${attentionPulsing ? 'xp-pm-attention' : ''}`}
         style={{
           background: 'var(--xp-card)',
           border: '0.5px solid var(--xp-bdr2)',
           boxShadow: '0 24px 64px rgba(0,0,0,0.30)',
           display: 'grid',
-          gridTemplateRows: 'auto 1fr',
-          maxHeight: '90vh',
+          gridTemplateRows: 'auto 1fr auto',
         }}
         onClick={e => e.stopPropagation()}
+        onAnimationEnd={() => setAttentionPulsing(false)}
       >
         <PremiumModalHeader title="Profile" subtitle="Manage your account details" onClose={onClose} />
 
@@ -618,9 +664,14 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
                   Other available XPadite plans — manage upgrades from Settings.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {Object.entries(PLAN_CONFIGS).map(([id, cfg]) => (
-                    <PlanPreviewCard key={id} cfg={cfg} onClick={() => setPlanInfoTarget(id)} />
-                  ))}
+                  {/* Same PLAN_CONFIGS entries/order Settings uses, except the
+                      Lifetime Deal is always pushed to the end here — ordering
+                      only, no plan data/pricing/colors changed. */}
+                  {Object.entries(PLAN_CONFIGS)
+                    .sort(([a], [b]) => (a === 'ltd' ? 1 : b === 'ltd' ? -1 : 0))
+                    .map(([id, cfg]) => (
+                      <PlanPreviewCard key={id} cfg={cfg} onClick={() => setPlanInfoTarget(id)} />
+                    ))}
                 </div>
               </div>
             )}
@@ -647,19 +698,20 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
             <span style={{ color: '#ef4444' }}><ChevronRightIcon /></span>
           </button>
 
-          {/* Save */}
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-all duration-150 hover:opacity-85 disabled:opacity-60"
-            style={{
-              background: saved
-                ? 'linear-gradient(135deg, #16a34a, #15803d)'
-                : 'linear-gradient(135deg, #7c3aed, #6d28d9)',
-            }}
-          >
-            {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Changes'}
-          </button>
+          {/* Save — desktop/tablet only here; reached by scrolling, unchanged.
+              Mobile shows the sticky instance below instead (see saveButtonNode). */}
+          <div className="hidden sm:block">{saveButtonNode}</div>
+        </div>
+
+        {/* Mobile-only sticky Save Changes — sits directly above the locked
+            5-slot bottom nav (the modal's own bottom-14 backdrop inset already
+            stops right there). Desktop/tablet: this row renders nothing
+            (sm:hidden), so it takes no space and Save stays in the body. */}
+        <div
+          className="sm:hidden px-5 py-3 flex-shrink-0"
+          style={{ borderTop: '0.5px solid var(--xp-bdr)', background: 'var(--xp-card)' }}
+        >
+          {saveButtonNode}
         </div>
       </div>
     </div>
@@ -801,17 +853,20 @@ function ChangeEmailModal({ currentEmail, onClose }: { currentEmail: string; onC
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+      className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[80] flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.55)' }}
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[380px] rounded-2xl overflow-hidden"
-        style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.30)' }}
+        className="w-full max-w-[380px] rounded-2xl overflow-hidden flex flex-col"
+        style={{
+          background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.30)',
+          maxHeight: 'calc(100dvh - 32px)',
+        }}
         onClick={e => e.stopPropagation()}
       >
         <PremiumModalHeader title="Change Email" subtitle="Update your account email address" onClose={onClose} />
-        <div className="px-5 py-5">
+        <div className="px-5 py-5" style={{ minHeight: 0, overflowY: 'auto' }}>
           {success ? (
             <div className="space-y-4">
               <p className="text-[13px] leading-relaxed" style={{ color: 'var(--xp-txt2)' }}>
@@ -907,17 +962,20 @@ function ChangePasswordModal({ currentEmail, onClose }: { currentEmail: string; 
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+      className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[80] flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.55)' }}
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[380px] rounded-2xl overflow-hidden"
-        style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.30)' }}
+        className="w-full max-w-[380px] rounded-2xl overflow-hidden flex flex-col"
+        style={{
+          background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.30)',
+          maxHeight: 'calc(100dvh - 32px)',
+        }}
         onClick={e => e.stopPropagation()}
       >
         <PremiumModalHeader title="Change Password" subtitle="Update your account password" onClose={onClose} />
-        <div className="px-5 py-5">
+        <div className="px-5 py-5" style={{ minHeight: 0, overflowY: 'auto' }}>
           {success ? (
             <div className="space-y-4">
               <p className="text-[13px]" style={{ color: 'var(--xp-txt2)' }}>Your password has been updated.</p>
@@ -999,17 +1057,20 @@ function DeleteAccountModal({ onClose, onDeleted }: { onClose: () => void; onDel
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+      className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[80] flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.6)' }}
       onClick={loading ? undefined : onClose}
     >
       <div
-        className="w-full max-w-[380px] rounded-2xl overflow-hidden"
-        style={{ background: 'var(--xp-card)', border: '0.5px solid rgba(239,68,68,0.3)', boxShadow: '0 24px 64px rgba(0,0,0,0.35)' }}
+        className="w-full max-w-[380px] rounded-2xl overflow-hidden flex flex-col"
+        style={{
+          background: 'var(--xp-card)', border: '0.5px solid rgba(239,68,68,0.3)', boxShadow: '0 24px 64px rgba(0,0,0,0.35)',
+          maxHeight: 'calc(100dvh - 32px)',
+        }}
         onClick={e => e.stopPropagation()}
       >
         <PremiumModalHeader title="Delete Account" subtitle="This action is permanent" onClose={loading ? () => {} : onClose} icon={<WarningIcon />} />
-        <div className="px-5 py-5 space-y-4">
+        <div className="px-5 py-5 space-y-4" style={{ minHeight: 0, overflowY: 'auto' }}>
           <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--xp-txt2)' }}>
             This will permanently delete your XPadite account and all associated data — tasks,
             calendar history, journal entries, activities, and photos. <strong>This cannot be undone.</strong>
@@ -1086,20 +1147,23 @@ function PlanRedirectModal({ planTitle, onClose, onGoToSettings }: {
 }) {
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+      className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[80] flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.55)' }}
       onClick={onClose}
     >
       <div
-        className="w-full max-w-[360px] rounded-2xl overflow-hidden"
-        style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.30)' }}
+        className="w-full max-w-[360px] rounded-2xl overflow-hidden flex flex-col"
+        style={{
+          background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.30)',
+          maxHeight: 'calc(100dvh - 32px)',
+        }}
         onClick={e => e.stopPropagation()}
       >
         <PremiumModalHeader title={planTitle} onClose={onClose} />
-        <div className="px-5 py-5 space-y-4">
+        <div className="px-5 py-5 space-y-4" style={{ minHeight: 0, overflowY: 'auto' }}>
           <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--xp-txt2)' }}>
-            Plan upgrades and billing are managed from Settings, not from Profile. Head to Settings to view
-            or change your XPadite plan.
+            Plan upgrades and billing are managed from Settings. Please head to Settings to view or change
+            your XPadite plan.
           </p>
           <div className="flex gap-2">
             <button

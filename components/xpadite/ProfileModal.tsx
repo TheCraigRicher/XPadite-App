@@ -484,8 +484,12 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
       >
         <PremiumModalHeader title="Profile" subtitle="Manage your account details" onClose={onClose} />
 
-        {/* Body — only this region scrolls when content exceeds the modal's max height */}
-        <div className="px-5 py-5 space-y-4" style={{ minHeight: 0, overflowY: 'auto' }}>
+        {/* Body — only this region scrolls when content exceeds the modal's max height.
+            overscrollBehavior: 'contain' is the same fix already applied to every other
+            XPadite modal's scrollable body (GalleryModal, MeetingsModal, NotificationsModal,
+            SyncModal, AppSidebar) — Profile was simply missing it, which is what let a
+            swipe at the scroll boundary chain into/rubber-band the outer shell. */}
+        <div className="px-5 py-5 space-y-4" style={{ minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }}>
           {/* Avatar */}
           <div className="flex flex-col items-center gap-3">
             <div
@@ -706,10 +710,13 @@ export function ProfileModal({ onClose, onOpenSettings }: ProfileModalProps) {
         {/* Mobile-only sticky Save Changes — sits directly above the locked
             5-slot bottom nav (the modal's own bottom-14 backdrop inset already
             stops right there). Desktop/tablet: this row renders nothing
-            (sm:hidden), so it takes no space and Save stays in the body. */}
+            (sm:hidden), so it takes no space and Save stays in the body.
+            Background reuses the exact deep-navy dock treatment already
+            established for the Planner Editor's bottom toolbar (dockBg/dockBdr
+            in JournalEditorContent.tsx) — Save Changes itself stays purple. */}
         <div
           className="sm:hidden px-5 py-3 flex-shrink-0"
-          style={{ borderTop: '0.5px solid var(--xp-bdr)', background: 'var(--xp-card)' }}
+          style={{ borderTop: '0.5px solid rgba(124,58,237,0.20)', background: 'rgba(8,20,58,0.98)' }}
         >
           {saveButtonNode}
         </div>

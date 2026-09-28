@@ -526,8 +526,8 @@ function ColorPickerPopover({ currentColor, isDark, onSelect, onClose }: {
 
 // ─── Tasks batch-action dropdown ──────────────────────────────────────────────
 
-function TasksDropdown({ onGenerate, onReorder, onDelete, isDark }: {
-  onGenerate: () => void; onReorder: () => void; onDelete: () => void; isDark: boolean
+function TasksDropdown({ onGenerate, onReorder, onMove, onDelete, isDark }: {
+  onGenerate: () => void; onReorder: () => void; onMove: () => void; onDelete: () => void; isDark: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -541,6 +541,7 @@ function TasksDropdown({ onGenerate, onReorder, onDelete, isDark }: {
   const items: { icon: string; label: string; action: () => void; iconStyle?: React.CSSProperties }[] = [
     { icon: '✨', label: 'Generate 3 Tasks', action: onGenerate },
     { icon: '↕',  label: 'Reorder Tasks',    action: onReorder, iconStyle: { fontSize: 17, fontWeight: 700 } },
+    { icon: '📅', label: 'Move Tasks',       action: onMove    },
     { icon: '🗑',  label: 'Delete Tasks',     action: onDelete  },
   ]
   return (
@@ -564,7 +565,7 @@ function TasksDropdown({ onGenerate, onReorder, onDelete, isDark }: {
               className="w-full flex items-center px-3.5 py-2.5 text-left text-xs transition-colors hover:bg-black/5"
               style={{
                 color: item.label === 'Delete Tasks' ? '#ef4444' : 'var(--xp-txt)',
-                borderTop: idx === 2 ? `0.5px solid var(--xp-bdr)` : 'none',
+                borderTop: idx === items.length - 1 ? `0.5px solid var(--xp-bdr)` : 'none',
               }}>
               <span style={{ width: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, ...item.iconStyle }}>{item.icon}</span>
               <span>{item.label}</span>
@@ -615,7 +616,7 @@ function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, 
     { icon: '📄', label: 'Duplicate Task',   action: onDuplicate, sep: true },
     { icon: '📋', label: 'Copy Task',        action: onCopy        },
     { icon: '📌', label: 'Paste Task',       action: onPaste, disabled: !pasteEnabled },
-    { icon: '📅', label: 'Transfer Task',    action: onTransfer, disabled: transferDisabled },
+    { icon: '📅', label: 'Move Task',        action: onTransfer, disabled: transferDisabled },
     ...(!isChild ? [{ icon: '➕', label: 'Create Sub-Task', action: onCreateSubTask }] as MenuItem[] : []),
     { icon: '🎨', label: 'Choose Task Color', action: onChooseColor, sep: true },
     { icon: '⚡', label: isPriority ? 'Remove Priority' : 'Mark as Priority', action: onTogglePriority },
@@ -1822,7 +1823,10 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   const [dragItemId,       setDragItemId]        = useState<string | null>(null)
   const [showConfetti,     setShowConfetti]      = useState(false)
   const [reminderTaskId,   setReminderTaskId]    = useState<string | null>(null)
-  const [transferTaskId,   setTransferTaskId]    = useState<string | null>(null)
+  // One or more task ids to move/copy — [id] for the individual 3-dot "Move
+  // Task" action, or the full bulk selection for the top-level "Move" action.
+  // Both open the SAME TransferTaskModal below.
+  const [transferTaskIds,  setTransferTaskIds]   = useState<string[] | null>(null)
   const [reminderSavedKey, setReminderSavedKey]  = useState<Record<string, number>>({})
   const [expandedTaskId,   setExpandedTaskId]    = useState<string | null>(null)
   const [dirtyNotesMap,    setDirtyNotesMap]     = useState<Record<string, string>>({})
@@ -1843,6 +1847,12 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   const [deleteMode,     setDeleteMode]     = useState(false)
   const [selectedForDel, setSelectedForDel] = useState<Set<string>>(new Set())
   const [deleteConfirm,  setDeleteConfirm]  = useState(false)
+  // Bulk Move — same selection-mode shape as delete (mutually exclusive with
+  // reorder/delete), but selecting tasks here can never delete them: it only
+  // ever feeds the same TransferTaskModal the individual "Move Task" 3-dot
+  // action already uses (see transferTaskIds below).
+  const [moveMode,        setMoveMode]        = useState(false)
+  const [selectedForMove, setSelectedForMove] = useState<Set<string>>(new Set())
   const journalSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevNotesOpenRef    = useRef(false)
   const openSnapshotRef     = useRef<typeof dayData | null>(null)
@@ -2238,6 +2248,10 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
 
   function toggleDeleteSelect(taskId: string) {
     setSelectedForDel(prev => { const n = new Set(prev); n.has(taskId) ? n.delete(taskId) : n.add(taskId); return n })
+  }
+
+  function toggleMoveSelect(taskId: string) {
+    setSelectedForMove(prev => { const n = new Set(prev); n.has(taskId) ? n.delete(taskId) : n.add(taskId); return n })
   }
 
   function executeDeleteSelected() {
@@ -2713,8 +2727,9 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                 <TasksDropdown
                   isDark={isDark}
                   onGenerate={generateTasks}
-                  onReorder={() => { setReorderMode(true); setDeleteMode(false); setSelectedForDel(new Set()) }}
-                  onDelete={() => { setDeleteMode(true); setReorderMode(false); setSelectedForDel(new Set()) }}
+                  onReorder={() => { setReorderMode(true); setDeleteMode(false); setSelectedForDel(new Set()); setMoveMode(false); setSelectedForMove(new Set()) }}
+                  onMove={() => { setMoveMode(true); setReorderMode(false); setDeleteMode(false); setSelectedForDel(new Set()); setSelectedForMove(new Set()) }}
+                  onDelete={() => { setDeleteMode(true); setReorderMode(false); setSelectedForDel(new Set()); setMoveMode(false); setSelectedForMove(new Set()) }}
                 />
                 <button onClick={() => setAddingTask(true)} className="text-[10px] px-2.5 py-1 rounded-lg text-white font-medium transition-opacity hover:opacity-85 flex-shrink-0" style={{ background: '#16a34a' }}>+ Add Task</button>
               </div>
@@ -2776,7 +2791,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                     onCopy: () => copyTask(t.id), onPaste: pasteTask,
                     onCreateSubTask: () => createSubTask(t.id),
                     pasteEnabled: !!taskClipboard,
-                    onTransfer: () => setTransferTaskId(t.id),
+                    onTransfer: () => setTransferTaskIds([t.id]),
                     transferDisabled: (() => {
                       const childIds = dayData.tasks.filter(c => c.parentTaskId === t.id).map(c => c.id)
                       const familyIds = new Set([t.id, ...childIds])
@@ -2865,6 +2880,28 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                               {selectedForDel.has(task.id) && <span style={{ color: 'white', fontSize: 10, fontWeight: 700, lineHeight: 1 }}>✓</span>}
                             </button>
                           )}
+                          {/* Bulk-Move selection checkbox — same architecture/
+                              placement/styling as the Multi-delete checkbox
+                              above (selectedForMove instead of selectedForDel),
+                              PARENT TASKS ONLY. Move/Delete modes are mutually
+                              exclusive, so only one of these ever renders. */}
+                          {moveMode && (
+                            <button type="button" onClick={() => toggleMoveSelect(task.id)} className="xp-dm-mdel-cb"
+                              style={{
+                                position: 'absolute', top: 3, left: 2, zIndex: 2,
+                                width: 16, height: 16, borderRadius: 6, margin: 0, padding: 0,
+                                border: '2px solid transparent',
+                                backgroundColor: selectedForMove.has(task.id) ? 'rgba(124,58,237,0.85)' : (isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.035)'),
+                                backgroundClip: 'padding-box',
+                                boxShadow: 'inset 0 0 0 1.5px rgba(124,58,237,0.85)',
+                                overflow: 'hidden',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                cursor: 'pointer', outline: 'none', appearance: 'none', WebkitAppearance: 'none',
+                                WebkitTapHighlightColor: 'transparent',
+                              }}>
+                              {selectedForMove.has(task.id) && <span style={{ color: 'white', fontSize: 10, fontWeight: 700, lineHeight: 1 }}>✓</span>}
+                            </button>
+                          )}
                           <TaskRow
                             {...sharedProps(task, taskIndex)}
                             hasChildren={hasKids}
@@ -2943,7 +2980,24 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
               </div>
             )}
 
-            {topLevelTasks.length > 0 && !addingTask && !reorderMode && !deleteMode && (
+            {/* Bulk-Move mode controls — same shape/behavior as Delete mode's
+                bar above (selection count, Cancel, primary action), purple to
+                match the Move Task modal's own accent instead of destructive
+                red. "Continue" hands the current selection to the SAME
+                TransferTaskModal the individual Move Task action opens. */}
+            {moveMode && (
+              <div style={{ position: 'sticky', bottom: 0, paddingTop: 8, paddingBottom: 2, background: 'var(--xp-card)', zIndex: 5 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 12px', borderRadius: 12, background: isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)', border: '1px solid rgba(124,58,237,0.22)' }}>
+                  <span style={{ fontSize: 11, fontWeight: 500, color: '#7c3aed' }}>{selectedForMove.size} selected</span>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button type="button" onClick={() => { setMoveMode(false); setSelectedForMove(new Set()) }} style={{ fontSize: 11, fontWeight: 500, color: 'var(--xp-txt2)', background: 'var(--xp-bg3)', border: '1px solid var(--xp-bdr2)', borderRadius: 8, padding: '4px 10px', cursor: 'pointer' }}>Cancel</button>
+                    <button type="button" disabled={selectedForMove.size === 0} onClick={() => setTransferTaskIds([...selectedForMove])} style={{ fontSize: 11, fontWeight: 600, color: 'white', background: selectedForMove.size > 0 ? '#7c3aed' : 'rgba(124,58,237,0.35)', border: 'none', borderRadius: 8, padding: '4px 12px', cursor: selectedForMove.size > 0 ? 'pointer' : 'default' }}>Move {selectedForMove.size > 0 ? selectedForMove.size : ''}</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {topLevelTasks.length > 0 && !addingTask && !reorderMode && !deleteMode && !moveMode && (
               <div style={{ position: 'sticky', bottom: 0, paddingTop: 6, paddingBottom: 2, background: 'var(--xp-card)', zIndex: 4 }}>
                 <button onClick={() => setAddingTask(true)} className="w-full text-xs py-2.5 rounded-xl text-white font-semibold transition-all hover:opacity-85" style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)', boxShadow: '0 2px 10px rgba(124,58,237,0.35)' }}>
                   + Add accomplishment
@@ -3098,10 +3152,14 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
         ) : null
       })()}
 
-      {transferTaskId && (() => {
-        const transferTask = dayData.tasks.find(t => t.id === transferTaskId)
-        return transferTask ? (
-          <TransferTaskModal task={transferTask} dateKey={dateKey} onClose={() => setTransferTaskId(null)} />
+      {transferTaskIds && transferTaskIds.length > 0 && (() => {
+        const transferTasks = dayData.tasks.filter(t => transferTaskIds.includes(t.id))
+        return transferTasks.length > 0 ? (
+          <TransferTaskModal
+            tasks={transferTasks}
+            dateKey={dateKey}
+            onClose={() => { setTransferTaskIds(null); setMoveMode(false); setSelectedForMove(new Set()) }}
+          />
         ) : null
       })()}
     </div>

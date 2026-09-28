@@ -30,7 +30,11 @@ import type { Task } from './types'
 type TransferMode = 'move' | 'copy'
 
 interface TransferTaskModalProps {
-  task: Task
+  // One task (the individual 3-dot "Move Task" action) or several (the
+  // top-level bulk "Move" action) — same modal, same rules either way. Each
+  // entry is treated as its own family (itself + its own children), exactly
+  // like the single-task case always was.
+  tasks: Task[]
   dateKey: string
   onClose: () => void
 }
@@ -48,13 +52,16 @@ function fmtShort(d: Date): string {
   return `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getDate()}`
 }
 
-export function TransferTaskModal({ task, dateKey, onClose }: TransferTaskModalProps) {
+export function TransferTaskModal({ tasks, dateKey, onClose }: TransferTaskModalProps) {
   const { calData, updateDay, activeTaskTimer, setToast, effectiveTimezone } = useApp()
+
+  const isMultiple = tasks.length > 1
+  const anyDone = tasks.some(t => t.done)
 
   const originDate = useMemo(() => parseDateKey(dateKey), [dateKey])
   const [monthCursor, setMonthCursor] = useState(() => new Date(originDate.getFullYear(), originDate.getMonth(), 1))
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
-  const [mode, setMode] = useState<TransferMode>(task.done ? 'copy' : 'move')
+  const [mode, setMode] = useState<TransferMode>(anyDone ? 'copy' : 'move')
   const [showCompletedDialog, setShowCompletedDialog] = useState(false)
 
   useEffect(() => {
@@ -67,14 +74,17 @@ export function TransferTaskModal({ task, dateKey, onClose }: TransferTaskModalP
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose, showCompletedDialog])
 
-  const children = useMemo(
-    () => (calData[dateKey]?.tasks ?? []).filter(t => t.parentTaskId === task.id),
-    [calData, dateKey, task.id],
+  // Each selected task is its own family (itself + its own children) — same
+  // as the single-task case always was, just one per selected task now.
+  const families = useMemo(
+    () => tasks.map(root => ({
+      root,
+      members: [root, ...(calData[dateKey]?.tasks ?? []).filter(c => c.parentTaskId === root.id)],
+    })),
+    [calData, dateKey, tasks],
   )
-  const family = useMemo(() => [task, ...children], [task, children])
 
-  const hasHistory = family.some(t => (t.sessions?.length ?? 0) > 0)
-  const isRunning = family.some(t => activeTaskTimer?.taskId === t.id && activeTaskTimer.dateKey === dateKey)
+  const isRunning = families.some(f => f.members.some(t => activeTaskTimer?.taskId === t.id && activeTaskTimer.dateKey === dateKey))
 
   const selectedKey = selectedDate ? buildDateKey(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()) : null
   const isSameAsOrigin = selectedKey === dateKey
@@ -95,59 +105,73 @@ export function TransferTaskModal({ task, dateKey, onClose }: TransferTaskModalP
     return rows
   }, [monthCursor])
 
+  // Builds fresh (new-id, zero-session, not-done) copies of one family for
+  // the destination day — the exact same field mapping the single-task copy/
+  // continuation branches always used, factored out so bulk mode applies it
+  // per-family without re-deriving the rules.
+  function buildFreshFamily(members: Task[], rootId: string, seedOffset: number): Task[] {
+    const idMap = new Map<string, string>()
+    members.forEach((t, i) => idMap.set(t.id, makeTransferId(seedOffset + i)))
+    return members.map(t => ({
+      id: idMap.get(t.id)!,
+      text: t.text,
+      done: false,
+      journal: t.journal,
+      timerStart: null,
+      timerEnd: null,
+      actId: t.actId,
+      sessions: [],
+      taskColor: t.taskColor,
+      isPriority: t.isPriority,
+      // A transferred child keeps pointing at the new parent's id; the root
+      // itself never carries a parentTaskId on the destination day, since
+      // its actual parent (if any) stays behind on the origin day.
+      ...(t.id !== rootId && t.parentTaskId ? { parentTaskId: idMap.get(t.parentTaskId) } : {}),
+    }))
+  }
+
   function performTransfer() {
     if (!canConfirm || !selectedDate || !selectedKey) return
 
     if (mode === 'copy') {
-      const idMap = new Map<string, string>()
-      family.forEach((t, i) => idMap.set(t.id, makeTransferId(i)))
-      const fresh: Task[] = family.map(t => ({
-        id: idMap.get(t.id)!,
-        text: t.text,
-        done: false,
-        journal: t.journal,
-        timerStart: null,
-        timerEnd: null,
-        actId: t.actId,
-        sessions: [],
-        taskColor: t.taskColor,
-        isPriority: t.isPriority,
-        // A transferred child keeps pointing at the new parent's id; the root
-        // itself never carries a parentTaskId on the destination day, since
-        // its actual parent (if any) stays behind on the origin day.
-        ...(t.id !== task.id && t.parentTaskId ? { parentTaskId: idMap.get(t.parentTaskId) } : {}),
-      }))
-      updateDay(selectedKey, prev => ({ ...prev, tasks: [...prev.tasks, ...fresh] }))
-      setToast(`Task copied to ${fmtShort(selectedDate)} ✓`)
+      const allFresh: Task[] = []
+      families.forEach(({ root, members }) => {
+        allFresh.push(...buildFreshFamily(members, root.id, allFresh.length))
+      })
+      updateDay(selectedKey, prev => ({ ...prev, tasks: [...prev.tasks, ...allFresh] }))
+      setToast(isMultiple ? `${tasks.length} tasks copied to ${fmtShort(selectedDate)} ✓` : `Task copied to ${fmtShort(selectedDate)} ✓`)
     } else {
-      if (!hasHistory) {
-        // No logged time anywhere in the family — a true, lossless relocation.
-        const familyIds = new Set(family.map(t => t.id))
-        const relocated = family.map(t => (t.id === task.id && t.parentTaskId ? { ...t, parentTaskId: undefined } : t))
-        updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.filter(t => !familyIds.has(t.id)) }))
-        updateDay(selectedKey, prev => ({ ...prev, tasks: [...prev.tasks, ...relocated] }))
-        setToast(`Task moved to ${fmtShort(selectedDate)} ✓`)
+      const removeIds = new Set<string>()
+      const destAdditions: Task[] = []
+      let anyHistory = false
+      families.forEach(({ root, members }) => {
+        const famHasHistory = members.some(t => (t.sessions?.length ?? 0) > 0)
+        if (!famHasHistory) {
+          // No logged time anywhere in this family — a true, lossless relocation.
+          members.forEach(t => removeIds.add(t.id))
+          members.forEach(t => destAdditions.push(t.id === root.id && t.parentTaskId ? { ...t, parentTaskId: undefined } : t))
+        } else {
+          // Already-logged time exists — leave the origin's record (and its
+          // history) exactly as-is, and start a fresh continuation task on
+          // the destination with zero time logged.
+          anyHistory = true
+          destAdditions.push(...buildFreshFamily(members, root.id, destAdditions.length))
+        }
+      })
+      if (removeIds.size > 0) {
+        updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.filter(t => !removeIds.has(t.id)) }))
+      }
+      if (destAdditions.length > 0) {
+        updateDay(selectedKey, prev => ({ ...prev, tasks: [...prev.tasks, ...destAdditions] }))
+      }
+      if (!isMultiple) {
+        setToast(anyHistory
+          ? `Continuing on ${fmtShort(selectedDate)} — logged time stays on ${fmtShort(originDate)} ✓`
+          : `Task moved to ${fmtShort(selectedDate)} ✓`)
       } else {
-        // Already-logged time exists — leave the origin's record (and its
-        // history) exactly as-is, and start a fresh continuation task on the
-        // destination with zero time logged.
-        const idMap = new Map<string, string>()
-        family.forEach((t, i) => idMap.set(t.id, makeTransferId(i)))
-        const fresh: Task[] = family.map(t => ({
-          id: idMap.get(t.id)!,
-          text: t.text,
-          done: false,
-          journal: t.journal,
-          timerStart: null,
-          timerEnd: null,
-          actId: t.actId,
-          sessions: [],
-          taskColor: t.taskColor,
-          isPriority: t.isPriority,
-          ...(t.id !== task.id && t.parentTaskId ? { parentTaskId: idMap.get(t.parentTaskId) } : {}),
-        }))
-        updateDay(selectedKey, prev => ({ ...prev, tasks: [...prev.tasks, ...fresh] }))
-        setToast(`Continuing on ${fmtShort(selectedDate)} — logged time stays on ${fmtShort(originDate)} ✓`)
+        setToast(anyHistory
+          ? `${tasks.length} tasks continued on ${fmtShort(selectedDate)} — logged time stays on ${fmtShort(originDate)} ✓`
+          : `${tasks.length} tasks moved to ${fmtShort(selectedDate)} ✓`)
       }
     }
     onClose()
@@ -155,23 +179,30 @@ export function TransferTaskModal({ task, dateKey, onClose }: TransferTaskModalP
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+      className="xp-transfer-backdrop fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[200] flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.55)' }}
       onClick={e => { e.stopPropagation(); onClose() }}
     >
+      {/* Mobile-only: a touch stronger backdrop blur than the plain dimming
+          used elsewhere, since this dialog stacks on top of the already-busy
+          Task Manager. Matches the blur SettingsModal's own stacked
+          "Unsaved Changes" dialog uses (blur(6px)) rather than a new value. */}
+      <style>{`@media (max-width: 640px) { .xp-transfer-backdrop { backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); } }`}</style>
       <div
-        className="w-full max-w-[360px] rounded-2xl overflow-hidden"
-        style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.32)' }}
+        className="w-full max-w-[360px] rounded-2xl overflow-hidden flex flex-col"
+        style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.32)', maxHeight: '100%' }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
         <div
           className="flex items-start justify-between gap-3 px-4 py-3.5"
-          style={{ background: 'linear-gradient(135deg, #5b21b6 0%, #7c3aed 100%)' }}
+          style={{ background: 'linear-gradient(135deg, #5b21b6 0%, #7c3aed 100%)', flexShrink: 0 }}
         >
           <div className="min-w-0">
-            <h3 className="text-[14px] font-semibold" style={{ color: '#ffffff' }}>Transfer Task</h3>
-            <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.75)' }}>Move or copy this task to another date.</p>
+            <h3 className="text-[14px] font-semibold" style={{ color: '#ffffff' }}>Move Task</h3>
+            <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.75)' }}>
+              {isMultiple ? 'Move or copy selected tasks to another date.' : 'Move or copy this task to another date.'}
+            </p>
           </div>
           <button
             onClick={onClose}
@@ -183,19 +214,19 @@ export function TransferTaskModal({ task, dateKey, onClose }: TransferTaskModalP
           </button>
         </div>
 
-        <div className="px-4 py-3.5">
-          {/* Task name */}
+        <div className="px-4 pt-3.5" style={{ overflowY: 'auto', minHeight: 0 }}>
+          {/* Task name — or a compact selected-count for bulk mode */}
           <p
             className="text-[12.5px] font-medium mb-3 truncate"
             style={{ color: 'var(--xp-txt)', background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)', borderRadius: 9, padding: '7px 10px' }}
-            title={task.text}
+            title={isMultiple ? undefined : tasks[0].text}
           >
-            {task.text || '(untitled task)'}
+            {isMultiple ? `${tasks.length} tasks selected` : (tasks[0].text || '(untitled task)')}
           </p>
 
           {isRunning && (
             <p className="text-[11.5px] mb-3" style={{ color: '#dc2626', background: 'rgba(220,38,38,0.08)', border: '0.5px solid rgba(220,38,38,0.22)', borderRadius: 9, padding: '8px 10px' }}>
-              Stop the active timer before transferring this task.
+              {isMultiple ? 'Stop the active timer before moving these tasks.' : 'Stop the active timer before transferring this task.'}
             </p>
           )}
 
@@ -212,28 +243,32 @@ export function TransferTaskModal({ task, dateKey, onClose }: TransferTaskModalP
             >
               <span className="text-[12.5px] font-semibold" style={{ color: mode === 'copy' ? '#ffffff' : 'var(--xp-txt)' }}>📋 Copy to Date</span>
               <p className="text-[10.5px] mt-0.5" style={{ color: mode === 'copy' ? 'rgba(255,255,255,0.80)' : 'var(--xp-txt3)' }}>
-                Creates a copy on another date. The original task stays here.
+                {isMultiple ? 'Creates copies on another date. The original tasks stay here.' : 'Creates a copy on another date. The original task stays here.'}
               </p>
             </button>
 
             <button
-              onClick={() => { if (task.done) setShowCompletedDialog(true); else setMode('move') }}
+              onClick={() => { if (anyDone) setShowCompletedDialog(true); else setMode('move') }}
               className="text-left transition-colors duration-150"
               style={{
                 borderRadius: 10, padding: '9px 11px',
-                border: `1.5px solid ${task.done ? 'var(--xp-bdr)' : mode === 'move' ? '#7c3aed' : 'var(--xp-bdr2)'}`,
-                background: task.done ? 'var(--xp-bg3)' : mode === 'move' ? 'linear-gradient(135deg, #7c3aed, #6d28d9)' : 'var(--xp-card)',
-                opacity: task.done ? 0.55 : 1,
-                cursor: task.done ? 'default' : 'pointer',
+                border: `1.5px solid ${anyDone ? 'var(--xp-bdr)' : mode === 'move' ? '#7c3aed' : 'var(--xp-bdr2)'}`,
+                background: anyDone ? 'var(--xp-bg3)' : mode === 'move' ? 'linear-gradient(135deg, #7c3aed, #6d28d9)' : 'var(--xp-card)',
+                opacity: anyDone ? 0.55 : 1,
+                cursor: anyDone ? 'default' : 'pointer',
               }}
             >
-              <span className="text-[12.5px] font-semibold" style={{ color: task.done ? 'var(--xp-txt3)' : mode === 'move' ? '#ffffff' : 'var(--xp-txt)' }}>
+              <span className="text-[12.5px] font-semibold" style={{ color: anyDone ? 'var(--xp-txt3)' : mode === 'move' ? '#ffffff' : 'var(--xp-txt)' }}>
                 ➡️ Move to Date
               </span>
-              <p className="text-[10.5px] mt-0.5" style={{ color: task.done ? 'var(--xp-txt3)' : mode === 'move' ? 'rgba(255,255,255,0.80)' : 'var(--xp-txt3)' }}>
-                {task.done
-                  ? 'Completed tasks cannot be moved because their completion history belongs to the original date.'
-                  : 'Moves this task to another date. The original task is removed from this day’s task list.'}
+              <p className="text-[10.5px] mt-0.5" style={{ color: anyDone ? 'var(--xp-txt3)' : mode === 'move' ? 'rgba(255,255,255,0.80)' : 'var(--xp-txt3)' }}>
+                {anyDone
+                  ? (isMultiple
+                      ? 'One or more selected tasks are completed and cannot be moved because their completion history belongs to the original date.'
+                      : 'Completed tasks cannot be moved because their completion history belongs to the original date.')
+                  : (isMultiple
+                      ? 'Moves selected tasks to another date. The original tasks are removed from this day’s task list.'
+                      : 'Moves this task to another date. The original task is removed from this day’s task list.')}
               </p>
             </button>
           </div>
@@ -305,25 +340,26 @@ export function TransferTaskModal({ task, dateKey, onClose }: TransferTaskModalP
               This is already the task&apos;s current date — pick another date to transfer it.
             </p>
           )}
+        </div>
 
-          {/* Actions */}
-          <div className="flex items-center gap-2.5">
-            <button
-              onClick={onClose}
-              className="flex-1 text-[12.5px] font-semibold transition-opacity hover:opacity-80"
-              style={{ padding: '9px 0', borderRadius: 10, background: 'var(--xp-bg3)', color: 'var(--xp-txt)', border: '0.5px solid var(--xp-bdr2)' }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={performTransfer}
-              disabled={!canConfirm}
-              className="flex-1 text-[12.5px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-default"
-              style={{ padding: '9px 0', borderRadius: 10, background: '#7c3aed' }}
-            >
-              {selectedDate ? `${mode === 'copy' ? 'Copy' : 'Move'} to ${fmtShort(selectedDate)}` : (mode === 'copy' ? 'Copy' : 'Move')}
-            </button>
-          </div>
+        {/* Actions — fixed footer, always reachable even if the content
+            above has to scroll on a short mobile viewport. */}
+        <div className="px-4 pt-2.5 pb-3.5 flex items-center gap-2.5" style={{ flexShrink: 0 }}>
+          <button
+            onClick={onClose}
+            className="flex-1 text-[12.5px] font-semibold transition-opacity hover:opacity-80"
+            style={{ padding: '9px 0', borderRadius: 10, background: 'var(--xp-bg3)', color: 'var(--xp-txt)', border: '0.5px solid var(--xp-bdr2)' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={performTransfer}
+            disabled={!canConfirm}
+            className="flex-1 text-[12.5px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-default"
+            style={{ padding: '9px 0', borderRadius: 10, background: '#7c3aed' }}
+          >
+            {selectedDate ? `${mode === 'copy' ? 'Copy' : 'Move'} to ${fmtShort(selectedDate)}` : (mode === 'copy' ? 'Copy' : 'Move')}
+          </button>
         </div>
       </div>
 
@@ -350,9 +386,11 @@ export function TransferTaskModal({ task, dateKey, onClose }: TransferTaskModalP
               </button>
             </div>
             <p className="text-[11.5px] leading-relaxed mb-3.5" style={{ color: 'var(--xp-txt3)' }}>
-              This task has already been completed, so it can&apos;t be moved to another date because its completion history belongs to the original date.
+              {isMultiple
+                ? 'One or more selected tasks have already been completed, so they can’t be moved to another date because their completion history belongs to the original date.'
+                : 'This task has already been completed, so it can’t be moved to another date because its completion history belongs to the original date.'}
               <br /><br />
-              You can copy it to another date instead.
+              You can copy {isMultiple ? 'them' : 'it'} to another date instead.
             </p>
             <button
               onClick={() => setShowCompletedDialog(false)}

@@ -1799,6 +1799,10 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   useLockBodyScroll()
 
   const dayData = calData[dateKey] ?? { ...EMPTY_DAY }
+  // Mirror ref so handleMainSave's delayed callback can read the truly
+  // latest dayData (avoids closing over a stale render's value).
+  const dayDataRef = useRef(dayData)
+  dayDataRef.current = dayData
 
   const currentStatus: StatusValue | null =
     dayData.milestone ? 'milestone' : dayData.hyper ? 'hyper' : dayData.goal ? 'goal' : dayData.productive ? 'productive' : null
@@ -2422,11 +2426,30 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
 
   function handleMainSave() {
     flushDirtyNotes()
-    openSnapshotRef.current = null
     setNewTaskText('')
     setAddingTask(false)
     setMainSaving(true)
-    setTimeout(doClose, 620)
+    // Save keeps Task Manager open — re-baseline the dirty-change snapshot
+    // to the just-saved state (via the mirror ref, so further edits made
+    // after this Save are still correctly detected as unsaved) instead of
+    // closing.
+    setTimeout(() => {
+      openSnapshotRef.current = JSON.parse(JSON.stringify(dayDataRef.current))
+      setMainSaving(false)
+    }, 620)
+  }
+
+  // Reverts any unsaved edits back to how Task Manager looked when it was
+  // opened (or last saved) WITHOUT closing — distinct from attemptClose,
+  // which is the guarded exit path. Reuses the same revert logic as
+  // discardAndClose, minus the close.
+  function handleCancelEdits() {
+    if (openSnapshotRef.current) {
+      updateDay(dateKey, () => openSnapshotRef.current!)
+    }
+    setDirtyNotesMap({})
+    setNewTaskText('')
+    setAddingTask(false)
   }
 
   function discardAndClose() {
@@ -2663,37 +2686,54 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
           </div>
         </div>
 
-        {/* Mobile-only header — no Back/Close, bare triangles with no visible
-            button chrome. Prev/next are pinned at a fixed distance from the
-            header's horizontal center via position:absolute (the same technique
-            already used for the Planner Editor's day-nav arrows), so neither
-            triangle — nor the gap around the date — ever shifts as the date
-            text's own length changes across different weekdays/months; only
-            the text itself changes. */}
+        {/* Mobile-only header — the [←][date][→] group has a LOCKED,
+            content-independent width (270px — narrowed from 300px per
+            visual reference to bring the arrows closer to the date),
+            centered via left:50%/translateX(-50%) so the group's pixel
+            position is identical for every date — the arrows sit at this
+            fixed container's own edges (space-between), so they never move
+            when the date text's length changes; only the date's own
+            centering within its flexible middle slot changes. X is a
+            separate, independently positioned element pinned to the far
+            right — it does not participate in the group's layout. Arrow
+            glyphs are scaled up slightly (9x12 → 11x14, same path/shape);
+            nothing else about their styling changed. */}
         <div className="flex sm:hidden flex-shrink-0" style={{ position: 'relative', minHeight: 52, borderBottom: '0.5px solid rgba(255,255,255,0.08)', background: 'linear-gradient(135deg, #3b0764 0%, #7c3aed 50%, #6d28d9 100%)' }}>
-          <span style={{
-            position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
-            textAlign: 'center', padding: '0 58px',
-            color: '#ffffff', fontSize: 12.5, fontWeight: 600, letterSpacing: '-0.01em',
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          <div style={{
+            position: 'absolute', left: '50%', top: 0, bottom: 0, transform: 'translateX(-50%)',
+            width: 270, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}>
-            {dateLabel}
-          </span>
+            <button
+              onClick={() => attemptNavigateDay(-1)}
+              title="Previous day" aria-label="Previous day"
+              className="transition-transform active:scale-90 flex-shrink-0"
+              style={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+            >
+              <svg width="11" height="14" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
+            </button>
+            <span style={{
+              flex: 1, minWidth: 0, textAlign: 'center',
+              color: '#ffffff', fontSize: 12.5, fontWeight: 600, letterSpacing: '-0.01em',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {dateLabel}
+            </span>
+            <button
+              onClick={() => attemptNavigateDay(1)}
+              title="Next day" aria-label="Next day"
+              className="transition-transform active:scale-90 flex-shrink-0"
+              style={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+            >
+              <svg width="11" height="14" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
+            </button>
+          </div>
           <button
-            onClick={() => attemptNavigateDay(-1)}
-            title="Previous day" aria-label="Previous day"
-            className="transition-transform active:scale-90"
-            style={{ position: 'absolute', left: 'calc(50% - 148px)', top: '50%', transform: 'translateY(-50%)', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+            onClick={attemptClose}
+            title="Close" aria-label="Close"
+            className="xp-dm-close-btn flex items-center justify-center flex-shrink-0"
+            style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', width: 26, height: 26, background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.20)', borderRadius: 8, cursor: 'pointer', color: '#ffffff', fontSize: 12, fontWeight: 700 }}
           >
-            <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
-          </button>
-          <button
-            onClick={() => attemptNavigateDay(1)}
-            title="Next day" aria-label="Next day"
-            className="transition-transform active:scale-90"
-            style={{ position: 'absolute', right: 'calc(50% - 148px)', top: '50%', transform: 'translateY(-50%)', width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
-          >
-            <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
+            ✕
           </button>
         </div>
 
@@ -3060,9 +3100,18 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             )}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <button onClick={attemptClose} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
-            <button onClick={handleMainSave} disabled={mainSaving} className="text-xs px-5 py-1.5 rounded-full text-white font-medium transition-all" style={{ background: mainSaving ? '#16a34a' : '#7c3aed', opacity: mainSaving ? 1 : undefined }}>
-              {mainSaving ? '✓ Saved' : '✓ Save'}
+            <button onClick={handleCancelEdits} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
+            <button
+              onClick={handleMainSave}
+              disabled={mainSaving}
+              className="text-xs px-4 sm:px-5 py-1.5 rounded-full text-white font-medium transition-all inline-flex items-center justify-center min-w-[90px] sm:min-w-[100px]"
+              style={{ background: mainSaving ? '#16a34a' : '#7c3aed', opacity: mainSaving ? 1 : undefined }}
+            >
+              {/* Mobile drops the checkmark from the normal "Save" state
+                  (desktop/tablet keep "✓ Save" unchanged) — both show
+                  "✓ Saved" for the same success-feedback duration. */}
+              <span className="sm:hidden">{mainSaving ? '✓ Saved' : 'Save'}</span>
+              <span className="hidden sm:inline">{mainSaving ? '✓ Saved' : '✓ Save'}</span>
             </button>
           </div>
         </div>

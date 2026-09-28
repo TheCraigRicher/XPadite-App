@@ -684,6 +684,17 @@ function ThemedApp(_props: XpaditeAppProps) {
   // ── Mobile tab ────────────────────────────────────────────────────────────────
   const [mobileTab, setMobileTab] = useState<MobileTab>('calendar')
 
+  // One-shot flag so the burger menu's "Motivate Me" shortcut can start the
+  // canonical mobile AI Coach tab (see the mobileTab === 'ai-coach' block
+  // below) already in Motivate mode. AICoachPage only reads startWithMotivate
+  // at its own mount time (motivateOnMountRef), so this must be cleared right
+  // after that mount — otherwise a later plain bottom-nav tap into AI Coach
+  // would also incorrectly start in Motivate mode.
+  const [mobileAICoachMotivate, setMobileAICoachMotivate] = useState(false)
+  useEffect(() => {
+    if (mobileAICoachMotivate) setMobileAICoachMotivate(false)
+  }, [mobileAICoachMotivate])
+
   // ── Mobile nav guard (unsaved changes protection) ─────────────────────────────
   const modalDirtyRef                = useRef(false)
   const plannerDirtyRef              = useRef(false)
@@ -950,11 +961,30 @@ function ThemedApp(_props: XpaditeAppProps) {
         onSettings={() => setSettingsOpen(true)}
         onWhatsNew={() => setWhatsNewOpen(true)}
         onAnalytics={() => setAnalyticsOpen(true)}
-        onMotivate={() => { setAICoachMotivate(true); setAICoachOpen(true) }}
+        onMotivate={() => {
+          // Mobile: reuse the SAME canonical AI Coach tab bottom-nav entry
+          // uses (same component/state, bottom nav stays visible), started
+          // already in Motivate mode. Desktop/tablet: unchanged overlay.
+          if (typeof window !== 'undefined' && window.innerWidth < 640) {
+            setMobileAICoachMotivate(true)
+            handleMobileNav('ai-coach')
+          } else {
+            setAICoachMotivate(true)
+            setAICoachOpen(true)
+          }
+        }}
         onQotd={triggerQotd}
         onProfile={() => setProfileOpen(true)}
         onActivities={() => setActivityManagerOpen(true)}
-        onAICoach={() => setAICoachOpen(true)}
+        onAICoach={() => {
+          // Mobile: same canonical AI Coach tab as the bottom nav (persistent
+          // nav stays visible). Desktop/tablet: unchanged full overlay.
+          if (typeof window !== 'undefined' && window.innerWidth < 640) {
+            handleMobileNav('ai-coach')
+          } else {
+            setAICoachOpen(true)
+          }
+        }}
         onTasks={() => handleMobileNav('tasks')}
         onJournalNotes={() => {
           // On mobile: switch to the polished Planner tab (same as bottom-nav Planner)
@@ -1116,7 +1146,7 @@ function ThemedApp(_props: XpaditeAppProps) {
             className="sm:hidden"
             style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 56, zIndex: 49, transform: 'translateZ(0)', overflow: 'hidden' }}
           >
-            <AICoachPage onClose={() => setMobileTab('calendar')} startWithMotivate={false} showBackButton={false} />
+            <AICoachPage onClose={() => setMobileTab('calendar')} startWithMotivate={mobileAICoachMotivate} showBackButton={false} />
           </div>
         )}
       </div>

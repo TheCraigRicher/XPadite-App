@@ -159,6 +159,18 @@ function isStoragePath(url: string): boolean {
   return !!url && !url.startsWith('data:') && !url.startsWith('http')
 }
 
+// Supabase/Postgrest errors carry their real detail on .message/.code/
+// .details/.hint — logging the raw object can print as an unhelpful "{}"
+// depending on how it serializes, hiding the actual cause.
+function describeSupabaseError(err: unknown): string {
+  if (err && typeof err === 'object') {
+    const e = err as { message?: string; code?: string; details?: string; hint?: string }
+    const parts = [e.message, e.code && `code=${e.code}`, e.details, e.hint].filter(Boolean)
+    if (parts.length) return parts.join(' | ')
+  }
+  try { return JSON.stringify(err) } catch { return String(err) }
+}
+
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_BYTES = 5 * 1024 * 1024
 
@@ -270,7 +282,9 @@ export function ProfileModal({
     }).catch(() => { setAvatarLoading(false) })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Bootstrap from Supabase if xp9-profile was never saved locally
+  // Bootstrap avatar from Supabase if xp9-profile was never saved locally.
+  // Name/Display Name hydration is a separate, always-runs effect below —
+  // kept apart so this avatar loading/signed-URL timing stays untouched.
   useEffect(() => {
     if (typeof window === 'undefined') return
     if (localStorage.getItem('xp9-profile')) return
@@ -279,22 +293,10 @@ export function ProfileModal({
       if (!authData.user) { setAvatarLoading(false); return }
       const { data: profile } = await sb
         .from('profiles')
-        .select('full_name, avatar_url')
+        .select('avatar_url')
         .eq('id', authData.user.id)
         .single()
-      const row = profile as { full_name?: string; avatar_url?: string } | null
-      const fullName = row?.full_name ?? ''
-      if (fullName) {
-        const spaceIdx = fullName.indexOf(' ')
-        const firstName = spaceIdx === -1 ? fullName : fullName.slice(0, spaceIdx)
-        const lastName  = spaceIdx === -1 ? '' : fullName.slice(spaceIdx + 1)
-        // This whole bootstrap effect only runs when there's no cached local
-        // profile yet (see the guard above), so `data.displayName` is still
-        // empty at this point — `d.displayName || firstName` below therefore
-        // always resolves to `firstName`, which is what's mirrored here.
-        setData(d => ({ ...d, firstName, lastName, displayName: d.displayName || firstName }))
-        setSavedProfile(sp => ({ ...sp, firstName, lastName, displayName: firstName }))
-      }
+      const row = profile as { avatar_url?: string } | null
       const avatarPath = row?.avatar_url ?? ''
       if (isStoragePath(avatarPath)) {
         setSavedProfile(sp => ({ ...sp, avatarUrl: avatarPath }))
@@ -307,6 +309,50 @@ export function ProfileModal({
         setAvatarLoading(false)  // confirmed no avatar
       }
     }).catch(() => { setAvatarLoading(false) })
+  }, [])
+
+  // Display Name (and First/Last Name) are ACCOUNT-LEVEL data — always fetch
+  // the canonical value from Supabase, regardless of whatever this device's
+  // own localStorage happens to have cached. Root cause of the cross-device
+  // bug this fixes: Display Name was NEVER actually written to or read from
+  // Supabase at all — only full_name was — so a value saved on one device
+  // had no account-level record for any other device to find, and each
+  // device just kept showing its own local cache (or the first-name
+  // fallback). Supabase always wins here once it resolves, exactly like
+  // AppContext's own isDark/language/etc. hydration already does — this
+  // effect deliberately always runs, unlike the avatar one above.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const sb = createClient()
+    sb.auth.getUser().then(async ({ data: authData }) => {
+      if (!authData.user) return
+      const { data: profile, error } = await sb
+        .from('profiles')
+        .select('full_name, display_name')
+        .eq('id', authData.user.id)
+        .single()
+      if (error || !profile) return
+      const row = profile as { full_name?: string; display_name?: string }
+      const fullName = row.full_name ?? ''
+      const canonicalDisplayName = row.display_name ?? ''
+      if (!fullName && !canonicalDisplayName) return
+      const spaceIdx = fullName.indexOf(' ')
+      const firstName = spaceIdx === -1 ? fullName : fullName.slice(0, spaceIdx)
+      const lastName  = spaceIdx === -1 ? '' : fullName.slice(spaceIdx + 1)
+      // Canonical display_name wins whenever it's actually set; the first
+      // name is only ever used as a fallback for a user with none saved yet.
+      const displayName = canonicalDisplayName || firstName
+      setData(d => ({
+        ...d,
+        ...(fullName ? { firstName, lastName } : {}),
+        ...(displayName ? { displayName } : {}),
+      }))
+      setSavedProfile(sp => ({
+        ...sp,
+        ...(fullName ? { firstName, lastName } : {}),
+        ...(displayName ? { displayName } : {}),
+      }))
+    }).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -437,10 +483,11 @@ export function ProfileModal({
       setPendingFile(null)
     }
 
-    // ── Write profiles row (full_name + avatar_url in one call) ────────────
+    // ── Write profiles row (full_name + display_name + avatar_url) ─────────
     const fullName = [data.firstName.trim(), data.lastName.trim()].filter(Boolean).join(' ')
     const profilePatch: Record<string, unknown> = {
       full_name: fullName || null,
+      display_name: data.displayName.trim() || null,
       updated_at: new Date().toISOString(),
     }
     if (storagePath !== data.avatarUrl) profilePatch.avatar_url = storagePath || null
@@ -449,7 +496,17 @@ export function ProfileModal({
       .from('profiles')
       .update(profilePatch)
       .eq('id', user.id)
-    if (saveError) console.error('Profile save failed:', saveError)
+
+    if (saveError) {
+      // Do not report success, update the saved baseline, or cache locally —
+      // the canonical Supabase record still holds whatever it held before,
+      // so pretending this succeeded would make Profile (and every other
+      // device) disagree with what's actually persisted.
+      console.error('[Profile] Save failed:', describeSupabaseError(saveError))
+      setAvatarError('Could not save your profile. Please try again.')
+      setSaving(false)
+      return false
+    }
 
     // ── Persist to localStorage and notify sidebar ──────────────────────────
     const newData = { ...data, avatarUrl: storagePath }

@@ -2568,17 +2568,6 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
         onClick={e => e.stopPropagation()}
       >
         <style>{`
-          /* Mobile TM header nav arrows: the 6px inward nudge lives in the
-             transform (paint-only), never in margin/flex layout — so it can
-             never steal box-model width from the date's flex:1 span between
-             them. The active-press scale is combined into the same
-             transform value rather than using Tailwind's active:scale-90
-             utility, which would otherwise fight this inline translateX for
-             the transform property. */
-          .xp-dm-nav-prev { transition: transform 100ms; transform: translateX(6px); }
-          .xp-dm-nav-prev:active { transform: translateX(6px) scale(0.9); }
-          .xp-dm-nav-next { transition: transform 100ms; transform: translateX(-6px); }
-          .xp-dm-nav-next:active { transform: translateX(-6px) scale(0.9); }
           /* The Multi-delete selector's inline style can't reach :focus/:active/
              :focus-visible — a platform default focus/tap ring on some mobile
              browsers can render its own glow around a <button> on press, which
@@ -2671,7 +2660,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             <button
               onClick={() => attemptNavigateDay(-1)}
               title="Previous day" aria-label="Previous day"
-              className="xp-dm-nav-prev flex-shrink-0"
+              className="transition-transform active:scale-90 flex-shrink-0"
               style={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
             >
               <svg width="11" height="14" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
@@ -2686,7 +2675,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             <button
               onClick={() => attemptNavigateDay(1)}
               title="Next day" aria-label="Next day"
-              className="xp-dm-nav-next flex-shrink-0"
+              className="transition-transform active:scale-90 flex-shrink-0"
               style={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
             >
               <svg width="11" height="14" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>

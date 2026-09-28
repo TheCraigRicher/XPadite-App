@@ -2439,19 +2439,6 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     }, 620)
   }
 
-  // Reverts any unsaved edits back to how Task Manager looked when it was
-  // opened (or last saved) WITHOUT closing — distinct from attemptClose,
-  // which is the guarded exit path. Reuses the same revert logic as
-  // discardAndClose, minus the close.
-  function handleCancelEdits() {
-    if (openSnapshotRef.current) {
-      updateDay(dateKey, () => openSnapshotRef.current!)
-    }
-    setDirtyNotesMap({})
-    setNewTaskText('')
-    setAddingTask(false)
-  }
-
   function discardAndClose() {
     if (openSnapshotRef.current) {
       updateDay(dateKey, () => openSnapshotRef.current!)
@@ -2580,13 +2567,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
         }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Desktop/tablet-only Close button micro-interaction — a subtle red
-            tint on hover ("this closes the modal") and a quick press-scale on
-            click, purely visual; attemptClose's behavior is untouched. */}
         <style>{`
-          .xp-dm-close-btn { transition: background 150ms ease, border-color 150ms ease, transform 90ms ease; }
-          .xp-dm-close-btn:hover { background: rgba(239,68,68,0.28) !important; border-color: rgba(239,68,68,0.45) !important; }
-          .xp-dm-close-btn:active { transform: scale(0.93); transition-duration: 60ms; }
           /* Mobile TM header nav arrows: the 6px inward nudge lives in the
              transform (paint-only), never in margin/flex layout — so it can
              never steal box-model width from the date's flex:1 span between
@@ -2634,31 +2615,15 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
           }
         `}</style>
 
-        {/* Desktop/tablet header — three-zone layout so the center date stays
-            visually centered regardless of the Back/Close controls' own widths.
-            Hidden below sm: mobile gets its own bare-triangle header below. */}
-        <div className="hidden sm:flex items-center px-4 py-3 flex-shrink-0" style={{ borderBottom: '0.5px solid rgba(255,255,255,0.08)', background: 'linear-gradient(135deg, #3b0764 0%, #7c3aed 50%, #6d28d9 100%)' }}>
-          <div className="flex-1 flex justify-start min-w-0">
-            <button
-              onClick={attemptClose}
-              title="Back" aria-label="Back"
-              className="flex items-center justify-center flex-shrink-0 transition-opacity hover:opacity-70 active:scale-90"
-              style={{ width: 36, height: 36, background: 'transparent', border: 'none', borderRadius: 8, cursor: 'pointer', transition: 'transform 100ms, opacity 120ms' }}
-            >
-              <svg width="11" height="18" viewBox="0 0 11 18" fill="none" aria-hidden="true">
-                <path d="M9.5 1.5L1.5 9L9.5 16.5" stroke="#ffffff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Center nav — bare triangles (no square/background), pinned at a
-              fixed distance from THIS zone's own horizontal center via
-              position:absolute (same technique as the mobile header below),
-              so neither triangle moves as the date text's length changes;
-              only the text itself updates. This zone's own width is set purely
-              by the flex split against the fixed-size Back/Close zones, never
-              by the date text, so the whole nav group also stays centered. */}
-          <div style={{ position: 'relative', flex: '2 1 0%', minWidth: 0, height: 36 }}>
+        {/* Desktop/tablet header — Back and the square X were removed;
+            Cancel in the bottom action bar is now the close control (see
+            attemptClose there). The header is purely date navigation: the
+            same nav-group internals as before (locked arrow offsets, same
+            triangle size, same date padding), just centered directly in the
+            full header instead of being boxed in by flanking Back/Close
+            zones. Hidden below sm: mobile gets its own header below. */}
+        <div className="hidden sm:flex items-center justify-center px-4 py-3 flex-shrink-0" style={{ borderBottom: '0.5px solid rgba(255,255,255,0.08)', background: 'linear-gradient(135deg, #3b0764 0%, #7c3aed 50%, #6d28d9 100%)' }}>
+          <div style={{ position: 'relative', width: 340, height: 36 }}>
             <span style={{
               position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
               textAlign: 'center', padding: '0 12px',
@@ -2682,17 +2647,6 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
               style={{ position: 'absolute', right: 'calc(50% - 148px)', top: '50%', transform: 'translateY(-50%)', width: 36, height: 36, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
             >
               <svg width="11" height="14" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
-            </button>
-          </div>
-
-          <div className="flex-1 flex justify-end min-w-0">
-            <button
-              onClick={attemptClose}
-              title="Close" aria-label="Close"
-              className="xp-dm-close-btn flex items-center justify-center flex-shrink-0"
-              style={{ width: 32, height: 32, background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.20)', borderRadius: 8, cursor: 'pointer', color: '#ffffff', fontSize: 14, fontWeight: 700 }}
-            >
-              ✕
             </button>
           </div>
         </div>
@@ -2738,14 +2692,6 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
               <svg width="11" height="14" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
             </button>
           </div>
-          <button
-            onClick={attemptClose}
-            title="Close" aria-label="Close"
-            className="xp-dm-close-btn flex items-center justify-center flex-shrink-0"
-            style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', width: 26, height: 26, background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.20)', borderRadius: 8, cursor: 'pointer', color: '#ffffff', fontSize: 12, fontWeight: 700 }}
-          >
-            ✕
-          </button>
         </div>
 
         {/* Today's Status row */}
@@ -3111,7 +3057,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             )}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <button onClick={handleCancelEdits} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
+            <button onClick={attemptClose} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
             <button
               onClick={handleMainSave}
               disabled={mainSaving}

@@ -1153,7 +1153,12 @@ function ThemedApp(_props: XpaditeAppProps) {
 
       {/* ── Bottom nav (mobile only) */}
       <MobileBottomNav
-        activeTab={mobileTab}
+        // Opening Tasks/Task Manager (see executeNav's 'tasks' branch) leaves
+        // mobileTab at 'calendar' and shows DayModal on top of it instead —
+        // modalDay is the real signal that Tasks is the user's current
+        // destination, so the active indicator should follow it, not the
+        // underlying mobileTab value.
+        activeTab={modalDay ? 'tasks' : mobileTab}
         onTabChange={handleMobileNav}
       />
 

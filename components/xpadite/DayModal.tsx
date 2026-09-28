@@ -1103,12 +1103,16 @@ function TaskRow({
             )}
           </div>
 
-          {/* Category pill — custom dropdown */}
+          {/* Category pill — custom dropdown. Locked while this task's own
+              timer is running (isActive), same source of truth already used
+              to disable the Start/Stop button above — a session's category
+              must stay stable for as long as it's actively recording time. */}
           <ActivityDropdown
             value={task.actId}
             onChange={onActChange}
             activities={activities}
             isDark={isDark}
+            disabled={isActive}
           />
 
           {/* 3-dot */}
@@ -1584,9 +1588,10 @@ interface ActivityDropdownProps {
   onChange: (actId: string) => void
   activities: Activity[]
   isDark: boolean
+  disabled?: boolean
 }
 
-function ActivityDropdown({ value, onChange, activities, isDark }: ActivityDropdownProps) {
+function ActivityDropdown({ value, onChange, activities, isDark, disabled }: ActivityDropdownProps) {
   const [open,       setOpen]       = useState(false)
   const [focusedIdx, setFocusedIdx] = useState(-1)
   const [openUp,     setOpenUp]     = useState(false)
@@ -1606,6 +1611,7 @@ function ActivityDropdown({ value, onChange, activities, isDark }: ActivityDropd
   }, [open])
 
   function handleOpen() {
+    if (disabled) return
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect()
       setOpenUp(window.innerHeight - rect.bottom < 240)
@@ -1615,6 +1621,7 @@ function ActivityDropdown({ value, onChange, activities, isDark }: ActivityDropd
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
+    if (disabled) return
     if (!open) {
       if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpen(); setFocusedIdx(0) }
       return
@@ -1650,9 +1657,11 @@ function ActivityDropdown({ value, onChange, activities, isDark }: ActivityDropd
         {/* Trigger pill */}
         <button
           onClick={handleOpen}
+          disabled={disabled}
           aria-haspopup="listbox"
           aria-expanded={open}
-          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 4, padding: '3px 6px 3px 7px', borderRadius: 7, cursor: 'pointer', outline: 'none', border: `0.5px solid ${selected ? selected.color + '55' : 'var(--xp-bdr2)'}`, background: selected ? `${selected.color}18` : 'var(--xp-bg2)' }}
+          title={disabled ? 'Stop the timer to change category' : undefined}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 4, padding: '3px 6px 3px 7px', borderRadius: 7, cursor: disabled ? 'not-allowed' : 'pointer', outline: 'none', border: `0.5px solid ${selected ? selected.color + '55' : 'var(--xp-bdr2)'}`, background: selected ? `${selected.color}18` : 'var(--xp-bg2)', opacity: disabled ? 0.6 : 1 }}
         >
           {selected && <span style={{ width: 6, height: 6, borderRadius: '50%', background: selected.color, flexShrink: 0, display: 'inline-block' }} />}
           <span style={{ fontSize: 10, fontWeight: 500, color: selected ? selected.color : 'var(--xp-txt3)', flex: 1, minWidth: 0, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

@@ -2661,7 +2661,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
           <div style={{ position: 'relative', flex: '2 1 0%', minWidth: 0, height: 36 }}>
             <span style={{
               position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
-              textAlign: 'center', padding: '0 46px',
+              textAlign: 'center', padding: '0 12px',
               color: '#ffffff', fontSize: 14, fontWeight: 600,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             }}>
@@ -2671,17 +2671,17 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
               onClick={() => attemptNavigateDay(-1)}
               title="Previous day" aria-label="Previous day"
               className="flex items-center justify-center transition-all hover:opacity-70 active:scale-90"
-              style={{ position: 'absolute', left: 'calc(50% - 132px)', top: '50%', transform: 'translateY(-50%)', width: 36, height: 36, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+              style={{ position: 'absolute', left: 'calc(50% - 148px)', top: '50%', transform: 'translateY(-50%)', width: 36, height: 36, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
             >
-              <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
+              <svg width="11" height="14" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
             </button>
             <button
               onClick={() => attemptNavigateDay(1)}
               title="Next day" aria-label="Next day"
               className="flex items-center justify-center transition-all hover:opacity-70 active:scale-90"
-              style={{ position: 'absolute', right: 'calc(50% - 132px)', top: '50%', transform: 'translateY(-50%)', width: 36, height: 36, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+              style={{ position: 'absolute', right: 'calc(50% - 148px)', top: '50%', transform: 'translateY(-50%)', width: 36, height: 36, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
             >
-              <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
+              <svg width="11" height="14" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
             </button>
           </div>
 

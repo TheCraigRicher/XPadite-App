@@ -564,7 +564,16 @@ export function PlanPopup({ planId, isDark, onClose }: {
   )
 }
 
-export function SettingsModal({ onClose }: { onClose: () => void }) {
+export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
+  onClose: () => void
+  // Mobile nav-guard integration (mirrors ProfileModal's identical props,
+  // consumed by the shared dialog/state machine in XpaditeApp.tsx) — lets a
+  // mobile bottom-nav tap close Settings cleanly (or defer via the existing
+  // shared "Unsaved Changes" dialog when dirty) instead of leaving it
+  // stranded on top of whatever destination the tap was meant to open.
+  onDirtyChange?: (dirty: boolean) => void
+  closeIntent?: 'save' | 'discard' | null
+}) {
   const {
     isDark, setIsDark, progressColor, setProgressColor,
     language, setLanguage, effectiveLocale,
@@ -622,6 +631,25 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     setShowPrompt(false)
     onClose()
   }
+
+  // Tell the parent (mobile nav-guard) whenever dirtiness changes — same
+  // pattern as ProfileModal/DayModal's own onDirtyChange effects.
+  useEffect(() => {
+    onDirtyChange?.(hasChanges)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasChanges])
+
+  // External close intent from the mobile nav-guard dialog ('save' or
+  // 'discard'). Both existing handlers already persist/revert AND call
+  // onClose() themselves, so this is a direct passthrough — no separate
+  // save/discard logic to duplicate, and no failure path to report back
+  // since these setters were always fire-and-forget, same as before.
+  useEffect(() => {
+    if (!closeIntent) return
+    if (closeIntent === 'save') handleSaveAndClose()
+    else if (closeIntent === 'discard') handleDiscardAndClose()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeIntent])
 
   const tt = (key: string, fallback: string) => t(effectiveLocale, key, fallback)
 

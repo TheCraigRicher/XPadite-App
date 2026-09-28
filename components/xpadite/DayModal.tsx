@@ -2627,7 +2627,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
               className="flex items-center justify-center transition-all hover:opacity-70 active:scale-90"
               style={{ position: 'absolute', left: 'calc(50% - 148px)', top: '50%', transform: 'translateY(-50%)', width: 36, height: 36, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
             >
-              <svg width="11" height="14" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
+              <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
             </button>
             <button
               onClick={() => attemptNavigateDay(1)}
@@ -2635,7 +2635,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
               className="flex items-center justify-center transition-all hover:opacity-70 active:scale-90"
               style={{ position: 'absolute', right: 'calc(50% - 148px)', top: '50%', transform: 'translateY(-50%)', width: 36, height: 36, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
             >
-              <svg width="11" height="14" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
+              <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
             </button>
           </div>
         </div>
@@ -2663,7 +2663,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
               className="transition-transform active:scale-90 flex-shrink-0"
               style={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
             >
-              <svg width="11" height="14" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
+              <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
             </button>
             <span style={{
               flex: 1, minWidth: 0, textAlign: 'center',
@@ -2678,7 +2678,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
               className="transition-transform active:scale-90 flex-shrink-0"
               style={{ width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
             >
-              <svg width="11" height="14" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
+              <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
             </button>
           </div>
         </div>

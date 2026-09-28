@@ -18,6 +18,7 @@ import { JournalWorkspaceModal } from './JournalWorkspaceModal'
 import { NotificationsModal } from './NotificationsModal'
 import { SyncModal } from './SyncModal'
 import { MeetingsModal } from './MeetingsModal'
+import { HelpFeedbackModal } from './HelpFeedbackModal'
 import { GalleryModal } from './GalleryModal'
 import { SettingsModal } from './SettingsModal'
 import { WhatsNewModal } from './WhatsNewModal'
@@ -680,6 +681,7 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [notificationsOpen, setNotificationsOpen]       = useState(false)
   const [syncOpen, setSyncOpen]                         = useState(false)
   const [meetingsOpen, setMeetingsOpen]                 = useState(false)
+  const [helpOpen, setHelpOpen]                         = useState(false)
 
   // ── Mobile tab ────────────────────────────────────────────────────────────────
   const [mobileTab, setMobileTab] = useState<MobileTab>('calendar')
@@ -761,6 +763,7 @@ function ThemedApp(_props: XpaditeAppProps) {
     if (syncOpen) setSyncOpen(false)
     if (galleryOpen) setGalleryOpen(false)
     if (meetingsOpen) setMeetingsOpen(false)
+    if (helpOpen) setHelpOpen(false)
     if (whatsNewOpen) setWhatsNewOpen(false)
     if (modalDay) setModalDay(null)
     executeNav(tab)
@@ -998,6 +1001,7 @@ function ThemedApp(_props: XpaditeAppProps) {
         onNotifications={() => setNotificationsOpen(true)}
         onSync={() => setSyncOpen(true)}
         onMeetings={() => setMeetingsOpen(true)}
+        onHelp={() => setHelpOpen(true)}
       />
 
       {/* QOTD banner */}
@@ -1286,6 +1290,7 @@ function ThemedApp(_props: XpaditeAppProps) {
       {syncOpen && <SyncModal onClose={() => setSyncOpen(false)} />}
 
       {meetingsOpen && <MeetingsModal onClose={() => setMeetingsOpen(false)} />}
+      {helpOpen && <HelpFeedbackModal onClose={() => setHelpOpen(false)} />}
 
       {notificationsOpen && (
         <NotificationsModal

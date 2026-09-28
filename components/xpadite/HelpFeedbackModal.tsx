@@ -4,16 +4,18 @@ import { useRef, useState } from 'react'
 import { useApp } from './AppContext'
 import { useLockBodyScroll } from './useLockBodyScroll'
 import { formatBytes } from './attachmentUtils'
-import { SUPPORT_EMAIL, PROBLEM_CATEGORIES, FEEDBACK_CATEGORIES, type SupportRequestType } from '@/lib/config/support'
+import { SUPPORT_EMAIL, PROBLEM_CATEGORIES, FEEDBACK_CATEGORIES, XPADITE_REVIEW_URL } from '@/lib/config/support'
 
 interface HelpFeedbackModalProps {
   onClose: () => void
 }
 
-type TabKey = SupportRequestType
+// 'help' submissions still exist historically (see lib/config/support.ts) but
+// the UI no longer offers a way to create one — only these two remain as
+// selectable internal tabs. Rate Us is a separate external action, not a tab.
+type TabKey = 'problem' | 'feedback'
 
 const TABS: { key: TabKey; icon: string; label: string }[] = [
-  { key: 'help', icon: '💬', label: 'Get Help' },
   { key: 'problem', icon: '🐞', label: 'Report Problem' },
   { key: 'feedback', icon: '💡', label: 'Feedback' },
 ]
@@ -25,18 +27,12 @@ const QUICK_TIPS = [
   'For account or sync issues, tell us your device type for faster help.',
 ]
 
-const TAB_COPY: Record<TabKey, { heading: string; subjectLabel: string; bodyLabel: string; cta: string; success: string }> = {
-  help: {
-    heading: 'Need help with XPadite?',
-    subjectLabel: 'Subject',
-    bodyLabel: 'Message',
-    cta: 'Send Support Request',
-    success: 'Support request sent — we\'ll get back to you soon ✓',
-  },
+const TAB_COPY: Record<TabKey, { heading: string; subtitle?: string; subjectLabel: string; bodyLabel: string; bodyPlaceholder: string; cta: string; success: string }> = {
   problem: {
     heading: 'Report a Problem',
     subjectLabel: 'Subject',
     bodyLabel: 'Description',
+    bodyPlaceholder: 'Tell us more…',
     cta: 'Report Problem',
     success: 'Problem reported — thanks for flagging it ✓',
   },
@@ -44,9 +40,20 @@ const TAB_COPY: Record<TabKey, { heading: string; subjectLabel: string; bodyLabe
     heading: 'Share Feedback',
     subjectLabel: 'Subject',
     bodyLabel: 'Feedback',
+    bodyPlaceholder: 'Tell us more…',
     cta: 'Send Feedback',
     success: 'Feedback sent — thank you ✓',
   },
+}
+
+const COMPLIMENT_COPY = {
+  heading: 'Share some love ✨',
+  subtitle: 'Enjoying XPadite? We\'d love to hear what you\'re loving about it.',
+  subjectLabel: 'Subject',
+  bodyLabel: 'Feedback',
+  bodyPlaceholder: 'Tell us what you\'re loving about XPadite…',
+  cta: 'Send Compliment ✨',
+  success: 'Thanks for the kind words ✨ Your compliment has been sent.',
 }
 
 const inputStyle: React.CSSProperties = {
@@ -73,7 +80,7 @@ function Field({ label, required, children }: { label: string; required?: boolea
 
 export function HelpFeedbackModal({ onClose }: HelpFeedbackModalProps) {
   const { setToast } = useApp()
-  const [tab, setTab] = useState<TabKey>('help')
+  const [tab, setTab] = useState<TabKey>('problem')
   const [category, setCategory] = useState('')
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
@@ -121,6 +128,10 @@ export function HelpFeedbackModal({ onClose }: HelpFeedbackModalProps) {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
+  const isCompliment = tab === 'feedback' && category === 'Compliment'
+  const copy = isCompliment ? COMPLIMENT_COPY : TAB_COPY[tab]
+  const categories = tab === 'problem' ? PROBLEM_CATEGORIES : FEEDBACK_CATEGORIES
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (submitting) return
@@ -147,7 +158,7 @@ export function HelpFeedbackModal({ onClose }: HelpFeedbackModalProps) {
         return
       }
 
-      setToast(TAB_COPY[tab].success)
+      setToast(copy.success)
       clearForm()
     } catch {
       setToast('Could not submit your request. Please try again.')
@@ -156,26 +167,25 @@ export function HelpFeedbackModal({ onClose }: HelpFeedbackModalProps) {
     }
   }
 
-  const copy = TAB_COPY[tab]
-  const categories = tab === 'problem' ? PROBLEM_CATEGORIES : tab === 'feedback' ? FEEDBACK_CATEGORIES : null
-
   const formNode = (
     <form onSubmit={handleSubmit}>
-      <h3 className="text-[15px] font-semibold mb-4" style={{ color: 'var(--xp-txt)' }}>{copy.heading}</h3>
-
-      {categories && (
-        <Field label="Category" required>
-          <select
-            value={category}
-            onChange={e => setCategory(e.target.value)}
-            required
-            style={inputStyle}
-          >
-            <option value="" disabled>Select a category…</option>
-            {categories.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </Field>
+      <h3 className="text-[15px] font-semibold mb-1" style={{ color: 'var(--xp-txt)' }}>{copy.heading}</h3>
+      {copy.subtitle && (
+        <p className="text-[12px] mb-4" style={{ color: 'var(--xp-txt3)' }}>{copy.subtitle}</p>
       )}
+      {!copy.subtitle && <div className="mb-4" />}
+
+      <Field label="Category" required>
+        <select
+          value={category}
+          onChange={e => setCategory(e.target.value)}
+          required
+          style={inputStyle}
+        >
+          <option value="" disabled>Select a category…</option>
+          {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </Field>
 
       <Field label={copy.subjectLabel} required>
         <input
@@ -196,7 +206,7 @@ export function HelpFeedbackModal({ onClose }: HelpFeedbackModalProps) {
           required
           rows={5}
           maxLength={5000}
-          placeholder="Tell us more…"
+          placeholder={copy.bodyPlaceholder}
           className="resize-none"
           style={inputStyle}
         />
@@ -323,7 +333,7 @@ export function HelpFeedbackModal({ onClose }: HelpFeedbackModalProps) {
           </button>
         </div>
 
-        {/* Tabs */}
+        {/* Tabs + Rate Us */}
         <div className="flex items-center gap-1 flex-wrap flex-shrink-0" style={{ padding: '12px 16px 0' }}>
           <div className="flex items-center gap-1 flex-wrap" style={{ padding: 3, borderRadius: 10, background: 'var(--xp-bg3)' }}>
             {TABS.map(t => (
@@ -343,6 +353,27 @@ export function HelpFeedbackModal({ onClose }: HelpFeedbackModalProps) {
                 {t.icon} {t.label}
               </button>
             ))}
+            {XPADITE_REVIEW_URL ? (
+              <a
+                href={XPADITE_REVIEW_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={e => e.stopPropagation()}
+                className="text-[12px] whitespace-nowrap inline-flex items-center gap-1"
+                style={{ padding: '7px 13px', borderRadius: 7, fontWeight: 500, color: '#7c3aed' }}
+              >
+                ✨ Rate Us <span aria-hidden="true">↗</span>
+              </a>
+            ) : (
+              <span
+                title="Rate Us is coming soon"
+                aria-disabled="true"
+                className="text-[12px] whitespace-nowrap inline-flex items-center gap-1"
+                style={{ padding: '7px 13px', borderRadius: 7, fontWeight: 500, color: 'var(--xp-txt3)', opacity: 0.55, cursor: 'default' }}
+              >
+                ✨ Rate Us <span aria-hidden="true">↗</span>
+              </span>
+            )}
           </div>
         </div>
 

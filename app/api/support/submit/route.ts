@@ -158,6 +158,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (notifyTo) {
     const label = REQUEST_TYPE_LABEL[requestType]
     const submittedAt = new Date(inserted.created_at as string).toLocaleString('en-US')
+    const isCompliment = requestType === 'feedback' && category === 'Compliment'
+    const emailTag = isCompliment ? '[XPADITE COMPLIMENT]' : '[XPADITE SUPPORT]'
+    const emailSubject = isCompliment ? `${emailTag} — ${subject}` : `${emailTag} ${label} — ${subject}`
     const rows: [string, string][] = [
       ['Request Type', label],
       ['Category', category ?? '—'],
@@ -174,19 +177,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const html = `
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;background:#f9fafb">
   <div style="background:white;border-radius:16px;padding:28px;border:1px solid #e5e7eb">
-    <h2 style="color:#7c3aed;margin:0 0 16px;font-size:18px">[XPADITE SUPPORT] ${escapeHtml(label)} — ${escapeHtml(subject)}</h2>
+    <h2 style="color:#7c3aed;margin:0 0 16px;font-size:18px">${escapeHtml(emailSubject)}</h2>
     <table style="width:100%;border-collapse:collapse;font-size:13px;color:#1e1b4b">
       ${rows.map(([k, v]) => `<tr><td style="padding:4px 8px 4px 0;color:#6b7280;vertical-align:top;white-space:nowrap">${escapeHtml(k)}</td><td style="padding:4px 0">${escapeHtml(v)}</td></tr>`).join('')}
     </table>
     <div style="background:#f5f3ff;border-left:4px solid #7c3aed;border-radius:8px;padding:14px 16px;margin-top:18px;white-space:pre-wrap;font-size:13px;color:#1e1b4b">${escapeHtml(message)}</div>
   </div>
 </div>`
-    const text = `[XPADITE SUPPORT] ${label} — ${subject}\n\n${rows.map(([k, v]) => `${k}: ${v}`).join('\n')}\n\n${message}`
+    const text = `${emailSubject}\n\n${rows.map(([k, v]) => `${k}: ${v}`).join('\n')}\n\n${message}`
 
     const result = await sendEmail({
       to: notifyTo,
       from: fromEmail,
-      subject: `[XPADITE SUPPORT] ${label} — ${subject}`,
+      subject: emailSubject,
       html,
       text,
     })

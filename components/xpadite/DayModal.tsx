@@ -2380,11 +2380,14 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   }
 
   const hasDirtyChanges = useMemo(() => {
+    // While a Save is in progress the snapshot hasn't been re-baselined yet;
+    // treat as clean so Close doesn't incorrectly trigger the discard dialog.
+    if (mainSaving) return false
     if (newTaskText.trim().length > 0) return true
     if (Object.keys(dirtyNotesMap).length > 0) return true
     if (!openSnapshotRef.current) return false
     return JSON.stringify(calData[dateKey] ?? EMPTY_DAY) !== JSON.stringify(openSnapshotRef.current)
-  }, [newTaskText, dirtyNotesMap, calData, dateKey])
+  }, [mainSaving, newTaskText, dirtyNotesMap, calData, dateKey])
 
   // Locale-aware: e.g. "Friday, September 25, 2026" (en-US) vs
   // "Friday, 25 September 2026" (en-GB) — real Intl formatting, not just a

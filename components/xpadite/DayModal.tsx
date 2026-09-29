@@ -887,6 +887,7 @@ function TaskRow({
   const [listMenuLocalPos, setListMenuLocalPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number } | null>(null)
   const listBtnRef  = useRef<HTMLButtonElement>(null)
   const listMenuRef = useRef<HTMLDivElement>(null)
+  const listMenuMinScrollRef = useRef<number>(0)
   useEffect(() => {
     if (!listMenuOpen) return
     function onDown(e: MouseEvent) {
@@ -894,6 +895,27 @@ function TaskRow({
     }
     const t = setTimeout(() => document.addEventListener('mousedown', onDown), 10)
     return () => { clearTimeout(t); document.removeEventListener('mousedown', onDown) }
+  }, [listMenuOpen])
+  // While the list menu is open, prevent the scroll container from moving
+  // the open menu down far enough to overlap the sticky add button.
+  useEffect(() => {
+    if (!listMenuOpen) return
+    const el = document.querySelector('[data-xp-tm-scrollbody]') as HTMLElement | null
+    if (!el) return
+    const scrollEl: HTMLElement = el
+    const addBtnEl = document.querySelector('[data-xp-tm-addbtn]') as HTMLElement | null
+    const listEl   = listMenuRef.current
+    if (addBtnEl && listEl) {
+      const slack = addBtnEl.getBoundingClientRect().top - listEl.getBoundingClientRect().bottom - 8
+      listMenuMinScrollRef.current = Math.max(0, scrollEl.scrollTop - Math.max(0, slack))
+    } else {
+      listMenuMinScrollRef.current = 0
+    }
+    function clamp() {
+      if (scrollEl.scrollTop < listMenuMinScrollRef.current) scrollEl.scrollTop = listMenuMinScrollRef.current
+    }
+    scrollEl.addEventListener('scroll', clamp)
+    return () => scrollEl.removeEventListener('scroll', clamp)
   }, [listMenuOpen])
   function toggleListMenu() {
     if (!listMenuOpen && listBtnRef.current) {
@@ -962,10 +984,15 @@ function TaskRow({
   // scroll handling moves it in the exact same paint as the card — no scroll
   // listener, no re-measuring, no catch-up lag.
   //
-  // The sticky Cancel/Save footer (marked [data-xp-tm-footer]) is treated as
-  // a hard bottom boundary rather than window.innerHeight: that footer is a
-  // separate flex sibling below the scrollable task list, not part of it, so
-  // it occupies real screen space the popover must never render under.
+  // The sticky Cancel/Save footer (marked [data-xp-tm-footer]) and the sticky
+  // "+ Add accomplishment" bar (marked [data-xp-tm-addbtn], itself
+  // position:sticky/bottom:0 within the scrollable task list) are both
+  // treated as hard bottom boundaries rather than window.innerHeight — real
+  // screen space the popover must never render under. The add-accomplishment
+  // bar's sticky position is stable once measured (it doesn't drift as the
+  // list scrolls beneath it), so measuring both once at open time — same as
+  // the trigger's own rect — stays correct through further scrolling without
+  // any continuous re-measurement.
   //
   // Horizontal position is clamped to the card's own width (minus a safe
   // margin) so the popover can never extend past the left/right edges,
@@ -974,15 +1001,18 @@ function TaskRow({
   // When neither direction has enough room for the popover's natural height,
   // it opens in whichever direction has more space and returns a clamped
   // maxHeight so the popover's own content scrolls internally instead of
-  // crossing the footer boundary.
+  // crossing either boundary.
   function getLocalPopoverPos(btnRect: DOMRect, popoverW: number, estHeight: number): { top?: number; bottom?: number; left: number; maxHeight: number } {
     const card = cardRootRef.current
     if (!card) return { top: 0, left: 0, maxHeight: estHeight }
     const cardRect = card.getBoundingClientRect()
     const margin = 8
     const vh = typeof window !== 'undefined' ? window.innerHeight : 800
-    const footerEl = typeof document !== 'undefined' ? document.querySelector('[data-xp-tm-footer]') : null
-    const bottomBoundary = footerEl ? footerEl.getBoundingClientRect().top : vh
+    const footerEl  = typeof document !== 'undefined' ? document.querySelector('[data-xp-tm-footer]')  : null
+    const addBtnEl  = typeof document !== 'undefined' ? document.querySelector('[data-xp-tm-addbtn]')  : null
+    const footerTop = footerEl ? footerEl.getBoundingClientRect().top : vh
+    const addBtnTop = addBtnEl ? addBtnEl.getBoundingClientRect().top : vh
+    const bottomBoundary = Math.min(footerTop, addBtnTop)
 
     const spaceBelow = bottomBoundary - btnRect.bottom - margin
     const spaceAbove = btnRect.top - margin
@@ -1695,7 +1725,32 @@ function TaskRow({
         )}
 
         {emojiOpen && emojiLocalPos && (
-          <div ref={emojiPickerRef} style={{ position: 'absolute', ...emojiLocalPos, zIndex: 50, borderRadius: 12, overflow: 'hidden', boxShadow: '0 12px 40px rgba(0,0,0,0.22)' }}>
+          <div
+            ref={emojiPickerRef}
+            style={{
+              position: 'absolute', ...emojiLocalPos, zIndex: 50, borderRadius: 12, overflow: 'hidden', boxShadow: '0 12px 40px rgba(0,0,0,0.22)',
+              // emoji-picker-react's internal grid/icons/search/preview don't
+              // scale from the width/height props alone — they're governed by
+              // its own --epr-* CSS custom properties, which cascade in
+              // normally from this ancestor. Scaling these down (mobile only;
+              // the desktop instance below doesn't set them, so it keeps the
+              // library's own defaults) is what actually shrinks the internal
+              // content to match the already-compact outer container.
+              ...({
+                '--epr-emoji-size': '0.78rem',
+                '--epr-emoji-padding': '0.16rem',
+                '--epr-category-navigation-button-size': '0.82rem',
+                '--epr-category-padding': '0.2rem',
+                '--epr-category-label-height': '1.1rem',
+                '--epr-search-input-height': '1.5rem',
+                '--epr-header-padding': '0.28rem',
+                '--epr-horizontal-padding': '0.28rem',
+                '--epr-preview-height': '1.8rem',
+                '--epr-preview-text-size': '0.6rem',
+                '--epr-preview-text-padding': '0.2rem',
+              } as React.CSSProperties),
+            }}
+          >
             <EmojiPickerLib
               onEmojiClick={(data: EmojiClickData) => { handleEmojiSelect(data.emoji); setEmojiOpen(false) }}
               theme={isDark ? Theme.DARK : Theme.LIGHT}
@@ -2979,7 +3034,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
         </div>
 
         {/* Scrollable body */}
-        <div ref={scrollBodyRef} className="flex-1 overflow-y-auto">
+        <div ref={scrollBodyRef} data-xp-tm-scrollbody className="flex-1 overflow-y-auto">
           <div className="px-4 py-3" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
 
             {/* Section header */}
@@ -3271,7 +3326,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             )}
 
             {topLevelTasks.length > 0 && !addingTask && !reorderMode && !deleteMode && !moveMode && (
-              <div style={{ position: 'sticky', bottom: 0, paddingTop: 6, paddingBottom: 2, background: 'var(--xp-card)', zIndex: 4 }}>
+              <div data-xp-tm-addbtn style={{ position: 'sticky', bottom: 0, paddingTop: 6, paddingBottom: 2, background: 'var(--xp-card)', zIndex: 4 }}>
                 <button onClick={() => setAddingTask(true)} className="w-full text-xs py-2.5 rounded-xl text-white font-semibold transition-all hover:opacity-85" style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)', boxShadow: '0 2px 10px rgba(124,58,237,0.35)' }}>
                   + Add accomplishment
                 </button>

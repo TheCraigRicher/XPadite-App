@@ -830,7 +830,6 @@ function TaskRow({
   // using emojiAnchor (viewport rect) + a body-level portal, unchanged.
   const [emojiLocalPos,  setEmojiLocalPos]  = useState<{ top?: number; bottom?: number; left: number; maxHeight: number } | null>(null)
   const [isDragOver,     setIsDragOver]     = useState(false)
-  const [notesViewMode,  setNotesViewMode]  = useState<'preview' | 'edit'>('preview')
   const [isCardHovered,  setIsCardHovered]  = useState(false)
   const [notesJustSaved, setNotesJustSaved] = useState(false)
   const [titleJustSaved, setTitleJustSaved] = useState(false)
@@ -844,11 +843,6 @@ function TaskRow({
   // Session lock: once a task has a completed session it cannot be restarted
   const hasCompletedSession = (task.sessions?.some(s => s.endTs !== null) ?? false) || !!task.timerEnd
   const sessionLocked = hasCompletedSession && !isActive
-
-  // Reset notes view when task collapses
-  useEffect(() => { if (!expanded) setNotesViewMode('preview') }, [expanded])
-  // On desktop, focus the textarea when switching into edit mode
-  useEffect(() => { if (notesViewMode === 'edit' && expanded && notesRef.current) notesRef.current.focus() }, [notesViewMode, expanded])
 
   // Bell animation
   const [isBellAnimating, setIsBellAnimating] = useState(false)
@@ -926,6 +920,24 @@ function TaskRow({
     if (line.startsWith('☐ '))      lines[lineIndex] = '☑ ' + line.slice(2)
     else if (line.startsWith('☑ ')) lines[lineIndex] = '☐ ' + line.slice(2)
     onNotesDraftChange(lines.join('\n'))
+  }
+
+  function handleNotesTextareaClick(e: React.MouseEvent<HTMLTextAreaElement>) {
+    const ta = e.currentTarget
+    const rect = ta.getBoundingClientRect()
+    const style = window.getComputedStyle(ta)
+    const lineHeight = parseFloat(style.lineHeight) || 19.5
+    const paddingTop = parseFloat(style.paddingTop) || 8
+    const paddingLeft = parseFloat(style.paddingLeft) || 10
+    const relY = e.clientY - rect.top - paddingTop + ta.scrollTop
+    const lineIndex = Math.floor(relY / lineHeight)
+    const lines = ((draftJournal ?? task.journal) || '').split('\n')
+    if (lineIndex < 0 || lineIndex >= lines.length) return
+    const line = lines[lineIndex]
+    if (!line.startsWith('☐ ') && !line.startsWith('☑ ')) return
+    const relX = e.clientX - rect.left - paddingLeft
+    if (relX > 22) return
+    toggleChecklistLine(lineIndex)
   }
 
   function handleTitleEditEnd() {
@@ -1040,7 +1052,7 @@ function TaskRow({
 
   function handleEmojiSelect(emoji: string) {
     const current = draftJournal ?? task.journal
-    if (notesViewMode === 'edit' && notesRef.current) {
+    if (notesRef.current) {
       const ta    = notesRef.current
       const start = ta.selectionStart ?? current.length
       const next  = current.slice(0, start) + emoji + current.slice(start)
@@ -1449,91 +1461,29 @@ function TaskRow({
 
             {/* ── INTERACTIVE NOTES AREA ── */}
             <div>
-              {notesViewMode === 'preview' && (
-                // Preview — desktop/tablet only when in preview mode
-                <div
-                  className="hidden sm:block text-xs rounded-lg px-2.5 py-2"
-                  style={{ minHeight: 68, border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg2)', color: 'var(--xp-txt)', cursor: 'text' }}
-                  onClick={() => setNotesViewMode('edit')}
-                >
-                  {(draftJournal ?? task.journal) ? (
-                    <div>
-                      {(draftJournal ?? task.journal).split('\n').map((line, i) => {
-                        const isCheck = line.startsWith('☐ ') || line.startsWith('☑ ')
-                        if (isCheck) {
-                          const checked = line.startsWith('☑ ')
-                          const text    = line.slice(2)
-                          return (
-                            <button
-                              key={i}
-                              onClick={e => { e.stopPropagation(); toggleChecklistLine(i) }}
-                              className="flex items-center gap-2 w-full text-left py-0.5 transition-opacity hover:opacity-75"
-                            >
-                              <span style={{ fontSize: 13, flexShrink: 0, color: checked ? '#16a34a' : 'var(--xp-txt3)', lineHeight: 1 }}>{checked ? '☑' : '☐'}</span>
-                              <span style={{ textDecoration: checked ? 'line-through' : 'none', color: checked ? 'var(--xp-txt3)' : 'var(--xp-txt)', fontSize: 11, lineHeight: 1.5 }}>
-                                {text || <span style={{ opacity: 0.35, fontStyle: 'italic' }}>Empty item</span>}
-                              </span>
-                            </button>
-                          )
-                        }
-                        return line
-                          ? <p key={i} style={{ padding: '1px 0', lineHeight: 1.55, fontSize: 11, color: 'var(--xp-txt2)' }}>{line}</p>
-                          : <div key={i} style={{ height: 5 }} />
-                      })}
-                    </div>
-                  ) : (
-                    <span style={{ color: 'var(--xp-txt3)', opacity: 0.4, fontSize: 11 }}>
-                      Click ✏️ to add notes, or type ☐ for a checklist item...
-                    </span>
-                  )}
-                </div>
-              )}
-              {/* Edit textarea — always on mobile; on sm+ only when not in preview */}
-              <div className={notesViewMode === 'preview' ? 'sm:hidden' : ''} style={{ position: 'relative' }}>
+              {/* Notes textarea — always visible */}
+              <div style={{ position: 'relative' }}>
                   <textarea
                     ref={notesRef}
                     value={draftJournal ?? task.journal}
                     onChange={e => onNotesDraftChange(e.target.value)}
                     onKeyDown={handleNotesKeyDown}
+                    onClick={handleNotesTextareaClick}
                     placeholder="Add notes, or type ☐ to start a checklist item..."
                     rows={3}
                     tabIndex={expanded ? 0 : -1}
                     className="w-full text-xs px-2.5 py-2 rounded-lg outline-none resize-none leading-relaxed"
                     style={{ border: `1px solid ${notesDirty ? 'rgba(124,58,237,0.55)' : 'var(--xp-acc)'}`, background: 'var(--xp-bg2)', color: 'var(--xp-txt)' }}
                   />
-
                 </div>
 
               {/* Controls row */}
               <div className="flex items-center justify-between mt-1.5" style={{ flexWrap: 'wrap', gap: 4 }}>
-                {/* Left: mode toggle + formatting (edit-only) + upload + camera */}
+                {/* Left: formatting + upload + camera */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                  {notesViewMode === 'preview' ? (
-                    <button
-                      onClick={() => setNotesViewMode('edit')}
-                      className="flex items-center text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
-                      style={{ color: 'var(--xp-txt3)' }}
-                    >
-                      ✏️ Edit notes
-                    </button>
-                  ) : (
-                    /* Preview — desktop/tablet only; on mobile the user saves/collapses to exit edit */
-                    <button
-                      onClick={() => setNotesViewMode('preview')}
-                      className="hidden sm:flex items-center text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
-                      style={{ color: 'var(--xp-txt3)' }}
-                    >
-                      👁 Preview
-                    </button>
-                  )}
-
-                  {notesViewMode === 'edit' && (
-                    <>
-                      <button onClick={() => applyListType('bullet')} title="Bullet list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>• List</button>
-                      <button onClick={() => applyListType('number')} title="Numbered list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}><span className="sm:hidden">1. Number</span><span className="hidden sm:inline">1. List</span></button>
-                      <button onClick={() => applyListType('check')} title="Checklist" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>☐ Check</button>
-                    </>
-                  )}
+                  <button onClick={() => applyListType('bullet')} title="Bullet list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>• List</button>
+                  <button onClick={() => applyListType('number')} title="Numbered list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>1. Number</button>
+                  <button onClick={() => applyListType('check')} title="Checklist" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>☐ Check</button>
 
                   <button
                     onClick={() => uploadRef.current?.click()}
@@ -1542,7 +1492,7 @@ function TaskRow({
                     className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
                     style={{ color: 'var(--xp-txt3)', opacity: uploading ? 0.5 : 1, cursor: 'pointer' }}
                   >
-                    📎<span className="hidden sm:inline"> Upload File</span>
+                    📎
                   </button>
 
                   <button
@@ -1552,14 +1502,8 @@ function TaskRow({
                     className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
                     style={{ color: 'var(--xp-txt3)', opacity: uploading ? 0.5 : 1, cursor: 'pointer' }}
                   >
-                    📷<span className="hidden sm:inline"> Camera</span>
+                    📷
                   </button>
-
-                  {/* Emoji trigger — desktop/tablet only; mobile uses native keyboard emoji */}
-                  <div className="relative flex-shrink-0 hidden sm:block">
-                    <button ref={emojiBtnRefDesktop} onClick={() => toggleEmojiPicker(emojiBtnRefDesktop)} tabIndex={expanded ? 0 : -1} className="hover:scale-110 transition-transform leading-none" style={{ fontSize: 17 }} title="Insert emoji">😊</button>
-                  </div>
-
 
                   {uploading && (
                     <span style={{ fontSize: 10, color: 'var(--xp-txt3)' }}>Uploading…</span>
@@ -1599,13 +1543,7 @@ function TaskRow({
                 </div>
               </div>
 
-              {/* Emoji picker — desktop/tablet only (emojiAnchor is only ever
-                  set by the desktop trigger now). Rendered via a body-level
-                  portal, unchanged: its trigger lives in the toolbar, not
-                  inside a clipped/scrollable area, so this was never the
-                  source of the clipping/lag problem. Mobile's version
-                  (emojiLocalPos) renders separately, see "Mobile popovers"
-                  below. */}
+              {/* Emoji picker portal — kept for future use; currently no trigger in the toolbar */}
               {emojiOpen && emojiAnchor && createPortal(
                 <div ref={emojiPickerRef} style={getEmojiPickerStyle(emojiAnchor)}>
                   <EmojiPickerLib

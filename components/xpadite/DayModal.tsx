@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } fr
 import { createPortal } from 'react-dom'
 import { useApp, EMPTY_DAY } from './AppContext'
 import type { Task, TaskSession, Activity, TaskAttachment, DayData } from './types'
-import { formatMs, formatHMS, formatTime, formatTime12, isProductiveActivity, APP_YEAR, todayKey } from './utils'
+import { formatMs, formatHMS, formatTime, formatTime12, isProductiveActivity, APP_YEAR, todayKey, nowH12InTz } from './utils'
 import { ReminderModal } from './ReminderModal'
 import { TransferTaskModal } from './TransferTaskModal'
 import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
@@ -298,7 +298,7 @@ function CompactDropdown({ value, options, onChange, isDark, width, ariaLabel, i
 // ─── TimeRow — module-level so React never remounts CompactDropdown on state change ──
 
 function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setActivePicker, prefix,
-  manualMode, rawH, rawM, onRawH, onRawM, hInvalid, mInvalid }: {
+  manualMode, rawH, rawM, onRawH, onRawM, hInvalid, mInvalid, onFirstFocus }: {
   label: string; h: string; m: string; ap: string
   onH: (v: string) => void; onM: (v: string) => void; onAP: (v: string) => void
   isDark: boolean
@@ -309,6 +309,7 @@ function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setAct
   rawH?: string; rawM?: string
   onRawH?: (v: string) => void; onRawM?: (v: string) => void
   hInvalid?: boolean; mInvalid?: boolean
+  onFirstFocus?: () => void
 }) {
   const inputBase: React.CSSProperties = {
     borderRadius: 8, textAlign: 'center', fontSize: 12, fontWeight: 500,
@@ -322,7 +323,7 @@ function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setAct
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         {manualMode ? (
           <input type="text" inputMode="numeric" value={rawH ?? h} onChange={e => onRawH?.(e.target.value)}
-            placeholder="00" maxLength={2}
+            onFocus={onFirstFocus} placeholder="00" maxLength={2}
             style={{ ...inputBase, width: 56, border: `1px solid ${hInvalid ? '#ef4444' : 'var(--xp-bdr2)'}` }} />
         ) : (
           <CompactDropdown value={h} options={ADJUST_HOURS} onChange={onH} isDark={isDark} width={56}
@@ -331,7 +332,7 @@ function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setAct
         <span style={{ color: 'var(--xp-txt3)', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>:</span>
         {manualMode ? (
           <input type="text" inputMode="numeric" value={rawM ?? m} onChange={e => onRawM?.(e.target.value)}
-            placeholder="00" maxLength={2}
+            onFocus={onFirstFocus} placeholder="00" maxLength={2}
             style={{ ...inputBase, width: 62, border: `1px solid ${mInvalid ? '#ef4444' : 'var(--xp-bdr2)'}` }} />
         ) : (
           <CompactDropdown value={m} options={ADJUST_MINUTES} onChange={onM} isDark={isDark} width={62}
@@ -355,7 +356,7 @@ interface AdjustTimeProps {
 }
 
 function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
-  const { isDark } = useApp()
+  const { isDark, effectiveTimezone } = useApp()
   const runningSession = getRunningSession(task)
   const lastSession    = task.sessions?.findLast?.(s => s.endTs !== null) ?? null
   const editingSession = runningSession ?? lastSession
@@ -395,6 +396,18 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   function validH(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 1 && n <= 12 }
   function validM(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 0 && n <= 59 }
 
+  // Auto-populate End Time with the current time (in the user's configured
+  // XPadite timezone) the first time it's focused while still empty — mirrors
+  // the previous behavior. Guarded by emptiness so it never overwrites a
+  // value the user has already set or edited.
+  function handleEndFirstFocus() {
+    if (endH !== '' || endM !== '') return
+    const now = nowH12InTz(effectiveTimezone)
+    setEndH(now.h)
+    setEndM(now.m)
+    setEndAP(now.ap)
+  }
+
   const isValid    = validH(startH) && validM(startM) && validH(endH) && validM(endM)
   const startTs    = isValid ? h12ToTs(startH, startM, startAP, baseTs) : 0
   let   endTs      = isValid ? h12ToTs(endH, endM, endAP, baseTs) : 0
@@ -432,6 +445,7 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
               manualMode={true} rawH={endH} rawM={endM}
               onRawH={setEndH} onRawM={setEndM}
               hInvalid={endH !== '' && !validH(endH)} mInvalid={endM !== '' && !validM(endM)}
+              onFirstFocus={handleEndFirstFocus}
             />
           </div>
 

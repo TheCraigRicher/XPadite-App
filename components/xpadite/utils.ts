@@ -67,6 +67,30 @@ export function todayKeyInTz(tz: string): string {
   return dateKey(d.getFullYear(), d.getMonth(), d.getDate())
 }
 
+// Current wall-clock time (12-hour) as it reads in an arbitrary IANA zone,
+// derived via Intl (same technique as todayKeyInTz) so DST is handled by the
+// zone's own rules rather than manual offset math.
+export function nowH12InTz(tz: string): { h: string; m: string; ap: string } {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).formatToParts(new Date())
+    const h = parts.find(p => p.type === 'hour')?.value
+    const m = parts.find(p => p.type === 'minute')?.value
+    const ap = parts.find(p => p.type === 'dayPeriod')?.value?.toUpperCase()
+    if (h && m && (ap === 'AM' || ap === 'PM')) return { h, m, ap }
+  } catch {
+    // fall through to system-local below
+  }
+  const d = new Date()
+  const hours = d.getHours()
+  const h12 = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours
+  return { h: String(h12), m: String(d.getMinutes()).padStart(2, '0'), ap: hours < 12 ? 'AM' : 'PM' }
+}
+
 // `tz` is optional and backward-compatible: existing call sites that don't
 // pass it keep today's exact system-local behavior. Callers that know the
 // user's effective timezone preference can opt in explicitly.

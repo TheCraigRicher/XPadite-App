@@ -3,7 +3,8 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp, EMPTY_DAY } from './AppContext'
-import type { Task, TaskSession, Activity, TaskAttachment, DayData } from './types'
+import type { Task, TaskSession, Activity, TaskAttachment, DayData, JournalBlock } from './types'
+import { parseJournalDoc, mkId } from './journalUtils'
 import { formatMs, formatHMS, formatTime, formatTime12, isProductiveActivity, APP_YEAR, todayKey, nowH12InTz } from './utils'
 import { ReminderModal } from './ReminderModal'
 import { TransferTaskModal } from './TransferTaskModal'
@@ -610,6 +611,8 @@ interface TaskMenuProps {
   onCopy: () => void
   onPaste: () => void
   onCreateSubTask: () => void
+  onPlannerNotes: () => void
+  plannerSectionSent: boolean
   onChooseColor: () => void
   onTogglePriority: () => void
   onTransfer: () => void
@@ -622,7 +625,7 @@ interface TaskMenuProps {
   onClose: () => void
 }
 
-function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onChooseColor, onTogglePriority, onTransfer, pasteEnabled, transferDisabled, isChild, isPriority, onClose, menuAnchor, isDark }: TaskMenuProps) {
+function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onPlannerNotes, plannerSectionSent, onChooseColor, onTogglePriority, onTransfer, pasteEnabled, transferDisabled, isChild, isPriority, onClose, menuAnchor, isDark }: TaskMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     function onOut(e: PointerEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
@@ -640,6 +643,9 @@ function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, 
     { icon: '📌', label: 'Paste Task',       action: onPaste, disabled: !pasteEnabled },
     { icon: '📅', label: 'Move Task',        action: onTransfer, disabled: transferDisabled },
     ...(!isChild ? [{ icon: '➕', label: 'Create Sub-Task', action: onCreateSubTask }] as MenuItem[] : []),
+    plannerSectionSent
+      ? { icon: '✓',  label: 'Sent to Planner',  action: () => {}, disabled: true }
+      : { icon: '📝', label: 'Send to Planner',   action: onPlannerNotes },
     { icon: '🎨', label: 'Choose Task Color', action: onChooseColor, sep: true },
     { icon: '⚡', label: isPriority ? 'Remove Priority' : 'Mark as Priority', action: onTogglePriority },
     { icon: '🗑',  label: 'Delete Task',      action: onDelete, danger: true, sep: true },
@@ -770,6 +776,7 @@ interface TaskRowProps {
   // Transfer (move/copy to another date)
   onTransfer: () => void
   transferDisabled: boolean
+  onPlannerNotes?: () => void
 }
 
 function TaskRow({
@@ -785,6 +792,7 @@ function TaskRow({
   onCopy, onPaste, onCreateSubTask, pasteEnabled,
   onChooseColor, onTogglePriority,
   onTransfer, transferDisabled,
+  onPlannerNotes,
 }: TaskRowProps) {
   const { activities, reminders, isDark, setToast } = useApp()
   const attachments = task.attachments ?? []
@@ -885,59 +893,6 @@ function TaskRow({
   // it scrolls natively with the card, with zero scroll-listener/re-measure
   // lag, since its position is expressed in the card's own local coordinate
   // space rather than the viewport's.
-  const [listMenuOpen, setListMenuOpen] = useState(false)
-  const [listMenuLocalPos, setListMenuLocalPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number } | null>(null)
-  const listBtnRef  = useRef<HTMLButtonElement>(null)
-  const listMenuRef = useRef<HTMLDivElement>(null)
-  const listMenuMinScrollRef = useRef<number>(0)
-  useEffect(() => {
-    if (!listMenuOpen) return
-    function onDown(e: MouseEvent) {
-      if (listMenuRef.current && !listMenuRef.current.contains(e.target as Node)) setListMenuOpen(false)
-    }
-    const t = setTimeout(() => document.addEventListener('mousedown', onDown), 10)
-    return () => { clearTimeout(t); document.removeEventListener('mousedown', onDown) }
-  }, [listMenuOpen])
-  // While the list menu is open, prevent the scroll container from moving
-  // the open menu down far enough to overlap the sticky add button.
-  useEffect(() => {
-    if (!listMenuOpen) return
-    const el = document.querySelector('[data-xp-tm-scrollbody]') as HTMLElement | null
-    if (!el) return
-    const scrollEl: HTMLElement = el
-    const addBtnEl = document.querySelector('[data-xp-tm-addbtn]') as HTMLElement | null
-    const listEl   = listMenuRef.current
-    if (addBtnEl && listEl) {
-      const slack = addBtnEl.getBoundingClientRect().top - listEl.getBoundingClientRect().bottom - 8
-      listMenuMinScrollRef.current = Math.max(0, scrollEl.scrollTop - Math.max(0, slack))
-    } else {
-      listMenuMinScrollRef.current = 0
-    }
-    let lastTY = 0
-    function onTS(e: TouchEvent) { lastTY = e.touches[0].clientY }
-    function onTM(e: TouchEvent) {
-      const dy = e.touches[0].clientY - lastTY
-      lastTY = e.touches[0].clientY
-      if (dy > 0 && scrollEl.scrollTop <= listMenuMinScrollRef.current + 1) e.preventDefault()
-    }
-    function clamp() {
-      if (scrollEl.scrollTop < listMenuMinScrollRef.current) scrollEl.scrollTop = listMenuMinScrollRef.current
-    }
-    scrollEl.addEventListener('touchstart', onTS, { passive: true })
-    scrollEl.addEventListener('touchmove', onTM, { passive: false } as AddEventListenerOptions)
-    scrollEl.addEventListener('scroll', clamp)
-    return () => {
-      scrollEl.removeEventListener('touchstart', onTS)
-      scrollEl.removeEventListener('touchmove', onTM)
-      scrollEl.removeEventListener('scroll', clamp)
-    }
-  }, [listMenuOpen])
-  function toggleListMenu() {
-    if (!listMenuOpen && listBtnRef.current) {
-      setListMenuLocalPos(getLocalPopoverPos(listBtnRef.current.getBoundingClientRect(), LIST_MENU_W_MOBILE, LIST_MENU_H_MOBILE))
-    }
-    setListMenuOpen(o => !o)
-  }
   const [showTooltip, setShowTooltip] = useState(false)
   const [tooltipPos,  setTooltipPos]  = useState<{ top: number; left: number; width: number } | null>(null)
   const [showPopover, setShowPopover] = useState(false)
@@ -1068,8 +1023,6 @@ function TaskRow({
   const EMOJI_PICKER_H = 340
   const EMOJI_PICKER_W_MOBILE = 230
   const EMOJI_PICKER_H_MOBILE = 260
-  const LIST_MENU_W_MOBILE = 150
-  const LIST_MENU_H_MOBILE = 116
   function getEmojiPickerStyle(anchor: DOMRect): React.CSSProperties {
     const vw = typeof window !== 'undefined' ? window.innerWidth  : 390
     const vh = typeof window !== 'undefined' ? window.innerHeight : 800
@@ -1358,6 +1311,8 @@ function TaskRow({
                 onCopy={onCopy}
                 onPaste={onPaste}
                 onCreateSubTask={onCreateSubTask}
+                onPlannerNotes={() => { setMenuOpen(false); onPlannerNotes?.() }}
+                plannerSectionSent={!!task.plannerSectionId}
                 onChooseColor={() => { setMenuOpen(false); setColorPickerOpen(true) }}
                 onTogglePriority={() => { onTogglePriority(); setMenuOpen(false) }}
                 onTransfer={onTransfer}
@@ -1552,33 +1507,32 @@ function TaskRow({
               <div className="flex items-center justify-between mt-1.5" style={{ flexWrap: 'wrap', gap: 4 }}>
                 {/* Left: mode toggle + formatting (edit-only) + upload + camera */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                  <button
-                    onClick={() => setNotesViewMode(m => m === 'preview' ? 'edit' : 'preview')}
-                    className="hidden sm:flex items-center text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
-                    style={{ color: 'var(--xp-txt3)' }}
-                  >
-                    {notesViewMode === 'preview' ? <>✏️ Edit notes</> : '👁 Preview'}
-                  </button>
+                  {notesViewMode === 'preview' ? (
+                    <button
+                      onClick={() => setNotesViewMode('edit')}
+                      className="flex items-center text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
+                      style={{ color: 'var(--xp-txt3)' }}
+                    >
+                      ✏️ Edit notes
+                    </button>
+                  ) : (
+                    /* Preview — desktop/tablet only; on mobile the user saves/collapses to exit edit */
+                    <button
+                      onClick={() => setNotesViewMode('preview')}
+                      className="hidden sm:flex items-center text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
+                      style={{ color: 'var(--xp-txt3)' }}
+                    >
+                      👁 Preview
+                    </button>
+                  )}
 
                   {notesViewMode === 'edit' && (
-                    <div className="hidden sm:contents">
+                    <>
                       <button onClick={() => applyListType('bullet')} title="Bullet list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>• List</button>
                       <button onClick={() => applyListType('number')} title="Numbered list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>1. List</button>
                       <button onClick={() => applyListType('check')} title="Checklist" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>☐ Check</button>
-                    </div>
+                    </>
                   )}
-                  {/* Mobile list dropdown — always visible so the toolbar is consistent */}
-                  <div className="relative sm:hidden">
-                    <button
-                      ref={listBtnRef}
-                      onClick={toggleListMenu}
-                      title="List type"
-                      className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5 flex items-center gap-0.5"
-                      style={{ color: 'var(--xp-txt3)' }}
-                    >
-                      ☰ List <span style={{ fontSize: 8 }}>▾</span>
-                    </button>
-                  </div>
 
                   <button
                     onClick={() => uploadRef.current?.click()}
@@ -1587,20 +1541,20 @@ function TaskRow({
                     className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
                     style={{ color: 'var(--xp-txt3)', opacity: uploading ? 0.5 : 1, cursor: 'pointer' }}
                   >
-                    📎 <span className="hidden sm:inline">Upload File</span><span className="sm:hidden">Upload</span>
+                    📎<span className="hidden sm:inline"> Upload File</span>
                   </button>
 
                   <button
                     onClick={() => setCameraOpen(true)}
                     disabled={uploading}
                     title="Take a photo with your camera"
-                    className="hidden sm:block text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
+                    className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
                     style={{ color: 'var(--xp-txt3)', opacity: uploading ? 0.5 : 1, cursor: 'pointer' }}
                   >
-                    📷 Camera
+                    📷<span className="hidden sm:inline"> Camera</span>
                   </button>
 
-                  {/* Desktop/tablet emoji trigger — stays in toolbar after Camera */}
+                  {/* Emoji trigger — desktop/tablet only; mobile uses native keyboard emoji */}
                   <div className="relative flex-shrink-0 hidden sm:block">
                     <button ref={emojiBtnRefDesktop} onClick={() => toggleEmojiPicker(emojiBtnRefDesktop)} tabIndex={expanded ? 0 : -1} className="hover:scale-110 transition-transform leading-none" style={{ fontSize: 17 }} title="Insert emoji">😊</button>
                   </div>
@@ -1683,26 +1637,9 @@ function TaskRow({
           </div>
         </div>
 
-        {/* Mobile popovers (List dropdown, emoji picker) — siblings of the
-            expand/collapse wrapper above (not descendants of it), so they
-            are never subject to that wrapper's overflow:hidden/max-height
-            clipping. Positioned via getLocalPopoverPos against cardRootRef
-            (this task card, which is itself overflow-visible), so they scroll
-            in the exact same paint as the card with zero JS repositioning. */}
-        {listMenuOpen && listMenuLocalPos && (
-          <div ref={listMenuRef} style={{
-            position: 'absolute', ...listMenuLocalPos, width: LIST_MENU_W_MOBILE, zIndex: 50,
-            background: isDark ? '#1e1130' : '#fff',
-            border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.12)'}`,
-            borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.18)',
-            overflowY: 'auto', overflowX: 'hidden', padding: 4,
-          }}>
-            <button onClick={() => { applyListType('bullet'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: isDark ? '#e2e8f0' : '#111827' }}>• Bullet List</button>
-            <button onClick={() => { applyListType('number'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: isDark ? '#e2e8f0' : '#111827' }}>1. Numbered List</button>
-            <button onClick={() => { applyListType('check'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: isDark ? '#e2e8f0' : '#111827' }}>☐ Checklist</button>
-          </div>
-        )}
-
+        {/* Mobile emoji picker — sibling of the expand/collapse wrapper so it
+            is never subject to overflow:hidden clipping. Positioned via
+            getLocalPopoverPos against cardRootRef and scrolls with the card. */}
         {emojiOpen && emojiLocalPos && (
           <div
             ref={emojiPickerRef}
@@ -2749,6 +2686,26 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     }, 620)
   }
 
+  function handleOpenPlannerNotes(taskId: string, taskText: string) {
+    const task = dayData.tasks.find(t => t.id === taskId)
+    if (task?.plannerSectionId) {
+      setToast('Already sent to Planner')
+      return
+    }
+    const doc = parseJournalDoc(calData[dateKey]?.notes)
+    const label = taskText.trim() || 'Task Notes'
+    const newSectionId = mkId()
+    const newSection: JournalBlock = { id: newSectionId, type: 'section', name: label, content: '', sectionColor: 'lavender', createdAt: Date.now(), updatedAt: Date.now() }
+    const newText:    JournalBlock = { id: mkId(),        type: 'text',    content: '', createdAt: Date.now(), updatedAt: Date.now() }
+    const updated = { ...doc, blocks: [...doc.blocks, newSection, newText] }
+    updateDay(dateKey, prev => ({
+      ...prev,
+      notes: JSON.stringify(updated),
+      tasks: prev.tasks.map(t => t.id === taskId ? { ...t, plannerSectionId: newSectionId } : t),
+    }))
+    setToast('Sent to Planner ✓')
+  }
+
   function discardAndClose() {
     if (openSnapshotRef.current) {
       updateDay(dateKey, () => openSnapshotRef.current!)
@@ -3107,6 +3064,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                     isChild, childIndex: childIdx,
                     onChooseColor: (color: string) => setTaskColor(t.id, color),
                     onTogglePriority: () => toggleTaskPriority(t.id),
+                    onPlannerNotes: () => handleOpenPlannerNotes(t.id, t.text),
                   })
 
                   return (

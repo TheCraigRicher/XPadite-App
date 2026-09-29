@@ -707,7 +707,7 @@ function ThemedApp(_props: XpaditeAppProps) {
   const pendingNavRef                = useRef<(() => void) | null>(null)
   const [dayModalCloseIntent, setDayModalCloseIntent]     = useState<'save' | 'discard' | null>(null)
   const [plannerCloseIntent, setPlannerCloseIntent]       = useState<'save' | 'discard' | null>(null)
-  const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'discard' | null>(null)
+const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'discard' | null>(null)
   const [settingsCloseIntent, setSettingsCloseIntent]     = useState<'save' | 'discard' | null>(null)
 
   function executeNav(tab: MobileTab) {
@@ -1140,6 +1140,7 @@ function ThemedApp(_props: XpaditeAppProps) {
               mobileNavSpace
               onDirtyChange={dirty => { plannerDirtyRef.current = dirty }}
               closeIntent={plannerCloseIntent}
+
             />
           </div>
         )}

@@ -23,6 +23,7 @@ export interface Task {
   parentTaskId?: string      // set for sub-tasks; references a top-level task's id
   taskColor?: string         // user-chosen highlight color key (e.g. 'yellow', 'blue')
   isPriority?: boolean       // user-marked as urgent/important
+  plannerSectionId?: string  // block.id of the linked Planner section for this task on its date
 }
 
 export interface DayData {

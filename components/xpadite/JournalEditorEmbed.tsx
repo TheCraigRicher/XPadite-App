@@ -215,6 +215,7 @@ export function JournalEditorEmbed({
         <button
           ref={emojiBtnRef}
           onClick={() => setShowEmoji(v => !v)}
+          className="hidden sm:block"
           style={{ background: 'none', border: `0.5px solid ${bdr}`, borderRadius: 6, cursor: 'pointer', fontSize: 14, padding: '3px 7px', lineHeight: 1, color: muted }}
           title="Insert emoji"
         >😊</button>

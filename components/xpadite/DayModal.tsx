@@ -396,10 +396,17 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   function validH(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 1 && n <= 12 }
   function validM(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 0 && n <= 59 }
 
-  // Auto-populate End Time with the current time (in the user's configured
-  // XPadite timezone) the first time it's focused while still empty — mirrors
-  // the previous behavior. Guarded by emptiness so it never overwrites a
-  // value the user has already set or edited.
+  // Auto-populate Start/End Time with the current time (in the user's
+  // configured XPadite timezone) the first time each is focused while still
+  // empty — mirrors the previous behavior. Guarded by emptiness so it never
+  // overwrites a value the user has already set or edited.
+  function handleStartFirstFocus() {
+    if (startH !== '' || startM !== '') return
+    const now = nowH12InTz(effectiveTimezone)
+    setStartH(now.h)
+    setStartM(now.m)
+    setStartAP(now.ap)
+  }
   function handleEndFirstFocus() {
     if (endH !== '' || endM !== '') return
     const now = nowH12InTz(effectiveTimezone)
@@ -437,6 +444,7 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
               manualMode={true} rawH={startH} rawM={startM}
               onRawH={setStartH} onRawM={setStartM}
               hInvalid={startH !== '' && !validH(startH)} mInvalid={startM !== '' && !validM(startM)}
+              onFirstFocus={handleStartFirstFocus}
             />
             <TimeRow
               label="End Time" h={endH} m={endM} ap={endAP}

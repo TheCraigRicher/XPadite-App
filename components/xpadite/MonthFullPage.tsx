@@ -473,12 +473,18 @@ function MonthCalendarLarge({
     if (clickRef.current.count === 1) {
       clickRef.current.timer = setTimeout(() => {
         clickRef.current = { key: null, count: 0, timer: null }
+        const _t = new Date()
+        if (new Date(APP_YEAR, month, day) > new Date(_t.getFullYear(), _t.getMonth(), _t.getDate())) {
+          setToast("Activity status can't be changed for future dates. You can only update today or past dates.")
+          return
+        }
+        if (wasStreak) { setToast('Change this status from the Task Manager.'); return }
         updateDay(key, prev => ({
           ...prev,
           productive: !prev.productive,
           hyper: prev.productive ? false : prev.hyper,
         }))
-        if (!wasStreak) setToast('Day Complete ✅  Great work. See you tomorrow.')
+        setToast('Day Complete ✅  Great work. See you tomorrow.')
       }, 260)
     } else if (clickRef.current.count === 2) {
       if (clickRef.current.timer) clearTimeout(clickRef.current.timer)

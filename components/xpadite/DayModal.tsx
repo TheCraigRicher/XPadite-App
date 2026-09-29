@@ -2627,6 +2627,19 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     }, 620)
   }
 
+  function handleSaveAndClose() {
+    flushDirtyNotes()
+    setNewTaskText('')
+    setAddingTask(false)
+    setMainSaving(true)
+    // Same re-baseline as handleMainSave, then close once the state is clean.
+    setTimeout(() => {
+      openSnapshotRef.current = JSON.parse(JSON.stringify(dayDataRef.current))
+      setMainSaving(false)
+      doClose()
+    }, 620)
+  }
+
   function handleOpenPlannerNotes(taskId: string, taskText: string) {
     const task = dayData.tasks.find(t => t.id === taskId)
     if (task?.plannerSectionId) {
@@ -3303,7 +3316,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                 Close Without Saving
               </button>
               <button
-                onClick={() => { setShowCloseDialog(false); handleMainSave() }}
+                onClick={() => { setShowCloseDialog(false); handleSaveAndClose() }}
                 style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: '#7c3aed', color: '#ffffff', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
               >
                 Save and Close

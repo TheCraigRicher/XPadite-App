@@ -1529,7 +1529,7 @@ function TaskRow({
                   {notesViewMode === 'edit' && (
                     <>
                       <button onClick={() => applyListType('bullet')} title="Bullet list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>• List</button>
-                      <button onClick={() => applyListType('number')} title="Numbered list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>1. List</button>
+                      <button onClick={() => applyListType('number')} title="Numbered list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}><span className="sm:hidden">1. Number</span><span className="hidden sm:inline">1. List</span></button>
                       <button onClick={() => applyListType('check')} title="Checklist" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>☐ Check</button>
                     </>
                   )}

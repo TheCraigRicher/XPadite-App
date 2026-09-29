@@ -7,7 +7,7 @@ import { dateKey as buildDateKey, isToday, MONTHS, DAY_HEADERS } from './utils'
 interface SendToPlannerModalProps {
   taskText: string
   sourceDate: string     // dateKey of the TM source — calendar opens here and is pre-selected
-  onSend: (destDateKey: string) => void
+  onSend: (destDateKey: string) => 'ok' | 'duplicate'
   onClose: () => void
 }
 
@@ -26,6 +26,7 @@ export function SendToPlannerModal({ taskText, sourceDate, onSend, onClose }: Se
   const sourceAsDate = useMemo(() => parseDateKey(sourceDate), [sourceDate])
   const [monthCursor, setMonthCursor] = useState(() => new Date(sourceAsDate.getFullYear(), sourceAsDate.getMonth(), 1))
   const [selectedDate, setSelectedDate] = useState<Date>(sourceAsDate)  // pre-select TM date
+  const [dupWarning, setDupWarning] = useState(false)
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
@@ -159,7 +160,7 @@ export function SendToPlannerModal({ taskText, sourceDate, onSend, onClose }: Se
             Cancel
           </button>
           <button
-            onClick={() => onSend(selectedKey)}
+            onClick={() => { if (onSend(selectedKey) === 'duplicate') setDupWarning(true) }}
             className="flex-1 text-[12.5px] font-semibold text-white transition-opacity hover:opacity-90"
             style={{ padding: '9px 0', borderRadius: 10, background: '#7c3aed' }}
           >
@@ -167,6 +168,38 @@ export function SendToPlannerModal({ taskText, sourceDate, onSend, onClose }: Se
           </button>
         </div>
       </div>
+
+      {/* Already in Planner — inline warning */}
+      {dupWarning && (
+        <div
+          className="fixed inset-0 flex items-center justify-center p-4"
+          style={{ zIndex: 210, background: 'rgba(0,0,0,0.45)' }}
+          onClick={() => setDupWarning(false)}
+        >
+          <div
+            className="w-full max-w-[300px] rounded-2xl overflow-hidden"
+            style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.32)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-4 pt-4 pb-3">
+              <p className="text-[13.5px] font-bold mb-1.5" style={{ color: 'var(--xp-txt)' }}>Already in Planner</p>
+              <p className="text-[11.5px] leading-relaxed" style={{ color: 'var(--xp-txt3)' }}>
+                This task has already been sent to this date in Planner.
+                Choose another date, or remove the existing Planner section before sending it here again.
+              </p>
+            </div>
+            <div className="px-4 pb-4">
+              <button
+                onClick={() => setDupWarning(false)}
+                className="w-full text-[12.5px] font-semibold text-white"
+                style={{ padding: '9px 0', borderRadius: 10, background: '#7c3aed' }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

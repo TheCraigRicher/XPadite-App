@@ -613,7 +613,6 @@ interface TaskMenuProps {
   onPaste: () => void
   onCreateSubTask: () => void
   onPlannerNotes: () => void
-  plannerSectionSent: boolean
   onChooseColor: () => void
   onTogglePriority: () => void
   onTransfer: () => void
@@ -626,7 +625,7 @@ interface TaskMenuProps {
   onClose: () => void
 }
 
-function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onPlannerNotes, plannerSectionSent, onChooseColor, onTogglePriority, onTransfer, pasteEnabled, transferDisabled, isChild, isPriority, onClose, menuAnchor, isDark }: TaskMenuProps) {
+function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onPlannerNotes, onChooseColor, onTogglePriority, onTransfer, pasteEnabled, transferDisabled, isChild, isPriority, onClose, menuAnchor, isDark }: TaskMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     function onOut(e: PointerEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
@@ -644,9 +643,7 @@ function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, 
     { icon: '📌', label: 'Paste Task',       action: onPaste, disabled: !pasteEnabled },
     { icon: '📅', label: 'Move Task',        action: onTransfer, disabled: transferDisabled },
     ...(!isChild ? [{ icon: '➕', label: 'Create Sub-Task', action: onCreateSubTask }] as MenuItem[] : []),
-    plannerSectionSent
-      ? { icon: '✓',  label: 'Sent to Planner',  action: () => {}, disabled: true }
-      : { icon: '📝', label: 'Send to Planner',   action: onPlannerNotes },
+    { icon: '📝', label: 'Send to Planner', action: onPlannerNotes },
     { icon: '🎨', label: 'Choose Task Color', action: onChooseColor, sep: true },
     { icon: '⚡', label: isPriority ? 'Remove Priority' : 'Mark as Priority', action: onTogglePriority },
     { icon: '🗑',  label: 'Delete Task',      action: onDelete, danger: true, sep: true },
@@ -1325,7 +1322,6 @@ function TaskRow({
                 onPaste={onPaste}
                 onCreateSubTask={onCreateSubTask}
                 onPlannerNotes={() => { setMenuOpen(false); onPlannerNotes?.() }}
-                plannerSectionSent={!!task.plannerSectionId}
                 onChooseColor={() => { setMenuOpen(false); setColorPickerOpen(true) }}
                 onTogglePriority={() => { onTogglePriority(); setMenuOpen(false) }}
                 onTransfer={onTransfer}
@@ -2641,23 +2637,26 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   }
 
   function handleOpenPlannerNotes(taskId: string, taskText: string) {
-    const task = dayData.tasks.find(t => t.id === taskId)
-    if (task?.plannerSectionId) {
-      setToast('Already sent to Planner')
-      return
-    }
     setPlannerSendTask({ taskId, taskText })
   }
 
-  function handlePlannerSend(taskId: string, taskText: string, destDateKey: string) {
+  function handlePlannerSend(taskId: string, taskText: string, destDateKey: string): 'ok' | 'duplicate' {
     const doc = parseJournalDoc(calData[destDateKey]?.notes)
+    // Block duplicate: same source task already has a section on this exact date
+    if (doc.blocks.some(b => b.sourceTaskId === taskId)) return 'duplicate'
     const label = taskText.trim() || 'Task Notes'
     const newSectionId = mkId()
-    const newSection: JournalBlock = { id: newSectionId, type: 'section', name: label, content: '', sectionColor: 'lavender', createdAt: Date.now(), updatedAt: Date.now() }
+    const newSection: JournalBlock = {
+      id: newSectionId, type: 'section', name: label, content: '',
+      sectionColor: 'lavender', sourceTaskId: taskId,
+      createdAt: Date.now(), updatedAt: Date.now(),
+    }
     updateDay(destDateKey, prev => ({ ...prev, notes: JSON.stringify({ ...doc, blocks: [...doc.blocks, newSection] }) }))
-    updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, plannerSectionId: newSectionId } : t) }))
     setPlannerSendTask(null)
-    setToast('Sent to Planner ✓')
+    const [, mm, dd] = destDateKey.split('-').map(Number)
+    const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][mm - 1]
+    setToast(`Sent to Planner — ${mon} ${dd}`)
+    return 'ok'
   }
 
   function discardAndClose() {

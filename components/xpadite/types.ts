@@ -92,6 +92,7 @@ export interface JournalBlock {
   width?: number        // layout width percent (15–100), default 100
   height?: number       // explicit height in px; undefined = auto (natural image height)
   collapsed?: boolean   // section body hidden (presentational only); undefined/false = expanded
+  sourceTaskId?: string // TM source task id — for duplicate-detection only, no sync
   createdAt: number
   updatedAt: number
 }

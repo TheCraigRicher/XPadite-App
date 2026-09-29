@@ -1071,9 +1071,11 @@ interface JournalWorkspaceModalProps {
   mobileNavSpace?: boolean
   onDirtyChange?: (dirty: boolean) => void
   closeIntent?: 'save' | 'discard' | null
+  jumpToDate?: string | null
+  onJumpConsumed?: () => void
 }
 
-export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, closeIntent }: JournalWorkspaceModalProps) {
+export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, closeIntent, jumpToDate, onJumpConsumed }: JournalWorkspaceModalProps) {
   const {
     isDark, calData, updateDay,
     journalLabels, addJournalLabel, removeJournalLabel,
@@ -1116,6 +1118,15 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   const [newLabelName, setNewLabelName]             = useState('')
   const [newLabelColor, setNewLabelColor]           = useState<string>(COLOR_PALETTE[0])
   const [showLabelColorPicker, setShowLabelColorPicker] = useState(false)
+
+  // Navigate to a specific date when requested externally (e.g. after Send to Planner)
+  useEffect(() => {
+    if (!jumpToDate) return
+    setEditorDate(jumpToDate)
+    setView('editor')
+    onJumpConsumed?.()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpToDate])
 
   // ── ESC key — calendar view only; editor ESC is owned by JournalEditorContent ─
   const escRef = useRef<() => void>(() => {})

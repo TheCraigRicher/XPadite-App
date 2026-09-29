@@ -8,6 +8,7 @@ import { parseJournalDoc, mkId } from './journalUtils'
 import { formatMs, formatHMS, formatTime, formatTime12, isProductiveActivity, APP_YEAR, todayKey, nowH12InTz } from './utils'
 import { ReminderModal } from './ReminderModal'
 import { TransferTaskModal } from './TransferTaskModal'
+import { SendToPlannerModal } from './SendToPlannerModal'
 import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
 import { useLockBodyScroll } from './useLockBodyScroll'
 import dynamic from 'next/dynamic'
@@ -2031,9 +2032,10 @@ interface DayModalProps {
   onGoToToday?: () => void
   closeIntent?: 'save' | 'discard' | null
   skipEntryAnimation?: boolean
+  onSendToPlanner?: (destDateKey: string) => void
 }
 
-export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyChange, onNavigateDay, onGoToToday, closeIntent, skipEntryAnimation }: DayModalProps) {
+export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyChange, onNavigateDay, onGoToToday, closeIntent, skipEntryAnimation, onSendToPlanner }: DayModalProps) {
   const {
     calData, updateDay, activeTaskTimer, setActiveTaskTimer,
     activities, activeSession, setActiveSession, selectedActId,
@@ -2075,6 +2077,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   // Task" action, or the full bulk selection for the top-level "Move" action.
   // Both open the SAME TransferTaskModal below.
   const [transferTaskIds,  setTransferTaskIds]   = useState<string[] | null>(null)
+  const [plannerSendTask,  setPlannerSendTask]   = useState<{ taskId: string; taskText: string } | null>(null)
   const [reminderSavedKey, setReminderSavedKey]  = useState<Record<string, number>>({})
   const [expandedTaskId,   setExpandedTaskId]    = useState<string | null>(null)
   const [dirtyNotesMap,    setDirtyNotesMap]     = useState<Record<string, string>>({})
@@ -2692,18 +2695,18 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
       setToast('Already sent to Planner')
       return
     }
-    const doc = parseJournalDoc(calData[dateKey]?.notes)
+    setPlannerSendTask({ taskId, taskText })
+  }
+
+  function handlePlannerSend(taskId: string, taskText: string, destDateKey: string) {
+    const doc = parseJournalDoc(calData[destDateKey]?.notes)
     const label = taskText.trim() || 'Task Notes'
     const newSectionId = mkId()
     const newSection: JournalBlock = { id: newSectionId, type: 'section', name: label, content: '', sectionColor: 'lavender', createdAt: Date.now(), updatedAt: Date.now() }
-    const newText:    JournalBlock = { id: mkId(),        type: 'text',    content: '', createdAt: Date.now(), updatedAt: Date.now() }
-    const updated = { ...doc, blocks: [...doc.blocks, newSection, newText] }
-    updateDay(dateKey, prev => ({
-      ...prev,
-      notes: JSON.stringify(updated),
-      tasks: prev.tasks.map(t => t.id === taskId ? { ...t, plannerSectionId: newSectionId } : t),
-    }))
-    setToast('Sent to Planner ✓')
+    updateDay(destDateKey, prev => ({ ...prev, notes: JSON.stringify({ ...doc, blocks: [...doc.blocks, newSection] }) }))
+    updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, plannerSectionId: newSectionId } : t) }))
+    setPlannerSendTask(null)
+    onSendToPlanner?.(destDateKey)
   }
 
   function discardAndClose() {
@@ -3436,6 +3439,15 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
           />
         ) : null
       })()}
+
+      {plannerSendTask && (
+        <SendToPlannerModal
+          taskText={plannerSendTask.taskText}
+          sourceDate={dateKey}
+          onSend={destDateKey => handlePlannerSend(plannerSendTask.taskId, plannerSendTask.taskText, destDateKey)}
+          onClose={() => setPlannerSendTask(null)}
+        />
+      )}
     </div>
   )
 }

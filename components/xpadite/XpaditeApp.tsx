@@ -707,6 +707,7 @@ function ThemedApp(_props: XpaditeAppProps) {
   const pendingNavRef                = useRef<(() => void) | null>(null)
   const [dayModalCloseIntent, setDayModalCloseIntent]     = useState<'save' | 'discard' | null>(null)
   const [plannerCloseIntent, setPlannerCloseIntent]       = useState<'save' | 'discard' | null>(null)
+  const [plannerDestDate,    setPlannerDestDate]          = useState<string | null>(null)
 const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'discard' | null>(null)
   const [settingsCloseIntent, setSettingsCloseIntent]     = useState<'save' | 'discard' | null>(null)
 
@@ -1140,7 +1141,8 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
               mobileNavSpace
               onDirtyChange={dirty => { plannerDirtyRef.current = dirty }}
               closeIntent={plannerCloseIntent}
-
+              jumpToDate={plannerDestDate}
+              onJumpConsumed={() => setPlannerDestDate(null)}
             />
           </div>
         )}
@@ -1216,6 +1218,15 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
             setModalDay({ key: dateKey(t.getFullYear(), t.getMonth(), t.getDate()), month: t.getMonth(), day: t.getDate(), skipAnim: true })
           }}
           closeIntent={dayModalCloseIntent}
+          onSendToPlanner={destDateKey => {
+            setPlannerDestDate(destDateKey)
+            setModalDay(null)
+            if (typeof window !== 'undefined' && window.innerWidth < 640) {
+              handleMobileNav('planner')
+            } else {
+              setJournalNotesOpen(true)
+            }
+          }}
         />
       )}
 
@@ -1286,7 +1297,7 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
 
       {activityManagerOpen && <ActivityManagerModal onClose={() => setActivityManagerOpen(false)} />}
 
-      {journalNotesOpen && <JournalWorkspaceModal onClose={() => setJournalNotesOpen(false)} />}
+      {journalNotesOpen && <JournalWorkspaceModal onClose={() => setJournalNotesOpen(false)} jumpToDate={plannerDestDate} onJumpConsumed={() => setPlannerDestDate(null)} />}
 
       {syncOpen && <SyncModal onClose={() => setSyncOpen(false)} />}
 

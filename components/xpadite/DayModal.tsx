@@ -865,8 +865,13 @@ function TaskRow({
   }, [emojiOpen])
 
   // Mobile-only consolidated List dropdown (Bullet/Numbered/Checklist) — same
-  // outside-click-close pattern as the emoji picker above.
+  // outside-click-close pattern as the emoji picker above. Rendered via a
+  // body-level portal (see render below), same as TaskMenu/the emoji picker,
+  // since position:absolute here was being clipped by the task card/notes
+  // editor's own overflow.
   const [listMenuOpen, setListMenuOpen] = useState(false)
+  const [listMenuAnchor, setListMenuAnchor] = useState<DOMRect | null>(null)
+  const listBtnRef  = useRef<HTMLButtonElement>(null)
   const listMenuRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!listMenuOpen) return
@@ -876,6 +881,27 @@ function TaskRow({
     const t = setTimeout(() => document.addEventListener('mousedown', onDown), 10)
     return () => { clearTimeout(t); document.removeEventListener('mousedown', onDown) }
   }, [listMenuOpen])
+  function toggleListMenu() {
+    if (!listMenuOpen && listBtnRef.current) setListMenuAnchor(listBtnRef.current.getBoundingClientRect())
+    setListMenuOpen(o => !o)
+  }
+  function getListMenuStyle(anchor: DOMRect): React.CSSProperties {
+    const LIST_MENU_W = 150
+    const vw = typeof window !== 'undefined' ? window.innerWidth  : 390
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+    const estHeight = 116
+    const openUpward = vh - anchor.bottom - 8 < estHeight && anchor.top - 8 > estHeight
+    const left = Math.min(Math.max(8, anchor.left), vw - LIST_MENU_W - 8)
+    return {
+      position: 'fixed',
+      left, width: LIST_MENU_W,
+      ...(openUpward ? { bottom: vh - anchor.top + 4 } : { top: anchor.bottom + 4 }),
+      zIndex: 99999,
+      background: isDark ? '#1e1130' : '#fff',
+      border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.12)'}`,
+      borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.18)', overflow: 'hidden', padding: 4,
+    }
+  }
   const [showTooltip, setShowTooltip] = useState(false)
   const [tooltipPos,  setTooltipPos]  = useState<{ top: number; left: number; width: number } | null>(null)
   const [showPopover, setShowPopover] = useState(false)
@@ -1424,16 +1450,17 @@ function TaskRow({
                   />
                   {/* Mobile-only — emoji trigger anchored inside the editor's
                       bottom-right corner (desktop/tablet keep it in the
-                      toolbar above, unchanged). Icon is visually smaller than
-                      the toolbar's own emoji to match the surrounding
-                      controls, but the tap target stays a comfortable size. */}
+                      toolbar above, unchanged). No visible button chrome —
+                      just the glyph — but the tap target stays a comfortable
+                      24x24, inset enough to sit fully inside the textarea's
+                      rounded border rather than straddling it. */}
                   <button
                     ref={emojiBtnRefMobile}
                     onClick={() => toggleEmojiPicker(emojiBtnRefMobile)}
                     tabIndex={expanded ? 0 : -1}
                     title="Insert emoji"
                     className="sm:hidden flex items-center justify-center"
-                    style={{ position: 'absolute', bottom: 5, right: 5, width: 26, height: 26, fontSize: 13, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)', borderRadius: 7 }}
+                    style={{ position: 'absolute', bottom: 8, right: 8, width: 24, height: 24, fontSize: 13, background: 'transparent', border: 'none' }}
                   >
                     😊
                   </button>
@@ -1462,27 +1489,27 @@ function TaskRow({
                       </div>
 
                       {/* Mobile — the three list types consolidated into one dropdown so
-                          the toolbar fits without wrapping onto extra lines. */}
-                      <div ref={listMenuRef} className="relative sm:hidden">
+                          the toolbar fits without wrapping onto extra lines. Rendered via
+                          a body-level portal (see getListMenuStyle) so it can't be clipped
+                          by the task card/notes editor's own overflow, and opens upward
+                          automatically when there isn't room below. */}
+                      <div className="relative sm:hidden">
                         <button
-                          onClick={() => setListMenuOpen(o => !o)}
+                          ref={listBtnRef}
+                          onClick={toggleListMenu}
                           title="List type"
                           className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5 flex items-center gap-0.5"
                           style={{ color: 'var(--xp-txt3)' }}
                         >
                           ☰ List <span style={{ fontSize: 8 }}>▾</span>
                         </button>
-                        {listMenuOpen && (
-                          <div style={{
-                            position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 40, minWidth: 138,
-                            background: isDark ? '#1e1130' : '#fff',
-                            border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.12)'}`,
-                            borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.18)', overflow: 'hidden', padding: 4,
-                          }}>
+                        {listMenuOpen && listMenuAnchor && createPortal(
+                          <div ref={listMenuRef} style={getListMenuStyle(listMenuAnchor)}>
                             <button onClick={() => { applyListType('bullet'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: 'var(--xp-txt)' }}>• Bullet List</button>
                             <button onClick={() => { applyListType('number'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: 'var(--xp-txt)' }}>1. Numbered List</button>
                             <button onClick={() => { applyListType('check'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: 'var(--xp-txt)' }}>☐ Checklist</button>
-                          </div>
+                          </div>,
+                          document.body
                         )}
                       </div>
                     </>
@@ -2762,7 +2789,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             /* Mobile-only: reserve room in the bottom-right corner of the
                notes textarea for the in-editor emoji trigger, so typed text
                wraps before it rather than rendering underneath it. */
-            .xp-notes-ta-mobile { padding-right: 34px !important; padding-bottom: 28px !important; }
+            .xp-notes-ta-mobile { padding-right: 38px !important; padding-bottom: 38px !important; }
           }
         `}</style>
 

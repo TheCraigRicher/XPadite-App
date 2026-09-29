@@ -815,6 +815,7 @@ function TaskRow({
   const [colorPickerOpen, setColorPickerOpen] = useState(false)
   const [adjustOpen,     setAdjustOpen]     = useState(false)
   const [emojiOpen,      setEmojiOpen]      = useState(false)
+  const [emojiAnchor,    setEmojiAnchor]    = useState<DOMRect | null>(null)
   const [isDragOver,     setIsDragOver]     = useState(false)
   const [notesViewMode,  setNotesViewMode]  = useState<'preview' | 'edit'>('preview')
   const [isCardHovered,  setIsCardHovered]  = useState(false)
@@ -847,6 +848,8 @@ function TaskRow({
   }, [bellTriggerKey])
 
   const notesRef          = useRef<HTMLTextAreaElement>(null)
+  const emojiBtnRefDesktop = useRef<HTMLButtonElement>(null)
+  const emojiBtnRefMobile  = useRef<HTMLButtonElement>(null)
   const emojiPickerRef    = useRef<HTMLDivElement>(null)
   const titleContainerRef = useRef<HTMLDivElement>(null)
   const tooltipTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -860,6 +863,19 @@ function TaskRow({
     const t = setTimeout(() => document.addEventListener('mousedown', onDown), 10)
     return () => { clearTimeout(t); document.removeEventListener('mousedown', onDown) }
   }, [emojiOpen])
+
+  // Mobile-only consolidated List dropdown (Bullet/Numbered/Checklist) — same
+  // outside-click-close pattern as the emoji picker above.
+  const [listMenuOpen, setListMenuOpen] = useState(false)
+  const listMenuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!listMenuOpen) return
+    function onDown(e: MouseEvent) {
+      if (listMenuRef.current && !listMenuRef.current.contains(e.target as Node)) setListMenuOpen(false)
+    }
+    const t = setTimeout(() => document.addEventListener('mousedown', onDown), 10)
+    return () => { clearTimeout(t); document.removeEventListener('mousedown', onDown) }
+  }, [listMenuOpen])
   const [showTooltip, setShowTooltip] = useState(false)
   const [tooltipPos,  setTooltipPos]  = useState<{ top: number; left: number; width: number } | null>(null)
   const [showPopover, setShowPopover] = useState(false)
@@ -914,6 +930,33 @@ function TaskRow({
     }
   }
 
+  // Opens the emoji picker via a body-level portal (see render below) instead
+  // of position:absolute within this card, since the scrollable task list
+  // (and the card's own expand/collapse container) clip anything absolutely
+  // positioned inside them. Measuring the trigger's rect on open — the same
+  // technique TaskMenu already uses for its own portal-positioned dropdown —
+  // lets the picker render fixed to the viewport, immune to that clipping.
+  function toggleEmojiPicker(btnRef: React.RefObject<HTMLButtonElement | null>) {
+    if (!emojiOpen && btnRef.current) setEmojiAnchor(btnRef.current.getBoundingClientRect())
+    setEmojiOpen(o => !o)
+  }
+
+  const EMOJI_PICKER_W = 280
+  const EMOJI_PICKER_H = 340
+  function getEmojiPickerStyle(anchor: DOMRect): React.CSSProperties {
+    const vw = typeof window !== 'undefined' ? window.innerWidth  : 390
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+    const spaceBelow  = vh - anchor.bottom - 8
+    const openUpward  = spaceBelow < EMOJI_PICKER_H && anchor.top - 8 > EMOJI_PICKER_H
+    const left = Math.min(Math.max(8, anchor.right - EMOJI_PICKER_W), vw - EMOJI_PICKER_W - 8)
+    return {
+      position: 'fixed',
+      left,
+      ...(openUpward ? { bottom: vh - anchor.top + 6 } : { top: anchor.bottom + 6 }),
+      zIndex: 99999, borderRadius: 12, overflow: 'hidden', boxShadow: '0 12px 40px rgba(0,0,0,0.22)',
+    }
+  }
+
   function handleEmojiSelect(emoji: string) {
     const current = draftJournal ?? task.journal
     if (notesViewMode === 'edit' && notesRef.current) {
@@ -927,17 +970,50 @@ function TaskRow({
     }
   }
 
-  function insertAtCursor(text: string) {
-    const current = draftJournal ?? task.journal
-    if (notesRef.current) {
-      const ta    = notesRef.current
-      const start = ta.selectionStart ?? current.length
-      const next  = current.slice(0, start) + text + current.slice(start)
-      onNotesDraftChange(next)
-      requestAnimationFrame(() => { ta.setSelectionRange(start + text.length, start + text.length); ta.focus() })
-    } else {
-      onNotesDraftChange((current ? current + '\n' : '') + text)
-    }
+  // Bullet / Numbered / Checkbox are mutually exclusive list types for a
+  // line: applying one must REPLACE whatever marker is already there rather
+  // than insert alongside it (the previous insertAtCursor just inserted text
+  // at the cursor, which stacked markers when switching types — e.g. "☐ "
+  // then clicking Numbered produced "☐ 1. text" instead of "1. text").
+  // Numbering reuses the same "look at the previous line" logic
+  // handleNotesKeyDown's Enter-continuation already uses, rather than
+  // introducing a separate renumbering engine.
+  function nextNumberFor(lineStart: number, value: string): number {
+    if (lineStart <= 0) return 1
+    const prevLineStart = value.lastIndexOf('\n', lineStart - 2) + 1
+    const prevLine = value.slice(prevLineStart, lineStart - 1)
+    const m = prevLine.match(/^(\d+)\. /)
+    return m ? Number(m[1]) + 1 : 1
+  }
+
+  function applyListType(type: 'bullet' | 'number' | 'check') {
+    const ta = notesRef.current
+    if (!ta) return
+    const value  = draftJournal ?? task.journal
+    const cursor = ta.selectionStart ?? value.length
+    const lineStart   = value.lastIndexOf('\n', cursor - 1) + 1
+    const lineEndIdx  = value.indexOf('\n', lineStart)
+    const lineEnd     = lineEndIdx === -1 ? value.length : lineEndIdx
+    const line = value.slice(lineStart, lineEnd)
+
+    const numMatch = line.match(/^(\d+)\. (.*)$/)
+    const bulletMatch = line.match(/^• (.*)$/)
+    const checkMatch  = line.match(/^[☐☑] (.*)$/)
+    const content   = numMatch ? numMatch[2] : bulletMatch ? bulletMatch[1] : checkMatch ? checkMatch[1] : line
+    const oldMarkerLen = line.length - content.length
+
+    const marker =
+      type === 'bullet' ? '• ' :
+      type === 'check'  ? '☐ ' :
+      `${nextNumberFor(lineStart, value)}. `
+
+    const newLine = marker + content
+    const next = value.slice(0, lineStart) + newLine + value.slice(lineEnd)
+    onNotesDraftChange(next)
+
+    const delta = marker.length - oldMarkerLen
+    const newCursor = Math.max(lineStart, cursor + delta)
+    requestAnimationFrame(() => { ta.setSelectionRange(newCursor, newCursor); ta.focus() })
   }
 
   // Notes textarea is plain text (• /1. /☐ are literal characters this
@@ -1328,19 +1404,40 @@ function TaskRow({
                   )}
                 </div>
               ) : (
-                // Edit: raw textarea
-                <textarea
-                  ref={notesRef}
-                  autoFocus
-                  value={draftJournal ?? task.journal}
-                  onChange={e => onNotesDraftChange(e.target.value)}
-                  onKeyDown={handleNotesKeyDown}
-                  placeholder="Add notes, or type ☐ to start a checklist item..."
-                  rows={3}
-                  tabIndex={expanded ? 0 : -1}
-                  className="w-full text-xs px-2.5 py-2 rounded-lg outline-none resize-none leading-relaxed"
-                  style={{ border: `1px solid ${notesDirty ? 'rgba(124,58,237,0.55)' : 'var(--xp-acc)'}`, background: 'var(--xp-bg2)', color: 'var(--xp-txt)' }}
-                />
+                // Edit: raw textarea. Wrapped so the mobile-only in-editor
+                // emoji trigger (bottom-right corner) can be absolutely
+                // positioned against it; the textarea's own mobile-only
+                // xp-notes-ta-mobile class reserves space so typed text wraps
+                // before reaching that corner instead of running under it.
+                <div style={{ position: 'relative' }}>
+                  <textarea
+                    ref={notesRef}
+                    autoFocus
+                    value={draftJournal ?? task.journal}
+                    onChange={e => onNotesDraftChange(e.target.value)}
+                    onKeyDown={handleNotesKeyDown}
+                    placeholder="Add notes, or type ☐ to start a checklist item..."
+                    rows={3}
+                    tabIndex={expanded ? 0 : -1}
+                    className="xp-notes-ta-mobile w-full text-xs px-2.5 py-2 rounded-lg outline-none resize-none leading-relaxed"
+                    style={{ border: `1px solid ${notesDirty ? 'rgba(124,58,237,0.55)' : 'var(--xp-acc)'}`, background: 'var(--xp-bg2)', color: 'var(--xp-txt)' }}
+                  />
+                  {/* Mobile-only — emoji trigger anchored inside the editor's
+                      bottom-right corner (desktop/tablet keep it in the
+                      toolbar above, unchanged). Icon is visually smaller than
+                      the toolbar's own emoji to match the surrounding
+                      controls, but the tap target stays a comfortable size. */}
+                  <button
+                    ref={emojiBtnRefMobile}
+                    onClick={() => toggleEmojiPicker(emojiBtnRefMobile)}
+                    tabIndex={expanded ? 0 : -1}
+                    title="Insert emoji"
+                    className="sm:hidden flex items-center justify-center"
+                    style={{ position: 'absolute', bottom: 5, right: 5, width: 26, height: 26, fontSize: 13, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)', borderRadius: 7 }}
+                  >
+                    😊
+                  </button>
+                </div>
               )}
 
               {/* Controls row */}
@@ -1357,9 +1454,37 @@ function TaskRow({
 
                   {notesViewMode === 'edit' && (
                     <>
-                      <button onClick={() => insertAtCursor('• ')} title="Insert bullet point" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>• List</button>
-                      <button onClick={() => insertAtCursor('1. ')} title="Insert numbered item" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>1. List</button>
-                      <button onClick={() => insertAtCursor('☐ ')} title="Insert checklist item" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>☐ Check</button>
+                      {/* Desktop/tablet — three separate buttons, unchanged */}
+                      <div className="hidden sm:contents">
+                        <button onClick={() => applyListType('bullet')} title="Bullet list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>• List</button>
+                        <button onClick={() => applyListType('number')} title="Numbered list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>1. List</button>
+                        <button onClick={() => applyListType('check')} title="Checklist" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>☐ Check</button>
+                      </div>
+
+                      {/* Mobile — the three list types consolidated into one dropdown so
+                          the toolbar fits without wrapping onto extra lines. */}
+                      <div ref={listMenuRef} className="relative sm:hidden">
+                        <button
+                          onClick={() => setListMenuOpen(o => !o)}
+                          title="List type"
+                          className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5 flex items-center gap-0.5"
+                          style={{ color: 'var(--xp-txt3)' }}
+                        >
+                          ☰ List <span style={{ fontSize: 8 }}>▾</span>
+                        </button>
+                        {listMenuOpen && (
+                          <div style={{
+                            position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 40, minWidth: 138,
+                            background: isDark ? '#1e1130' : '#fff',
+                            border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.12)'}`,
+                            borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.18)', overflow: 'hidden', padding: 4,
+                          }}>
+                            <button onClick={() => { applyListType('bullet'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: 'var(--xp-txt)' }}>• Bullet List</button>
+                            <button onClick={() => { applyListType('number'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: 'var(--xp-txt)' }}>1. Numbered List</button>
+                            <button onClick={() => { applyListType('check'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: 'var(--xp-txt)' }}>☐ Checklist</button>
+                          </div>
+                        )}
+                      </div>
                     </>
                   )}
 
@@ -1382,6 +1507,17 @@ function TaskRow({
                   >
                     📷 Camera
                   </button>
+
+                  {/* Emoji trigger — desktop/tablet only, stays in the
+                      toolbar right after Camera (unchanged position/size).
+                      On mobile the trigger moves inside the notes textarea
+                      itself (see the edit-mode textarea below); the picker
+                      it opens is shared and rendered once via a body-level
+                      portal further down, immune to this card's/the task
+                      list's scroll clipping either way. */}
+                  <div className="relative flex-shrink-0 hidden sm:block">
+                    <button ref={emojiBtnRefDesktop} onClick={() => toggleEmojiPicker(emojiBtnRefDesktop)} tabIndex={expanded ? 0 : -1} className="hover:scale-110 transition-transform leading-none" style={{ fontSize: 17 }} title="Insert emoji">😊</button>
+                  </div>
 
                   {uploading && (
                     <span style={{ fontSize: 10, color: 'var(--xp-txt3)' }}>Uploading…</span>
@@ -1418,25 +1554,25 @@ function TaskRow({
                   >
                     {notesJustSaved ? '✓ Saved' : '✓ Save'}
                   </button>
-
-                  {/* Emoji picker — emoji-picker-react */}
-                  <div className="relative flex-shrink-0">
-                    <button onClick={() => setEmojiOpen(o => !o)} tabIndex={expanded ? 0 : -1} className="hover:scale-110 transition-transform leading-none" style={{ fontSize: 17 }} title="Insert emoji">😊</button>
-                    {emojiOpen && (
-                      <div ref={emojiPickerRef} style={{ position: 'absolute', bottom: 'calc(100% + 6px)', right: 0, zIndex: 30, borderRadius: 12, overflow: 'hidden', boxShadow: '0 12px 40px rgba(0,0,0,0.22)' }}>
-                        <EmojiPickerLib
-                          onEmojiClick={(data: EmojiClickData) => { handleEmojiSelect(data.emoji); setEmojiOpen(false) }}
-                          theme={isDark ? Theme.DARK : Theme.LIGHT}
-                          width={280}
-                          height={340}
-                          searchPlaceHolder="Search emoji…"
-                          lazyLoadEmojis
-                        />
-                      </div>
-                    )}
-                  </div>
                 </div>
               </div>
+
+              {/* Emoji picker — shared by both the desktop/tablet toolbar
+                  trigger and the mobile in-editor trigger, rendered once via
+                  a body-level portal so it can never be clipped. */}
+              {emojiOpen && emojiAnchor && createPortal(
+                <div ref={emojiPickerRef} style={getEmojiPickerStyle(emojiAnchor)}>
+                  <EmojiPickerLib
+                    onEmojiClick={(data: EmojiClickData) => { handleEmojiSelect(data.emoji); setEmojiOpen(false) }}
+                    theme={isDark ? Theme.DARK : Theme.LIGHT}
+                    width={EMOJI_PICKER_W}
+                    height={EMOJI_PICKER_H}
+                    searchPlaceHolder="Search emoji…"
+                    lazyLoadEmojis
+                  />
+                </div>,
+                document.body
+              )}
 
               {/* Attachment list */}
               {attachments.length > 0 && (
@@ -2623,6 +2759,10 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                moves) — only its glyph's alignment WITHIN that slot shifts from
                centered to right-aligned, closer to the gap before the label. */
             .xp-parent-expand-btn { justify-content: flex-end !important; }
+            /* Mobile-only: reserve room in the bottom-right corner of the
+               notes textarea for the in-editor emoji trigger, so typed text
+               wraps before it rather than rendering underneath it. */
+            .xp-notes-ta-mobile { padding-right: 34px !important; padding-bottom: 28px !important; }
           }
         `}</style>
 

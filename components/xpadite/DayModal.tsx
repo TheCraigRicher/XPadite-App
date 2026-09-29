@@ -1996,6 +1996,13 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     dayData.milestone ? 'milestone' : dayData.hyper ? 'hyper' : dayData.goal ? 'goal' : dayData.productive ? 'productive' : null
 
   function handleStatusSelect(newValue: StatusValue | null) {
+    // Block future-date status changes from Task Manager
+    const _t = new Date()
+    const [_y, _m, _d] = dateKey.split('-').map(Number)
+    if (new Date(_y, _m - 1, _d) > new Date(_t.getFullYear(), _t.getMonth(), _t.getDate())) {
+      setToast("Activity status can't be changed for future dates. You can only update today or past dates.")
+      return
+    }
     const wasGoal = !!dayData.goal
     updateDay(dateKey, prev => {
       if (newValue === null)         return { ...prev, productive: false, hyper: false, milestone: false, goal: false }

@@ -95,12 +95,20 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
     if (clickRef.current.count === 1) {
       clickRef.current.timer = setTimeout(() => {
         clickRef.current = { key: null, count: 0, timer: null }
+        // Reject future-date status changes
+        const _today = new Date()
+        if (new Date(APP_YEAR, month, day) > new Date(_today.getFullYear(), _today.getMonth(), _today.getDate())) {
+          setToast("Activity status can't be changed for future dates. You can only update today or past dates.")
+          return
+        }
+        // Already has a status — direct to Task Manager
+        if (wasStreak) { setToast('Change this status from the Task Manager.'); return }
         updateDay(key, prev => ({
           ...prev,
           productive: !prev.productive,
           hyper: prev.productive ? false : prev.hyper,
         }))
-        if (!wasStreak) setToast('Day Complete ✅  Great work. See you tomorrow.')
+        setToast('Day Complete ✅  Great work. See you tomorrow.')
       }, 260)
     } else if (clickRef.current.count === 2) {
       if (clickRef.current.timer) clearTimeout(clickRef.current.timer)

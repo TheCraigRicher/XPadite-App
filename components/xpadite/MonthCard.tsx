@@ -418,6 +418,12 @@ export function MonthCard({
       if (clickRef.current.count === 1) {
         clickRef.current.timer = setTimeout(() => {
           clickRef.current = { key: null, count: 0, timer: null };
+          // Reject future-date status changes
+          const _today = new Date()
+          if (new Date(APP_YEAR, month, day) > new Date(_today.getFullYear(), _today.getMonth(), _today.getDate())) {
+            setToast("Activity status can't be changed for future dates. You can only update today or past dates.")
+            return
+          }
           if (wasStreak) {
             // Status already set — locked on the calendar.
             // Direct the user to the Task Manager to change it.

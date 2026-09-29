@@ -2613,19 +2613,29 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             zones. Hidden below sm: mobile gets its own header below. */}
         <div className="hidden sm:flex items-center justify-center px-4 py-3 flex-shrink-0" style={{ borderBottom: '0.5px solid rgba(255,255,255,0.08)', background: 'linear-gradient(135deg, #3b0764 0%, #7c3aed 50%, #6d28d9 100%)' }}>
           <div style={{ position: 'relative', width: 340, height: 36 }}>
-            <span style={{
-              position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
-              textAlign: 'center', padding: '0 12px',
-              color: '#ffffff', fontSize: 14, fontWeight: 600,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            {/* Flex-centered (not translateY(-50%) text-baseline centering,
+                which visually sits off-center relative to the arrows'
+                own flex-centered icons) so the date shares the exact same
+                vertical centerline as the triangles. Horizontal position/
+                width unchanged. */}
+            <div style={{
+              position: 'absolute', left: 0, right: 0, top: 0, height: 36,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '0 12px',
             }}>
-              {dateLabel}
-            </span>
+              <span style={{
+                color: '#ffffff', fontSize: 14, fontWeight: 600, lineHeight: 1,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%',
+                transform: 'translateY(-1px)',
+              }}>
+                {dateLabel}
+              </span>
+            </div>
             <button
               onClick={() => attemptNavigateDay(-1)}
               title="Previous day" aria-label="Previous day"
               className="flex items-center justify-center transition-all hover:opacity-70 active:scale-90"
-              style={{ position: 'absolute', left: 'calc(50% - 148px)', top: '50%', transform: 'translateY(-50%)', width: 36, height: 36, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+              style={{ position: 'absolute', left: 'calc(50% - 148px)', top: '50%', transform: 'translateY(-50%)', width: 30, height: 30, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
             >
               <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
             </button>
@@ -2633,7 +2643,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
               onClick={() => attemptNavigateDay(1)}
               title="Next day" aria-label="Next day"
               className="flex items-center justify-center transition-all hover:opacity-70 active:scale-90"
-              style={{ position: 'absolute', right: 'calc(50% - 148px)', top: '50%', transform: 'translateY(-50%)', width: 36, height: 36, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+              style={{ position: 'absolute', right: 'calc(50% - 148px)', top: '50%', transform: 'translateY(-50%)', width: 30, height: 30, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
             >
               <svg width="9" height="12" viewBox="0 0 9 12" fill="#ffffff" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
             </button>

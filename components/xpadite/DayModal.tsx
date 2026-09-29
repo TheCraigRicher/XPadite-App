@@ -1284,6 +1284,7 @@ function TaskRow({
                 {titleJustSaved && (
                   <span
                     aria-live="polite"
+                    className="hidden sm:inline"
                     style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', fontSize: 9, fontWeight: 600, color: '#16a34a', pointerEvents: 'none', animation: 'xp-saved-fade 1100ms ease forwards', whiteSpace: 'nowrap' }}
                   >
                     ✓ Saved
@@ -1420,6 +1421,13 @@ function TaskRow({
           {hasChildren && subTaskCount !== undefined && (
             <span className="flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: 'var(--xp-bg2)', border: '0.5px solid var(--xp-bdr2)', color: 'var(--xp-txt3)' }}>
               {subTaskDoneCount}/{subTaskCount}
+            </span>
+          )}
+
+          {/* Mobile-only title-saved feedback — appears in the lower row so it doesn't crowd the title field */}
+          {titleJustSaved && (
+            <span className="sm:hidden text-[9px] font-semibold flex-shrink-0" aria-live="polite" style={{ color: '#16a34a', whiteSpace: 'nowrap', animation: 'xp-saved-fade 1100ms ease forwards' }}>
+              ✓ Saved
             </span>
           )}
 

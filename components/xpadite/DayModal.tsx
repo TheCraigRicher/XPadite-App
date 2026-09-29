@@ -881,6 +881,19 @@ function TaskRow({
     const t = setTimeout(() => document.addEventListener('mousedown', onDown), 10)
     return () => { clearTimeout(t); document.removeEventListener('mousedown', onDown) }
   }, [listMenuOpen])
+  // Re-measure on scroll (capture:true catches scrolling on any nested
+  // scrollable ancestor, e.g. the task list) so the portal — which must stay
+  // position:fixed to avoid the card/list clipping it — visually tracks its
+  // trigger button instead of staying stuck at its original screen position
+  // while the task scrolls away underneath it.
+  useEffect(() => {
+    if (!listMenuOpen) return
+    function onScroll() {
+      if (listBtnRef.current) setListMenuAnchor(listBtnRef.current.getBoundingClientRect())
+    }
+    window.addEventListener('scroll', onScroll, true)
+    return () => window.removeEventListener('scroll', onScroll, true)
+  }, [listMenuOpen])
   function toggleListMenu() {
     if (!listMenuOpen && listBtnRef.current) setListMenuAnchor(listBtnRef.current.getBoundingClientRect())
     setListMenuOpen(o => !o)
@@ -1460,7 +1473,7 @@ function TaskRow({
                     tabIndex={expanded ? 0 : -1}
                     title="Insert emoji"
                     className="sm:hidden flex items-center justify-center"
-                    style={{ position: 'absolute', bottom: 8, right: 8, width: 24, height: 24, fontSize: 13, background: 'transparent', border: 'none' }}
+                    style={{ position: 'absolute', bottom: 6, right: 6, width: 24, height: 24, fontSize: 13, background: 'transparent', border: 'none' }}
                   >
                     😊
                   </button>
@@ -1505,9 +1518,9 @@ function TaskRow({
                         </button>
                         {listMenuOpen && listMenuAnchor && createPortal(
                           <div ref={listMenuRef} style={getListMenuStyle(listMenuAnchor)}>
-                            <button onClick={() => { applyListType('bullet'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: 'var(--xp-txt)' }}>• Bullet List</button>
-                            <button onClick={() => { applyListType('number'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: 'var(--xp-txt)' }}>1. Numbered List</button>
-                            <button onClick={() => { applyListType('check'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: 'var(--xp-txt)' }}>☐ Checklist</button>
+                            <button onClick={() => { applyListType('bullet'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: isDark ? '#e2e8f0' : '#111827' }}>• Bullet List</button>
+                            <button onClick={() => { applyListType('number'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: isDark ? '#e2e8f0' : '#111827' }}>1. Numbered List</button>
+                            <button onClick={() => { applyListType('check'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: isDark ? '#e2e8f0' : '#111827' }}>☐ Checklist</button>
                           </div>,
                           document.body
                         )}
@@ -2789,7 +2802,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             /* Mobile-only: reserve room in the bottom-right corner of the
                notes textarea for the in-editor emoji trigger, so typed text
                wraps before it rather than rendering underneath it. */
-            .xp-notes-ta-mobile { padding-right: 38px !important; padding-bottom: 38px !important; }
+            .xp-notes-ta-mobile { padding-right: 36px !important; padding-bottom: 36px !important; }
           }
         `}</style>
 

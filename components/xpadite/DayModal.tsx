@@ -2644,7 +2644,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     updateDay(destDateKey, prev => ({ ...prev, notes: JSON.stringify({ ...doc, blocks: [...doc.blocks, newSection] }) }))
     updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, plannerSectionId: newSectionId } : t) }))
     setPlannerSendTask(null)
-    onSendToPlanner?.(destDateKey)
+    setToast('Sent to Planner ✓')
   }
 
   function discardAndClose() {

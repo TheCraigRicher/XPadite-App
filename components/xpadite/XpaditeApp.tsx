@@ -1218,15 +1218,6 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
             setModalDay({ key: dateKey(t.getFullYear(), t.getMonth(), t.getDate()), month: t.getMonth(), day: t.getDate(), skipAnim: true })
           }}
           closeIntent={dayModalCloseIntent}
-          onSendToPlanner={destDateKey => {
-            setPlannerDestDate(destDateKey)
-            setModalDay(null)
-            if (typeof window !== 'undefined' && window.innerWidth < 640) {
-              handleMobileNav('planner')
-            } else {
-              setJournalNotesOpen(true)
-            }
-          }}
         />
       )}
 

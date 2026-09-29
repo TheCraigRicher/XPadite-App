@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
@@ -838,6 +838,8 @@ function TaskRow({
 
   // Reset notes view when task collapses
   useEffect(() => { if (!expanded) setNotesViewMode('preview') }, [expanded])
+  // On desktop, focus the textarea when switching into edit mode
+  useEffect(() => { if (notesViewMode === 'edit' && expanded && notesRef.current) notesRef.current.focus() }, [notesViewMode, expanded])
 
   // Bell animation
   const [isBellAnimating, setIsBellAnimating] = useState(false)
@@ -911,11 +913,24 @@ function TaskRow({
     } else {
       listMenuMinScrollRef.current = 0
     }
+    let lastTY = 0
+    function onTS(e: TouchEvent) { lastTY = e.touches[0].clientY }
+    function onTM(e: TouchEvent) {
+      const dy = e.touches[0].clientY - lastTY
+      lastTY = e.touches[0].clientY
+      if (dy > 0 && scrollEl.scrollTop <= listMenuMinScrollRef.current + 1) e.preventDefault()
+    }
     function clamp() {
       if (scrollEl.scrollTop < listMenuMinScrollRef.current) scrollEl.scrollTop = listMenuMinScrollRef.current
     }
+    scrollEl.addEventListener('touchstart', onTS, { passive: true })
+    scrollEl.addEventListener('touchmove', onTM, { passive: false } as AddEventListenerOptions)
     scrollEl.addEventListener('scroll', clamp)
-    return () => scrollEl.removeEventListener('scroll', clamp)
+    return () => {
+      scrollEl.removeEventListener('touchstart', onTS)
+      scrollEl.removeEventListener('touchmove', onTM)
+      scrollEl.removeEventListener('scroll', clamp)
+    }
   }, [listMenuOpen])
   function toggleListMenu() {
     if (!listMenuOpen && listBtnRef.current) {
@@ -1051,8 +1066,8 @@ function TaskRow({
 
   const EMOJI_PICKER_W = 280
   const EMOJI_PICKER_H = 340
-  const EMOJI_PICKER_W_MOBILE = 205
-  const EMOJI_PICKER_H_MOBILE = 250
+  const EMOJI_PICKER_W_MOBILE = 230
+  const EMOJI_PICKER_H_MOBILE = 260
   const LIST_MENU_W_MOBILE = 150
   const LIST_MENU_H_MOBILE = 116
   function getEmojiPickerStyle(anchor: DOMRect): React.CSSProperties {
@@ -1478,12 +1493,12 @@ function TaskRow({
 
             {/* ── INTERACTIVE NOTES AREA ── */}
             <div>
-              {notesViewMode === 'preview' ? (
-                // Preview: interactive checklist + rendered text
+              {notesViewMode === 'preview' && (
+                // Preview — desktop/tablet only when in preview mode
                 <div
-                  className="text-xs rounded-lg px-2.5 py-2"
+                  className="hidden sm:block text-xs rounded-lg px-2.5 py-2"
                   style={{ minHeight: 68, border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg2)', color: 'var(--xp-txt)', cursor: 'text' }}
-                  onClick={() => { if (!(draftJournal ?? task.journal)) setNotesViewMode('edit') }}
+                  onClick={() => setNotesViewMode('edit')}
                 >
                   {(draftJournal ?? task.journal) ? (
                     <div>
@@ -1516,43 +1531,22 @@ function TaskRow({
                     </span>
                   )}
                 </div>
-              ) : (
-                // Edit: raw textarea. Wrapped so the mobile-only in-editor
-                // emoji trigger (bottom-right corner) can be absolutely
-                // positioned against it; the textarea's own mobile-only
-                // xp-notes-ta-mobile class reserves space so typed text wraps
-                // before reaching that corner instead of running under it.
-                <div style={{ position: 'relative' }}>
+              )}
+              {/* Edit textarea — always on mobile; on sm+ only when not in preview */}
+              <div className={notesViewMode === 'preview' ? 'sm:hidden' : ''} style={{ position: 'relative' }}>
                   <textarea
                     ref={notesRef}
-                    autoFocus
                     value={draftJournal ?? task.journal}
                     onChange={e => onNotesDraftChange(e.target.value)}
                     onKeyDown={handleNotesKeyDown}
                     placeholder="Add notes, or type ☐ to start a checklist item..."
                     rows={3}
                     tabIndex={expanded ? 0 : -1}
-                    className="xp-notes-ta-mobile w-full text-xs px-2.5 py-2 rounded-lg outline-none resize-none leading-relaxed"
+                    className="w-full text-xs px-2.5 py-2 rounded-lg outline-none resize-none leading-relaxed"
                     style={{ border: `1px solid ${notesDirty ? 'rgba(124,58,237,0.55)' : 'var(--xp-acc)'}`, background: 'var(--xp-bg2)', color: 'var(--xp-txt)' }}
                   />
-                  {/* Mobile-only — emoji trigger anchored inside the editor's
-                      bottom-right corner (desktop/tablet keep it in the
-                      toolbar above, unchanged). No visible button chrome —
-                      just the glyph — but the tap target stays a comfortable
-                      24x24, inset enough to sit fully inside the textarea's
-                      rounded border rather than straddling it. */}
-                  <button
-                    ref={emojiBtnRefMobile}
-                    onClick={() => toggleEmojiPicker(emojiBtnRefMobile)}
-                    tabIndex={expanded ? 0 : -1}
-                    title="Insert emoji"
-                    className="sm:hidden flex items-center justify-center"
-                    style={{ position: 'absolute', bottom: 6, right: 6, width: 24, height: 24, fontSize: 13, background: 'transparent', border: 'none' }}
-                  >
-                    😊
-                  </button>
+
                 </div>
-              )}
 
               {/* Controls row */}
               <div className="flex items-center justify-between mt-1.5" style={{ flexWrap: 'wrap', gap: 4 }}>
@@ -1560,41 +1554,31 @@ function TaskRow({
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
                   <button
                     onClick={() => setNotesViewMode(m => m === 'preview' ? 'edit' : 'preview')}
-                    className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
+                    className="hidden sm:flex items-center text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
                     style={{ color: 'var(--xp-txt3)' }}
                   >
-                    {notesViewMode === 'preview' ? <>✏️ <span className="hidden sm:inline">Edit notes</span><span className="sm:hidden">Edit</span></> : '👁 Preview'}
+                    {notesViewMode === 'preview' ? <>✏️ Edit notes</> : '👁 Preview'}
                   </button>
 
                   {notesViewMode === 'edit' && (
-                    <>
-                      {/* Desktop/tablet — three separate buttons, unchanged */}
-                      <div className="hidden sm:contents">
-                        <button onClick={() => applyListType('bullet')} title="Bullet list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>• List</button>
-                        <button onClick={() => applyListType('number')} title="Numbered list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>1. List</button>
-                        <button onClick={() => applyListType('check')} title="Checklist" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>☐ Check</button>
-                      </div>
-
-                      {/* Mobile — the three list types consolidated into one dropdown so
-                          the toolbar fits without wrapping onto extra lines. The trigger
-                          stays here; its dropdown content renders as a sibling of the
-                          expand/collapse wrapper further down (see "Mobile popovers"),
-                          positioned locally against cardRootRef so it scrolls natively
-                          with this card instead of being clipped by that wrapper's
-                          overflow:hidden. */}
-                      <div className="relative sm:hidden">
-                        <button
-                          ref={listBtnRef}
-                          onClick={toggleListMenu}
-                          title="List type"
-                          className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5 flex items-center gap-0.5"
-                          style={{ color: 'var(--xp-txt3)' }}
-                        >
-                          ☰ List <span style={{ fontSize: 8 }}>▾</span>
-                        </button>
-                      </div>
-                    </>
+                    <div className="hidden sm:contents">
+                      <button onClick={() => applyListType('bullet')} title="Bullet list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>• List</button>
+                      <button onClick={() => applyListType('number')} title="Numbered list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>1. List</button>
+                      <button onClick={() => applyListType('check')} title="Checklist" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>☐ Check</button>
+                    </div>
                   )}
+                  {/* Mobile list dropdown — always visible so the toolbar is consistent */}
+                  <div className="relative sm:hidden">
+                    <button
+                      ref={listBtnRef}
+                      onClick={toggleListMenu}
+                      title="List type"
+                      className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5 flex items-center gap-0.5"
+                      style={{ color: 'var(--xp-txt3)' }}
+                    >
+                      ☰ List <span style={{ fontSize: 8 }}>▾</span>
+                    </button>
+                  </div>
 
                   <button
                     onClick={() => uploadRef.current?.click()}
@@ -1610,22 +1594,17 @@ function TaskRow({
                     onClick={() => setCameraOpen(true)}
                     disabled={uploading}
                     title="Take a photo with your camera"
-                    className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
+                    className="hidden sm:block text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
                     style={{ color: 'var(--xp-txt3)', opacity: uploading ? 0.5 : 1, cursor: 'pointer' }}
                   >
                     📷 Camera
                   </button>
 
-                  {/* Emoji trigger — desktop/tablet only, stays in the
-                      toolbar right after Camera (unchanged position/size).
-                      On mobile the trigger moves inside the notes textarea
-                      itself (see the edit-mode textarea below); the picker
-                      it opens is shared and rendered once via a body-level
-                      portal further down, immune to this card's/the task
-                      list's scroll clipping either way. */}
+                  {/* Desktop/tablet emoji trigger — stays in toolbar after Camera */}
                   <div className="relative flex-shrink-0 hidden sm:block">
                     <button ref={emojiBtnRefDesktop} onClick={() => toggleEmojiPicker(emojiBtnRefDesktop)} tabIndex={expanded ? 0 : -1} className="hover:scale-110 transition-transform leading-none" style={{ fontSize: 17 }} title="Insert emoji">😊</button>
                   </div>
+
 
                   {uploading && (
                     <span style={{ fontSize: 10, color: 'var(--xp-txt3)' }}>Uploading…</span>
@@ -2929,10 +2908,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                moves) — only its glyph's alignment WITHIN that slot shifts from
                centered to right-aligned, closer to the gap before the label. */
             .xp-parent-expand-btn { justify-content: flex-end !important; }
-            /* Mobile-only: reserve room in the bottom-right corner of the
-               notes textarea for the in-editor emoji trigger, so typed text
-               wraps before it rather than rendering underneath it. */
-            .xp-notes-ta-mobile { padding-right: 36px !important; padding-bottom: 36px !important; }
+
           }
         `}</style>
 
@@ -3034,7 +3010,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
         </div>
 
         {/* Scrollable body */}
-        <div ref={scrollBodyRef} data-xp-tm-scrollbody className="flex-1 overflow-y-auto">
+        <div ref={scrollBodyRef} data-xp-tm-scrollbody className="flex-1 overflow-y-auto" style={{ overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
           <div className="px-4 py-3" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
 
             {/* Section header */}

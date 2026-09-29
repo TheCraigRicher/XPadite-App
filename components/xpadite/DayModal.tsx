@@ -816,6 +816,10 @@ function TaskRow({
   const [adjustOpen,     setAdjustOpen]     = useState(false)
   const [emojiOpen,      setEmojiOpen]      = useState(false)
   const [emojiAnchor,    setEmojiAnchor]    = useState<DOMRect | null>(null)
+  // Mobile only — position relative to cardRootRef (see getLocalPopoverPos),
+  // never the viewport, so it scrolls natively with the card. Desktop keeps
+  // using emojiAnchor (viewport rect) + a body-level portal, unchanged.
+  const [emojiLocalPos,  setEmojiLocalPos]  = useState<{ top?: number; bottom?: number; left: number; maxHeight: number } | null>(null)
   const [isDragOver,     setIsDragOver]     = useState(false)
   const [notesViewMode,  setNotesViewMode]  = useState<'preview' | 'edit'>('preview')
   const [isCardHovered,  setIsCardHovered]  = useState(false)
@@ -847,6 +851,15 @@ function TaskRow({
     if (bellTriggerKey !== prevTriggerRef.current) { prevTriggerRef.current = bellTriggerKey; setIsBellAnimating(true) }
   }, [bellTriggerKey])
 
+  // Card root — mobile popovers (List dropdown, emoji picker) are positioned
+  // relative to this (see getLocalPopoverPos) instead of the viewport, so
+  // they scroll natively with the card via the browser's own layout engine
+  // (zero JS recalculation, zero lag) rather than a scroll-listener chasing
+  // coordinates. The card root itself is overflow-visible, so a popover
+  // positioned this way isn't clipped by the card — only the outer task-list
+  // scroll container can still clip it, and only if it's scrolled fully out
+  // of the currently-visible area, same as any native in-flow content would.
+  const cardRootRef       = useRef<HTMLDivElement>(null)
   const notesRef          = useRef<HTMLTextAreaElement>(null)
   const emojiBtnRefDesktop = useRef<HTMLButtonElement>(null)
   const emojiBtnRefMobile  = useRef<HTMLButtonElement>(null)
@@ -865,12 +878,13 @@ function TaskRow({
   }, [emojiOpen])
 
   // Mobile-only consolidated List dropdown (Bullet/Numbered/Checklist) — same
-  // outside-click-close pattern as the emoji picker above. Rendered via a
-  // body-level portal (see render below), same as TaskMenu/the emoji picker,
-  // since position:absolute here was being clipped by the task card/notes
-  // editor's own overflow.
+  // outside-click-close pattern as the emoji picker above. Positioned via
+  // getLocalPopoverPos (cardRootRef-relative), not a viewport-level portal:
+  // it scrolls natively with the card, with zero scroll-listener/re-measure
+  // lag, since its position is expressed in the card's own local coordinate
+  // space rather than the viewport's.
   const [listMenuOpen, setListMenuOpen] = useState(false)
-  const [listMenuAnchor, setListMenuAnchor] = useState<DOMRect | null>(null)
+  const [listMenuLocalPos, setListMenuLocalPos] = useState<{ top?: number; bottom?: number; left: number; maxHeight: number } | null>(null)
   const listBtnRef  = useRef<HTMLButtonElement>(null)
   const listMenuRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -881,39 +895,11 @@ function TaskRow({
     const t = setTimeout(() => document.addEventListener('mousedown', onDown), 10)
     return () => { clearTimeout(t); document.removeEventListener('mousedown', onDown) }
   }, [listMenuOpen])
-  // Re-measure on scroll (capture:true catches scrolling on any nested
-  // scrollable ancestor, e.g. the task list) so the portal — which must stay
-  // position:fixed to avoid the card/list clipping it — visually tracks its
-  // trigger button instead of staying stuck at its original screen position
-  // while the task scrolls away underneath it.
-  useEffect(() => {
-    if (!listMenuOpen) return
-    function onScroll() {
-      if (listBtnRef.current) setListMenuAnchor(listBtnRef.current.getBoundingClientRect())
-    }
-    window.addEventListener('scroll', onScroll, true)
-    return () => window.removeEventListener('scroll', onScroll, true)
-  }, [listMenuOpen])
   function toggleListMenu() {
-    if (!listMenuOpen && listBtnRef.current) setListMenuAnchor(listBtnRef.current.getBoundingClientRect())
-    setListMenuOpen(o => !o)
-  }
-  function getListMenuStyle(anchor: DOMRect): React.CSSProperties {
-    const LIST_MENU_W = 150
-    const vw = typeof window !== 'undefined' ? window.innerWidth  : 390
-    const vh = typeof window !== 'undefined' ? window.innerHeight : 800
-    const estHeight = 116
-    const openUpward = vh - anchor.bottom - 8 < estHeight && anchor.top - 8 > estHeight
-    const left = Math.min(Math.max(8, anchor.left), vw - LIST_MENU_W - 8)
-    return {
-      position: 'fixed',
-      left, width: LIST_MENU_W,
-      ...(openUpward ? { bottom: vh - anchor.top + 4 } : { top: anchor.bottom + 4 }),
-      zIndex: 99999,
-      background: isDark ? '#1e1130' : '#fff',
-      border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.12)'}`,
-      borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.18)', overflow: 'hidden', padding: 4,
+    if (!listMenuOpen && listBtnRef.current) {
+      setListMenuLocalPos(getLocalPopoverPos(listBtnRef.current.getBoundingClientRect(), LIST_MENU_W_MOBILE, LIST_MENU_H_MOBILE))
     }
+    setListMenuOpen(o => !o)
   }
   const [showTooltip, setShowTooltip] = useState(false)
   const [tooltipPos,  setTooltipPos]  = useState<{ top: number; left: number; width: number } | null>(null)
@@ -969,19 +955,76 @@ function TaskRow({
     }
   }
 
-  // Opens the emoji picker via a body-level portal (see render below) instead
-  // of position:absolute within this card, since the scrollable task list
-  // (and the card's own expand/collapse container) clip anything absolutely
-  // positioned inside them. Measuring the trigger's rect on open — the same
-  // technique TaskMenu already uses for its own portal-positioned dropdown —
-  // lets the picker render fixed to the viewport, immune to that clipping.
+  // Shared by the mobile emoji picker and mobile List dropdown: positions a
+  // popover relative to cardRootRef (its containing task card) instead of
+  // the viewport. Because this is expressed in the card's own local
+  // coordinate space rather than the viewport's, the browser's normal layout/
+  // scroll handling moves it in the exact same paint as the card — no scroll
+  // listener, no re-measuring, no catch-up lag.
+  //
+  // The sticky Cancel/Save footer (marked [data-xp-tm-footer]) is treated as
+  // a hard bottom boundary rather than window.innerHeight: that footer is a
+  // separate flex sibling below the scrollable task list, not part of it, so
+  // it occupies real screen space the popover must never render under.
+  //
+  // Horizontal position is clamped to the card's own width (minus a safe
+  // margin) so the popover can never extend past the left/right edges,
+  // regardless of how close to an edge its trigger sits.
+  //
+  // When neither direction has enough room for the popover's natural height,
+  // it opens in whichever direction has more space and returns a clamped
+  // maxHeight so the popover's own content scrolls internally instead of
+  // crossing the footer boundary.
+  function getLocalPopoverPos(btnRect: DOMRect, popoverW: number, estHeight: number): { top?: number; bottom?: number; left: number; maxHeight: number } {
+    const card = cardRootRef.current
+    if (!card) return { top: 0, left: 0, maxHeight: estHeight }
+    const cardRect = card.getBoundingClientRect()
+    const margin = 8
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800
+    const footerEl = typeof document !== 'undefined' ? document.querySelector('[data-xp-tm-footer]') : null
+    const bottomBoundary = footerEl ? footerEl.getBoundingClientRect().top : vh
+
+    const spaceBelow = bottomBoundary - btnRect.bottom - margin
+    const spaceAbove = btnRect.top - margin
+    const openUpward = spaceBelow < estHeight && spaceAbove > spaceBelow
+    const maxHeight = Math.max(100, Math.min(estHeight, openUpward ? spaceAbove : spaceBelow))
+
+    const left = Math.min(
+      Math.max(margin, btnRect.left - cardRect.left),
+      Math.max(margin, cardRect.width - popoverW - margin)
+    )
+
+    return openUpward
+      ? { bottom: cardRect.bottom - btnRect.top + 6, left, maxHeight }
+      : { top: btnRect.bottom - cardRect.top + 6, left, maxHeight }
+  }
+
+  // Desktop/tablet keep the body-level portal + viewport-fixed positioning
+  // (unchanged) — their emoji trigger stays in the toolbar, not inside a
+  // scrollable/clipped area, so the portal was never the problem there.
+  // Mobile's trigger lives inside the notes editor, where the card's own
+  // expand/collapse container clips anything viewport-independent, so mobile
+  // uses the local (cardRootRef-relative) positioning above instead.
   function toggleEmojiPicker(btnRef: React.RefObject<HTMLButtonElement | null>) {
-    if (!emojiOpen && btnRef.current) setEmojiAnchor(btnRef.current.getBoundingClientRect())
+    if (!emojiOpen && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect()
+      if (typeof window !== 'undefined' && window.innerWidth < 640) {
+        setEmojiLocalPos(getLocalPopoverPos(rect, EMOJI_PICKER_W_MOBILE, EMOJI_PICKER_H_MOBILE))
+        setEmojiAnchor(null)
+      } else {
+        setEmojiAnchor(rect)
+        setEmojiLocalPos(null)
+      }
+    }
     setEmojiOpen(o => !o)
   }
 
   const EMOJI_PICKER_W = 280
   const EMOJI_PICKER_H = 340
+  const EMOJI_PICKER_W_MOBILE = 205
+  const EMOJI_PICKER_H_MOBILE = 250
+  const LIST_MENU_W_MOBILE = 150
+  const LIST_MENU_H_MOBILE = 116
   function getEmojiPickerStyle(anchor: DOMRect): React.CSSProperties {
     const vw = typeof window !== 'undefined' ? window.innerWidth  : 390
     const vh = typeof window !== 'undefined' ? window.innerHeight : 800
@@ -1147,6 +1190,7 @@ function TaskRow({
       <style>{`@keyframes xp-active-pulse{0%,100%{opacity:1}50%{opacity:0.25}}@keyframes xp-saved-fade{0%{opacity:1}70%{opacity:1}100%{opacity:0}}`}</style>
       <div
         id={`xp-task-${task.id}`}
+        ref={cardRootRef}
         className={`rounded-xl overflow-visible relative transition-all duration-200 ${isDragOver ? 'ring-2 ring-violet-400 ring-offset-1' : ''}`}
         style={{ border: `0.5px solid ${cardBorder}`, background: cardBg, boxShadow: cardShadow }}
         onMouseEnter={() => setIsCardHovered(true)}
@@ -1502,10 +1546,12 @@ function TaskRow({
                       </div>
 
                       {/* Mobile — the three list types consolidated into one dropdown so
-                          the toolbar fits without wrapping onto extra lines. Rendered via
-                          a body-level portal (see getListMenuStyle) so it can't be clipped
-                          by the task card/notes editor's own overflow, and opens upward
-                          automatically when there isn't room below. */}
+                          the toolbar fits without wrapping onto extra lines. The trigger
+                          stays here; its dropdown content renders as a sibling of the
+                          expand/collapse wrapper further down (see "Mobile popovers"),
+                          positioned locally against cardRootRef so it scrolls natively
+                          with this card instead of being clipped by that wrapper's
+                          overflow:hidden. */}
                       <div className="relative sm:hidden">
                         <button
                           ref={listBtnRef}
@@ -1516,14 +1562,6 @@ function TaskRow({
                         >
                           ☰ List <span style={{ fontSize: 8 }}>▾</span>
                         </button>
-                        {listMenuOpen && listMenuAnchor && createPortal(
-                          <div ref={listMenuRef} style={getListMenuStyle(listMenuAnchor)}>
-                            <button onClick={() => { applyListType('bullet'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: isDark ? '#e2e8f0' : '#111827' }}>• Bullet List</button>
-                            <button onClick={() => { applyListType('number'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: isDark ? '#e2e8f0' : '#111827' }}>1. Numbered List</button>
-                            <button onClick={() => { applyListType('check'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: isDark ? '#e2e8f0' : '#111827' }}>☐ Checklist</button>
-                          </div>,
-                          document.body
-                        )}
                       </div>
                     </>
                   )}
@@ -1597,9 +1635,13 @@ function TaskRow({
                 </div>
               </div>
 
-              {/* Emoji picker — shared by both the desktop/tablet toolbar
-                  trigger and the mobile in-editor trigger, rendered once via
-                  a body-level portal so it can never be clipped. */}
+              {/* Emoji picker — desktop/tablet only (emojiAnchor is only ever
+                  set by the desktop trigger now). Rendered via a body-level
+                  portal, unchanged: its trigger lives in the toolbar, not
+                  inside a clipped/scrollable area, so this was never the
+                  source of the clipping/lag problem. Mobile's version
+                  (emojiLocalPos) renders separately, see "Mobile popovers"
+                  below. */}
               {emojiOpen && emojiAnchor && createPortal(
                 <div ref={emojiPickerRef} style={getEmojiPickerStyle(emojiAnchor)}>
                   <EmojiPickerLib
@@ -1631,6 +1673,39 @@ function TaskRow({
             </div>
           </div>
         </div>
+
+        {/* Mobile popovers (List dropdown, emoji picker) — siblings of the
+            expand/collapse wrapper above (not descendants of it), so they
+            are never subject to that wrapper's overflow:hidden/max-height
+            clipping. Positioned via getLocalPopoverPos against cardRootRef
+            (this task card, which is itself overflow-visible), so they scroll
+            in the exact same paint as the card with zero JS repositioning. */}
+        {listMenuOpen && listMenuLocalPos && (
+          <div ref={listMenuRef} style={{
+            position: 'absolute', ...listMenuLocalPos, width: LIST_MENU_W_MOBILE, zIndex: 50,
+            background: isDark ? '#1e1130' : '#fff',
+            border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.12)'}`,
+            borderRadius: 10, boxShadow: '0 12px 32px rgba(0,0,0,0.18)',
+            overflowY: 'auto', overflowX: 'hidden', padding: 4,
+          }}>
+            <button onClick={() => { applyListType('bullet'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: isDark ? '#e2e8f0' : '#111827' }}>• Bullet List</button>
+            <button onClick={() => { applyListType('number'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: isDark ? '#e2e8f0' : '#111827' }}>1. Numbered List</button>
+            <button onClick={() => { applyListType('check'); setListMenuOpen(false) }} className="w-full text-left text-[11px] px-2 py-1.5 rounded-md hover:bg-black/5" style={{ color: isDark ? '#e2e8f0' : '#111827' }}>☐ Checklist</button>
+          </div>
+        )}
+
+        {emojiOpen && emojiLocalPos && (
+          <div ref={emojiPickerRef} style={{ position: 'absolute', ...emojiLocalPos, zIndex: 50, borderRadius: 12, overflow: 'hidden', boxShadow: '0 12px 40px rgba(0,0,0,0.22)' }}>
+            <EmojiPickerLib
+              onEmojiClick={(data: EmojiClickData) => { handleEmojiSelect(data.emoji); setEmojiOpen(false) }}
+              theme={isDark ? Theme.DARK : Theme.LIGHT}
+              width={EMOJI_PICKER_W_MOBILE}
+              height={emojiLocalPos.maxHeight}
+              searchPlaceHolder="Search emoji…"
+              lazyLoadEmojis
+            />
+          </div>
+        )}
       </div>
 
       {/* Image lightbox */}
@@ -3240,7 +3315,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
 
         {/* Footer — Today pill (bottom-left, only when viewing another date)
             shares this row with Cancel/Save rather than adding modal height. */}
-        <div className="flex items-center justify-between gap-2 px-4 py-3 flex-shrink-0" style={{ borderTop: '0.5px solid var(--xp-bdr)' }}>
+        <div data-xp-tm-footer className="flex items-center justify-between gap-2 px-4 py-3 flex-shrink-0" style={{ borderTop: '0.5px solid var(--xp-bdr)' }}>
           <div>
             {!isViewingToday && (
               <button

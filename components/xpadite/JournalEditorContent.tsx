@@ -52,6 +52,11 @@ function fmtShortDate(key: string): string {
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+function fmtTransferDate(key: string): string {
+  const [y, m, d] = key.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
+}
+
 function fmtBlockTime(ts: number): string {
   return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
@@ -332,7 +337,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
 
   return (
     <div
-      className={isSection ? 'xp-j-sec-wrap' : undefined}
+      className={isSection ? 'xp-j-sec-wrap' : 'xp-j-main-wrap'}
       style={{
         position: 'relative',
         borderRadius: sectionStyle ? 10 : 0,
@@ -530,7 +535,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                     )}
                     {!!onTransferSection && (
                       <button onClick={() => { onTransferSection(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
-                        📅 Transfer Section
+                        📅 Move Section
                       </button>
                     )}
                     <button onClick={tmOpenSendTo} style={menuItemStyle(isDark)}>
@@ -1832,35 +1837,41 @@ export function JournalEditorContent({
 
   // Appends an independent copy of `block` (with `liveContent` merged in) onto
   // another date's Planner/Journal doc — used by both Move and Copy below.
-  // Reads/writes calData[destKey].journal directly via updateDay, exactly like
+  // Reads/writes calData[destKey].notes directly via updateDay (the actual
+  // field the editor loads/persists — see JournalWorkspaceModal's
+  // rawContent={calData[editorDate]?.notes} and persistEntry), exactly like
   // every other cross-date write in this file (e.g. syncStartToTaskManager),
   // since the destination date's editor isn't mounted here.
   function appendBlockToDay(destKey: string, block: JournalBlock) {
-    const destDoc = parseJournalDoc(calData[destKey]?.journal)
+    const destDoc = parseJournalDoc(calData[destKey]?.notes)
     const newDoc = { ...destDoc, blocks: [...destDoc.blocks, block] }
-    updateDay(destKey, prev => ({ ...prev, journal: serializeJournalDoc(newDoc) }))
+    updateDay(destKey, prev => ({ ...prev, notes: serializeJournalDoc(newDoc) }))
   }
 
   // Transfer: Move relocates the exact same section (same id, unchanged
   // content/color/title — a true move, so deleteBlock's existing safe-removal
   // fallback runs on the origin). Copy leaves the origin completely untouched
   // and appends a fresh-id independent copy (mirrors duplicateBlock's pattern)
-  // — completion states are preserved exactly, never reset.
+  // — completion states are preserved exactly, never reset. The destination
+  // write (appendBlockToDay) always runs and completes its local state update
+  // before deleteBlock removes the origin, so Move never drops content into a
+  // gap between the two.
   function transferSection(mode: 'move' | 'copy', id: string, destKey: string) {
     const block = blocksRef.current.find(b => b.id === id)
     if (!block) return
     const liveContent = contentMapRef.current.get(id) ?? block.content ?? ''
     const ts = Date.now()
+    const destLabel = fmtTransferDate(destKey)
 
     if (mode === 'copy') {
       const copy: JournalBlock = { ...block, id: mkId(), content: liveContent, createdAt: ts, updatedAt: ts }
       appendBlockToDay(destKey, copy)
-      setToast('Section copied ✓')
+      setToast(`Section copied to ${destLabel} ✓`)
     } else {
       const moved: JournalBlock = { ...block, content: liveContent, updatedAt: ts }
       appendBlockToDay(destKey, moved)
       deleteBlock(id)
-      setToast('Section moved ✓')
+      setToast(`Section moved to ${destLabel} ✓`)
     }
   }
 
@@ -2575,6 +2586,17 @@ export function JournalEditorContent({
         .xp-j-save-btn { transition: all 120ms; }
         .xp-j-save-btn:hover { opacity: 0.88; transform: translateY(-1px); }
         .xp-j-save-btn:active { transform: scale(0.97); transition-duration: 60ms; }
+        /* Mobile-only: the main (non-section) block's ⋮ menu is absolutely
+           positioned at top:8/right:8 with no padding reserving space for it
+           (unlike section blocks, which already reserve 40px via inline
+           padding) — on desktop/tablet the block is wide enough that text
+           wraps well before reaching it, but on mobile's narrow width the
+           placeholder/first line collides with it. Reserve the same 40px
+           section blocks already use, mobile only; desktop/tablet keep their
+           existing padding:0 untouched. */
+        @media (max-width: 640px) {
+          .xp-j-main-wrap { padding-right: 40px !important; }
+        }
         .xp-j-prose {
           outline: none; font-size: 14px; line-height: 1.75;
           font-family: inherit; color: ${isDark ? '#f1f5f9' : '#0f172a'}; min-height: 32px;

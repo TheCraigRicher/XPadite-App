@@ -91,7 +91,7 @@ export function TransferSectionModal({ dateKey, sectionLabel, onClose, onConfirm
           style={{ background: 'linear-gradient(135deg, #5b21b6 0%, #7c3aed 100%)' }}
         >
           <div className="min-w-0">
-            <h3 className="text-[14px] font-semibold" style={{ color: '#ffffff' }}>Transfer Section</h3>
+            <h3 className="text-[14px] font-semibold" style={{ color: '#ffffff' }}>Move Section</h3>
             <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.75)' }}>Move or copy this section to another date.</p>
           </div>
           <button

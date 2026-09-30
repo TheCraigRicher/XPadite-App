@@ -1377,11 +1377,10 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     !COLOR_PALETTE.some(c => normalizeHexColor(c) === normalizeHexColor(newLabelColor)) &&
     !customColors.some(c => normalizeHexColor(c) === normalizeHexColor(newLabelColor))
 
-  // ── Scroll to today's quarter/month on calendar open ─────────────────────────
+  // ── Scroll to today's quarter/month on calendar open (and on Today pill click) ─
   const calContentRef  = useRef<HTMLDivElement>(null)
   const calMobileRef   = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (view !== 'calendar') return
+  const scrollToCurrentQuarter = useCallback(() => {
     requestAnimationFrame(() => {
       // Desktop: scroll to today's quarter section
       const q = QUARTERS.find(q => q.months.includes(todayDate.getMonth()))
@@ -1399,7 +1398,17 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         container.scrollTop = container.scrollTop + (elTop - containerTop)
       }
     })
-  }, [view, todayDate])
+  }, [todayDate])
+  useEffect(() => {
+    if (view !== 'calendar') return
+    scrollToCurrentQuarter()
+  }, [view, todayDate, scrollToCurrentQuarter])
+
+  // Journal Calendar TODAY pill — return to the current year and re-sync scroll
+  function goToTodayCalendar() {
+    setCalYear(todayDate.getFullYear())
+    scrollToCurrentQuarter()
+  }
 
   // ── Theme ─────────────────────────────────────────────────────────────────────
   // Match Dashboard exactly: rgba(9,4,22,0.99) dark / var(--xp-bg3) light
@@ -1417,7 +1426,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       <div
         className="xp-j-hdr"
         style={{
-          height: 64,
+          height: 52,
           display: 'flex', alignItems: 'center',
           padding: '0 20px',
           flexShrink: 0,
@@ -1458,7 +1467,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             </button>
 
             <span style={{ color: '#fff', fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em', lineHeight: 1 }}>
-              📋 Planner/Journal {calYear}
+              Planner/Journal {calYear}
             </span>
 
             <button
@@ -1483,15 +1492,16 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           </div>
         </div>
 
-        {/* Right: Today (when not current year) + Close — hidden on mobile */}
-        <div className="hidden sm:flex" style={{ position: 'absolute', right: 20, alignItems: 'center', gap: 6 }}>
+        {/* Right: Today pill (all devices, only when away from current year) + Close (desktop/tablet only) */}
+        <div style={{ position: 'absolute', right: 20, display: 'flex', alignItems: 'center', gap: 6 }}>
           {calYear !== todayDate.getFullYear() && (
             <button
-              onClick={() => setCalYear(todayDate.getFullYear())}
+              onClick={goToTodayCalendar}
+              title="Go to today"
               style={{
-                background: 'rgba(255,255,255,0.10)', border: '0.5px solid rgba(255,255,255,0.22)',
-                borderRadius: 8, cursor: 'pointer', color: 'rgba(255,255,255,0.65)',
-                fontSize: 10, padding: '3px 8px', lineHeight: 1.4,
+                padding: '3px 8px', borderRadius: 20, border: '0.5px solid rgba(255,255,255,0.22)',
+                background: 'transparent', color: 'rgba(255,255,255,0.60)',
+                fontSize: 11, cursor: 'pointer', flexShrink: 0,
               }}
             >
               Today
@@ -1499,7 +1509,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           )}
           <button
             onClick={doClose}
-            className="text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
+            className="hidden sm:block text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
             style={{ background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}
           >
             × Close
@@ -1716,7 +1726,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
               className={`xp-jws-nav-btn${active ? ' xp-jws-nav-active' : ''}`}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
-                padding: '6px 14px', borderRadius: 8,
+                padding: '5px 11px', borderRadius: 8,
                 fontSize: 12, fontWeight: active ? 600 : 400,
                 cursor: 'pointer',
                 background: active ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.06)',
@@ -1735,7 +1745,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           disabled
           style={{
             alignItems: 'center', gap: 6,
-            padding: '6px 14px', borderRadius: 8,
+            padding: '5px 11px', borderRadius: 8,
             fontSize: 12, fontWeight: 400,
             cursor: 'not-allowed',
             background: 'rgba(124,58,237,0.06)',
@@ -1759,7 +1769,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       <div
         className="xp-j-hdr"
         style={{
-          height: 64,
+          height: 52,
           display: 'flex', alignItems: 'center',
           padding: '0 20px',
           flexShrink: 0,
@@ -2759,7 +2769,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
               className={`xp-jws-nav-btn${active ? ' xp-jws-nav-active' : ''}`}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
-                padding: '6px 14px', borderRadius: 8,
+                padding: '5px 11px', borderRadius: 8,
                 fontSize: 12, fontWeight: active ? 600 : 400,
                 cursor: 'pointer',
                 background: active ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.06)',
@@ -2778,7 +2788,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           disabled
           style={{
             alignItems: 'center', gap: 6,
-            padding: '6px 14px', borderRadius: 8,
+            padding: '5px 11px', borderRadius: 8,
             fontSize: 12, fontWeight: 400,
             cursor: 'not-allowed',
             background: 'rgba(124,58,237,0.06)',

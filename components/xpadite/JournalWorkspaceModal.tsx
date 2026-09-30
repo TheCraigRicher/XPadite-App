@@ -1425,35 +1425,35 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           borderBottom: '0.5px solid rgba(255,255,255,0.06)',
         }}
       >
-        {/* Back — absolute left, hidden on mobile (bottom nav handles close) */}
+        {/* Back — hidden on desktop/tablet; mobile only via bottom nav */}
         <button
           onClick={doClose}
-          className="hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0"
+          className="hidden items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0"
           style={{ position: 'absolute', left: 20, background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.80)' }}
         >
           ← Back
         </button>
 
-        {/* Centered: large circular arrows flanking the title */}
+        {/* Centered: XPadite signature triangles flanking the title */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <button
               onClick={() => setCalYear(y => y - 1)}
               title="Previous year"
               style={{
-                width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+                width: 32, height: 32, flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.28)',
+                background: 'transparent', border: 'none',
                 color: '#fff', cursor: 'pointer', padding: 0,
-                transition: 'background 120ms, transform 80ms',
+                transition: 'opacity 120ms, transform 80ms',
               }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.24)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.14)' }}
-              onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.92)' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.7' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
+              onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.88)' }}
               onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="15 18 9 12 15 6" />
+              <svg width="9" height="12" viewBox="0 0 9 12" fill="#fff" aria-hidden="true">
+                <path d="M9 0 L0 6 L9 12 Z" />
               </svg>
             </button>
 
@@ -1465,19 +1465,19 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
               onClick={() => setCalYear(y => y + 1)}
               title="Next year"
               style={{
-                width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+                width: 32, height: 32, flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'rgba(255,255,255,0.14)', border: '1px solid rgba(255,255,255,0.28)',
+                background: 'transparent', border: 'none',
                 color: '#fff', cursor: 'pointer', padding: 0,
-                transition: 'background 120ms, transform 80ms',
+                transition: 'opacity 120ms, transform 80ms',
               }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.24)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.14)' }}
-              onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.92)' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.7' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
+              onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.88)' }}
               onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="9 18 15 12 9 6" />
+              <svg width="9" height="12" viewBox="0 0 9 12" fill="#fff" aria-hidden="true">
+                <path d="M0 0 L9 6 L0 12 Z" />
               </svg>
             </button>
           </div>
@@ -1769,7 +1769,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       >
         <button
           onClick={() => setView('calendar')}
-          className="hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0"
+          className="hidden items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0"
           style={{ position: 'absolute', left: 20, background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.80)' }}
         >
           ← Back

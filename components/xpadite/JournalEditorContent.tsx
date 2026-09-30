@@ -2809,10 +2809,10 @@ export function JournalEditorContent({
           position: 'relative', display: 'flex', alignItems: 'center',
           height: 52, padding: '0 14px', gap: 6,
         }}>
-          {/* Left: back — hidden on mobile (bottom nav handles close) */}
+          {/* Left: back — mobile only (bottom nav handles close on mobile; hidden on desktop/tablet) */}
           <button
             onClick={() => guardedNavigate(onBack)}
-            className="hidden sm:block"
+            className="hidden"
             style={{
               padding: '5px 10px', borderRadius: 8, border: '0.5px solid rgba(255,255,255,0.16)',
               background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.78)',

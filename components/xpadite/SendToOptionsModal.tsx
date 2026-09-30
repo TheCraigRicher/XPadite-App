@@ -66,6 +66,7 @@ export function SendToOptionsModal({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [dupInfo, setDupInfo]         = useState<{ nodes: PlannerTaskNode[]; total: number; sentCount: number } | null>(null)
   const [openTip, setOpenTip]         = useState<string | null>(null)
+  const [showZeroCheckboxInfo, setShowZeroCheckboxInfo] = useState(false)
 
   const [tmDateKey, setTmDateKey]     = useState(() => todayKey(effectiveTimezone))
   const [calendarOpen, setCalendarOpen] = useState(false)
@@ -89,6 +90,7 @@ export function SendToOptionsModal({
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key !== 'Escape') return
+    if (showZeroCheckboxInfo) { setShowZeroCheckboxInfo(false); return }
     if (view === 'main') onClose(); else goBack()
   }
 
@@ -165,20 +167,29 @@ export function SendToOptionsModal({
   // disables the three that don't apply to a single image (no Task Manager
   // tasks, no partial "selection" of one image) rather than swapping in a
   // different modal shape.
-  type Option = { id: string; icon: string; label: string; tooltip: string; premium?: boolean; disabled?: boolean; onSelect: () => void }
+  type Option = {
+    id: string; icon: string; label: string; tooltip: string; premium?: boolean
+    hardDisabled?: boolean   // truly inert (native disabled) — e.g. image context
+    softBlocked?: boolean    // looks unavailable but stays clickable — taps explain why
+    onSelect: () => void
+  }
+  // V1 semantic rule: only checklist items are actionable Task Manager tasks —
+  // bullets/numbers/plain text never count, so a zero-eligible section is a real
+  // state the user needs explaining, not a dead end.
+  const zeroCheckboxes = !isImage && eligibleCount === 0
   const options: Option[] = [
     {
-      id: 'tm-selected', icon: '✅', label: 'Send Selected to Task Manager', disabled: isImage || eligibleCount === 0,
+      id: 'tm-selected', icon: '✅', label: 'Send Selected to Task Manager', hardDisabled: isImage, softBlocked: zeroCheckboxes,
       tooltip: 'Choose specific tasks from this section and send them to Task Manager for scheduling, tracking and completion.',
       onSelect: () => { setSelectedIds(new Set()); setView('select') },
     },
     {
-      id: 'tm-all', icon: '✅', label: 'Send All to Task Manager', disabled: isImage || eligibleCount === 0,
+      id: 'tm-all', icon: '✅', label: 'Send All to Task Manager', hardDisabled: isImage, softBlocked: zeroCheckboxes,
       tooltip: 'Send all eligible tasks from this section to Task Manager at once.',
       onSelect: sendAll,
     },
     {
-      id: 'ai-selected', icon: '🧠', label: 'Send Selected to AI Coach', premium: true, disabled: isImage,
+      id: 'ai-selected', icon: '🧠', label: 'Send Selected to AI Coach', premium: true, hardDisabled: isImage,
       tooltip: 'Choose specific content from this section to send to XPadite AI Coach for personalized assistance.',
       onSelect: onAICoachComingSoon,
     },
@@ -210,9 +221,11 @@ export function SendToOptionsModal({
       <style>{`
         @media (prefers-reduced-motion: no-preference) {
           .xp-sendto-btn { transition: transform 140ms ease, background 140ms ease, border-color 140ms ease, box-shadow 140ms ease; }
+          .xp-sendto-hint, .xp-sendto-hint-text { transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease; }
         }
         @media (prefers-reduced-motion: reduce) {
           .xp-sendto-btn { transition: background 80ms linear; }
+          .xp-sendto-hint, .xp-sendto-hint-text { transition: background 80ms linear, color 80ms linear; }
         }
         .xp-sendto-btn:not(:disabled):hover {
           border-color: rgba(124,58,237,0.45) !important;
@@ -231,6 +244,34 @@ export function SendToOptionsModal({
           background: rgba(255,255,255,0.22) !important; color: #ffffff !important;
         }
         .xp-sendto-btn:disabled { cursor: default; opacity: 0.45; }
+        /* Soft-blocked: still clickable (tap explains why), but must keep the
+           same unavailable look — native :disabled hover/active rules never
+           match here since there's no disabled attribute, so cancel them explicitly. */
+        .xp-sendto-btn.xp-sendto-btn-soft { opacity: 0.45; }
+        .xp-sendto-btn.xp-sendto-btn-soft:hover,
+        .xp-sendto-btn.xp-sendto-btn-soft:active {
+          border-color: var(--xp-bdr) !important;
+          background: var(--xp-bg3) !important;
+          transform: none !important;
+          box-shadow: none !important;
+        }
+        .xp-sendto-btn.xp-sendto-btn-soft:active .xp-sendto-label,
+        .xp-sendto-btn.xp-sendto-btn-soft:active .xp-sendto-icon { color: inherit !important; }
+        /* Checkbox-required hint — neutral gray by default, purple on hover/focus/press */
+        .xp-sendto-hint { outline: none; cursor: default; }
+        .xp-sendto-hint-text { color: var(--xp-txt3); }
+        .xp-sendto-hint:hover,
+        .xp-sendto-hint:focus-visible,
+        .xp-sendto-hint:active {
+          background: ${isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)'} !important;
+          border-color: ${isDark ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.18)'} !important;
+          transform: translateY(-1px);
+        }
+        .xp-sendto-hint:hover .xp-sendto-hint-text,
+        .xp-sendto-hint:focus-visible .xp-sendto-hint-text,
+        .xp-sendto-hint:active .xp-sendto-hint-text {
+          color: ${isDark ? '#c4b5fd' : '#7c3aed'};
+        }
         /* vh alone measures the tallest possible viewport (address bar hidden) —
            on mobile, with the address bar showing, that overshoots the actually
            visible area and the card can run off-screen. dvh tracks the real,
@@ -287,9 +328,10 @@ export function SendToOptionsModal({
                 {options.map(opt => (
                   <div key={opt.id}>
                     <button
-                      onClick={opt.onSelect}
-                      disabled={opt.disabled}
-                      className="xp-sendto-btn w-full flex items-center gap-2.5 rounded-xl text-left"
+                      onClick={opt.softBlocked ? () => setShowZeroCheckboxInfo(true) : opt.onSelect}
+                      disabled={opt.hardDisabled}
+                      aria-disabled={opt.hardDisabled || opt.softBlocked || undefined}
+                      className={`xp-sendto-btn w-full flex items-center gap-2.5 rounded-xl text-left${opt.softBlocked ? ' xp-sendto-btn-soft' : ''}`}
                       style={{ padding: '10px 10px 10px 11px', background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}
                     >
                       <span className="xp-sendto-icon" style={{ fontSize: 16, flexShrink: 0, lineHeight: 1 }}>{opt.icon}</span>
@@ -333,14 +375,11 @@ export function SendToOptionsModal({
 
               {!isImage && eligibleCount === 0 && (
                 <div
-                  className="flex items-center gap-2 rounded-lg mt-2.5"
-                  style={{
-                    padding: '8px 10px',
-                    background: isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)',
-                    border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.18)'}`,
-                  }}
+                  tabIndex={0}
+                  className="xp-sendto-hint flex items-center gap-2 rounded-lg mt-2.5"
+                  style={{ padding: '8px 10px', background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}
                 >
-                  <span className="text-[11.5px] leading-snug font-medium" style={{ color: isDark ? '#c4b5fd' : '#7c3aed' }}>
+                  <span className="xp-sendto-hint-text text-[11.5px] leading-snug font-medium">
                     ☑ Add a checkbox to a line to turn it into a task and send it to Task Manager.
                   </span>
                 </div>
@@ -484,6 +523,37 @@ export function SendToOptionsModal({
           )}
         </div>
       </div>
+
+      {/* Zero-checkbox explanation — informational only, never mutates anything */}
+      {showZeroCheckboxInfo && (
+        <div
+          className="fixed inset-0 flex items-center justify-center p-4"
+          style={{ zIndex: 210, background: 'rgba(0,0,0,0.45)' }}
+          onClick={e => { e.stopPropagation(); setShowZeroCheckboxInfo(false) }}
+        >
+          <div
+            className="w-full max-w-[300px] rounded-2xl overflow-hidden"
+            style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.32)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="px-4 pt-4 pb-3">
+              <p className="text-[13.5px] font-bold mb-1.5" style={{ color: 'var(--xp-txt)' }}>Checkbox Required</p>
+              <p className="text-[11.5px] leading-relaxed" style={{ color: 'var(--xp-txt3)' }}>
+                ☑ Add a checkbox to a line to turn it into a task and send it to Task Manager.
+              </p>
+            </div>
+            <div className="px-4 pb-4">
+              <button
+                onClick={() => setShowZeroCheckboxInfo(false)}
+                className="w-full text-[12.5px] font-semibold text-white"
+                style={{ padding: '9px 0', borderRadius: 10, background: '#7c3aed', border: 'none', cursor: 'pointer' }}
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -3697,7 +3697,7 @@ function ListPicker({ activeType, onPick }: { activeType: 'bullet' | 'ordered' |
             onClick={() => { onPick('bullet'); setOpen(false) }}
             style={{
               ...menuItemStyle(true), display: 'flex', alignItems: 'center', gap: 8, borderRadius: 7,
-              color: activeType === 'bullet' ? '#c4b5fd' : undefined,
+              color: activeType === 'bullet' ? '#c4b5fd' : 'rgba(255,255,255,0.82)',
               fontWeight: activeType === 'bullet' ? 600 : 400,
             }}
           >• Bullet List{activeType === 'bullet' && <span style={{ marginLeft: 'auto', fontSize: 10 }}>✓</span>}</button>
@@ -3705,7 +3705,7 @@ function ListPicker({ activeType, onPick }: { activeType: 'bullet' | 'ordered' |
             onClick={() => { onPick('ordered'); setOpen(false) }}
             style={{
               ...menuItemStyle(true), display: 'flex', alignItems: 'center', gap: 8, borderRadius: 7,
-              color: activeType === 'ordered' ? '#c4b5fd' : undefined,
+              color: activeType === 'ordered' ? '#c4b5fd' : 'rgba(255,255,255,0.82)',
               fontWeight: activeType === 'ordered' ? 600 : 400,
             }}
           >1. Numbered List{activeType === 'ordered' && <span style={{ marginLeft: 'auto', fontSize: 10 }}>✓</span>}</button>

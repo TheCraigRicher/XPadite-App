@@ -332,9 +332,18 @@ export function SendToOptionsModal({
               </div>
 
               {!isImage && eligibleCount === 0 && (
-                <p className="text-[11px] mt-2.5" style={{ color: 'var(--xp-txt3)' }}>
-                  No checklist items in this section yet.
-                </p>
+                <div
+                  className="flex items-center gap-2 rounded-lg mt-2.5"
+                  style={{
+                    padding: '8px 10px',
+                    background: isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)',
+                    border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.18)'}`,
+                  }}
+                >
+                  <span className="text-[11.5px] leading-snug font-medium" style={{ color: isDark ? '#c4b5fd' : '#7c3aed' }}>
+                    ☑ Add a checkbox to a line to turn it into a task and send it to Task Manager.
+                  </span>
+                </div>
               )}
 
               {/* Task Manager destination date — applies only to the two TM actions above */}

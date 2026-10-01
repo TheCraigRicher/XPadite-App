@@ -1524,11 +1524,10 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     <div style={{display:'flex',alignItems:'stretch',background:dockBg,borderBottom:`0.5px solid ${dockBdr}`,boxShadow:isDark?'0 2px 12px rgba(0,0,0,0.40)':'0 1px 6px rgba(0,0,0,0.08)',flexShrink:0}}>
 
       {/* ── Scrollable tools ─────────────────────────────────────────────── */}
+      {/* The workspace title already lives in the purple header above — this
+          bar starts straight at Select, reclaiming the width the duplicate
+          label used to take. */}
       <div style={{display:'flex',alignItems:'center',gap:4,padding:'9px 10px 9px 14px',flex:1,minWidth:0,overflowX:'auto',flexWrap:'nowrap'}}>
-
-        <span style={{fontSize:12,fontWeight:700,letterSpacing:'-0.01em',color:isDark?'rgba(255,255,255,0.85)':'#1e293b',marginRight:2,flexShrink:0}}>🧠 Mind Mapping Canvas</span>
-
-        {dvdr}
 
         {/* Select */}
         <button title="Select (click / drag)" onClick={()=>{if(textInput)commitText();setTool('select')}} style={{...dkBtn(tool==='select'),minWidth:28,textAlign:'center',padding:'4px 8px',fontSize:13}}>↖</button>

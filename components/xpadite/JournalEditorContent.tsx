@@ -3224,10 +3224,10 @@ export function JournalEditorContent({
               title="Back"
               aria-label="Back"
               style={{
-                position: 'relative', zIndex: 1, width: 32, height: 32, flexShrink: 0,
+                position: 'relative', zIndex: 1, width: 40, height: 40, flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: 'transparent', border: 'none',
-                color: '#fff', cursor: 'pointer', padding: 0, fontSize: 20,
+                color: '#fff', cursor: 'pointer', padding: 0, fontSize: 24,
                 transition: 'opacity 120ms, transform 80ms',
               }}
               onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.88)' }}

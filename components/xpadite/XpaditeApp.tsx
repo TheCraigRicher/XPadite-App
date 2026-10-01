@@ -1353,9 +1353,11 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
         </div>
       )}
 
-      {/* Toast — above bottom nav on mobile */}
+      {/* Toast — above everything on desktop/tablet, behind the bottom nav on
+          mobile (z-index set in .xp-toast-wrapper/globals.css, not inline, so
+          the mobile media query there can override it). */}
       {toast && (
-        <div className="xp-toast-wrapper" style={{ position: 'fixed', right: 16, zIndex: 200 }}>
+        <div className="xp-toast-wrapper" style={{ position: 'fixed', right: 16 }}>
           <Toast
             message={toast}
             exiting={toastExiting}

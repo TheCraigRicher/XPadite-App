@@ -487,15 +487,23 @@ body {
   }
 }
 
-/* Toast floats above bottom nav on mobile */
+/* Toast floats above bottom nav on desktop/tablet (no nav to clear there);
+   on mobile it must stay BEHIND the fixed bottom nav (nav z-index: 50 in
+   MobileBottomNav.tsx) throughout its slide in/out animation, which needs
+   z-index set here (not inline — inline would beat this media query). */
 .xp-toast-wrapper {
   bottom: 24px;
+  z-index: 200;
 }
 @media (max-width: 639px) {
   .xp-toast-wrapper {
-    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    /* Nav renders ~76-77px tall (56px buttons + 10px top/bottom padding) plus
+       its own safe-area inset — 88px clears that with a small margin so the
+       toast's slide animation never pokes out above the nav's top edge. */
+    bottom: calc(88px + env(safe-area-inset-bottom, 0px));
     left: 16px;
     right: 16px;
+    z-index: 40;
   }
   .xp-toast-wrapper > div {
     min-width: 0;

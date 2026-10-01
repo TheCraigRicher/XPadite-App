@@ -1,5 +1,5 @@
 import type { Editor } from '@tiptap/react'
-import type { JournalBlock, JournalDoc } from './types'
+import type { JournalBlock, JournalDoc, SectionCell } from './types'
 
 // ─── ID helpers ───────────────────────────────────────────────────────────────
 
@@ -112,6 +112,51 @@ export function createDrawingBlock(src: string, name: string, canvasData?: strin
 
 export function createImageBlock(src: string, name: string): JournalBlock {
   return { id: mkId(), type: 'image', src, thumbnail: src, name, createdAt: now(), updatedAt: now() }
+}
+
+// ─── Section cells (split-section partitions / single-image sections) ────────
+
+export function mkContentCell(content: string): SectionCell {
+  return { kind: 'content', content }
+}
+
+export function mkImageCell(src: string, name: string, canvasData?: string): SectionCell {
+  return { kind: 'image', src, thumbnail: src, name, canvasData }
+}
+
+// True only when a section has no sectionImage/partitions AND its own Tiptap
+// content parses to an empty doc (no paragraphs with real content) — the
+// exact predicate "paste/drop an image into a section" needs: an empty
+// section takes the image directly (no split forced); anything else auto-splits.
+export function isSectionEmpty(block: JournalBlock): boolean {
+  if (block.sectionImage || block.partitions) return false
+  const str = (block.content ?? '').trim()
+  if (!str) return true
+  try {
+    const parsed = JSON.parse(str) as { content?: Array<{ content?: unknown[] }> }
+    const nodes = parsed.content ?? []
+    return nodes.every(n => !n.content || n.content.length === 0)
+  } catch {
+    return false
+  }
+}
+
+// Concatenates two Tiptap JSON doc strings' top-level content arrays into
+// one — used by "Merge Section" when both partitions are text. Falls back
+// to whichever side has real content if the other fails to parse/is empty.
+export function mergeTiptapContents(a: string, b: string): string {
+  const parse = (s: string): Array<Record<string, unknown>> => {
+    const str = (s ?? '').trim()
+    if (!str) return []
+    try {
+      const parsed = JSON.parse(str) as { type?: string; content?: Array<Record<string, unknown>> }
+      if (parsed?.type === 'doc' && Array.isArray(parsed.content)) return parsed.content
+    } catch { /* fall through */ }
+    return []
+  }
+  const merged = [...parse(a), ...parse(b)]
+  if (merged.length === 0) return ''
+  return JSON.stringify({ type: 'doc', content: merged })
 }
 
 // ─── Serialization ────────────────────────────────────────────────────────────

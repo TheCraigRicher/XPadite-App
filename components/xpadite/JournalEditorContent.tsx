@@ -18,14 +18,15 @@ import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
 import { addGalleryItem } from './GalleryModal'
 import dynamic from 'next/dynamic'
-import { buildAttachments, ATTACHMENT_ACCEPT, CameraModal, ImageLightbox } from './attachmentUtils'
-import type { JournalBlock, JournalTimerSession, TaskAttachment, Task, TaskSession } from './types'
+import { buildAttachment, buildAttachments, ATTACHMENT_ACCEPT, CameraModal, ImageLightbox } from './attachmentUtils'
+import type { JournalBlock, JournalTimerSession, TaskAttachment, Task, TaskSession, SectionCell } from './types'
 import { useApp } from './AppContext'
 import { JournalDrawModal } from './JournalDrawModal'
 import {
   parseJournalDoc, parseJournalContent, serializeJournalContent, serializeJournalDoc,
   getSectionStyle, SECTION_COLORS, createTextBlock, createSectionBlock,
   createDrawingBlock, createImageBlock, mkId, getTableColor,
+  mkContentCell, mkImageCell, isSectionEmpty, mergeTiptapContents,
 } from './journalUtils'
 import { TransferSectionModal } from './TransferSectionModal'
 import { SendToOptionsModal } from './SendToOptionsModal'
@@ -370,51 +371,31 @@ function AddTableModal({ isDark, onClose, onConfirm }: {
 
 // ─── JournalTextBlock ─────────────────────────────────────────────────────────
 
-interface JournalTextBlockProps {
-  block: JournalBlock
-  isDark: boolean
-  isOnlyBlock: boolean
-  isFirstBlock?: boolean
+// Shared Tiptap editor setup — extracted from JournalTextBlock so a split
+// section's two partition panes can each mount their OWN independent editor
+// instance (one useEditor() call per component instance; hook rules are per-
+// component, so two sibling cell components each calling this is valid even
+// though a single component can't call useEditor() twice). The unsplit path
+// (JournalTextBlock itself) calls this once, same as before — zero behavior
+// change there.
+function useProseEditor({
+  content, placeholder, resyncKey, forcedContent, onContentChange, onFocus, onSelectionUpdate, onPasteImage,
+}: {
+  content: string
+  placeholder: string
+  resyncKey: string // re-applies `content` to the editor whenever this changes (matches the original [editor, block.id] dependency)
   forcedContent?: { content: string; seq: number }
-  onContentChange: (id: string, content: string) => void
+  onContentChange: (content: string) => void
   onFocus: (editor: Editor) => void
   onSelectionUpdate: () => void
-  onDelete?: () => void
-  onDuplicate?: () => void
-  onTransferSection?: () => void
-  onMoveActivate?: () => void
-  onResizeActivate?: () => void
-  onColorChange?: (color: SectionColorKey) => void
-  onNameChange?: (name: string | undefined) => void
-  onCollapseToggle?: () => void
-  canMoveUp: boolean
-  canMoveDown: boolean
-  onMoveUp: () => void
-  onMoveDown: () => void
-}
-
-const JournalTextBlock = React.memo(function JournalTextBlock({
-  block, isDark, isOnlyBlock, isFirstBlock = false, forcedContent,
-  onContentChange, onFocus, onSelectionUpdate,
-  onDelete, onDuplicate, onTransferSection,
-  onMoveActivate, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
-  canMoveUp, canMoveDown, onMoveUp, onMoveDown,
-}: JournalTextBlockProps) {
-  const { updateDay, setToast } = useApp()
-  const [menuOpen,       setMenuOpen]       = useState(false)
-  const [showColorPick,  setShowColorPick]  = useState(false)
-  const [addingTitle,    setAddingTitle]    = useState(false)
-  const [titleValue,     setTitleValue]     = useState(block.name ?? '')
-  const menuRef           = useRef<HTMLDivElement>(null)
-  const titleInputRef     = useRef<HTMLInputElement>(null)
-  const prevForcedSeqRef  = useRef<number>(-1)
-
-  // ── "Send to…" (this section only) — the wizard UI itself lives entirely
-  // inside SendToOptionsModal; this component just supplies a fresh task tree
-  // each time it opens and performs the actual Task Manager write on confirm.
-  const [sendToOpen, setSendToOpen] = useState(false)
-  const [tmTaskTree, setTmTaskTree] = useState<PlannerTaskNode[]>([])
-  const [showAddTable, setShowAddTable] = useState(false)
+  // Image paste support — only passed for section content (see JournalTextBlock
+  // and SectionPartitionPane), never for plain text blocks (out of this
+  // feature's scope). Returning true from handlePaste tells ProseMirror the
+  // paste was fully handled, so it never falls through to inserting the image
+  // as text/leaves the default paste behavior to run.
+  onPasteImage?: (file: File) => void
+}): Editor | null {
+  const prevForcedSeqRef = useRef<number>(-1)
 
   const editor = useEditor({
     extensions: [
@@ -428,11 +409,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
       SubItemListItem,
       TaskList,
       SubItemTaskItem.configure({ nested: true }), // nested:true required for checkbox sub-items
-      Placeholder.configure({
-        placeholder: (block.type === 'section' && !isFirstBlock)
-          ? 'Add section content…'
-          : 'Write your plans, reflections, gratitude, journal entries, brain dumps, ideas, or mind maps here…',
-      }),
+      Placeholder.configure({ placeholder }),
       Underline,
       TextStyle,
       Color,
@@ -444,15 +421,28 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
       TableCell,
     ],
     content: { type: 'doc', content: [{ type: 'paragraph' }] },
-    editorProps: { attributes: { class: 'xp-j-prose' } },
-    onUpdate: ({ editor: e }) => onContentChange(block.id, serializeJournalContent(e)),
+    editorProps: {
+      attributes: { class: 'xp-j-prose' },
+      handlePaste: onPasteImage ? (_view, event) => {
+        const items = event.clipboardData?.items
+        if (!items) return false
+        for (const item of Array.from(items)) {
+          if (item.kind === 'file' && item.type.startsWith('image/')) {
+            const file = item.getAsFile()
+            if (file) { onPasteImage(file); return true }
+          }
+        }
+        return false
+      } : undefined,
+    },
+    onUpdate: ({ editor: e }) => onContentChange(serializeJournalContent(e)),
   })
 
   useEffect(() => {
     if (!editor) return
-    editor.commands.setContent(parseJournalContent(block.content || ''), { emitUpdate: false })
+    editor.commands.setContent(parseJournalContent(content || ''), { emitUpdate: false })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor, block.id])
+  }, [editor, resyncKey])
 
   useEffect(() => {
     if (!editor || !forcedContent || forcedContent.seq === prevForcedSeqRef.current) return
@@ -470,6 +460,162 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
     return () => { editor.off('focus', onF); editor.off('selectionUpdate', onS) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor])
+
+  return editor
+}
+
+// ─── Section cells (split-section partitions / single-image sections) ────────
+// Deliberate scope simplification (see plan): a cell-level image has no free-
+// drag "Move" of its own — only the divider drag (repositions the boundary)
+// and "Swap sides" exist for repositioning. Resize reuses the same generic
+// ResizeHandles component top-level image/drawing blocks already use.
+
+function SectionImageCell({ blockId, which, cell, selected, onSelect, onResizeStart }: {
+  blockId: string
+  which: 'single' | 'p0' | 'p1'
+  cell: SectionCell
+  selected: boolean
+  onSelect: () => void
+  onResizeStart: (dir: ResizeDir, e: React.MouseEvent) => void
+}) {
+  return (
+    <div
+      data-cell-id={`${blockId}:${which}`}
+      onClick={e => { e.stopPropagation(); onSelect() }}
+      style={{ position: 'relative', display: 'flex', justifyContent: 'center', padding: 4 }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={cell.src}
+        alt={cell.name ?? ''}
+        style={{ width: `${cell.width ?? 100}%`, maxWidth: '100%', borderRadius: 8, display: 'block', cursor: 'pointer' }}
+      />
+      {selected && <ResizeHandles onResizeStart={onResizeStart} />}
+    </div>
+  )
+}
+
+function SectionPartitionPane({
+  blockId, which, content, placeholder, onContentChange, onFocus, onSelectionUpdate,
+}: {
+  blockId: string
+  which: 'p0' | 'p1'
+  content: string
+  placeholder: string
+  onContentChange: (content: string) => void
+  onFocus: (editor: Editor) => void
+  onSelectionUpdate: () => void
+}) {
+  const editor = useProseEditor({
+    content,
+    placeholder,
+    resyncKey: `${blockId}:${which}`,
+    onContentChange,
+    onFocus,
+    onSelectionUpdate,
+  })
+  return (
+    <div
+      data-cell-id={`${blockId}:${which}`}
+      onClick={() => editor?.commands.focus()}
+      style={{ cursor: 'text', minHeight: 40 }}
+    >
+      <EditorContent editor={editor} />
+    </div>
+  )
+}
+
+interface JournalTextBlockProps {
+  block: JournalBlock
+  isDark: boolean
+  isOnlyBlock: boolean
+  isFirstBlock?: boolean
+  forcedContent?: { content: string; seq: number }
+  onContentChange: (id: string, content: string) => void
+  onFocus: (editor: Editor) => void
+  onSelectionUpdate: () => void
+  onDelete?: () => void
+  onDuplicate?: () => void
+  onTransferSection?: () => void
+  onMoveActivate?: () => void
+  onResizeActivate?: () => void
+  onColorChange?: (color: SectionColorKey) => void
+  onNameChange?: (name: string | undefined) => void
+  onCollapseToggle?: () => void
+  onPasteImage?: (file: File) => void
+  onSplitSection?: () => void
+  onMergeSection?: () => void
+  onUpdateBlock?: (updates: Partial<JournalBlock>) => void
+  onCellResizeStart?: (which: 'single' | 'p0' | 'p1', dir: ResizeDir, e: React.MouseEvent) => void
+  canMoveUp: boolean
+  canMoveDown: boolean
+  onMoveUp: () => void
+  onMoveDown: () => void
+}
+
+const JournalTextBlock = React.memo(function JournalTextBlock({
+  block, isDark, isOnlyBlock, isFirstBlock = false, forcedContent,
+  onContentChange, onFocus, onSelectionUpdate,
+  onDelete, onDuplicate, onTransferSection,
+  onMoveActivate, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
+  onPasteImage, onSplitSection, onMergeSection, onUpdateBlock, onCellResizeStart,
+  canMoveUp, canMoveDown, onMoveUp, onMoveDown,
+}: JournalTextBlockProps) {
+  const { updateDay, setToast } = useApp()
+  const [menuOpen,       setMenuOpen]       = useState(false)
+  const [showColorPick,  setShowColorPick]  = useState(false)
+  const [addingTitle,    setAddingTitle]    = useState(false)
+  const [titleValue,     setTitleValue]     = useState(block.name ?? '')
+  const [selectedCell,   setSelectedCell]   = useState<'single' | 'p0' | 'p1' | null>(null)
+  const [liveSplit,      setLiveSplit]      = useState<number | null>(null)
+  const menuRef           = useRef<HTMLDivElement>(null)
+  const titleInputRef     = useRef<HTMLInputElement>(null)
+  const dividerRef        = useRef<HTMLDivElement>(null)
+
+  // Draggable divider between the two partitions — live-visual only (liveSplit)
+  // until mouseup, when it's persisted once via onUpdateBlock (same "don't spam
+  // history per pixel" pattern startBlockResize uses for the top-level blocks).
+  function startDividerDrag(e: React.MouseEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    const row = dividerRef.current?.parentElement as HTMLElement | null
+    if (!row) return
+    const rect = row.getBoundingClientRect()
+    const clampPct = (clientX: number) => Math.max(20, Math.min(80, Math.round(((clientX - rect.left) / rect.width) * 100)))
+    const onMove = (ev: MouseEvent) => setLiveSplit(clampPct(ev.clientX))
+    const onUp = (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      const pct = clampPct(ev.clientX)
+      setLiveSplit(null)
+      onUpdateBlock?.({ partitionSplit: pct })
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
+  // ── "Send to…" (this section only) — the wizard UI itself lives entirely
+  // inside SendToOptionsModal; this component just supplies a fresh task tree
+  // each time it opens and performs the actual Task Manager write on confirm.
+  const [sendToOpen, setSendToOpen] = useState(false)
+  const [tmTaskTree, setTmTaskTree] = useState<PlannerTaskNode[]>([])
+  const [showAddTable, setShowAddTable] = useState(false)
+
+  // Unsplit section/text content — when block.sectionImage or block.partitions
+  // is set this editor's content is simply unused (see the render branch
+  // below), but the hook still runs (hook-call order must stay unconditional).
+  const editor = useProseEditor({
+    content: block.content ?? '',
+    placeholder: (block.type === 'section' && !isFirstBlock)
+      ? 'Add section content…'
+      : 'Write your plans, reflections, gratitude, journal entries, brain dumps, ideas, or mind maps here…',
+    resyncKey: block.id,
+    forcedContent,
+    onContentChange: content => onContentChange(block.id, content),
+    onFocus,
+    onSelectionUpdate,
+    onPasteImage: block.type === 'section' ? onPasteImage : undefined,
+  })
 
   useEffect(() => {
     if (!menuOpen) setShowColorPick(false)
@@ -683,11 +829,92 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
 
       {/* Editor — hidden while collapsed; collapsing never touches its content.
           Task selection for "Send to…" happens entirely inside SendToOptionsModal,
-          never in-place here — the Planner document itself is never altered for it. */}
+          never in-place here — the Planner document itself is never altered for it.
+          Three mutually-exclusive states: split (partitions), single image
+          (sectionImage), or the plain Tiptap editor — every pre-existing
+          section (neither field set) renders exactly as before. */}
       {!collapsed && (
-        <div onClick={() => editor?.commands.focus()} style={{ cursor: 'text' }}>
-          <EditorContent editor={editor} />
-        </div>
+        block.partitions ? (
+          <div style={{ display: 'flex', alignItems: 'stretch', position: 'relative' }}>
+            <div style={{ flex: `0 0 ${liveSplit ?? block.partitionSplit ?? 50}%`, minWidth: 0 }}>
+              {block.partitions[0].kind === 'image' ? (
+                <SectionImageCell
+                  blockId={block.id} which="p0" cell={block.partitions[0]}
+                  selected={selectedCell === 'p0'}
+                  onSelect={() => setSelectedCell('p0')}
+                  onResizeStart={(dir, e) => onCellResizeStart?.('p0', dir, e)}
+                />
+              ) : (
+                <SectionPartitionPane
+                  blockId={block.id} which="p0"
+                  content={block.partitions[0].content ?? ''}
+                  placeholder="Add content…"
+                  onContentChange={content => onUpdateBlock?.({
+                    partitions: [{ ...block.partitions![0], content }, block.partitions![1]],
+                  })}
+                  onFocus={onFocus}
+                  onSelectionUpdate={onSelectionUpdate}
+                />
+              )}
+            </div>
+            <div
+              ref={dividerRef}
+              onMouseDown={startDividerDrag}
+              title="Drag to resize"
+              style={{ width: 10, flexShrink: 0, cursor: 'col-resize', position: 'relative' }}
+            >
+              <div style={{
+                position: 'absolute', left: '50%', top: 4, bottom: 4, width: 2,
+                transform: 'translateX(-50%)', borderRadius: 1,
+                background: isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)',
+              }} />
+            </div>
+            <div style={{ flex: '1 1 0%', minWidth: 0 }}>
+              {block.partitions[1].kind === 'image' ? (
+                <SectionImageCell
+                  blockId={block.id} which="p1" cell={block.partitions[1]}
+                  selected={selectedCell === 'p1'}
+                  onSelect={() => setSelectedCell('p1')}
+                  onResizeStart={(dir, e) => onCellResizeStart?.('p1', dir, e)}
+                />
+              ) : (
+                <SectionPartitionPane
+                  blockId={block.id} which="p1"
+                  content={block.partitions[1].content ?? ''}
+                  placeholder="Add content…"
+                  onContentChange={content => onUpdateBlock?.({
+                    partitions: [block.partitions![0], { ...block.partitions![1], content }],
+                  })}
+                  onFocus={onFocus}
+                  onSelectionUpdate={onSelectionUpdate}
+                />
+              )}
+            </div>
+            <button
+              onClick={() => onUpdateBlock?.({ partitions: [block.partitions![1], block.partitions![0]] })}
+              title="Swap sides"
+              style={{
+                position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)',
+                width: 20, height: 20, borderRadius: 6, border: 'none', cursor: 'pointer',
+                background: isDark ? '#1e1130' : '#fff',
+                boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.5)' : '0 2px 8px rgba(0,0,0,0.18)',
+                color: isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)',
+                fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >⇄</button>
+          </div>
+        ) : block.sectionImage ? (
+          <SectionImageCell
+            blockId={block.id} which="single" cell={block.sectionImage}
+            selected={selectedCell === 'single'}
+            onSelect={() => setSelectedCell('single')}
+            onResizeStart={(dir, e) => onCellResizeStart?.('single', dir, e)}
+          />
+        ) : (
+          <div onClick={() => editor?.commands.focus()} style={{ cursor: 'text' }}>
+            <EditorContent editor={editor} />
+          </div>
+        )
       )}
 
       {/* Section timestamp — bottom-right, quiet metadata */}
@@ -788,6 +1015,15 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                     <button onClick={() => { setShowAddTable(true); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
                       ▦ Add Table
                     </button>
+                    {!block.partitions ? (
+                      <button onClick={() => { onSplitSection?.(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                        ⬓ Split Section
+                      </button>
+                    ) : (
+                      <button onClick={() => { onMergeSection?.(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                        ▭ Merge Section
+                      </button>
+                    )}
                     <button onClick={() => setShowColorPick(true)} style={menuItemStyle(isDark)}>
                       🎨 Change Color
                     </button>
@@ -1811,6 +2047,17 @@ export function JournalEditorContent({
   const [snapGuides, setSnapGuides] = useState<
     Array<{ type: 'v' | 'h'; coord: number; from: number; to: number }>
   >([])
+  // Set only while dragging an image/drawing block over a DIFFERENT section —
+  // every other block type's drag behavior (dropIdx/snapGuides above) is
+  // completely unaffected by this. Mirrored into a ref because the drag's
+  // document-level mouseup handler closes over state from drag-start time
+  // (same reason dragMoveRef exists instead of reading dragPos state there).
+  const [dropTargetSectionId, setDropTargetSectionIdState] = useState<string | null>(null)
+  const dropTargetSectionIdRef = useRef<string | null>(null)
+  function setDropTargetSectionId(id: string | null) {
+    dropTargetSectionIdRef.current = id
+    setDropTargetSectionIdState(id)
+  }
   // Ref holds drag metadata without triggering extra re-renders
   const dragMoveRef = useRef<{
     blockId: string
@@ -2370,6 +2617,171 @@ export function JournalEditorContent({
     scheduleSave()
   }
 
+  // ── Section image paste/drop + Split/Merge Section ──────────────────────────
+  // Shared by paste (Ctrl+V inside a section), upload/drop, and MMC drag-drop —
+  // one insertion path, per the "don't build separate image systems" mandate.
+
+  function loadImageNaturalSize(src: string): Promise<{ w: number; h: number }> {
+    return new Promise(resolve => {
+      const im = new Image()
+      im.onload  = () => resolve({ w: im.naturalWidth || 0, h: im.naturalHeight || 0 })
+      im.onerror = () => resolve({ w: 0, h: 0 })
+      im.src = src
+    })
+  }
+
+  // Percent-of-available-width sizing: never upscale past the image's own
+  // natural width, cap at 85% of the box so it never overwhelms the cell.
+  function computeIntelligentCellWidth(naturalW: number, _naturalH: number, availableW: number): number {
+    if (!naturalW || !availableW) return 100
+    const capped = Math.min(naturalW, availableW * 0.85)
+    return Math.max(20, Math.min(100, Math.round((capped / availableW) * 100)))
+  }
+
+  async function insertImageIntoSection(
+    blockId: string,
+    img: { src: string; name: string; canvasData?: string },
+    preferredSide?: 'left' | 'right',
+  ) {
+    const block = blocksRef.current.find(b => b.id === blockId)
+    if (!block || block.type !== 'section') return
+
+    const sectionEl = blockListRef.current?.querySelector(`[data-block-id="${blockId}"]`) as HTMLElement | null
+    const sectionW = sectionEl?.offsetWidth ?? 400
+    const { w: naturalW, h: naturalH } = await loadImageNaturalSize(img.src)
+
+    // Re-read in case the block changed while the image was loading (e.g. the
+    // user kept typing, or split/merged the section before this resolved).
+    const latest = blocksRef.current.find(b => b.id === blockId)
+    if (!latest) return
+
+    if (latest.partitions) {
+      const side = preferredSide === 'right' ? 1 : 0
+      const availableW = sectionW * ((latest.partitionSplit ?? 50) / 100)
+      const cell: SectionCell = { ...mkImageCell(img.src, img.name, img.canvasData), width: computeIntelligentCellWidth(naturalW, naturalH, availableW) }
+      const nextPartitions = [...latest.partitions] as [SectionCell, SectionCell]
+      nextPartitions[side] = cell
+      updateBlock(blockId, { partitions: nextPartitions })
+    } else if (isSectionEmpty(latest)) {
+      // Completely empty section: insert directly, never force a split.
+      updateBlock(blockId, {
+        sectionImage: { ...mkImageCell(img.src, img.name, img.canvasData), width: computeIntelligentCellWidth(naturalW, naturalH, sectionW) },
+        content: '',
+      })
+    } else {
+      // Has existing content: auto-split, exactly like manual "Split Section".
+      const existingCell = latest.sectionImage ?? mkContentCell(latest.content ?? '')
+      const newCell: SectionCell = { ...mkImageCell(img.src, img.name, img.canvasData), width: computeIntelligentCellWidth(naturalW, naturalH, sectionW / 2) }
+      const partitions: [SectionCell, SectionCell] = preferredSide === 'left' ? [newCell, existingCell] : [existingCell, newCell]
+      updateBlock(blockId, { partitions, partitionSplit: 50, content: '', sectionImage: undefined })
+    }
+  }
+
+  async function handlePasteImageIntoSection(blockId: string, file: File) {
+    const att = await buildAttachment(file, 'upload')
+    await insertImageIntoSection(blockId, { src: att.url, name: att.name })
+  }
+
+  function handleSplitSection(blockId: string) {
+    const block = blocksRef.current.find(b => b.id === blockId)
+    if (!block || block.partitions) return
+    const currentCell: SectionCell = block.sectionImage ?? mkContentCell(block.content ?? '')
+    updateBlock(blockId, {
+      partitions: [currentCell, mkContentCell('')],
+      partitionSplit: 50,
+      content: '',
+      sectionImage: undefined,
+    })
+  }
+
+  // Never deletes content: text sides concatenate, image sides get ejected as
+  // new adjacent top-level blocks (reusing createImageBlock/createDrawingBlock)
+  // rather than being discarded.
+  function handleMergeSection(blockId: string) {
+    const idx = blocksRef.current.findIndex(b => b.id === blockId)
+    const block = blocksRef.current[idx]
+    if (!block || !block.partitions) return
+    const [a, b] = block.partitions
+    const eject = (cell: SectionCell) => cell.canvasData
+      ? createDrawingBlock(cell.src ?? '', cell.name ?? 'Image', cell.canvasData)
+      : createImageBlock(cell.src ?? '', cell.name ?? 'Image')
+
+    let mergedContent = ''
+    const toInsert: JournalBlock[] = []
+    if (a.kind === 'content' && b.kind === 'content') {
+      mergedContent = mergeTiptapContents(a.content ?? '', b.content ?? '')
+    } else if (a.kind === 'content') {
+      mergedContent = a.content ?? ''
+      toInsert.push(eject(b))
+    } else if (b.kind === 'content') {
+      mergedContent = b.content ?? ''
+      toInsert.push(eject(a))
+    } else {
+      toInsert.push(eject(a), eject(b))
+    }
+
+    const merged: JournalBlock = {
+      ...block, content: mergedContent, partitions: undefined, partitionSplit: undefined, sectionImage: undefined, updatedAt: Date.now(),
+    }
+    const next = [...blocksRef.current]
+    next[idx] = merged
+    if (toInsert.length > 0) next.splice(idx + 1, 0, ...toInsert)
+    blocksRef.current = next
+    setBlocks(next)
+    onContentChange(buildDocStr())
+    scheduleSave()
+    pushHistory(true)
+  }
+
+  // Cell-level resize — a direct copy of startBlockResize's percent-width math,
+  // scoped to one cell's own box (data-cell-id) instead of the whole grid block.
+  function startCellResize(blockId: string, which: 'single' | 'p0' | 'p1', dir: ResizeDir, e: React.MouseEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    const cellEl = blockListRef.current?.querySelector(`[data-cell-id="${blockId}:${which}"]`) as HTMLElement | null
+    if (!cellEl) return
+    const containerW = cellEl.offsetWidth
+    const block = blocksRef.current.find(b => b.id === blockId)
+    if (!block) return
+    const getCell = (b: JournalBlock): SectionCell | undefined =>
+      which === 'single' ? b.sectionImage : (which === 'p0' ? b.partitions?.[0] : b.partitions?.[1])
+    const cell = getCell(block)
+    if (!cell) return
+
+    const startWidthPct = cell.width ?? 100
+    const startX = e.clientX
+    const isW = dir === 'w' || dir === 'nw' || dir === 'sw'
+    const isHoriz = dir !== 'n' && dir !== 's'
+    const MIN_W = 10
+    const MAX_W = 100
+
+    const onMove = (ev: MouseEvent) => {
+      if (!isHoriz) return
+      const dx = ev.clientX - startX
+      const w = Math.max(MIN_W, Math.min(MAX_W, Math.round(startWidthPct + (isW ? -1 : 1) * (dx / containerW) * 100)))
+      const next = blocksRef.current.map(b => {
+        if (b.id !== blockId) return b
+        if (which === 'single') return { ...b, sectionImage: b.sectionImage ? { ...b.sectionImage, width: w } : b.sectionImage }
+        if (!b.partitions) return b
+        const parts = [...b.partitions] as [SectionCell, SectionCell]
+        const pIdx = which === 'p0' ? 0 : 1
+        parts[pIdx] = { ...parts[pIdx], width: w }
+        return { ...b, partitions: parts }
+      })
+      blocksRef.current = next
+      setBlocks(next)
+    }
+    const onUp = () => {
+      onContentChange(buildDocStr())
+      scheduleSave()
+      pushHistory(true)
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
+
   // ── Drag-to-reorder: activated by ✥ Move in the ⋮ menu ─────────────────────
 
   // Compute which array index the block should be inserted at given mouse position.
@@ -2450,6 +2862,9 @@ export function JournalEditorContent({
     const blockEl   = container?.querySelector(`[data-block-id="${blockId}"]`) as HTMLElement | null
     if (!blockEl) return
 
+    const draggedBlock = blocksRef.current.find(b => b.id === blockId)
+    const isMediaDrag = draggedBlock?.type === 'image' || draggedBlock?.type === 'drawing'
+
     const rect = blockEl.getBoundingClientRect()
     dragMoveRef.current = {
       blockId,
@@ -2465,23 +2880,66 @@ export function JournalEditorContent({
       const dm = dragMoveRef.current
       if (!dm) return
       setDragPos({ x: ev.clientX, y: ev.clientY })
-      setDropIdx(computeDropIdx(blockId, ev.clientX, ev.clientY))
-      setSnapGuides(computeAlignGuides(
-        blockId,
-        ev.clientX - dm.offsetX,
-        ev.clientY - dm.offsetY,
-        dm.blockW,
-        dm.blockH,
-      ))
+
+      // Image/drawing blocks may additionally target a different section to
+      // drop INTO (auto-splitting it) — every other block type keeps the
+      // reorder-only ghost-slot behavior below, untouched.
+      let overSection: string | null = null
+      if (isMediaDrag) {
+        const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-block-id]') as HTMLElement | null
+        const targetId = el?.getAttribute('data-block-id')
+        if (targetId && targetId !== blockId) {
+          const targetBlock = blocksRef.current.find(b => b.id === targetId)
+          if (targetBlock?.type === 'section') overSection = targetId
+        }
+      }
+      setDropTargetSectionId(overSection)
+
+      if (overSection) {
+        // A section drop-target is active — suppress the normal ghost slot so
+        // the two affordances never show at once.
+        setSnapGuides([])
+      } else {
+        setDropIdx(computeDropIdx(blockId, ev.clientX, ev.clientY))
+        setSnapGuides(computeAlignGuides(
+          blockId,
+          ev.clientX - dm.offsetX,
+          ev.clientY - dm.offsetY,
+          dm.blockW,
+          dm.blockH,
+        ))
+      }
     }
     function onUp(ev: MouseEvent) {
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup',   onUp)
-      const finalIdx = computeDropIdx(blockId, ev.clientX, ev.clientY)
-      doMoveBlockToIdx(blockId, finalIdx)
+
+      if (isMediaDrag && dropTargetSectionIdRef.current) {
+        const targetId = dropTargetSectionIdRef.current
+        const targetBlock = blocksRef.current.find(b => b.id === targetId)
+        const dragged = blocksRef.current.find(b => b.id === blockId)
+        if (targetBlock && dragged && dragged.src) {
+          let side: 'left' | 'right' | undefined
+          if (targetBlock.partitions) {
+            const targetRect = (document.querySelector(`[data-block-id="${targetId}"]`) as HTMLElement | null)?.getBoundingClientRect()
+            side = targetRect && ev.clientX < targetRect.left + targetRect.width / 2 ? 'left' : 'right'
+          }
+          insertImageIntoSection(targetId, { src: dragged.src, name: dragged.name ?? 'Image', canvasData: dragged.canvasData }, side)
+          const next = blocksRef.current.filter(b => b.id !== blockId)
+          blocksRef.current = next
+          setBlocks(next)
+          onContentChange(buildDocStr())
+          scheduleSave()
+        }
+      } else {
+        const finalIdx = computeDropIdx(blockId, ev.clientX, ev.clientY)
+        doMoveBlockToIdx(blockId, finalIdx)
+      }
+
       dragMoveRef.current = null
       setDragPos(null)
       setSnapGuides([])
+      setDropTargetSectionId(null)
       setMoveModeId(null)
     }
     document.addEventListener('mousemove', onMove)
@@ -3499,7 +3957,10 @@ export function JournalEditorContent({
                         className={isSelectable ? 'xp-j-blk' : ''}
                         style={{
                           position: 'relative',
-                          outline: isSelected && isSelectable ? '1.5px solid rgba(124,58,237,0.55)' : '1.5px solid transparent',
+                          outline: dropTargetSectionId === block.id
+                            ? '1.5px solid rgba(124,58,237,0.85)'
+                            : (isSelected && isSelectable ? '1.5px solid rgba(124,58,237,0.55)' : '1.5px solid transparent'),
+                          boxShadow: dropTargetSectionId === block.id ? 'inset 0 0 0 3px rgba(124,58,237,0.20)' : undefined,
                           borderRadius: 10, transition: 'outline 120ms',
                         }}
                       >
@@ -3532,6 +3993,21 @@ export function JournalEditorContent({
                               : undefined}
                             onCollapseToggle={block.type === 'section'
                               ? () => updateBlock(block.id, { collapsed: !block.collapsed })
+                              : undefined}
+                            onPasteImage={block.type === 'section'
+                              ? (file) => handlePasteImageIntoSection(block.id, file)
+                              : undefined}
+                            onSplitSection={block.type === 'section'
+                              ? () => handleSplitSection(block.id)
+                              : undefined}
+                            onMergeSection={block.type === 'section'
+                              ? () => handleMergeSection(block.id)
+                              : undefined}
+                            onUpdateBlock={block.type === 'section'
+                              ? (updates) => updateBlock(block.id, updates)
+                              : undefined}
+                            onCellResizeStart={block.type === 'section'
+                              ? (which, dir, e) => startCellResize(block.id, which, dir, e)
                               : undefined}
                             canMoveUp={idx > 0}
                             canMoveDown={idx < blocks.length - 1}

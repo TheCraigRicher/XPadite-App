@@ -81,6 +81,19 @@ export type RepeatFrequency = 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly'
 
 // ─── Journal block system ─────────────────────────────────────────────────────
 
+// A section's single content area, OR one half of a split section. Mirrors
+// the same "text or image" duality every top-level JournalBlock already has,
+// just scoped down to live inside a section instead of the block grid.
+export interface SectionCell {
+  kind: 'content' | 'image'
+  content?: string      // Tiptap JSON, kind==='content'
+  src?: string          // data URL, kind==='image'
+  thumbnail?: string
+  name?: string
+  canvasData?: string   // present if this image came from an MMC drawing — keeps "Edit Mind Map" available
+  width?: number        // intelligent-sized display width, percent of the cell's own box; user-resizable after insert
+}
+
 export interface JournalBlock {
   id: string
   type: 'text' | 'section' | 'image' | 'drawing'
@@ -99,6 +112,19 @@ export interface JournalBlock {
   // before this field existed; the canvas falls back to its old flat-image
   // behavior for those rather than breaking on missing data.
   canvasData?: string
+  // Section only, both optional and mutually set by "insert image"/"Split
+  // Section"/"Merge Section": an unsplit section normally uses `content`
+  // above exactly as before. `sectionImage` replaces that with a single
+  // image (set only by pasting/dropping into a completely EMPTY section —
+  // never forces a split). `partitions` splits the section into two
+  // side-by-side cells (manual "Split Section", or auto-split when an image
+  // lands in a section that already has content) with `partitionSplit`
+  // (0–100, left cell's width %, default 50) controlling the divider.
+  // Absent on every section created before this feature — renders identically
+  // to today with no migration needed.
+  sectionImage?: SectionCell
+  partitions?: [SectionCell, SectionCell]
+  partitionSplit?: number
   createdAt: number
   updatedAt: number
 }

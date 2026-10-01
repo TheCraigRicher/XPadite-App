@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useEditor, EditorContent } from '@tiptap/react'
 import type { Editor } from '@tiptap/react'
 import { Mark, mergeAttributes } from '@tiptap/core'
@@ -1723,6 +1724,15 @@ export function JournalEditorContent({
     insertAt: number
     editingBlock: JournalBlock | null
   } | null>(null)
+  // Mind Mapping Canvas immersive "Fit" mode — owned here (not inside
+  // JournalDrawModal) because only the PARENT can portal {header + canvas}
+  // to document.body, which is the only way to escape this Journal modal's
+  // own z-index stacking context and actually render above the main mobile
+  // bottom nav (a z-index set from inside that stacking context never can,
+  // regardless of value — see the portal render below). Reset directly at
+  // every place MMC closes (not via a setState-in-effect watching drawState)
+  // so a later reopen never starts back in a stale "Restore" state.
+  const [mmcFit, setMmcFit] = useState(false)
 
   // ── Floating formatter state ─────────────────────────────────────────────────
   const [selectionRect, setSelectionRect] = useState<DOMRect | null>(null)
@@ -1928,6 +1938,7 @@ export function JournalEditorContent({
     plannerTmSessionIdRef.current = null
     setShowSessions(false)
     setDrawState(null)
+    setMmcFit(false)
     setSelectedBlockId(null)
     setShowEmoji(false)
     setSaveStatus('idle')
@@ -2927,8 +2938,177 @@ export function JournalEditorContent({
   // Utility buttons: subdued navy/lavender treatment (List, Upload, Camera, Draw)
   // ─────────────────────────────────────────────────────────────────────────
 
+  // Extracted so the SAME header renders both in the normal embedded layout
+  // and inside the Fit-mode portal below (see mmcFit) without duplicating it.
+  const headerEl = (
+    <div
+      className="xp-j-hdr"
+      style={{ flexShrink: 0, borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}
+    >
+      {/* Mobile-only Mind Mapping Canvas header — swaps in for the normal date-nav
+          header while the canvas is open on mobile; desktop/tablet always keep the
+          normal header below untouched (this block is display:none there). */}
+      {drawState && (
+        <div className="xp-j-draw-mobile-hdr" style={{
+          display: 'none', position: 'relative', alignItems: 'center',
+          height: 52, padding: '0 14px',
+        }}>
+          <button
+            onClick={() => { setDrawState(null); setMmcFit(false) }}
+            title="Back"
+            aria-label="Back"
+            style={{
+              position: 'relative', zIndex: 1, width: 40, height: 40, flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'transparent', border: 'none',
+              color: '#fff', cursor: 'pointer', padding: 0, fontSize: 24,
+              transition: 'opacity 120ms, transform 80ms',
+            }}
+            onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.88)' }}
+            onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
+          >‹</button>
+          <span style={{
+            position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
+            textAlign: 'center', pointerEvents: 'none',
+            color: '#fff', fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap',
+          }}>🧠 Mind Mapping Canvas</span>
+        </div>
+      )}
+
+      <div className={drawState ? 'xp-j-hdr-normal' : undefined} style={{
+        position: 'relative', display: 'flex', alignItems: 'center',
+        height: 52, padding: '0 14px', gap: 6,
+      }}>
+        {/* Left: back — mobile only (bottom nav handles close on mobile; hidden on desktop/tablet) */}
+        <button
+          onClick={() => guardedNavigate(onBack)}
+          className="hidden"
+          style={{
+            padding: '5px 10px', borderRadius: 8, border: '0.5px solid rgba(255,255,255,0.16)',
+            background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.78)',
+            fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
+          }}
+        >← Calendar</button>
+
+        {/*
+         * Center group: the date is independently centered on the header,
+         * and each triangle is pinned at a FIXED distance (132px) from that
+         * same center point — never from the date's own rendered width.
+         * Changing weekday/month/day/year length never moves a triangle.
+         */}
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, pointerEvents: 'none' }}>
+          <span style={{
+            position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
+            textAlign: 'center',
+            color: '#fff', fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap',
+          }}>
+            {fmtEditorDate(dateKey)}
+          </span>
+          <button
+            onClick={() => guardedNavigate(() => onNavigateDay(-1))}
+            title="Previous day"
+            style={{
+              position: 'absolute', left: 'calc(50% - 132px)', top: '50%', transform: 'translateY(-50%)',
+              width: 32, height: 32, flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'transparent', border: 'none',
+              color: '#fff', cursor: 'pointer', padding: 0, pointerEvents: 'auto',
+              transition: 'opacity 120ms, transform 80ms',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.7' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
+            onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-50%) scale(0.88)' }}
+            onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-50%) scale(1)' }}
+          >
+            <svg width="9" height="12" viewBox="0 0 9 12" fill="#fff" aria-hidden="true">
+              <path d="M9 0 L0 6 L9 12 Z" />
+            </svg>
+          </button>
+          <button
+            onClick={() => guardedNavigate(() => onNavigateDay(1))}
+            title="Next day"
+            style={{
+              position: 'absolute', right: 'calc(50% - 132px)', top: '50%', transform: 'translateY(-50%)',
+              width: 32, height: 32, flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'transparent', border: 'none',
+              color: '#fff', cursor: 'pointer', padding: 0, pointerEvents: 'auto',
+              transition: 'opacity 120ms, transform 80ms',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.7' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
+            onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-50%) scale(0.88)' }}
+            onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-50%) scale(1)' }}
+          >
+            <svg width="9" height="12" viewBox="0 0 9 12" fill="#fff" aria-hidden="true">
+              <path d="M0 0 L9 6 L0 12 Z" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Right: today + close */}
+        <div style={{ flex: 1 }} />
+        {!isEditorOnToday && (
+          <button
+            onClick={() => guardedNavigate(onNavigateToday)}
+            title="Go to today"
+            style={{
+              padding: '3px 8px', borderRadius: 20, border: '0.5px solid rgba(255,255,255,0.22)',
+              background: 'transparent', color: 'rgba(255,255,255,0.60)',
+              fontSize: 11, cursor: 'pointer', flexShrink: 0,
+            }}
+          >Today</button>
+        )}
+        {/* Close — hidden on mobile (bottom nav handles close) and removed
+            entirely while the Mind Mapping Canvas is open on any device: its
+            own mobile Back / desktop-tablet Cancel already handle exiting,
+            so × Close there was a redundant second exit control. */}
+        {!drawState && (
+          <button
+            onClick={() => guardedNavigate(onClose)}
+            className="hidden sm:block"
+            style={{
+              padding: '5px 10px', borderRadius: 8,
+              border: '0.5px solid rgba(239,68,68,0.28)',
+              background: 'rgba(239,68,68,0.15)', color: '#fca5a5',
+              fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
+            }}
+          >× Close</button>
+        )}
+      </div>
+    </div>
+  )
+
+  const journalDrawModalEl = drawState && (
+    <JournalDrawModal
+      isDark={isDark}
+      initialSrc={drawState.editingBlock?.src}
+      initialObjects={drawState.editingBlock?.canvasData}
+      onSave={handleDrawSave}
+      onClose={() => { setDrawState(null); setMmcFit(false) }}
+      fitScreen={mmcFit}
+      onToggleFitScreen={() => setMmcFit(f => !f)}
+    />
+  )
+
   return (
     <>
+      {/* Fit mode: portal {header + canvas} to document.body so they escape this
+          Journal modal's own z-index stacking context entirely — that's the
+          only way to visually sit above the main mobile bottom nav (z-index:50),
+          since no z-index set from WITHIN that stacking context ever could. */}
+      {mmcFit && drawState && createPortal(
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          display: 'flex', flexDirection: 'column',
+          background: isDark ? '#10071e' : '#ffffff',
+        }}>
+          {headerEl}
+          {journalDrawModalEl}
+        </div>,
+        document.body
+      )}
+
       {/* ── CSS ─────────────────────────────────────────────────────────── */}
       <style>{`
         @keyframes xpJHdrFlow {
@@ -3210,154 +3390,13 @@ export function JournalEditorContent({
         }
       `}</style>
 
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div
-        className="xp-j-hdr"
-        style={{ flexShrink: 0, borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}
-      >
-        {/* Mobile-only Mind Mapping Canvas header — swaps in for the normal date-nav
-            header while the canvas is open on mobile; desktop/tablet always keep the
-            normal header below untouched (this block is display:none there). */}
-        {drawState && (
-          <div className="xp-j-draw-mobile-hdr" style={{
-            display: 'none', position: 'relative', alignItems: 'center',
-            height: 52, padding: '0 14px',
-          }}>
-            <button
-              onClick={() => setDrawState(null)}
-              title="Back"
-              aria-label="Back"
-              style={{
-                position: 'relative', zIndex: 1, width: 40, height: 40, flexShrink: 0,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'transparent', border: 'none',
-                color: '#fff', cursor: 'pointer', padding: 0, fontSize: 24,
-                transition: 'opacity 120ms, transform 80ms',
-              }}
-              onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.88)' }}
-              onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
-            >‹</button>
-            <span style={{
-              position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
-              textAlign: 'center', pointerEvents: 'none',
-              color: '#fff', fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap',
-            }}>🧠 Mind Mapping Canvas</span>
-          </div>
-        )}
-
-        <div className={drawState ? 'xp-j-hdr-normal' : undefined} style={{
-          position: 'relative', display: 'flex', alignItems: 'center',
-          height: 52, padding: '0 14px', gap: 6,
-        }}>
-          {/* Left: back — mobile only (bottom nav handles close on mobile; hidden on desktop/tablet) */}
-          <button
-            onClick={() => guardedNavigate(onBack)}
-            className="hidden"
-            style={{
-              padding: '5px 10px', borderRadius: 8, border: '0.5px solid rgba(255,255,255,0.16)',
-              background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.78)',
-              fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
-            }}
-          >← Calendar</button>
-
-          {/*
-           * Center group: the date is independently centered on the header,
-           * and each triangle is pinned at a FIXED distance (132px) from that
-           * same center point — never from the date's own rendered width.
-           * Changing weekday/month/day/year length never moves a triangle.
-           */}
-          <div style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, pointerEvents: 'none' }}>
-            <span style={{
-              position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
-              textAlign: 'center',
-              color: '#fff', fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap',
-            }}>
-              {fmtEditorDate(dateKey)}
-            </span>
-            <button
-              onClick={() => guardedNavigate(() => onNavigateDay(-1))}
-              title="Previous day"
-              style={{
-                position: 'absolute', left: 'calc(50% - 132px)', top: '50%', transform: 'translateY(-50%)',
-                width: 32, height: 32, flexShrink: 0,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'transparent', border: 'none',
-                color: '#fff', cursor: 'pointer', padding: 0, pointerEvents: 'auto',
-                transition: 'opacity 120ms, transform 80ms',
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.7' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
-              onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-50%) scale(0.88)' }}
-              onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-50%) scale(1)' }}
-            >
-              <svg width="9" height="12" viewBox="0 0 9 12" fill="#fff" aria-hidden="true">
-                <path d="M9 0 L0 6 L9 12 Z" />
-              </svg>
-            </button>
-            <button
-              onClick={() => guardedNavigate(() => onNavigateDay(1))}
-              title="Next day"
-              style={{
-                position: 'absolute', right: 'calc(50% - 132px)', top: '50%', transform: 'translateY(-50%)',
-                width: 32, height: 32, flexShrink: 0,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'transparent', border: 'none',
-                color: '#fff', cursor: 'pointer', padding: 0, pointerEvents: 'auto',
-                transition: 'opacity 120ms, transform 80ms',
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.7' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
-              onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-50%) scale(0.88)' }}
-              onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-50%) scale(1)' }}
-            >
-              <svg width="9" height="12" viewBox="0 0 9 12" fill="#fff" aria-hidden="true">
-                <path d="M0 0 L9 6 L0 12 Z" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Right: today + close */}
-          <div style={{ flex: 1 }} />
-          {!isEditorOnToday && (
-            <button
-              onClick={() => guardedNavigate(onNavigateToday)}
-              title="Go to today"
-              style={{
-                padding: '3px 8px', borderRadius: 20, border: '0.5px solid rgba(255,255,255,0.22)',
-                background: 'transparent', color: 'rgba(255,255,255,0.60)',
-                fontSize: 11, cursor: 'pointer', flexShrink: 0,
-              }}
-            >Today</button>
-          )}
-          {/* Close — hidden on mobile (bottom nav handles close) and removed
-              entirely while the Mind Mapping Canvas is open on any device: its
-              own mobile Back / desktop-tablet Cancel already handle exiting,
-              so × Close there was a redundant second exit control. */}
-          {!drawState && (
-            <button
-              onClick={() => guardedNavigate(onClose)}
-              className="hidden sm:block"
-              style={{
-                padding: '5px 10px', borderRadius: 8,
-                border: '0.5px solid rgba(239,68,68,0.28)',
-                background: 'rgba(239,68,68,0.15)', color: '#fca5a5',
-                fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
-              }}
-            >× Close</button>
-          )}
-        </div>
-      </div>
+      {/* Normal embedded layout — suppressed while the Fit-mode portal above
+          owns the (identical) header + canvas instead, so JournalDrawModal is
+          never mounted twice at once. */}
+      {!mmcFit && headerEl}
 
       {/* ── Content area or Draw canvas ─────────────────────────────────────── */}
-      {drawState ? (
-        <JournalDrawModal
-          isDark={isDark}
-          initialSrc={drawState.editingBlock?.src}
-          initialObjects={drawState.editingBlock?.canvasData}
-          onSave={handleDrawSave}
-          onClose={() => setDrawState(null)}
-        />
-      ) : (
+      {!mmcFit && (drawState ? journalDrawModalEl : (
         <>
           {/* Block list — masonry grid layout */}
           <div
@@ -4101,7 +4140,7 @@ export function JournalEditorContent({
             <FloatingFormatter editor={focusedEditor.current} rect={selectionRect} />
           )}
         </>
-      )}
+      ))}
 
       {/* ── Modals ─────────────────────────────────────────────────────────── */}
       {cameraInsertAt !== null && (

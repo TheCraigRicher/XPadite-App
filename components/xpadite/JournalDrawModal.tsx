@@ -110,6 +110,16 @@ interface JournalDrawModalProps {
   // (drawings saved before this field existed, or any parse failure).
   initialObjects?: string
   onSave: (dataUrl: string, objectsJson: string) => void; onClose: () => void
+  // Full-screen immersive mode is a VIEW-ONLY concern owned by the PARENT
+  // (JournalEditorContent), not this component: the parent portals {its own
+  // header + this component} to document.body when fitScreen is true, which
+  // is the only way to visually escape the Journal modal's own z-index
+  // stacking context (and therefore render above the main mobile bottom nav —
+  // a z-index set from inside that stacking context can never do that, no
+  // matter how high). This component only reflects fitScreen in its Fit/
+  // Restore button and asks the parent to toggle it; it never sizes/positions
+  // itself differently based on it — the parent's portal wrapper does that.
+  fitScreen: boolean; onToggleFitScreen: () => void
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -866,7 +876,7 @@ const ElbowArrowIcon = ({ curved = false, size = 15 }: { curved?: boolean; size?
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects, onSave, onClose }: JournalDrawModalProps) {
+export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects, onSave, onClose, fitScreen, onToggleFitScreen }: JournalDrawModalProps) {
   // The toolbar always uses a subtle light-gray chrome regardless of app theme
   // (per XPadite spec — the toolbar must never go dark/heavy), so every
   // existing `isDark`-branched style below the toolbar now resolves to its
@@ -899,7 +909,6 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const [drawColor,   setDrawColor]   = useState('#1a1a1a')
   const [fillColor,   setFillColor]   = useState('#7c3aed')
   const [filled,      setFilled]      = useState(false)
-  const [fitToScreen, setFitToScreen] = useState(false)
   const [canUndo,     setCanUndo]     = useState(false)
   const [canRedo,     setCanRedo]     = useState(false)
   const [objects,     setObjects]     = useState<DrawObj[]>([])
@@ -1974,35 +1983,14 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const dvdr = <span style={{width:1,height:18,background:dockBdr,flexShrink:0,alignSelf:'center'}} />
 
   // ── Toolbar ─────────────────────────────────────────────────────────────────
-  const toolbar = (
+  // ── TOP toolbar: creation/structure tools ───────────────────────────────────
+  // Select/Rotate/Color/Fill/Flip/Delete/Undo/Redo now live in the bottom
+  // toolbar instead (see bottomToolbar below) — not duplicated here.
+  const topToolbar = (
     <div style={{display:'flex',alignItems:'stretch',background:dockBg,borderBottom:`0.5px solid ${dockBdr}`,boxShadow:isDark?'0 2px 12px rgba(0,0,0,0.40)':'0 1px 6px rgba(0,0,0,0.08)',flexShrink:0}}>
 
       {/* ── Scrollable tools ─────────────────────────────────────────────── */}
-      {/* The workspace title already lives in the purple header above — this
-          bar starts straight at Select, reclaiming the width the duplicate
-          label used to take. */}
       <div style={{display:'flex',alignItems:'center',gap:4,padding:'9px 10px 9px 14px',flex:1,minWidth:0,overflowX:'auto',flexWrap:'nowrap'}}>
-
-        {/* Select */}
-        <button title="Select (click / drag)" onClick={()=>{if(textInput)commitText();setTool('select')}} style={{...dkBtn(tool==='select'),minWidth:28,textAlign:'center',padding:'4px 8px',fontSize:13}}>↖</button>
-
-        {/* Rotate — quick ±90°, works on the current selection */}
-        <div style={{flexShrink:0}} data-pop-trigger="">
-          <button title="Rotate" disabled={!selHasRotatable} onClick={(e)=>{if(!selHasRotatable)return;openPop('rotate',e)}}
-            style={{...dkBtn(false,false,!selHasRotatable),display:'flex',alignItems:'center',padding:'4px 8px',fontSize:13}}>↻</button>
-          {openPopover==='rotate' && (
-            <div data-popover="" style={fixedPopStyle({flexDirection:'row',gap:4,minWidth:'auto',padding:'6px 8px'})}>
-              <button title="Rotate 90° left" onClick={()=>rotateSelectedBy(-Math.PI/2)}
-                style={{width:30,height:28,borderRadius:7,padding:0,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,
-                  border:'0.5px solid rgba(0,0,0,0.15)',background:'rgba(0,0,0,0.04)',fontSize:14}}>↺</button>
-              <button title="Rotate 90° right" onClick={()=>rotateSelectedBy(Math.PI/2)}
-                style={{width:30,height:28,borderRadius:7,padding:0,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,
-                  border:'0.5px solid rgba(0,0,0,0.15)',background:'rgba(0,0,0,0.04)',fontSize:14}}>↻</button>
-            </div>
-          )}
-        </div>
-
-        {dvdr}
 
         {/* Pen + size popover */}
         <div style={{flexShrink:0}} data-pop-trigger="">
@@ -2199,6 +2187,87 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           ⇄ Switch
         </button>
 
+        {/* Connector type — always visible; disabled unless a single arrow is selected */}
+        {dvdr}
+        <button disabled={!selArrow} onClick={()=>setConnType('straight')} style={dkBtn(selArrow?.connType==='straight',false,!selArrow)} title="Straight arrow">⟶</button>
+        <button disabled={!selArrow} onClick={()=>setConnType('curved')}   style={dkBtn(selArrow?.connType==='curved',false,!selArrow)}   title="Curved arrow">⌒</button>
+        <button disabled={!selArrow} onClick={()=>setConnType('elbow')}    style={{...dkBtn(selArrow?.connType==='elbow',false,!selArrow),display:'flex',alignItems:'center',padding:'4px 8px'}} title="Sharp 90° Arrow">
+          <ElbowArrowIcon curved={false} size={13}/>
+        </button>
+        <button disabled={!selArrow} onClick={()=>setConnType('elbow-curved')} style={{...dkBtn(selArrow?.connType==='elbow-curved',false,!selArrow),display:'flex',alignItems:'center',padding:'4px 8px'}} title="Curved Arrow">
+          <ElbowArrowIcon curved={true} size={13}/>
+        </button>
+
+        <span style={{flex:1,minWidth:8}}/>
+
+        {/* Group ▾ (Group/Ungroup) / Dup — always visible; each disables
+            itself when the current selection doesn't support it. Delete
+            moved to the bottom toolbar (see bottomToolbar below). */}
+        {dvdr}
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Group" disabled={selIds.length===0} onClick={(e)=>{if(selIds.length===0)return;if(textInput)commitText();openPop('group',e)}}
+            style={{...dkBtn(selIsGroup,false,selIds.length===0),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>
+            ⛓ Group▾
+          </button>
+          {openPopover==='group' && selIds.length>0 && (
+            <div data-popover="" style={fixedPopStyle()}>
+              <button onClick={()=>{ if(canGroup){groupSelected(); setOpenPopover(null)} }} disabled={!canGroup}
+                style={{...dkBtn(false,false,!canGroup),textAlign:'left',width:'100%',padding:'5px 10px'}}>Group</button>
+              <button onClick={()=>{ if(selIsGroup){ungroupSelected(); setOpenPopover(null)} }} disabled={!selIsGroup}
+                style={{...dkBtn(false,false,!selIsGroup),textAlign:'left',width:'100%',padding:'5px 10px'}}>Ungroup</button>
+            </div>
+          )}
+        </div>
+        <button disabled={selIds.length===0} onClick={duplicateSelected} style={dkBtn(false,false,selIds.length===0)}>Dup</button>
+
+        {dvdr}
+
+        {/* Clear — Undo/Redo moved to the bottom toolbar (see bottomToolbar below) */}
+        <button style={dkBtn()} onClick={clearAll} title="Clear canvas">Clear</button>
+
+        {dvdr}
+
+        {/* Fit / Restore — two clearly distinct icon states communicating the
+            action that will happen next. Immersive full-screen sizing itself
+            is owned entirely by the parent (see JournalDrawModalProps.fitScreen). */}
+        <button onClick={onToggleFitScreen} title={fitScreen?'Restore View':'Fit to Screen'} aria-label={fitScreen?'Restore View':'Fit to Screen'}
+          style={{...dkBtn(fitScreen),display:'flex',alignItems:'center',gap:5,padding:'4px 8px'}}>
+          {fitScreen ? <RestoreIcon/> : <FitIcon/>}
+          {fitScreen?'Restore':'Fit'}
+        </button>
+      </div>
+    </div>
+  )
+
+  // ── BOTTOM toolbar: frequently used manipulation tools ──────────────────────
+  // Selection/Pointer → Rotation → Color → Fill → Flip → Delete → Undo → Redo,
+  // kept immediately accessible on every device without horizontal-scrolling
+  // the top toolbar. Cancel/Save stay pinned alongside it, same pattern as the
+  // top toolbar previously used.
+  const bottomToolbar = (
+    <div style={{display:'flex',alignItems:'stretch',background:dockBg,borderTop:`0.5px solid ${dockBdr}`,boxShadow:isDark?'0 -2px 12px rgba(0,0,0,0.40)':'0 -1px 6px rgba(0,0,0,0.08)',flexShrink:0}}>
+
+      <div style={{display:'flex',alignItems:'center',gap:4,padding:'9px 10px 9px 14px',flex:1,minWidth:0,overflowX:'auto',flexWrap:'nowrap'}}>
+
+        {/* Select */}
+        <button title="Select (click / drag)" onClick={()=>{if(textInput)commitText();setTool('select')}} style={{...dkBtn(tool==='select'),minWidth:28,textAlign:'center',padding:'4px 8px',fontSize:13}}>↖</button>
+
+        {/* Rotate — quick ±90°, works on the current selection */}
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Rotate" disabled={!selHasRotatable} onClick={(e)=>{if(!selHasRotatable)return;openPop('rotate',e)}}
+            style={{...dkBtn(false,false,!selHasRotatable),display:'flex',alignItems:'center',padding:'4px 8px',fontSize:13}}>↻</button>
+          {openPopover==='rotate' && (
+            <div data-popover="" style={fixedPopStyle({flexDirection:'row',gap:4,minWidth:'auto',padding:'6px 8px'})}>
+              <button title="Rotate 90° left" onClick={()=>rotateSelectedBy(-Math.PI/2)}
+                style={{width:30,height:28,borderRadius:7,padding:0,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,
+                  border:'0.5px solid rgba(0,0,0,0.15)',background:'rgba(0,0,0,0.04)',fontSize:14}}>↺</button>
+              <button title="Rotate 90° right" onClick={()=>rotateSelectedBy(Math.PI/2)}
+                style={{width:30,height:28,borderRadius:7,padding:0,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,
+                  border:'0.5px solid rgba(0,0,0,0.15)',background:'rgba(0,0,0,0.04)',fontSize:14}}>↻</button>
+            </div>
+          )}
+        </div>
+
         {dvdr}
 
         {/* Stroke color */}
@@ -2210,8 +2279,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         {/* Fill color — XPadite palette popover (reuses the same preset swatches +
             rainbow custom-color trigger + ColorPickerModal used by Activity Manager),
             not the native browser picker. Stays in its normal toolbar position even
-            with nothing selected — disabled rather than removed (see also Fill toggle,
-            Flip, Connector type, Group/Dup/Delete below). */}
+            with nothing selected — disabled rather than removed. */}
         <div style={{flexShrink:0}} data-pop-trigger="">
           <button title="Fill Color" disabled={!showFill} onClick={(e)=>{if(!showFill)return;if(textInput)commitText();openPop('fill',e)}}
             style={{...dkBtn(false,false,!showFill),display:'flex',alignItems:'center',gap:5,padding:'4px 8px'}}>
@@ -2266,56 +2334,18 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           )}
         </div>
 
-        {/* Connector type — always visible; disabled unless a single arrow is selected */}
         {dvdr}
-        <button disabled={!selArrow} onClick={()=>setConnType('straight')} style={dkBtn(selArrow?.connType==='straight',false,!selArrow)} title="Straight arrow">⟶</button>
-        <button disabled={!selArrow} onClick={()=>setConnType('curved')}   style={dkBtn(selArrow?.connType==='curved',false,!selArrow)}   title="Curved arrow">⌒</button>
-        <button disabled={!selArrow} onClick={()=>setConnType('elbow')}    style={{...dkBtn(selArrow?.connType==='elbow',false,!selArrow),display:'flex',alignItems:'center',padding:'4px 8px'}} title="Sharp 90° Arrow">
-          <ElbowArrowIcon curved={false} size={13}/>
-        </button>
-        <button disabled={!selArrow} onClick={()=>setConnType('elbow-curved')} style={{...dkBtn(selArrow?.connType==='elbow-curved',false,!selArrow),display:'flex',alignItems:'center',padding:'4px 8px'}} title="Curved Arrow">
-          <ElbowArrowIcon curved={true} size={13}/>
-        </button>
 
-        <span style={{flex:1,minWidth:8}}/>
-
-        {/* Group ▾ (Group/Ungroup) / Dup / Delete — always visible; each
-            disables itself when the current selection doesn't support it. */}
-        {dvdr}
-        <div style={{flexShrink:0}} data-pop-trigger="">
-          <button title="Group" disabled={selIds.length===0} onClick={(e)=>{if(selIds.length===0)return;if(textInput)commitText();openPop('group',e)}}
-            style={{...dkBtn(selIsGroup,false,selIds.length===0),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>
-            ⛓ Group▾
-          </button>
-          {openPopover==='group' && selIds.length>0 && (
-            <div data-popover="" style={fixedPopStyle()}>
-              <button onClick={()=>{ if(canGroup){groupSelected(); setOpenPopover(null)} }} disabled={!canGroup}
-                style={{...dkBtn(false,false,!canGroup),textAlign:'left',width:'100%',padding:'5px 10px'}}>Group</button>
-              <button onClick={()=>{ if(selIsGroup){ungroupSelected(); setOpenPopover(null)} }} disabled={!selIsGroup}
-                style={{...dkBtn(false,false,!selIsGroup),textAlign:'left',width:'100%',padding:'5px 10px'}}>Ungroup</button>
-            </div>
-          )}
-        </div>
-        <button disabled={selIds.length===0} onClick={duplicateSelected} style={dkBtn(false,false,selIds.length===0)}>Dup</button>
+        {/* Delete */}
         <button title="Delete" disabled={selIds.length===0} onClick={deleteSelected} style={{...dkBtn(false,true,selIds.length===0),display:'flex',alignItems:'center',padding:'4px 8px'}}>
           <TrashIcon/>
         </button>
-        {dvdr}
-
-        {/* History */}
-        <button style={dkBtn(false,false,!canUndo)} onClick={undo}    disabled={!canUndo} title="Undo (Ctrl+Z)">↩</button>
-        <button style={dkBtn(false,false,!canRedo)} onClick={redo}    disabled={!canRedo} title="Redo (Ctrl+Y)">↪</button>
-        <button style={dkBtn()}                     onClick={clearAll} title="Clear canvas">Clear</button>
 
         {dvdr}
 
-        {/* Fit / Restore — two clearly distinct icon states communicating the
-            action that will happen next */}
-        <button onClick={()=>setFitToScreen(f=>!f)} title={fitToScreen?'Restore View':'Fit to Screen'} aria-label={fitToScreen?'Restore View':'Fit to Screen'}
-          style={{...dkBtn(fitToScreen),display:'flex',alignItems:'center',gap:5,padding:'4px 8px'}}>
-          {fitToScreen ? <RestoreIcon/> : <FitIcon/>}
-          {fitToScreen?'Restore':'Fit'}
-        </button>
+        {/* Undo / Redo */}
+        <button style={dkBtn(false,false,!canUndo)} onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">↩</button>
+        <button style={dkBtn(false,false,!canRedo)} onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)">↪</button>
       </div>
 
       {/* ── Fixed Cancel + Save ────────────────────────────────────────────── */}
@@ -2450,19 +2480,12 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   )
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  const innerContent = <>{popoverStyleTag}{toolbar}{canvasArea}{customFillPicker}</>
-
-  if (fitToScreen) {
-    return (
-      <div style={{position:'fixed',inset:0,zIndex:200,display:'flex',flexDirection:'column',background:isDarkApp?'#10071e':'#ffffff'}}>
-        {innerContent}
-      </div>
-    )
-  }
-
+  // Full-screen immersive ("Fit") mode is sized/positioned entirely by the
+  // PARENT (via a document.body portal — see JournalDrawModalProps.fitScreen);
+  // this component always renders the same embedded layout either way.
   return (
     <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minHeight:0,background:isDarkApp?'#10071e':'#ffffff'}}>
-      {innerContent}
+      {popoverStyleTag}{topToolbar}{canvasArea}{bottomToolbar}{customFillPicker}
     </div>
   )
 }

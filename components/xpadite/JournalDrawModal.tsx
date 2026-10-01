@@ -7,8 +7,8 @@ import { COLOR_PALETTE, normalizeHexColor } from './utils'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type DrawTool = 'select' | 'pen' | 'eraser' | 'text' | 'line' | 'arrow' | 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starburst' | 'capsule'
-type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starburst' | 'capsule' | 'line' | 'arrow' | 'text' | 'stroke' | 'image'
+type DrawTool = 'select' | 'pen' | 'eraser' | 'text' | 'line' | 'arrow' | 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starburst' | 'capsule' | 'hexagon'
+type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starburst' | 'capsule' | 'hexagon' | 'line' | 'arrow' | 'text' | 'stroke' | 'image'
 // 'elbow' = sharp 90° two-segment connector; 'elbow-curved' = the same two-segment
 // route with a smoothly rounded corner. Both are distinct from the older 'curved'
 // (a single free-form quadratic bezier from start to end, unrelated to the elbow tool).
@@ -30,7 +30,7 @@ interface Pt { x: number; y: number }
 // rect/rect-r/capsule have the full Title+Note area. Both wrap/auto-grow the
 // shape — see wrapTextLines/computeRequiredHeight.
 const TITLE_NOTE_TYPES: ObjType[] = ['rect', 'rect-r', 'capsule']
-const TITLE_ONLY_TYPES: ObjType[] = ['circle', 'triangle', 'diamond', 'starburst']
+const TITLE_ONLY_TYPES: ObjType[] = ['circle', 'triangle', 'diamond', 'starburst', 'hexagon']
 const TEXT_CAPABLE_TYPES: ObjType[] = [...TITLE_NOTE_TYPES, ...TITLE_ONLY_TYPES]
 const SHAPE_TEXT_PAD = 10
 // Approximate inscribed-rectangle ratios (fraction of the shape's own bbox
@@ -42,6 +42,7 @@ const TITLE_SAFE_RATIO: Partial<Record<ObjType, { w: number; h: number }>> = {
   diamond:   { w: 0.5,  h: 0.5  },
   triangle:  { w: 0.55, h: 0.32 }, // weighted toward the triangle's wider base
   starburst: { w: 0.46, h: 0.46 },
+  hexagon:   { w: 0.72, h: 0.72 }, // flat top/bottom edges leave more usable room than the pointed shapes above
 }
 
 interface DrawObj {
@@ -113,8 +114,12 @@ const PEN_SIZES    = [2, 4, 8, 14] as const
 const ERASER_SIZES = [8, 16, 28, 44] as const
 const TEXT_SIZES   = [12, 18, 26, 36] as const
 const THICKNESS_LEVELS = [1, 2, 3, 5, 8] as const
-const SHAPE_TOOLS: DrawTool[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule']
-const ROTATABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule']
+const SHAPE_TOOLS: DrawTool[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule', 'hexagon']
+// 'stroke' (freehand) rotates via the SAME render-time-transform architecture
+// as the shapes below it — pts stay in local/unrotated space (see renderObj,
+// hitObj, getHandlePositions), not rotated-in-place, so selection bounds,
+// resize handles and hit-testing all stay correctly aligned post-rotation.
+const ROTATABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule', 'hexagon', 'stroke']
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -244,7 +249,7 @@ function rotatePt(p: Pt, center: Pt, rad: number): Pt {
 // clockwise in screen space (atan2 convention) — matches Math.atan2(dy,dx).
 // 'stroke' (freehand) participates too — connectors attach to its bbox via the
 // same rayBoxIntersection approximation already used for the custom shapes.
-const CONNECTABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule', 'image', 'stroke']
+const CONNECTABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule', 'hexagon', 'image', 'stroke']
 
 // Ray-box intersection in the box's own LOCAL frame (center at origin) — used
 // directly for rect/rect-r, and as a reasonable approximation of the true
@@ -479,6 +484,22 @@ function drawStarburstPath(c: CanvasRenderingContext2D, x: number, y: number, w:
   c.closePath()
 }
 
+// Elongated horizontal hexagon — flat top/bottom edges, pointed left/right
+// ends. The corner inset scales off the SHORTER side so the point stays a
+// clean diagonal cut rather than stretching into a near-triangle on a very
+// wide/short box.
+function drawHexagonPath(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+  const cut = Math.min(Math.abs(w), Math.abs(h)) * 0.25
+  c.beginPath()
+  c.moveTo(x+cut, y)
+  c.lineTo(x+w-cut, y)
+  c.lineTo(x+w, y+h/2)
+  c.lineTo(x+w-cut, y+h)
+  c.lineTo(x+cut, y+h)
+  c.lineTo(x, y+h/2)
+  c.closePath()
+}
+
 // Centered mind-map-node label — drawn after any flip transform is restored so
 // the text itself is never mirrored (a shape's bbox center is unaffected by a
 // flip around its own center, so this still lands in the visually-correct spot).
@@ -577,15 +598,17 @@ function getObjBB(obj: DrawObj): { minX:number;minY:number;maxX:number;maxY:numb
 
 function hitObj(obj: DrawObj, px: number, py: number, thresh = 8): boolean {
   if (obj.type === 'line' || obj.type === 'arrow') return distToSeg(px,py,obj.x1,obj.y1,obj.x2,obj.y2) < thresh
-  if (obj.type === 'stroke') return obj.pts.some(pt => Math.hypot(pt.x-px,pt.y-py) < thresh+obj.sw/2)
   const { minX,minY,maxX,maxY } = getObjBB(obj)
-  // Rotated shapes are tested in their own local (unrotated) space — inverse-
-  // rotate the pointer around the shape's center before the plain bbox test.
+  // Rotated shapes (and freehand strokes, which store pts in LOCAL/unrotated
+  // space and rotate purely as a render-time transform — see renderObj) are
+  // tested in their own local space — inverse-rotate the pointer around the
+  // object's center before the plain bbox/point test.
   if (obj.rotation && ROTATABLE_TYPES.includes(obj.type)) {
     const center = { x: (minX+maxX)/2, y: (minY+maxY)/2 }
     const local = rotatePt({ x: px, y: py }, center, -obj.rotation)
     px = local.x; py = local.y
   }
+  if (obj.type === 'stroke') return obj.pts.some(pt => Math.hypot(pt.x-px,pt.y-py) < thresh+obj.sw/2)
   if (obj.type === 'text' || obj.type === 'image') return px>=minX&&px<=maxX&&py>=minY&&py<=maxY
   // Any reasonable visible portion of a shape selects it — including an
   // unfilled shape's hollow interior, not just its border band.
@@ -612,6 +635,15 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<str
 
   if (obj.type === 'stroke') {
     if (obj.pts.length < 2) { c.restore(); return }
+    // pts are always stored in LOCAL (unrotated) space — rotation is purely a
+    // render-time transform around the stroke's own bbox center, exactly like
+    // the shape types below, so selection bounds/handles/hit-testing (which
+    // all derive from this same local bbox) stay correctly aligned post-rotation.
+    if (obj.rotation) {
+      const sbb = getObjBB(obj)
+      const scx = (sbb.minX+sbb.maxX)/2, scy = (sbb.minY+sbb.maxY)/2
+      c.translate(scx,scy); c.rotate(obj.rotation); c.translate(-scx,-scy)
+    }
     c.beginPath(); c.moveTo(obj.pts[0].x, obj.pts[0].y)
     for (const pt of obj.pts.slice(1)) c.lineTo(pt.x, pt.y)
     // canvas fill() implicitly closes the path for filling purposes only — the
@@ -692,6 +724,7 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<str
   else if (obj.type === 'triangle') { c.beginPath(); c.moveTo(obj.x+obj.w/2,obj.y); c.lineTo(obj.x+obj.w,obj.y+obj.h); c.lineTo(obj.x,obj.y+obj.h); c.closePath(); if (obj.filled) c.fill(); c.stroke() }
   else if (obj.type === 'diamond') { c.beginPath(); c.moveTo(obj.x+obj.w/2,obj.y); c.lineTo(obj.x+obj.w,obj.y+obj.h/2); c.lineTo(obj.x+obj.w/2,obj.y+obj.h); c.lineTo(obj.x,obj.y+obj.h/2); c.closePath(); if (obj.filled) c.fill(); c.stroke() }
   else if (obj.type === 'starburst') { drawStarburstPath(c,obj.x,obj.y,obj.w,obj.h); if (obj.filled) c.fill(); c.stroke() }
+  else if (obj.type === 'hexagon') { drawHexagonPath(c,obj.x,obj.y,obj.w,obj.h); if (obj.filled) c.fill(); c.stroke() }
   c.restore() // undo flip only — label below rotates with the shape but is never mirrored
 
   if (TEXT_CAPABLE_TYPES.includes(obj.type)) drawShapeText(c, obj, bb)
@@ -739,14 +772,17 @@ function drawRotateHandle(c: CanvasRenderingContext2D, x: number, y: number) {
 }
 
 // ─── EraserIcon ───────────────────────────────────────────────────────────────
-// A clean, tilted wedge-eraser silhouette — no size letter baked in, so the
-// toolbar shows only the icon (the size lives in the popover, same as Pen).
+// A simple tilted block eraser — a single rounded-rect body with a lighter
+// "worn corner" patch at one end (the classic two-tone eraser cue), no size
+// letter baked in (the size lives in the popover, same as Pen), and no
+// crossing line through the middle (the previous version's diagonal cut read
+// as a "+" at toolbar size rather than as an eraser).
 
 const EraserIcon = ({ size = 16 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 20 20" fill="none" style={{ display:'block', transform:'rotate(-25deg)' }}>
-    <rect x="4" y="6.5" width="12" height="8" rx="1.5" fill="currentColor" opacity="0.85"/>
-    <path d="M4 10.5H16V14.5A1.5 1.5 0 0 1 14.5 16H5.5A1.5 1.5 0 0 1 4 14.5Z" fill="currentColor" opacity="0.4"/>
-    <rect x="4" y="6.5" width="12" height="8" rx="1.5" stroke="currentColor" strokeWidth="1"/>
+  <svg width={size} height={size} viewBox="0 0 20 20" fill="none" style={{ display:'block', transform:'rotate(-40deg)' }}>
+    <rect x="3" y="7" width="14" height="7" rx="1.8" fill="currentColor" opacity="0.85"/>
+    <rect x="3" y="7" width="5.5" height="7" rx="1.8" fill="currentColor" opacity="0.35"/>
+    <rect x="3" y="7" width="14" height="7" rx="1.8" stroke="currentColor" strokeWidth="1.1"/>
   </svg>
 )
 
@@ -975,12 +1011,20 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       c.restore(); return
     }
     const { minX,minY,maxX,maxY } = getObjBB(obj)
-    c.strokeRect(minX-2, minY-2, maxX-minX+4, maxY-minY+4); c.restore()
+    // The dashed box itself rotates with the object (not just the handle dots,
+    // which getHandlePositions already rotates) so it visually matches the
+    // actual rotated shape/stroke instead of showing a stale axis-aligned box.
+    if (obj.rotation && ROTATABLE_TYPES.includes(obj.type)) {
+      const bcx=(minX+maxX)/2, bcy=(minY+maxY)/2
+      c.save(); c.translate(bcx,bcy); c.rotate(obj.rotation); c.translate(-bcx,-bcy)
+      c.strokeRect(minX-2, minY-2, maxX-minX+4, maxY-minY+4)
+      c.restore()
+    } else {
+      c.strokeRect(minX-2, minY-2, maxX-minX+4, maxY-minY+4)
+    }
+    c.restore()
     for (const h of getHandlePositions(obj)) drawHandleDot(c, h.x, h.y)
-    // Strokes rotate via direct point-rotation (no stored angle/render transform,
-    // so no inverse-rotate needed below) rather than through ROTATABLE_TYPES —
-    // still get the same solo rotation handle as shapes.
-    if (ROTATABLE_TYPES.includes(obj.type) || obj.type === 'stroke') {
+    if (ROTATABLE_TYPES.includes(obj.type)) {
       const center = { x:(minX+maxX)/2, y:(minY+maxY)/2 }
       const topScreen = obj.rotation ? rotatePt({x:center.x,y:minY}, center, obj.rotation) : { x:center.x, y:minY }
       const rp = getRotateHandlePos(obj)
@@ -1002,7 +1046,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     // Rotation handle(s) — checked first since they sit outside every other
     // hit region and never overlap resize/endpoint handles.
     const selObjsNow = objectsRef.current.filter(o => selIdsRef.current.includes(o.id))
-    if (selObjsNow.length === 1 && (ROTATABLE_TYPES.includes(selObjsNow[0].type) || selObjsNow[0].type === 'stroke')) {
+    if (selObjsNow.length === 1 && ROTATABLE_TYPES.includes(selObjsNow[0].type)) {
       const rp = getRotateHandlePos(selObjsNow[0])
       if (Math.hypot(rp.x-px, rp.y-py) < HR) return {kind:'rotate', ids:[selObjsNow[0].id]}
     } else if (selObjsNow.length > 1) {
@@ -1314,10 +1358,16 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           return {...o, x1:p1.x,y1:p1.y, x2:p2.x,y2:p2.y, mx:pm.x,my:pm.y}
         }
         if (o.type === 'stroke') {
-          // Rotate from the DRAG-START point set (base.pts), not the live o.pts —
-          // delta is the TOTAL angle since the drag began, so re-applying it to
-          // already-rotated points on every tick would compound each frame.
-          return {...o, pts: base.pts.map(p => rotatePt(p, dm.pivot, delta))}
+          // pts stay in LOCAL/unrotated space (see renderObj) — only their
+          // shared bbox center orbits the pivot (computed from the DRAG-START
+          // baseline, not the live/already-shifted pts, for the same reason
+          // the shape branch below uses `base` and not live x/y), while the
+          // actual visual spin comes from `rotation` applied at render time.
+          const bb = getObjBB({ ...o, pts: base.pts })
+          const baseCenter = { x:(bb.minX+bb.maxX)/2, y:(bb.minY+bb.maxY)/2 }
+          const newCenter = rotatePt(baseCenter, dm.pivot, delta)
+          const dx = newCenter.x-baseCenter.x, dy = newCenter.y-baseCenter.y
+          return {...o, pts: base.pts.map(p => ({x:p.x+dx, y:p.y+dy})), rotation: (base.rotation||0)+delta}
         }
         // Shapes/text/image: rotate the bbox center around the pivot (repositions
         // it for a multi-select group; a no-op position-wise for a single
@@ -1657,7 +1707,16 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         const p1=rotatePt({x:o.x1,y:o.y1},pivot,deltaRad), p2=rotatePt({x:o.x2,y:o.y2},pivot,deltaRad), pm=rotatePt({x:o.mx,y:o.my},pivot,deltaRad)
         return {...o,x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y,mx:pm.x,my:pm.y}
       }
-      if (o.type==='stroke') return {...o,pts:o.pts.map(p=>rotatePt(p,pivot,deltaRad))}
+      if (o.type==='stroke') {
+        // pts stay in local space — only their shared bbox center orbits the
+        // pivot (a no-op for a single selection, since the pivot IS its own
+        // center); the actual visual spin comes from `rotation` at render time.
+        const bb = getObjBB(o)
+        const center = { x:(bb.minX+bb.maxX)/2, y:(bb.minY+bb.maxY)/2 }
+        const nc = rotatePt(center, pivot, deltaRad)
+        const dx = nc.x-center.x, dy = nc.y-center.y
+        return {...o, pts:o.pts.map(p=>({x:p.x+dx,y:p.y+dy})), rotation:(o.rotation||0)+deltaRad}
+      }
       const center={x:o.x+o.w/2,y:o.y+o.h/2}, nc=rotatePt(center,pivot,deltaRad)
       return {...o,x:nc.x-o.w/2,y:nc.y-o.h/2,rotation:(o.rotation||0)+deltaRad}
     })
@@ -1853,11 +1912,16 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const dockBdr = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)'
 
   function dkBtn(active=false, danger=false, disabled=false): React.CSSProperties {
+    // `disabled` is checked before `danger` (active still wins over both) so a
+    // disabled danger button — e.g. Delete with nothing selected, now always
+    // visible instead of hidden — actually reads as disabled, not as a live
+    // warning. `danger` is never combined with `active=true` by any caller,
+    // so giving `active` top priority is unaffected.
     return {
       padding:'4px 10px', borderRadius:7, cursor:disabled?'default':'pointer',
-      border:`0.5px solid ${active?'rgba(124,58,237,0.55)':danger?'rgba(239,68,68,0.28)':isDark?'rgba(255,255,255,0.14)':'rgba(0,0,0,0.15)'}`,
-      background:active?'rgba(124,58,237,0.20)':danger?'rgba(239,68,68,0.08)':isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.04)',
-      color:active?'#a78bfa':danger?(isDark?'rgba(252,165,165,0.85)':'#dc2626'):disabled?(isDark?'rgba(255,255,255,0.22)':'rgba(0,0,0,0.22)'):isDark?'rgba(255,255,255,0.78)':'rgba(0,0,0,0.68)',
+      border:`0.5px solid ${active?'rgba(124,58,237,0.55)':disabled?(isDark?'rgba(255,255,255,0.10)':'rgba(0,0,0,0.08)'):danger?'rgba(239,68,68,0.28)':isDark?'rgba(255,255,255,0.14)':'rgba(0,0,0,0.15)'}`,
+      background:active?'rgba(124,58,237,0.20)':disabled?(isDark?'rgba(255,255,255,0.03)':'rgba(0,0,0,0.02)'):danger?'rgba(239,68,68,0.08)':isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.04)',
+      color:active?'#a78bfa':disabled?(isDark?'rgba(255,255,255,0.22)':'rgba(0,0,0,0.22)'):danger?(isDark?'rgba(252,165,165,0.85)':'#dc2626'):isDark?'rgba(255,255,255,0.78)':'rgba(0,0,0,0.68)',
       fontSize:12, fontWeight:active?600:500, transition:'all 120ms', flexShrink:0, whiteSpace:'nowrap' as const, lineHeight:'1.4',
     }
   }
@@ -1990,15 +2054,26 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           )}
         </div>
 
-        {/* List — applies to the Note field of the shape currently being edited */}
+        {/* List — applies to the Note field of the shape currently being edited.
+            onMouseDown must preventDefault: without it, clicking this button
+            shifts focus away from the Note textarea, firing its onBlur ->
+            commitText() -> textInput=null BEFORE this button's own onClick
+            runs — the dropdown would then silently fail to open (or the
+            button would already read as disabled) on that same click, which
+            is exactly the "doesn't show the options reliably" symptom. */}
         <div style={{flexShrink:0}} data-pop-trigger="">
           <button title="List" disabled={!(textInput?.targetId && textInput.activeField==='note')}
+            onMouseDown={e=>e.preventDefault()}
             onClick={(e)=>{ if (textInput?.targetId && textInput.activeField==='note') openPop('list-type',e) }}
             style={{...dkBtn(false,false,!(textInput?.targetId && textInput.activeField==='note')),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>
             ☷ List▾
           </button>
           {openPopover==='list-type' && textInput?.targetId && (
-            <div data-popover="" style={fixedPopStyle()}>
+            // Same onMouseDown-preventDefault reasoning as the trigger button:
+            // without it, clicking an option blurs the Note textarea first,
+            // which can unmount this very dropdown (textInput?.targetId above
+            // goes false) before the click ever reaches these buttons.
+            <div data-popover="" onMouseDown={e=>e.preventDefault()} style={fixedPopStyle()}>
               <button onClick={()=>applyNoteListType('bullet')} style={{...dkBtn(activeNoteListType==='bullet'),textAlign:'left',width:'100%',padding:'5px 10px'}}>• Bullet Points</button>
               <button onClick={()=>applyNoteListType('numbered')} style={{...dkBtn(activeNoteListType==='numbered'),textAlign:'left',width:'100%',padding:'5px 10px'}}>1. Numbers</button>
               <button onClick={()=>applyNoteListType('lettered')} style={{...dkBtn(activeNoteListType==='lettered'),textAlign:'left',width:'100%',padding:'5px 10px'}}>a. Letters</button>
@@ -2012,13 +2087,14 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         <div style={{flexShrink:0}} data-pop-trigger="">
           <button title="Shapes" onClick={(e)=>{if(textInput)commitText();openPop('shapes',e)}}
             style={{...dkBtn(SHAPE_TOOLS.includes(tool)),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>
-            {tool==='rect'?'□':tool==='rect-r'?'⊡':tool==='circle'?'○':tool==='triangle'?'△':tool==='diamond'?'◇':tool==='starburst'?'✦':tool==='capsule'?'⬭':'□'} Shapes▾
+            {tool==='rect'?'□':tool==='rect-r'?'⊡':tool==='circle'?'○':tool==='triangle'?'△':tool==='diamond'?'◇':tool==='starburst'?'✦':tool==='capsule'?'⬭':tool==='hexagon'?'⬡':'□'} Shapes▾
           </button>
           {openPopover==='shapes' && (
             <div data-popover="" style={fixedPopStyle()}>
               {pbtn('□  Rectangle', ()=>{setTool('rect');      setOpenPopover(null)}, tool==='rect')}
               {pbtn('⊡  Round Rect',()=>{setTool('rect-r');    setOpenPopover(null)}, tool==='rect-r')}
               {pbtn('⬭  Capsule',   ()=>{setTool('capsule');   setOpenPopover(null)}, tool==='capsule')}
+              {pbtn('⬡  Hexagon',   ()=>{setTool('hexagon');   setOpenPopover(null)}, tool==='hexagon')}
               {pbtn('○  Circle',    ()=>{setTool('circle');    setOpenPopover(null)}, tool==='circle')}
               {pbtn('△  Triangle',  ()=>{setTool('triangle');  setOpenPopover(null)}, tool==='triangle')}
               {pbtn('◇  Diamond',   ()=>{setTool('diamond');   setOpenPopover(null)}, tool==='diamond')}
@@ -2109,50 +2185,48 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
 
         {/* Fill color — XPadite palette popover (reuses the same preset swatches +
             rainbow custom-color trigger + ColorPickerModal used by Activity Manager),
-            not the native browser picker */}
-        {showFill && (
-          <div style={{flexShrink:0}} data-pop-trigger="">
-            <button title="Fill Color" onClick={(e)=>{if(textInput)commitText();openPop('fill',e)}}
-              style={{...dkBtn(),display:'flex',alignItems:'center',gap:5,padding:'4px 8px'}}>
-              <span style={{width:16,height:16,borderRadius:4,background:fillColor,border:`1.5px solid ${isDark?'rgba(255,255,255,0.35)':'rgba(0,0,0,0.25)'}`,display:'inline-block',flexShrink:0}}/>
-              Fill
-            </button>
-            {openPopover==='fill' && (
-              <div data-popover="" style={fixedPopStyle({flexDirection:'row',flexWrap:'wrap',gap:6,width:172,minWidth:'auto',padding:'8px'})}>
-                {COLOR_PALETTE.map(c => {
-                  const sel = normalizeHexColor(c)===normalizedFill
-                  return (
-                    <button key={c} title={c} onClick={()=>{updateSelFillColor(c);setOpenPopover(null)}}
-                      style={{width:22,height:22,borderRadius:'50%',flexShrink:0,cursor:'pointer',background:c,border:'none',padding:0,
-                        transform:sel?'scale(1.15)':'scale(1)',
-                        boxShadow:sel?`0 0 0 2px ${isDark?'#1e1033':'#fff'}, 0 0 0 3.5px #7c3aed`:'none'}}/>
-                  )
-                })}
-                {customColors.map(c => {
-                  const sel = normalizeHexColor(c)===normalizedFill
-                  return (
-                    <button key={c} title={c} onClick={()=>{updateSelFillColor(c);setOpenPopover(null)}}
-                      style={{width:22,height:22,borderRadius:'50%',flexShrink:0,cursor:'pointer',background:c,border:'none',padding:0,
-                        transform:sel?'scale(1.15)':'scale(1)',
-                        boxShadow:sel?`0 0 0 2px ${isDark?'#1e1033':'#fff'}, 0 0 0 3.5px #7c3aed`:'none'}}/>
-                  )
-                })}
-                <button title="Custom color" onClick={()=>{setOpenPopover(null);setShowCustomFill(true)}}
-                  style={{width:22,height:22,borderRadius:'50%',flexShrink:0,cursor:'pointer',border:'none',padding:0,
-                    background:isCustomFill?fillColor:'conic-gradient(from 0deg, #ff0000,#ffff00,#00ff00,#00ffff,#0000ff,#ff00ff,#ff0000)',
-                    transform:isCustomFill?'scale(1.15)':'scale(1)',
-                    boxShadow:isCustomFill?`0 0 0 2px ${isDark?'#1e1033':'#fff'}, 0 0 0 3.5px ${fillColor}`:'none'}}/>
-              </div>
-            )}
-          </div>
-        )}
+            not the native browser picker. Stays in its normal toolbar position even
+            with nothing selected — disabled rather than removed (see also Fill toggle,
+            Flip, Connector type, Branch/Group/Dup/Delete below). */}
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Fill Color" disabled={!showFill} onClick={(e)=>{if(!showFill)return;if(textInput)commitText();openPop('fill',e)}}
+            style={{...dkBtn(false,false,!showFill),display:'flex',alignItems:'center',gap:5,padding:'4px 8px'}}>
+            <span style={{width:16,height:16,borderRadius:4,background:fillColor,border:`1.5px solid ${isDark?'rgba(255,255,255,0.35)':'rgba(0,0,0,0.25)'}`,display:'inline-block',flexShrink:0,opacity:showFill?1:0.4}}/>
+            Fill
+          </button>
+          {openPopover==='fill' && showFill && (
+            <div data-popover="" style={fixedPopStyle({flexDirection:'row',flexWrap:'wrap',gap:6,width:172,minWidth:'auto',padding:'8px'})}>
+              {COLOR_PALETTE.map(c => {
+                const sel = normalizeHexColor(c)===normalizedFill
+                return (
+                  <button key={c} title={c} onClick={()=>{updateSelFillColor(c);setOpenPopover(null)}}
+                    style={{width:22,height:22,borderRadius:'50%',flexShrink:0,cursor:'pointer',background:c,border:'none',padding:0,
+                      transform:sel?'scale(1.15)':'scale(1)',
+                      boxShadow:sel?`0 0 0 2px ${isDark?'#1e1033':'#fff'}, 0 0 0 3.5px #7c3aed`:'none'}}/>
+                )
+              })}
+              {customColors.map(c => {
+                const sel = normalizeHexColor(c)===normalizedFill
+                return (
+                  <button key={c} title={c} onClick={()=>{updateSelFillColor(c);setOpenPopover(null)}}
+                    style={{width:22,height:22,borderRadius:'50%',flexShrink:0,cursor:'pointer',background:c,border:'none',padding:0,
+                      transform:sel?'scale(1.15)':'scale(1)',
+                      boxShadow:sel?`0 0 0 2px ${isDark?'#1e1033':'#fff'}, 0 0 0 3.5px #7c3aed`:'none'}}/>
+                )
+              })}
+              <button title="Custom color" onClick={()=>{setOpenPopover(null);setShowCustomFill(true)}}
+                style={{width:22,height:22,borderRadius:'50%',flexShrink:0,cursor:'pointer',border:'none',padding:0,
+                  background:isCustomFill?fillColor:'conic-gradient(from 0deg, #ff0000,#ffff00,#00ff00,#00ffff,#0000ff,#ff00ff,#ff0000)',
+                  transform:isCustomFill?'scale(1.15)':'scale(1)',
+                  boxShadow:isCustomFill?`0 0 0 2px ${isDark?'#1e1033':'#fff'}, 0 0 0 3.5px ${fillColor}`:'none'}}/>
+            </div>
+          )}
+        </div>
 
         {/* Fill toggle */}
-        {showFill && (
-          <button title="Toggle fill" onClick={toggleFilled} style={dkBtn(curFilled)}>
-            {curFilled ? '◉' : '○'} Fill
-          </button>
-        )}
+        <button title="Toggle fill" disabled={!showFill} onClick={()=>{if(showFill)toggleFilled()}} style={dkBtn(curFilled,false,!showFill)}>
+          {curFilled ? '◉' : '○'} Fill
+        </button>
 
         {dvdr}
 
@@ -2168,46 +2242,43 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           )}
         </div>
 
-        {/* Connector type — only when single arrow selected */}
-        {selArrow && (<>
-          {dvdr}
-          <button onClick={()=>setConnType('straight')} style={dkBtn(selArrow.connType==='straight')} title="Straight arrow">⟶</button>
-          <button onClick={()=>setConnType('curved')}   style={dkBtn(selArrow.connType==='curved')}   title="Curved arrow">⌒</button>
-          <button onClick={()=>setConnType('elbow')}    style={{...dkBtn(selArrow.connType==='elbow'),display:'flex',alignItems:'center',padding:'4px 8px'}} title="Sharp 90° Arrow">
-            <ElbowArrowIcon curved={false} size={13}/>
-          </button>
-          <button onClick={()=>setConnType('elbow-curved')} style={{...dkBtn(selArrow.connType==='elbow-curved'),display:'flex',alignItems:'center',padding:'4px 8px'}} title="Curved Arrow">
-            <ElbowArrowIcon curved={true} size={13}/>
-          </button>
-        </>)}
+        {/* Connector type — always visible; disabled unless a single arrow is selected */}
+        {dvdr}
+        <button disabled={!selArrow} onClick={()=>setConnType('straight')} style={dkBtn(selArrow?.connType==='straight',false,!selArrow)} title="Straight arrow">⟶</button>
+        <button disabled={!selArrow} onClick={()=>setConnType('curved')}   style={dkBtn(selArrow?.connType==='curved',false,!selArrow)}   title="Curved arrow">⌒</button>
+        <button disabled={!selArrow} onClick={()=>setConnType('elbow')}    style={{...dkBtn(selArrow?.connType==='elbow',false,!selArrow),display:'flex',alignItems:'center',padding:'4px 8px'}} title="Sharp 90° Arrow">
+          <ElbowArrowIcon curved={false} size={13}/>
+        </button>
+        <button disabled={!selArrow} onClick={()=>setConnType('elbow-curved')} style={{...dkBtn(selArrow?.connType==='elbow-curved',false,!selArrow),display:'flex',alignItems:'center',padding:'4px 8px'}} title="Curved Arrow">
+          <ElbowArrowIcon curved={true} size={13}/>
+        </button>
 
         <span style={{flex:1,minWidth:8}}/>
 
-        {/* Contextual: Branch / Group ▾ (Group/Ungroup) / Dup / Delete */}
-        {selIds.length>0 && (<>
-          {dvdr}
-          <button title="Branch — select 1 parent + Shift-select 2 or more children, then click Branch"
-            disabled={selIds.length<3} onClick={createBranch} style={dkBtn(false,false,selIds.length<3)}>┣ Branch</button>
-          <div style={{flexShrink:0}} data-pop-trigger="">
-            <button title="Group" onClick={(e)=>{if(textInput)commitText();openPop('group',e)}}
-              style={{...dkBtn(selIsGroup),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>
-              ⛓ Group▾
-            </button>
-            {openPopover==='group' && (
-              <div data-popover="" style={fixedPopStyle()}>
-                <button onClick={()=>{ if(canGroup){groupSelected(); setOpenPopover(null)} }} disabled={!canGroup}
-                  style={{...dkBtn(false,false,!canGroup),textAlign:'left',width:'100%',padding:'5px 10px'}}>Group</button>
-                <button onClick={()=>{ if(selIsGroup){ungroupSelected(); setOpenPopover(null)} }} disabled={!selIsGroup}
-                  style={{...dkBtn(false,false,!selIsGroup),textAlign:'left',width:'100%',padding:'5px 10px'}}>Ungroup</button>
-              </div>
-            )}
-          </div>
-          <button onClick={duplicateSelected} style={dkBtn()}>Dup</button>
-          <button title="Delete" onClick={deleteSelected} style={{...dkBtn(false,true),display:'flex',alignItems:'center',padding:'4px 8px'}}>
-            <TrashIcon/>
+        {/* Branch / Group ▾ (Group/Ungroup) / Dup / Delete — always visible; each
+            disables itself when the current selection doesn't support it. */}
+        {dvdr}
+        <button title="Branch — select 1 parent + Shift-select 2 or more children, then click Branch"
+          disabled={selIds.length<3} onClick={createBranch} style={dkBtn(false,false,selIds.length<3)}>┣ Branch</button>
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Group" disabled={selIds.length===0} onClick={(e)=>{if(selIds.length===0)return;if(textInput)commitText();openPop('group',e)}}
+            style={{...dkBtn(selIsGroup,false,selIds.length===0),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>
+            ⛓ Group▾
           </button>
-          {dvdr}
-        </>)}
+          {openPopover==='group' && selIds.length>0 && (
+            <div data-popover="" style={fixedPopStyle()}>
+              <button onClick={()=>{ if(canGroup){groupSelected(); setOpenPopover(null)} }} disabled={!canGroup}
+                style={{...dkBtn(false,false,!canGroup),textAlign:'left',width:'100%',padding:'5px 10px'}}>Group</button>
+              <button onClick={()=>{ if(selIsGroup){ungroupSelected(); setOpenPopover(null)} }} disabled={!selIsGroup}
+                style={{...dkBtn(false,false,!selIsGroup),textAlign:'left',width:'100%',padding:'5px 10px'}}>Ungroup</button>
+            </div>
+          )}
+        </div>
+        <button disabled={selIds.length===0} onClick={duplicateSelected} style={dkBtn(false,false,selIds.length===0)}>Dup</button>
+        <button title="Delete" disabled={selIds.length===0} onClick={deleteSelected} style={{...dkBtn(false,true,selIds.length===0),display:'flex',alignItems:'center',padding:'4px 8px'}}>
+          <TrashIcon/>
+        </button>
+        {dvdr}
 
         {/* History */}
         <button style={dkBtn(false,false,!canUndo)} onClick={undo}    disabled={!canUndo} title="Undo (Ctrl+Z)">↩</button>

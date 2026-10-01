@@ -3192,6 +3192,12 @@ export function JournalEditorContent({
         @media (prefers-reduced-motion: reduce) {
           .xp-mic-dot { animation: none; }
         }
+        /* Mind Mapping Canvas — mobile-only header swap (desktop/tablet never
+           match this query, so the normal date-nav header always shows there). */
+        @media (max-width: 640px) {
+          .xp-j-draw-mobile-hdr { display: flex !important; }
+          .xp-j-hdr-normal { display: none !important; }
+        }
       `}</style>
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
@@ -3199,7 +3205,37 @@ export function JournalEditorContent({
         className="xp-j-hdr"
         style={{ flexShrink: 0, borderBottom: '0.5px solid rgba(255,255,255,0.08)' }}
       >
-        <div style={{
+        {/* Mobile-only Mind Mapping Canvas header — swaps in for the normal date-nav
+            header while the canvas is open on mobile; desktop/tablet always keep the
+            normal header below untouched (this block is display:none there). */}
+        {drawState && (
+          <div className="xp-j-draw-mobile-hdr" style={{
+            display: 'none', position: 'relative', alignItems: 'center',
+            height: 52, padding: '0 14px',
+          }}>
+            <button
+              onClick={() => setDrawState(null)}
+              title="Back"
+              aria-label="Back"
+              style={{
+                position: 'relative', zIndex: 1, width: 32, height: 32, flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'transparent', border: 'none',
+                color: '#fff', cursor: 'pointer', padding: 0, fontSize: 20,
+                transition: 'opacity 120ms, transform 80ms',
+              }}
+              onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.88)' }}
+              onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
+            >‹</button>
+            <span style={{
+              position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
+              textAlign: 'center', pointerEvents: 'none',
+              color: '#fff', fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap',
+            }}>🧠 Mind Mapping Canvas</span>
+          </div>
+        )}
+
+        <div className={drawState ? 'xp-j-hdr-normal' : undefined} style={{
           position: 'relative', display: 'flex', alignItems: 'center',
           height: 52, padding: '0 14px', gap: 6,
         }}>

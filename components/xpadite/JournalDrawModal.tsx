@@ -1513,7 +1513,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
 
       {/* ── Fixed Cancel + Save ────────────────────────────────────────────── */}
       <div style={{display:'flex',alignItems:'center',gap:5,padding:'9px 12px',flexShrink:0,borderLeft:`0.5px solid ${dockBdr}`,background:dockBg}}>
-        <button onClick={onClose} style={dkBtn(false,true)}>Cancel</button>
+        <button onClick={onClose} className="xp-dm-cancel-btn" style={dkBtn(false,true)}>Cancel</button>
         <button onClick={handleSave} style={{padding:'5px 16px',borderRadius:7,border:'none',cursor:'pointer',background:'linear-gradient(135deg,#7c3aed,#6d28d9)',color:'#fff',fontSize:12,fontWeight:600,flexShrink:0,boxShadow:'0 2px 8px rgba(124,58,237,0.35)'}}>Save</button>
       </div>
 
@@ -1574,6 +1574,12 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       [data-popover] button:not(:disabled):hover, [data-pop-trigger] > button:not(:disabled):hover { background: rgba(124,58,237,0.14) !important; }
       @media (hover: none) {
         [data-popover] button:not(:disabled):active, [data-pop-trigger] > button:not(:disabled):active { background: rgba(124,58,237,0.22) !important; }
+      }
+      /* Mobile only: Cancel is replaced by the Mind Mapping Canvas header's own
+         Back button (same safe close behavior) — freeing width for the tools.
+         Save stays exactly where it is on every breakpoint. */
+      @media (max-width: 640px) {
+        .xp-dm-cancel-btn { display: none !important; }
       }
     `}</style>
   )

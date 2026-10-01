@@ -2475,16 +2475,22 @@ export function JournalEditorContent({
   }
 
   // Draw handlers
+  // Save-in-place — never closes the canvas (Ctrl+S and the toolbar Save button
+  // both go through this). Exiting is only ever Back (mobile) / Cancel (desktop,
+  // tablet). The first save of a brand-new Mind Map creates its block and starts
+  // tracking it as `editingBlock`, so every save after that (including the very
+  // next Ctrl+S) updates that same block instead of inserting another one.
   function handleDrawSave(dataUrl: string, objectsJson: string) {
     if (!drawState) return
     let next: JournalBlock[]
+    let savedBlock: JournalBlock
     if (drawState.editingBlock) {
-      const updatedBlock: JournalBlock = { ...drawState.editingBlock, src: dataUrl, thumbnail: dataUrl, canvasData: objectsJson, updatedAt: Date.now() }
-      next = blocksRef.current.map(b => b.id === drawState.editingBlock!.id ? updatedBlock : b)
+      savedBlock = { ...drawState.editingBlock, src: dataUrl, thumbnail: dataUrl, canvasData: objectsJson, updatedAt: Date.now() }
+      next = blocksRef.current.map(b => b.id === drawState.editingBlock!.id ? savedBlock : b)
     } else {
-      const drawBlock = createDrawingBlock(dataUrl, `Mind Map — ${fmtShortDate(dateKey)}`, objectsJson)
+      savedBlock = createDrawingBlock(dataUrl, `Mind Map — ${fmtShortDate(dateKey)}`, objectsJson)
       next = [...blocksRef.current]
-      next.splice(drawState.insertAt + 1, 0, drawBlock)
+      next.splice(drawState.insertAt + 1, 0, savedBlock)
       // New drawings become Gallery assets automatically; re-editing an existing
       // one (the branch above) does not create a second Gallery entry.
       addGalleryItem({
@@ -2499,7 +2505,7 @@ export function JournalEditorContent({
     }
     blocksRef.current = next
     setBlocks(next)
-    setDrawState(null)
+    setDrawState(prev => prev ? { ...prev, editingBlock: savedBlock } : prev)
     onContentChange(buildDocStr())
     scheduleSave()
   }

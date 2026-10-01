@@ -17,14 +17,18 @@ type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starbur
 // vertex. This guarantees a clean, deliberate default and keeps move/resize/flip trivial.
 type ConnType = 'straight' | 'curved' | 'elbow' | 'elbow-curved'
 type HPos     = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
-type PopoverId = 'pen-size' | 'eraser-size' | 'shapes' | 'flip' | 'text-size' | 'arrow-type' | 'fill' | 'rotate' | 'line-thickness' | 'arrow-thickness'
+type PopoverId = 'pen-size' | 'eraser-size' | 'shapes' | 'flip' | 'text-size' | 'arrow-type' | 'fill' | 'rotate' | 'line-thickness' | 'arrow-thickness' | 'list-type'
+type NoteListType = 'none' | 'bullet' | 'numbered' | 'lettered'
+type EditField = 'title' | 'note'
 
 interface Pt { x: number; y: number }
 
 // Shape types (rect/rect-r/circle/triangle/diamond/starburst) double as mind-map
-// nodes: `text`/`fontSize` hold an optional centered label rendered independently
-// of the flip transform so labels are never mirrored.
+// nodes: `text`/`fontSize` hold the Title (centered alone, or top-aligned once a
+// Note exists); `note`/`noteFontSize`/`noteListType` hold the optional body below
+// it. Both wrap/auto-grow the shape — see wrapTextLines/computeRequiredHeight.
 const TEXT_CAPABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst']
+const SHAPE_TEXT_PAD = 10
 
 interface DrawObj {
   id: string; type: ObjType
@@ -33,13 +37,21 @@ interface DrawObj {
   mx: number; my: number; connType: ConnType
   pts: Pt[]; eraser: boolean
   color: string; fillColor: string; filled: boolean; sw: number
-  text: string; fontSize: number
+  text: string; fontSize: number           // shape Title (or the free Text tool's only field)
+  note: string; noteFontSize: number; noteListType: NoteListType  // shape Note — optional, below the Title
   flipX: boolean; flipY: boolean; gid: string
   src: string // data URL — pasted 'image' objects only
   // Radians, applied as a render-time transform around the shape's own bbox
   // center — only meaningful for the 6 SHAPE_TOOLS types (lines/arrows rotate
   // by re-deriving their endpoints directly, so they never need this field).
   rotation: number
+  // Smart connectors (line/arrow only): the shape id + perimeter angle (radians,
+  // 0 = due right, increasing clockwise) this endpoint is anchored to. Multiple
+  // connectors may freely share the same shape+angle — no uniqueness is enforced.
+  // Re-resolved against the target's CURRENT geometry after every move/resize/
+  // rotate/auto-grow — see resolveAttachments.
+  attachStartId: string | null; attachStartAngle: number
+  attachEndId: string | null; attachEndAngle: number
 }
 
 type RotateBaseline = { x:number;y:number;w:number;h:number;x1:number;y1:number;x2:number;y2:number;mx:number;my:number;rotation:number }
@@ -80,8 +92,80 @@ function mkObj(p: Partial<DrawObj> & { id: string; type: ObjType }): DrawObj {
   return {
     x:0,y:0,w:0,h:0,x1:0,y1:0,x2:0,y2:0,mx:0,my:0,connType:'straight',
     pts:[],eraser:false,color:'#1a1a1a',fillColor:'#7c3aed',filled:false,sw:2,
-    text:'',fontSize:18,flipX:false,flipY:false,gid:'',src:'',rotation:0, ...p,
+    text:'',fontSize:18,note:'',noteFontSize:13,noteListType:'none',
+    flipX:false,flipY:false,gid:'',src:'',rotation:0,
+    attachStartId:null,attachStartAngle:0,attachEndId:null,attachEndAngle:0, ...p,
   }
+}
+
+// ─── Text wrapping (shape Title/Note) ──────────────────────────────────────────
+// Canvas has no native text layout, so wrapping is done by hand: measure each
+// candidate line and break at the last word that still fits, hard-breaking a
+// single word that's wider than maxWidth on its own.
+function wrapTextLines(c: CanvasRenderingContext2D, text: string, maxWidth: number, fontPx: number, weight = '400'): string[] {
+  c.font = `${weight} ${fontPx}px sans-serif`
+  const lines: string[] = []
+  for (const para of text.split('\n')) {
+    if (para === '') { lines.push(''); continue }
+    let cur = ''
+    for (const word of para.split(' ')) {
+      const candidate = cur ? `${cur} ${word}` : word
+      if (c.measureText(candidate).width <= maxWidth) { cur = candidate; continue }
+      if (cur) { lines.push(cur); cur = '' }
+      if (c.measureText(word).width <= maxWidth) { cur = word; continue }
+      let chunk = ''
+      for (const ch of word) {
+        const t = chunk + ch
+        if (c.measureText(t).width > maxWidth && chunk) { lines.push(chunk); chunk = ch }
+        else chunk = t
+      }
+      cur = chunk
+    }
+    if (cur) lines.push(cur)
+  }
+  return lines
+}
+
+function getListMarker(type: NoteListType, index: number): string {
+  if (type === 'bullet') return '•'
+  if (type === 'numbered') return `${index + 1}.`
+  if (type === 'lettered') return `${String.fromCharCode(97 + (index % 26))}.`
+  return ''
+}
+
+// Each line of `note` is one list item (when noteListType !== 'none') — Enter
+// naturally continues the active list type, and switching types just changes
+// how the SAME lines render, so nothing ever needs rewriting/"stacking."
+type NoteLine = { text: string; indent: number; marker?: string }
+function wrapNoteContent(c: CanvasRenderingContext2D, note: string, maxWidth: number, fontPx: number, listType: NoteListType): NoteLine[] {
+  if (listType === 'none') return wrapTextLines(c, note, maxWidth, fontPx).map(t => ({ text: t, indent: 0 }))
+  c.font = `400 ${fontPx}px sans-serif`
+  const indent = c.measureText('99.').width + 5
+  const out: NoteLine[] = []
+  note.split('\n').forEach((item, i) => {
+    if (item.trim() === '') { out.push({ text: '', indent: 0 }); return }
+    const marker = getListMarker(listType, i)
+    wrapTextLines(c, item, Math.max(10, maxWidth - indent), fontPx).forEach((ln, li) => {
+      out.push({ text: ln, indent, marker: li === 0 ? marker : undefined })
+    })
+  })
+  return out
+}
+
+// The minimum height needed so the current Title/Note content never overflows
+// the shape at its CURRENT width — callers grow (never shrink below this) `h`.
+function computeRequiredHeight(c: CanvasRenderingContext2D, obj: DrawObj): number {
+  const innerW = Math.max(10, Math.abs(obj.w) - SHAPE_TEXT_PAD * 2)
+  const hasTitle = !!obj.text.trim(), hasNote = !!obj.note.trim()
+  if (!hasTitle && !hasNote) return 40
+  if (hasTitle && !hasNote) {
+    const lines = wrapTextLines(c, obj.text, innerW, obj.fontSize, '600')
+    return Math.max(40, lines.length * (obj.fontSize * 1.25) + SHAPE_TEXT_PAD * 2)
+  }
+  let h = SHAPE_TEXT_PAD
+  if (hasTitle) h += wrapTextLines(c, obj.text, innerW, obj.fontSize, '700').length * (obj.fontSize * 1.25) + 4
+  if (hasNote) h += wrapNoteContent(c, obj.note, innerW, obj.noteFontSize, obj.noteListType).length * (obj.noteFontSize * 1.3)
+  return h + SHAPE_TEXT_PAD
 }
 
 function rotatePt(p: Pt, center: Pt, rad: number): Pt {
@@ -89,6 +173,88 @@ function rotatePt(p: Pt, center: Pt, rad: number): Pt {
   const cos = Math.cos(rad), sin = Math.sin(rad)
   const dx = p.x - center.x, dy = p.y - center.y
   return { x: center.x + dx * cos - dy * sin, y: center.y + dx * sin + dy * cos }
+}
+
+// ─── Smart connector anchors ────────────────────────────────────────────────────
+// A connector endpoint attaches to a SHAPE + a perimeter ANGLE (not a fixed
+// point), so it can be re-resolved against the shape's current geometry after
+// any move/resize/rotate/auto-grow. Angle 0 = due right of center, increasing
+// clockwise in screen space (atan2 convention) — matches Math.atan2(dy,dx).
+const CONNECTABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'image']
+
+// Ray-box intersection in the box's own LOCAL frame (center at origin) — used
+// directly for rect/rect-r, and as a reasonable approximation of the true
+// polygon boundary for triangle/diamond/starburst (exact per-vertex boundary
+// math for each custom shape is a much larger lift for little practical gain —
+// an edge-anchored connector on those still visually reads as "attached").
+function rayBoxIntersection(halfW: number, halfH: number, angle: number): Pt {
+  const dx = Math.cos(angle), dy = Math.sin(angle)
+  const tx = dx !== 0 ? halfW / Math.abs(dx) : Infinity
+  const ty = dy !== 0 ? halfH / Math.abs(dy) : Infinity
+  const t = Math.min(tx, ty)
+  return { x: t * dx, y: t * dy }
+}
+
+// The actual boundary point for a given perimeter angle, in SCREEN space —
+// resolves rotation so an attached connector follows a rotated shape correctly.
+function getPerimeterPoint(shape: DrawObj, angle: number): Pt {
+  const bb = getObjBB(shape)
+  const cx = (bb.minX+bb.maxX)/2, cy = (bb.minY+bb.maxY)/2
+  const halfW = (bb.maxX-bb.minX)/2, halfH = (bb.maxY-bb.minY)/2
+  const local = shape.type === 'circle'
+    ? { x: halfW*Math.cos(angle), y: halfH*Math.sin(angle) }
+    : rayBoxIntersection(halfW, halfH, angle)
+  const screen = { x: cx+local.x, y: cy+local.y }
+  return shape.rotation ? rotatePt(screen, { x:cx, y:cy }, shape.rotation) : screen
+}
+
+function angleDiff(a: number, b: number): number {
+  let d = Math.abs(a-b) % (Math.PI*2)
+  if (d > Math.PI) d = Math.PI*2 - d
+  return d
+}
+
+// Evenly distributed snap angles around the perimeter — cardinals get a wider,
+// easier-to-hit tolerance; the rest a tighter one; anywhere else, the connector
+// just uses the exact free angle under the pointer (never restricted to only these).
+const CARDINAL_ANGLES = [0, Math.PI/2, Math.PI, -Math.PI/2]
+const DISTRIBUTED_ANGLES = [30,45,60,120,135,150,210,225,240,300,315,330].map(d => d*Math.PI/180)
+function snapAnchorAngle(raw: number): number {
+  for (const a of CARDINAL_ANGLES) if (angleDiff(raw,a) < 10*Math.PI/180) return a
+  for (const a of DISTRIBUTED_ANGLES) if (angleDiff(raw,a) < 6*Math.PI/180) return a
+  return raw
+}
+
+// Finds a shape under/near the pointer to attach to, and the (snapped) angle
+// from its center the endpoint should sit at — null target means "leave it
+// floating in empty canvas space," which callers must still allow (item 11).
+function findAttachTarget(objs: DrawObj[], excludeId: string, pos: Pt): { target: DrawObj; angle: number } | null {
+  const PAD = 24
+  for (const o of objs) {
+    if (o.id === excludeId || !CONNECTABLE_TYPES.includes(o.type)) continue
+    const bb = getObjBB(o)
+    if (pos.x < bb.minX-PAD || pos.x > bb.maxX+PAD || pos.y < bb.minY-PAD || pos.y > bb.maxY+PAD) continue
+    const cx = (bb.minX+bb.maxX)/2, cy = (bb.minY+bb.maxY)/2
+    const local = o.rotation ? rotatePt(pos, {x:cx,y:cy}, -o.rotation) : pos
+    const angle = snapAnchorAngle(Math.atan2(local.y-cy, local.x-cx))
+    return { target: o, angle }
+  }
+  return null
+}
+
+// Re-resolves every attached connector endpoint against its target's CURRENT
+// geometry — called after every move/resize/rotate/auto-grow so "if the shape
+// moves/resizes/rotates, the connector follows" holds unconditionally.
+function resolveAttachments(objs: DrawObj[]): DrawObj[] {
+  const byId = new Map(objs.map(o => [o.id, o]))
+  return objs.map(o => {
+    if (o.type !== 'line' && o.type !== 'arrow') return o
+    if (!o.attachStartId && !o.attachEndId) return o
+    let x1=o.x1, y1=o.y1, x2=o.x2, y2=o.y2
+    if (o.attachStartId) { const t = byId.get(o.attachStartId); if (t) { const p = getPerimeterPoint(t, o.attachStartAngle); x1=p.x; y1=p.y } }
+    if (o.attachEndId)   { const t = byId.get(o.attachEndId);   if (t) { const p = getPerimeterPoint(t, o.attachEndAngle);   x2=p.x; y2=p.y } }
+    return { ...o, x1, y1, x2, y2, mx:(x1+x2)/2, my:(y1+y2)/2 }
+  })
 }
 
 // The pivot a rotation acts around: a single object's own bbox center, or the
@@ -132,21 +298,46 @@ function drawStarburstPath(c: CanvasRenderingContext2D, x: number, y: number, w:
 // Centered mind-map-node label — drawn after any flip transform is restored so
 // the text itself is never mirrored (a shape's bbox center is unaffected by a
 // flip around its own center, so this still lands in the visually-correct spot).
+// Title-only: centered both axes, word-wrapped. Title+Note: left-aligned block
+// near the top (Title bold, Note below it, Note's own list markers if any) —
+// both forms keep content strictly inside [bb] at the shape's CURRENT size;
+// auto-grow (computeRequiredHeight) is what keeps that true as content changes.
 function drawShapeText(c: CanvasRenderingContext2D, obj: DrawObj, bb: { minX:number;minY:number;maxX:number;maxY:number }) {
-  if (!obj.text) return
-  const cx = (bb.minX + bb.maxX) / 2, cy = (bb.minY + bb.maxY) / 2
-  const boxW = Math.max(10, (bb.maxX - bb.minX) - 12)
-  const boxH = Math.abs(bb.maxY - bb.minY)
-  let fontSize = Math.max(10, Math.min(28, boxH * 0.28))
+  const hasTitle = !!obj.text.trim(), hasNote = !!obj.note.trim()
+  if (!hasTitle && !hasNote) return
+  const innerW = Math.max(10, (bb.maxX - bb.minX) - SHAPE_TEXT_PAD * 2)
   c.save()
-  c.font = `600 ${fontSize}px sans-serif`
-  while (fontSize > 9 && c.measureText(obj.text).width > boxW) {
-    fontSize -= 1
-    c.font = `600 ${fontSize}px sans-serif`
-  }
   c.fillStyle = obj.color
-  c.textAlign = 'center'; c.textBaseline = 'middle'
-  c.fillText(obj.text, cx, cy)
+
+  if (hasTitle && !hasNote) {
+    const lines = wrapTextLines(c, obj.text, innerW, obj.fontSize, '600')
+    const lineH = obj.fontSize * 1.25
+    const cx = (bb.minX + bb.maxX) / 2, cy = (bb.minY + bb.maxY) / 2
+    c.font = `600 ${obj.fontSize}px sans-serif`
+    c.textAlign = 'center'; c.textBaseline = 'alphabetic'
+    let y = cy - (lines.length * lineH) / 2 + lineH * 0.78
+    for (const ln of lines) { c.fillText(ln, cx, y); y += lineH }
+    c.restore(); return
+  }
+
+  c.textAlign = 'left'; c.textBaseline = 'alphabetic'
+  const left = bb.minX + SHAPE_TEXT_PAD
+  let y = bb.minY + SHAPE_TEXT_PAD
+  if (hasTitle) {
+    const lineH = obj.fontSize * 1.25
+    c.font = `700 ${obj.fontSize}px sans-serif`
+    for (const ln of wrapTextLines(c, obj.text, innerW, obj.fontSize, '700')) { y += lineH; c.fillText(ln, left, y - lineH * 0.22) }
+    y += 4
+  }
+  if (hasNote) {
+    const lineH = obj.noteFontSize * 1.3
+    c.font = `400 ${obj.noteFontSize}px sans-serif`
+    for (const ln of wrapNoteContent(c, obj.note, innerW, obj.noteFontSize, obj.noteListType)) {
+      y += lineH
+      if (ln.marker) c.fillText(ln.marker, left, y - lineH * 0.3)
+      if (ln.text) c.fillText(ln.text, left + ln.indent, y - lineH * 0.3)
+    }
+  }
   c.restore()
 }
 
@@ -403,6 +594,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const redoRef     = useRef<string[]>([])
   const dragRef     = useRef<DragMode>(null)
   const alignGuidesRef = useRef<Array<{ axis:'v'|'h'; pos:number }>>([]) // active snap guides while moving
+  const snapTargetRef  = useRef<string | null>(null) // shape id a connector endpoint is currently hovering/snapping to
   const activeRef   = useRef<DrawObj | null>(null)
   const isDownRef   = useRef(false)
   const shapeStart  = useRef<Pt | null>(null)
@@ -422,7 +614,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const [canRedo,     setCanRedo]     = useState(false)
   const [objects,     setObjects]     = useState<DrawObj[]>([])
   const [selIds,      setSelIds]      = useState<string[]>([])
-  const [textInput,   setTextInput]   = useState<{ x:number; y:number; w?:number; value:string; targetId?:string } | null>(null)
+  const [textInput,   setTextInput]   = useState<{ x:number; y:number; w?:number; value:string; targetId?:string; noteValue?:string; activeField?:EditField; titleFontSize?:number; noteFontSizeLive?:number } | null>(null)
   const [openPopover, setOpenPopover] = useState<PopoverId | null>(null)
   const [popAnchor,   setPopAnchor]   = useState<{ top:number; left:number } | null>(null)
   const [arrowConnDefault, setArrowConnDefault] = useState<ConnType>('elbow')
@@ -460,8 +652,9 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       if (restored) {
         // setObjects below re-renders via the existing
         // useEffect(() => renderAll(), [objects, selIds]) — no explicit call needed.
-        syncObjs(restored)
-        historyRef.current = [JSON.stringify(restored)]; setCanUndo(false); setCanRedo(false)
+        const resolved = resolveAttachments(restored)
+        syncObjs(resolved)
+        historyRef.current = [JSON.stringify(resolved)]; setCanUndo(false); setCanRedo(false)
       } else if (initialSrc) {
         // No object data (a drawing saved before canvasData existed) — load
         // the old flattened PNG as a background, exactly as before.
@@ -501,6 +694,17 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         }
         c.restore()
       }
+      // Connector snap feedback — a restrained highlight around whichever shape
+      // the dragged endpoint is currently about to attach to.
+      if (dm?.kind === 'endpoint' && snapTargetRef.current) {
+        const target = objectsRef.current.find(o => o.id === snapTargetRef.current)
+        if (target) {
+          const bb = getObjBB(target)
+          c.save(); c.strokeStyle = '#7c3aed'; c.lineWidth = 2; c.setLineDash([])
+          c.strokeRect(bb.minX-4, bb.minY-4, bb.maxX-bb.minX+8, bb.maxY-bb.minY+8)
+          c.restore()
+        }
+      }
       if (selIdsRef.current.length > 0) renderSelHandles(c)
     }
   }
@@ -534,7 +738,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       }
       return
     }
-    if (obj.type === 'stroke' || obj.type === 'text') {
+    if (obj.type === 'text') {
       const bb = getObjBB(obj)
       c.strokeRect(bb.minX-4, bb.minY-4, bb.maxX-bb.minX+8, bb.maxY-bb.minY+8)
       c.restore(); return
@@ -542,7 +746,10 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     const { minX,minY,maxX,maxY } = getObjBB(obj)
     c.strokeRect(minX-2, minY-2, maxX-minX+4, maxY-minY+4); c.restore()
     for (const h of getHandlePositions(obj)) drawHandleDot(c, h.x, h.y)
-    if (ROTATABLE_TYPES.includes(obj.type)) {
+    // Strokes rotate via direct point-rotation (no stored angle/render transform,
+    // so no inverse-rotate needed below) rather than through ROTATABLE_TYPES —
+    // still get the same solo rotation handle as shapes.
+    if (ROTATABLE_TYPES.includes(obj.type) || obj.type === 'stroke') {
       const center = { x:(minX+maxX)/2, y:(minY+maxY)/2 }
       const topScreen = obj.rotation ? rotatePt({x:center.x,y:minY}, center, obj.rotation) : { x:center.x, y:minY }
       const rp = getRotateHandlePos(obj)
@@ -564,7 +771,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     // Rotation handle(s) — checked first since they sit outside every other
     // hit region and never overlap resize/endpoint handles.
     const selObjsNow = objectsRef.current.filter(o => selIdsRef.current.includes(o.id))
-    if (selObjsNow.length === 1 && ROTATABLE_TYPES.includes(selObjsNow[0].type)) {
+    if (selObjsNow.length === 1 && (ROTATABLE_TYPES.includes(selObjsNow[0].type) || selObjsNow[0].type === 'stroke')) {
       const rp = getRotateHandlePos(selObjsNow[0])
       if (Math.hypot(rp.x-px, rp.y-py) < HR) return {kind:'rotate', ids:[selObjsNow[0].id]}
     } else if (selObjsNow.length > 1) {
@@ -582,7 +789,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         if (Math.hypot(obj.x2-px,obj.y2-py) < HR) return {kind:'handle',id,which:'end'}
         const hasBendHandle = !(obj.type === 'arrow' && (obj.connType === 'elbow' || obj.connType === 'elbow-curved'))
         if (hasBendHandle && Math.hypot(obj.mx-px,obj.my-py) < HR) return {kind:'handle',id,which:'mid'}
-      } else if (obj.type !== 'stroke' && obj.type !== 'text') {
+      } else if (obj.type !== 'text') {
         for (const h of getHandlePositions(obj)) {
           if (Math.hypot(h.x-px,h.y-py) < HR) return {kind:'handle',id,which:h.pos}
         }
@@ -737,13 +944,13 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       }
       alignGuidesRef.current = guides
 
-      objectsRef.current = objectsRef.current.map(o => {
+      objectsRef.current = resolveAttachments(objectsRef.current.map(o => {
         if (!dm.ids.includes(o.id)) return o
         const s = dm.snap.get(o.id)!
         if (o.type === 'line' || o.type === 'arrow') return {...o,x1:s.x1+dx,y1:s.y1+dy,x2:s.x2+dx,y2:s.y2+dy,mx:s.mx+dx,my:s.my+dy}
         if (o.type === 'stroke') return {...o,pts:s.pts.map(p=>({x:p.x+dx,y:p.y+dy}))}
         return {...o,x:s.x+dx,y:s.y+dy}
-      })
+      }))
       renderAll(); return
     }
 
@@ -762,6 +969,18 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         : pos
       if (h.includes('w')) nx1=resizePos.x; if (h.includes('e')) nx2=resizePos.x
       if (h.includes('n')) ny1=resizePos.y; if (h.includes('s')) ny2=resizePos.y
+      // Text reflows live from the shape's own render (drawShapeText always
+      // wraps against the CURRENT w) — the only thing resize itself must do is
+      // refuse to go shorter than the Title/Note actually needs at this width.
+      if (TEXT_CAPABLE_TYPES.includes(orig.type)) {
+        const ctx = canvasRef.current?.getContext('2d')
+        if (ctx) {
+          const requiredH = computeRequiredHeight(ctx, { ...orig, w: nx2-nx1, h: ny2-ny1 })
+          if (Math.abs(ny2-ny1) < requiredH) {
+            if (h.includes('n')) ny1 = ny2 - requiredH; else ny2 = ny1 + requiredH
+          }
+        }
+      }
       // Images resize proportionally from a corner handle, like most creative
       // tools — the axis that moved more wins and the other is derived from it.
       if (orig.type === 'image' && (h==='nw'||h==='ne'||h==='se'||h==='sw')) {
@@ -776,18 +995,43 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           if (h==='nw'||h==='sw') nx1 = nx2-adjW; else nx2 = nx1+adjW
         }
       }
-      objectsRef.current = objectsRef.current.map(o => o.id!==dm.id?o:{...o,x:nx1,y:ny1,w:nx2-nx1,h:ny2-ny1})
+      // Freehand strokes have no x/y/w/h-driven render path — scale the actual
+      // point geometry from the ORIGINAL (drag-start) points into the new bbox
+      // so the drawing visually scales with the handles, same as any shape.
+      if (orig.type === 'stroke') {
+        const origW = ox2-ox1 || 1, origH = oy2-oy1 || 1
+        const sx = (nx2-nx1) / origW, sy = (ny2-ny1) / origH
+        const scaledPts = orig.pts.map(p => ({ x: nx1 + (p.x-ox1)*sx, y: ny1 + (p.y-oy1)*sy }))
+        objectsRef.current = objectsRef.current.map(o => o.id!==dm.id?o:{...o,x:nx1,y:ny1,w:nx2-nx1,h:ny2-ny1,pts:scaledPts})
+        renderAll(); return
+      }
+      objectsRef.current = resolveAttachments(objectsRef.current.map(o => o.id!==dm.id?o:{...o,x:nx1,y:ny1,w:nx2-nx1,h:ny2-ny1}))
       renderAll(); return
     }
 
     if (dm?.kind === 'endpoint') {
+      if (dm.which === 'start' || dm.which === 'end') {
+        const attach = findAttachTarget(objectsRef.current, dm.id, pos)
+        snapTargetRef.current = attach?.target.id ?? null
+        objectsRef.current = resolveAttachments(objectsRef.current.map(o => {
+          if (o.id !== dm.id) return o
+          if (attach) {
+            const p = getPerimeterPoint(attach.target, attach.angle)
+            return dm.which === 'start'
+              ? { ...o, x1:p.x, y1:p.y, attachStartId:attach.target.id, attachStartAngle:attach.angle }
+              : { ...o, x2:p.x, y2:p.y, attachEndId:attach.target.id, attachEndAngle:attach.angle }
+          }
+          return dm.which === 'start'
+            ? { ...o, x1:pos.x, y1:pos.y, attachStartId:null }
+            : { ...o, x2:pos.x, y2:pos.y, attachEndId:null }
+        }))
+        renderAll(); return
+      }
+      // Mid/bend-handle drag — elbow corners are always derived (no handle is
+      // ever hit-tested for them, see getTarget), so this only ever runs for
+      // the free-form 'curved' control point; it never attaches to a shape.
       objectsRef.current = objectsRef.current.map(o => {
         if (o.id !== dm.id) return o
-        if (dm.which === 'start') return {...o,x1:pos.x,y1:pos.y}
-        if (dm.which === 'end')   return {...o,x2:pos.x,y2:pos.y}
-        // Mid/bend-handle drag — elbow corners are always derived (no handle
-        // is ever hit-tested for them, see getTarget), so this only ever runs
-        // for the free-form 'curved' control point.
         if (o.type === 'arrow' && o.connType === 'straight') return {...o,mx:pos.x,my:pos.y,connType:'curved' as ConnType}
         return {...o,mx:pos.x,my:pos.y}
       })
@@ -797,7 +1041,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     if (dm?.kind === 'rotate') {
       const angleNow = Math.atan2(pos.y-dm.pivot.y, pos.x-dm.pivot.x)
       const delta = angleNow - dm.startAngle
-      objectsRef.current = objectsRef.current.map(o => {
+      objectsRef.current = resolveAttachments(objectsRef.current.map(o => {
         const base = dm.baseline.get(o.id); if (!base) return o
         if (o.type === 'line' || o.type === 'arrow') {
           const p1 = rotatePt({x:base.x1,y:base.y1}, dm.pivot, delta)
@@ -816,7 +1060,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         const baseCenter = { x: base.x+bw/2, y: base.y+bh/2 }
         const newCenter = rotatePt(baseCenter, dm.pivot, delta)
         return {...o, x:newCenter.x-bw/2, y:newCenter.y-bh/2, rotation: (base.rotation||0)+delta}
-      })
+      }))
       renderAll(); return
     }
 
@@ -847,7 +1091,8 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     const dm  = dragRef.current
 
     if (dm?.kind === 'move' || dm?.kind === 'resize' || dm?.kind === 'endpoint' || dm?.kind === 'rotate') {
-      dragRef.current = null; alignGuidesRef.current = []; syncObjs(objectsRef.current); snapshot(objectsRef.current); renderAll(); return
+      dragRef.current = null; alignGuidesRef.current = []; snapTargetRef.current = null
+      syncObjs(objectsRef.current); snapshot(objectsRef.current); renderAll(); return
     }
 
     if (dm?.kind === 'marquee') {
@@ -925,26 +1170,50 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     // is what makes reopening the canvas resume as a REAL editable Mind Map
     // instead of a flattened picture — see JournalBlock.canvasData.
     onSave(off.toDataURL('image/png'), JSON.stringify(objectsRef.current))
+    setToast('Mind Map saved ✓')
   }
 
   // ── Text ───────────────────────────────────────────────────────────────────
-  // Opens the same floating-input overlay used by the free Text tool, but
-  // centered over a shape's own bounding box and tagged with targetId so
-  // commitText() writes into that shape's label instead of creating a new
-  // free-floating text object.
+  // Opens a floating Title+Note panel over the shape's own bounding box, tagged
+  // with targetId so commitText() writes into that shape instead of creating a
+  // new free-floating text object. Both fields are plain text — Note's markers
+  // (bullet/numbered/lettered) are rendered dynamically from noteListType, never
+  // baked into the text, so switching list types can't "stack" formatting.
   function startShapeTextEdit(obj: DrawObj) {
     const bb = getObjBB(obj)
-    const cx = (bb.minX+bb.maxX)/2, cy = (bb.minY+bb.maxY)/2
-    const w = Math.max(60, (bb.maxX-bb.minX)-16)
+    const cx = (bb.minX+bb.maxX)/2
+    const w = Math.max(100, (bb.maxX-bb.minX)-16)
     syncSel([obj.id])
-    setTextInput({ x: cx-w/2, y: cy-13, w, value: obj.text ?? '', targetId: obj.id })
+    setTextInput({ x: cx-w/2, y: bb.minY+8, w, value: obj.text ?? '', noteValue: obj.note ?? '', targetId: obj.id, activeField: 'title', titleFontSize: obj.fontSize, noteFontSizeLive: obj.noteFontSize })
+  }
+
+  // Applies a toolbar text-size choice to whichever shape field is currently
+  // focused (Title or Note) — the shape's dimensions are never touched here.
+  function applyShapeTextSize(sz: number) {
+    if (!textInput?.targetId) return
+    const id = textInput.targetId, field = textInput.activeField ?? 'title'
+    const n = objectsRef.current.map(o => o.id!==id ? o : (field==='note' ? {...o,noteFontSize:sz} : {...o,fontSize:sz}))
+    syncObjs(n); snapshot(n)
+    setTextInput(prev => prev ? (field==='note' ? {...prev, noteFontSizeLive:sz} : {...prev, titleFontSize:sz}) : null)
+    setOpenPopover(null)
   }
 
   function commitText() {
     if (textInput?.targetId) {
       const id = textInput.targetId
-      const val = textInput.value.trim()
-      const n = objectsRef.current.map(o => o.id===id ? {...o,text:val} : o)
+      const title = textInput.value.trim()
+      const note = (textInput.noteValue ?? '').trim()
+      const canvas = canvasRef.current
+      const ctx = canvas?.getContext('2d')
+      const n = resolveAttachments(objectsRef.current.map(o => {
+        if (o.id !== id) return o
+        const updated = { ...o, text: title, note }
+        if (ctx) {
+          const needed = computeRequiredHeight(ctx, updated)
+          if (needed > Math.abs(updated.h)) updated.h = updated.h < 0 ? -needed : needed
+        }
+        return updated
+      }))
       syncObjs(n); snapshot(n); renderAll()
       setTextInput(null); return
     }
@@ -1043,6 +1312,16 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     }
     setOpenPopover(null)
   }
+  // Changes how the SAME Note lines render (bullet/numbered/lettered) — never
+  // rewrites the text itself, so switching types replaces formatting instead
+  // of stacking it, and Enter naturally continues the active type for free.
+  function applyNoteListType(type: NoteListType) {
+    if (!textInput?.targetId) return
+    const id = textInput.targetId
+    const n = objectsRef.current.map(o => o.id!==id ? o : {...o, noteListType: type})
+    syncObjs(n); snapshot(n); setOpenPopover(null)
+  }
+
   function applyArrowThickness(px: number) {
     setArrowThickIdx(THICKNESS_LEVELS.indexOf(px as typeof THICKNESS_LEVELS[number]))
     if (selArrows.length > 0) {
@@ -1181,6 +1460,9 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const selLines    = selObjs.filter(o => o.type==='line')
   const selArrows   = selObjs.filter(o => o.type==='arrow')
   const selArrow    = selObjs.length===1 && selObjs[0].type==='arrow' ? selObjs[0] : null
+  const activeNoteListType: NoteListType = textInput?.targetId
+    ? (objects.find(o=>o.id===textInput.targetId)?.noteListType ?? 'none')
+    : 'none'
   const selIsGroup  = selObjs.length>=2 && selObjs.every(o=>o.gid&&o.gid===selObjs[0].gid)
   const canGroup    = selIds.length>=2 && !selIsGroup
   const showFill    = SHAPE_TOOLS.includes(tool) || selHasShape
@@ -1303,15 +1585,48 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           )}
         </div>
 
-        {/* Text */}
+        {/* Text size — while a shape's Title/Note is being edited, this targets
+            whichever of the two currently has focus and leaves the panel open;
+            otherwise it behaves as before (sets the default for the Text tool). */}
         <div style={{flexShrink:0}} data-pop-trigger="">
-          <button title="Text" onClick={(e)=>{if(textInput)commitText();setTool('text');openPop('text-size',e)}}
-            style={{...dkBtn(tool==='text'),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:13,fontWeight:700}}>
-            T<span style={{fontSize:9,opacity:0.6,fontWeight:400}}>{TEXT_SIZES[textSzIdx]}</span>
+          <button title="Text Size" onClick={(e)=>{
+              if (!textInput?.targetId) { if(textInput)commitText(); setTool('text') }
+              openPop('text-size',e)
+            }}
+            style={{...dkBtn(tool==='text'||!!textInput?.targetId),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:13,fontWeight:700}}>
+            T<span style={{fontSize:9,opacity:0.6,fontWeight:400}}>
+              {textInput?.targetId ? (textInput.activeField==='note' ? textInput.noteFontSizeLive : textInput.titleFontSize) : TEXT_SIZES[textSzIdx]}
+            </span>
           </button>
           {openPopover==='text-size' && (
             <div data-popover="" style={fixedPopStyle()}>
-              {TEXT_SIZES.map((sz,i)=>pbtn(`${sz}px`,()=>{setTextSzIdx(i);setOpenPopover(null)},textSzIdx===i))}
+              {textInput?.targetId
+                ? TEXT_SIZES.map(sz => {
+                    const active = (textInput.activeField==='note' ? textInput.noteFontSizeLive : textInput.titleFontSize)===sz
+                    // Inlined (not routed through the pbtn() helper) — applyShapeTextSize
+                    // reads objectsRef, and only a DIRECT onClick JSX attribute (not a value
+                    // passed into another function) is recognized as deferred-to-click here.
+                    return (
+                      <button key={sz} onClick={()=>applyShapeTextSize(sz)} style={{...dkBtn(active),textAlign:'left',width:'100%',padding:'5px 10px'}}>{sz}px</button>
+                    )
+                  })
+                : TEXT_SIZES.map((sz,i)=>pbtn(`${sz}px`,()=>{setTextSzIdx(i);setOpenPopover(null)},textSzIdx===i))}
+            </div>
+          )}
+        </div>
+
+        {/* List — applies to the Note field of the shape currently being edited */}
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="List" disabled={!(textInput?.targetId && textInput.activeField==='note')}
+            onClick={(e)=>{ if (textInput?.targetId && textInput.activeField==='note') openPop('list-type',e) }}
+            style={{...dkBtn(false,false,!(textInput?.targetId && textInput.activeField==='note')),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>
+            ☷ List▾
+          </button>
+          {openPopover==='list-type' && textInput?.targetId && (
+            <div data-popover="" style={fixedPopStyle()}>
+              <button onClick={()=>applyNoteListType('bullet')} style={{...dkBtn(activeNoteListType==='bullet'),textAlign:'left',width:'100%',padding:'5px 10px'}}>• Bullet List</button>
+              <button onClick={()=>applyNoteListType('numbered')} style={{...dkBtn(activeNoteListType==='numbered'),textAlign:'left',width:'100%',padding:'5px 10px'}}>1. Numbered List</button>
+              <button onClick={()=>applyNoteListType('lettered')} style={{...dkBtn(activeNoteListType==='lettered'),textAlign:'left',width:'100%',padding:'5px 10px'}}>a. Lettered List</button>
             </div>
           )}
         </div>
@@ -1541,7 +1856,38 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           if (obj && TEXT_CAPABLE_TYPES.includes(obj.type)) startShapeTextEdit(obj)
         }}
       />
-      {textInput && (
+      {textInput && textInput.targetId && (
+        <div
+          // Commit only when focus leaves the WHOLE panel — not when tabbing
+          // between Title and Note — using the standard relatedTarget check.
+          onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) commitText() }}
+          style={{
+            position:'absolute', left:textInput.x, top:textInput.y, width:textInput.w,
+            display:'flex', flexDirection:'column', gap:4,
+            background:'rgba(255,255,255,0.95)', backdropFilter:'blur(4px)',
+            border:'1px dashed rgba(124,58,237,0.60)', borderRadius:6, padding:'6px 7px', zIndex:10,
+          }}
+        >
+          <input
+            ref={textInputRef} autoFocus value={textInput.value}
+            onChange={e=>setTextInput(prev=>prev?{...prev,value:e.target.value}:null)}
+            onFocus={()=>setTextInput(prev=>prev?{...prev,activeField:'title'}:null)}
+            onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();commitText()}if(e.key==='Escape'){e.preventDefault();setTextInput(null)}}}
+            placeholder="Title"
+            style={{border:'none',outline:'none',background:'transparent',color:drawColor,fontSize:textInput.titleFontSize??14,fontWeight:700,fontFamily:'sans-serif',padding:'2px 3px'}}
+          />
+          <textarea
+            value={textInput.noteValue ?? ''}
+            onChange={e=>setTextInput(prev=>prev?{...prev,noteValue:e.target.value}:null)}
+            onFocus={()=>setTextInput(prev=>prev?{...prev,activeField:'note'}:null)}
+            onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();setTextInput(null)}}}
+            placeholder="Write a note…"
+            rows={2}
+            style={{border:'none',outline:'none',background:'transparent',color:drawColor,fontSize:textInput.noteFontSizeLive??12.5,fontFamily:'sans-serif',padding:'2px 3px',resize:'vertical',minHeight:36}}
+          />
+        </div>
+      )}
+      {textInput && !textInput.targetId && (
         <input
           ref={textInputRef} autoFocus value={textInput.value}
           onChange={e=>setTextInput(prev=>prev?{...prev,value:e.target.value}:null)}
@@ -1549,10 +1895,10 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();commitText()}if(e.key==='Escape'){e.preventDefault();setTextInput(null)}}}
           style={{
             position:'absolute',left:textInput.x,top:textInput.y,
-            width: textInput.w, textAlign: textInput.targetId ? 'center' : 'left',
+            width: textInput.w, textAlign: 'left',
             background:'rgba(255,255,255,0.12)',backdropFilter:'blur(4px)',border:'1px dashed rgba(124,58,237,0.60)',borderRadius:4,color:drawColor,fontSize:TEXT_SIZES[textSzIdx],outline:'none',minWidth:textInput.w?undefined:120,padding:'2px 4px',zIndex:10,fontFamily:'sans-serif',
           }}
-          placeholder={textInput.targetId ? 'Label…' : 'Type here…'}
+          placeholder="Type here…"
         />
       )}
       <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'none',opacity:objects.length>0?0:0.35,transition:'opacity 300ms'}}>

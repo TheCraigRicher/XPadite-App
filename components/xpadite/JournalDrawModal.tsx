@@ -18,7 +18,7 @@ type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starbur
 type ConnType = 'straight' | 'curved' | 'elbow' | 'elbow-curved'
 type HPos     = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
 type PopoverId = 'pen-size' | 'eraser-size' | 'shapes' | 'flip' | 'text-size' | 'arrow-type' | 'fill' | 'rotate' | 'line-thickness' | 'arrow-thickness' | 'list-type' | 'group'
-type NoteListType = 'none' | 'bullet' | 'numbered' | 'lettered'
+type NoteListType = 'none' | 'bullet' | 'numbered' | 'lettered' | 'checkbox'
 type EditField = 'title' | 'note'
 
 interface Pt { x: number; y: number }
@@ -77,6 +77,10 @@ interface DrawObj {
   attachEndConnId: string | null; attachEndT: number
   // Arrow only: draws an arrowhead at BOTH ends instead of just the end point.
   doubleEnded: boolean
+  // Arrow only: which single endpoint owns the arrowhead when NOT doubleEnded
+  // ('end' matches all prior behavior/saved data). "Switch Arrow" flips this
+  // without touching x1/y1/x2/y2/mx/my or any attachment — purely cosmetic.
+  headAt: 'start' | 'end'
 }
 
 // Shared full-geometry snapshot — captured once at drag-start and read back
@@ -134,7 +138,7 @@ function mkObj(p: Partial<DrawObj> & { id: string; type: ObjType }): DrawObj {
     flipX:false,flipY:false,gid:'',src:'',rotation:0,
     attachStartId:null,attachStartAngle:0,attachEndId:null,attachEndAngle:0,
     attachStartConnId:null,attachStartT:0,attachEndConnId:null,attachEndT:0,
-    doubleEnded:false, ...p,
+    doubleEnded:false, headAt:'end', ...p,
   }
 }
 
@@ -170,12 +174,15 @@ function getListMarker(type: NoteListType, index: number): string {
   if (type === 'bullet') return '•'
   if (type === 'numbered') return `${index + 1}.`
   if (type === 'lettered') return `${String.fromCharCode(97 + (index % 26))}.`
+  if (type === 'checkbox') return '☐'
   return ''
 }
 
 // Each line of `note` is one list item (when noteListType !== 'none') — Enter
 // naturally continues the active list type, and switching types just changes
-// how the SAME lines render, so nothing ever needs rewriting/"stacking."
+// how the SAME lines render, so nothing ever needs rewriting/"stacking." An
+// EMPTY line still gets its marker (not just lines with typed text) so a
+// freshly chosen list type shows its marker immediately, ready to type after.
 type NoteLine = { text: string; indent: number; marker?: string }
 function wrapNoteContent(c: CanvasRenderingContext2D, note: string, maxWidth: number, fontPx: number, listType: NoteListType): NoteLine[] {
   if (listType === 'none') return wrapTextLines(c, note, maxWidth, fontPx).map(t => ({ text: t, indent: 0 }))
@@ -183,8 +190,8 @@ function wrapNoteContent(c: CanvasRenderingContext2D, note: string, maxWidth: nu
   const indent = c.measureText('99.').width + 5
   const out: NoteLine[] = []
   note.split('\n').forEach((item, i) => {
-    if (item.trim() === '') { out.push({ text: '', indent: 0 }); return }
     const marker = getListMarker(listType, i)
+    if (item.trim() === '') { out.push({ text: '', indent, marker }); return }
     wrapTextLines(c, item, Math.max(10, maxWidth - indent), fontPx).forEach((ln, li) => {
       out.push({ text: ln, indent, marker: li === 0 ? marker : undefined })
     })
@@ -327,7 +334,7 @@ function getPointAtT(conn: DrawObj, t: number): Pt {
     }
   }
   if (conn.connType === 'elbow' || conn.connType === 'elbow-curved') {
-    const cornerX = conn.x1, cornerY = conn.y2
+    const cornerX = conn.mx, cornerY = conn.my // the corner is a free point, same as renderObj
     if (ct < 0.5) { const u = ct*2; return { x: conn.x1+(cornerX-conn.x1)*u, y: conn.y1+(cornerY-conn.y1)*u } }
     const u = (ct-0.5)*2
     return { x: cornerX+(conn.x2-cornerX)*u, y: cornerY+(conn.y2-cornerY)*u }
@@ -675,10 +682,12 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<str
 
   if (obj.type === 'arrow') {
     const isElbow = obj.connType === 'elbow' || obj.connType === 'elbow-curved'
-    // V1: the elbow corner is always derived from the endpoints — a vertical
-    // trunk down from the start, then horizontal to the end — never a stored,
-    // draggable vertex. Guarantees the clean default geometry every time.
-    const cornerX = obj.x1, cornerY = obj.y2
+    // The elbow corner is a free, draggable point stored in mx/my — the SAME
+    // field 'curved' already uses for its control point — defaulted to the
+    // classic "vertical trunk then horizontal" position at creation/connType-
+    // switch time (see endStroke / setConnType) but freely repositionable
+    // afterward via the same mid/bend handle every other connType exposes.
+    const cornerX = obj.mx, cornerY = obj.my
     c.beginPath()
     if (obj.connType === 'curved') { c.moveTo(obj.x1,obj.y1); c.quadraticCurveTo(obj.mx,obj.my,obj.x2,obj.y2) }
     else if (obj.connType === 'elbow') { c.moveTo(obj.x1,obj.y1); c.lineTo(cornerX,cornerY); c.lineTo(obj.x2,obj.y2) }
@@ -696,14 +705,21 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<str
     c.stroke()
     const tx = isElbow ? cornerX : (obj.connType !== 'straight' ? obj.mx : obj.x1)
     const ty = isElbow ? cornerY : (obj.connType !== 'straight' ? obj.my : obj.y1)
-    drawArrowHead(c, tx, ty, obj.x2, obj.y2, obj.sw)
+    // Same "approach point" logic mirrored for the START end — the near-start
+    // leg of a curve/elbow points back toward the same reference point its
+    // near-end leg points away from (mx,my for curved; the corner for elbow).
+    const tx2 = isElbow ? cornerX : (obj.connType !== 'straight' ? obj.mx : obj.x2)
+    const ty2 = isElbow ? cornerY : (obj.connType !== 'straight' ? obj.my : obj.y2)
+    // Switch Arrow (headAt) swaps which single endpoint owns the arrowhead
+    // without touching geometry/attachments/bends — moot once doubleEnded
+    // already draws both, so that always wins regardless of headAt.
     if (obj.doubleEnded) {
-      // Same "approach point" logic mirrored for the START end — the near-start
-      // leg of a curve/elbow points back toward the same reference point its
-      // near-end leg points away from (mx,my for curved; the corner for elbow).
-      const tx2 = isElbow ? cornerX : (obj.connType !== 'straight' ? obj.mx : obj.x2)
-      const ty2 = isElbow ? cornerY : (obj.connType !== 'straight' ? obj.my : obj.y2)
+      drawArrowHead(c, tx, ty, obj.x2, obj.y2, obj.sw)
       drawArrowHead(c, tx2, ty2, obj.x1, obj.y1, obj.sw)
+    } else if (obj.headAt === 'start') {
+      drawArrowHead(c, tx2, ty2, obj.x1, obj.y1, obj.sw)
+    } else {
+      drawArrowHead(c, tx, ty, obj.x2, obj.y2, obj.sw)
     }
     c.restore(); return
   }
@@ -793,6 +809,20 @@ const EraserIcon = ({ size = 16 }: { size?: number }) => (
     <rect x="3" y="7" width="14" height="7" rx="1.8" stroke="currentColor" strokeWidth="1.1"/>
   </svg>
 )
+
+// Canvas cursor for the Eraser tool — the SAME tilted two-tone block as
+// EraserIcon above, baked as a standalone SVG data URI (cursor images can't
+// resolve `currentColor`/CSS, and the rotation is an SVG `transform`
+// attribute rather than a CSS one for reliable cross-browser cursor
+// rendering). Replaces the native 'cell' cursor, which rendered as a plain
+// "+" and gave no visual hint that Eraser was active. Visual only — no
+// change to hit-testing/erase behavior, which never reads the CSS cursor.
+const ERASER_CURSOR_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 20 20">'
+  + '<g transform="rotate(-40 10 10)">'
+  + '<rect x="3" y="7" width="14" height="7" rx="1.8" fill="#475569" stroke="#1e293b" stroke-width="1.1"/>'
+  + '<rect x="3" y="7" width="5.5" height="7" rx="1.8" fill="#cbd5e1"/>'
+  + '</g></svg>'
+const ERASER_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(ERASER_CURSOR_SVG)}") 10 10, cell`
 
 // ─── TrashIcon ────────────────────────────────────────────────────────────────
 
@@ -1007,10 +1037,9 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     if (obj.type === 'line' || obj.type === 'arrow') {
       c.beginPath(); c.moveTo(obj.x1,obj.y1); c.lineTo(obj.x2,obj.y2); c.stroke(); c.restore()
       drawHandleDot(c, obj.x1, obj.y1); drawHandleDot(c, obj.x2, obj.y2)
-      // V1: elbow corners are derived, not editable — no bend handle for them.
-      if (!(obj.type === 'arrow' && (obj.connType === 'elbow' || obj.connType === 'elbow-curved'))) {
-        drawHandleDot(c, obj.mx, obj.my, '#ede9fe')
-      }
+      // Every connType gets the same draggable mid/bend handle — for elbow/
+      // elbow-curved this dot sits at the corner (mx/my), freely repositionable.
+      drawHandleDot(c, obj.mx, obj.my, '#ede9fe')
       return
     }
     if (obj.type === 'text') {
@@ -1084,8 +1113,9 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         if (obj.type === 'line' || obj.type === 'arrow') {
           if (Math.hypot(obj.x1-px,obj.y1-py) < HR) return {kind:'handle',id,which:'start'}
           if (Math.hypot(obj.x2-px,obj.y2-py) < HR) return {kind:'handle',id,which:'end'}
-          const hasBendHandle = !(obj.type === 'arrow' && (obj.connType === 'elbow' || obj.connType === 'elbow-curved'))
-          if (hasBendHandle && Math.hypot(obj.mx-px,obj.my-py) < HR) return {kind:'handle',id,which:'mid'}
+          // Every connType (including elbow/elbow-curved, whose corner lives
+          // in mx/my too — see renderObj) exposes the same draggable mid/bend handle.
+          if (Math.hypot(obj.mx-px,obj.my-py) < HR) return {kind:'handle',id,which:'mid'}
         } else if (obj.type !== 'text') {
           for (const h of getHandlePositions(obj)) {
             if (Math.hypot(h.x-px,h.y-py) < HR) return {kind:'handle',id,which:h.pos}
@@ -1343,9 +1373,10 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         }))
         renderAll(); return
       }
-      // Mid/bend-handle drag — elbow corners are always derived (no handle is
-      // ever hit-tested for them, see getTarget), so this only ever runs for
-      // the free-form 'curved' control point; it never attaches to a shape.
+      // Mid/bend-handle drag — repositions the free control point (mx/my),
+      // which is the curve control point for 'curved' and the corner for
+      // 'elbow'/'elbow-curved'; dragging it never attaches to a shape. A
+      // straight connector auto-promotes to 'curved' on its first such drag.
       objectsRef.current = objectsRef.current.map(o => {
         if (o.id !== dm.id) return o
         if (o.type === 'arrow' && o.connType === 'straight') return {...o,mx:pos.x,my:pos.y,connType:'curved' as ConnType}
@@ -1477,9 +1508,13 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       if (!pos||!shapeStart.current){renderAll();return}
       if (Math.hypot(pos.x-shapeStart.current.x,pos.y-shapeStart.current.y)>4) {
         const x1=shapeStart.current.x, y1=shapeStart.current.y, x2=pos.x, y2=pos.y
-        // Elbow corners are always derived from (x1,y2) at render time — see
-        // renderObj — so no special-cased default coordinates are needed here.
-        const obj={...active,x1,y1,x2,y2,connType: active.type==='arrow' ? arrowConnDefault : active.connType,doubleEnded: active.type==='arrow' && doubleEndedDefault,mx:(x1+x2)/2,my:(y1+y2)/2}
+        const finalConnType = active.type==='arrow' ? arrowConnDefault : active.connType
+        // The elbow corner is a free point stored in mx/my (see renderObj) —
+        // default it to the classic "vertical trunk then horizontal" position
+        // so a freshly drawn elbow looks exactly as before until manually bent.
+        const isElbow = finalConnType==='elbow' || finalConnType==='elbow-curved'
+        const mx = isElbow ? x1 : (x1+x2)/2, my = isElbow ? y2 : (y1+y2)/2
+        const obj={...active,x1,y1,x2,y2,connType:finalConnType,doubleEnded: active.type==='arrow' && doubleEndedDefault,mx,my}
         const n=[...objectsRef.current,obj]; syncObjs(n); snapshot(n); syncSel([obj.id])
       }
     } else {
@@ -1625,55 +1660,6 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     syncObjs(n); snapshot(n); renderAll()
   }
 
-  // Builds a Parent → Junction → each-Child hierarchy out of REAL persistent
-  // connector-to-connector attachments (attachStartConnId/attachEndConnId —
-  // see resolveAttachments) instead of faking the look with overlapping
-  // lines: one 'straight' TRUNK runs from the parent to a free junction point
-  // at the parent's own height, and each 'elbow' ARM attaches its own start to
-  // that trunk's end (t=1) and its end to a child. Because every segment is an
-  // ordinary attached connector, Save/reopen, moving the parent, moving a
-  // child, and manually re-editing any individual segment afterward all behave
-  // exactly like any other connector — Branch is just a creation convenience.
-  // selIdsRef.current preserves click order (see beginStroke's select/shift
-  // logic), so the FIRST object selected is treated as the parent.
-  function createBranch() {
-    const ids = selIdsRef.current
-    if (ids.length < 3) return
-    const [parentId, ...childIds] = ids
-    const parent = objectsRef.current.find(o => o.id === parentId)
-    if (!parent || !CONNECTABLE_TYPES.includes(parent.type)) { setToast('Select 1 parent and at least 2 child objects.'); return }
-    const children = childIds
-      .map(id => objectsRef.current.find(o => o.id === id))
-      .filter((o): o is DrawObj => !!o && o.id !== parentId && CONNECTABLE_TYPES.includes(o.type))
-    if (children.length < 2) { setToast('Select 1 parent and at least 2 child objects.'); return }
-
-    const parentBB = getObjBB(parent)
-    const parentCenterY = (parentBB.minY + parentBB.maxY) / 2
-    const childLeftMostX = Math.min(...children.map(ch => getObjBB(ch).minX))
-    const pStart = getPerimeterPoint(parent, 0) // due right of the parent
-    const junction: Pt = { x: pStart.x + Math.max(44, (childLeftMostX-pStart.x) * 0.35), y: parentCenterY }
-
-    const trunkId = uid()
-    const trunk = mkObj({
-      id: trunkId, type:'arrow', color:drawColor, sw:THICKNESS_LEVELS[arrowThickIdx], connType:'straight',
-      x1:pStart.x, y1:pStart.y, x2:junction.x, y2:junction.y, mx:(pStart.x+junction.x)/2, my:(pStart.y+junction.y)/2,
-      attachStartId:parent.id, attachStartAngle:0,
-    })
-    const arms = children.map(child => {
-      const bb = getObjBB(child)
-      const childCenter = { x:(bb.minX+bb.maxX)/2, y:(bb.minY+bb.maxY)/2 }
-      const endAngle = snapAnchorAngle(Math.atan2(junction.y-childCenter.y, junction.x-childCenter.x))
-      const pEnd = getPerimeterPoint(child, endAngle)
-      return mkObj({
-        id:uid(), type:'arrow', color:drawColor, sw:THICKNESS_LEVELS[arrowThickIdx], connType:'elbow',
-        x1:junction.x, y1:junction.y, x2:pEnd.x, y2:pEnd.y, mx:(junction.x+pEnd.x)/2, my:(junction.y+pEnd.y)/2,
-        attachStartConnId:trunkId, attachStartT:1, attachEndId:child.id, attachEndAngle:endAngle,
-      })
-    })
-    const n = resolveAttachments([...objectsRef.current, trunk, ...arms])
-    syncObjs(n); snapshot(n); syncSel([parent.id, trunkId, ...arms.map(a=>a.id)]); renderAll()
-  }
-
   function flipSelected(axis: 'x'|'y') {
     if (selIdsRef.current.length===0) return
     const ids=selIdsRef.current
@@ -1763,10 +1749,17 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   }
 
   function setConnType(ct: ConnType) {
-    // Elbow corners are always derived from (x1,y2) at render time — see
-    // renderObj — so switching connector type never needs to touch mx/my.
+    // The elbow corner lives in mx/my (see renderObj) — switching TO elbow/
+    // elbow-curved resets it to the classic derived corner (a leftover curve
+    // control point would otherwise land somewhere arbitrary); switching away
+    // from elbow leaves mx/my as-is, which gives 'curved' a sensible starting
+    // control point based on where the corner used to be.
     const ids=selIdsRef.current
-    const n=objectsRef.current.map(o=>(!ids.includes(o.id)||o.type!=='arrow')?o:{...o,connType:ct})
+    const isElbow = ct==='elbow' || ct==='elbow-curved'
+    const n=objectsRef.current.map(o=>{
+      if (!ids.includes(o.id)||o.type!=='arrow') return o
+      return isElbow ? {...o,connType:ct,mx:o.x1,my:o.y2} : {...o,connType:ct}
+    })
     syncObjs(n); snapshot(n); renderAll()
   }
 
@@ -1780,6 +1773,19 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     if (selArrowsNow.length===0) { setDoubleEndedDefault(v=>!v); return }
     const next = !selArrowsNow[0].doubleEnded
     const n=objectsRef.current.map(o=>(!ids.includes(o.id)||o.type!=='arrow')?o:{...o,doubleEnded:next})
+    syncObjs(n); snapshot(n); renderAll()
+  }
+
+  // Switch Arrow — flips which single endpoint owns the arrowhead. Pure
+  // cosmetic flag (headAt); geometry/attachments/bends/curves/junctions are
+  // never touched. No effect on a doubleEnded arrow, so the button disables
+  // itself for those (see the toolbar) rather than silently doing nothing.
+  function switchArrowHead() {
+    const ids=selIdsRef.current
+    const sel = objectsRef.current.find(o=>ids.includes(o.id)&&o.type==='arrow')
+    if (!sel || sel.doubleEnded) return
+    const next: 'start'|'end' = sel.headAt==='start' ? 'end' : 'start'
+    const n=objectsRef.current.map(o=>(!ids.includes(o.id)||o.type!=='arrow'||o.doubleEnded)?o:{...o,headAt:next})
     syncObjs(n); snapshot(n); renderAll()
   }
 
@@ -2085,6 +2091,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
               <button onClick={()=>applyNoteListType('bullet')} style={{...dkBtn(activeNoteListType==='bullet'),textAlign:'left',width:'100%',padding:'5px 10px'}}>• Bullet Points</button>
               <button onClick={()=>applyNoteListType('numbered')} style={{...dkBtn(activeNoteListType==='numbered'),textAlign:'left',width:'100%',padding:'5px 10px'}}>1. Numbers</button>
               <button onClick={()=>applyNoteListType('lettered')} style={{...dkBtn(activeNoteListType==='lettered'),textAlign:'left',width:'100%',padding:'5px 10px'}}>a. Letters</button>
+              <button onClick={()=>applyNoteListType('checkbox')} style={{...dkBtn(activeNoteListType==='checkbox'),textAlign:'left',width:'100%',padding:'5px 10px'}}>☐ Checkbox</button>
             </div>
           )}
         </div>
@@ -2183,6 +2190,15 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           ⟷
         </button>
 
+        {/* Switch Arrow — reverses ONLY which endpoint owns the arrowhead
+            (headAt); geometry/attachments/bends/curves/junctions are untouched.
+            Disabled for a doubleEnded arrow since reversing it is a no-op. */}
+        <button title="Switch Arrow — reverse which end has the arrowhead" disabled={!selArrow || selArrow.doubleEnded}
+          onClick={()=>{if(textInput)commitText();switchArrowHead()}}
+          style={dkBtn(false,false,!selArrow || !!selArrow?.doubleEnded)}>
+          ⇄ Switch
+        </button>
+
         {dvdr}
 
         {/* Stroke color */}
@@ -2195,7 +2211,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
             rainbow custom-color trigger + ColorPickerModal used by Activity Manager),
             not the native browser picker. Stays in its normal toolbar position even
             with nothing selected — disabled rather than removed (see also Fill toggle,
-            Flip, Connector type, Branch/Group/Dup/Delete below). */}
+            Flip, Connector type, Group/Dup/Delete below). */}
         <div style={{flexShrink:0}} data-pop-trigger="">
           <button title="Fill Color" disabled={!showFill} onClick={(e)=>{if(!showFill)return;if(textInput)commitText();openPop('fill',e)}}
             style={{...dkBtn(false,false,!showFill),display:'flex',alignItems:'center',gap:5,padding:'4px 8px'}}>
@@ -2263,11 +2279,9 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
 
         <span style={{flex:1,minWidth:8}}/>
 
-        {/* Branch / Group ▾ (Group/Ungroup) / Dup / Delete — always visible; each
+        {/* Group ▾ (Group/Ungroup) / Dup / Delete — always visible; each
             disables itself when the current selection doesn't support it. */}
         {dvdr}
-        <button title="Branch — select 1 parent + Shift-select 2 or more children, then click Branch"
-          disabled={selIds.length<3} onClick={createBranch} style={dkBtn(false,false,selIds.length<3)}>┣ Branch</button>
         <div style={{flexShrink:0}} data-pop-trigger="">
           <button title="Group" disabled={selIds.length===0} onClick={(e)=>{if(selIds.length===0)return;if(textInput)commitText();openPop('group',e)}}
             style={{...dkBtn(selIsGroup,false,selIds.length===0),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>
@@ -2314,7 +2328,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   )
 
   // ── Canvas area ─────────────────────────────────────────────────────────────
-  const cursorMap: Partial<Record<DrawTool,string>> = {select:'default',text:'text',eraser:'cell'}
+  const cursorMap: Partial<Record<DrawTool,string>> = {select:'default',text:'text',eraser:ERASER_CURSOR}
   const canvasCursor = cursorMap[tool] ?? 'crosshair'
 
   const canvasArea = (
@@ -2355,15 +2369,27 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
             style={{border:'none',outline:'none',background:'transparent',color:drawColor,fontSize:textInput.titleFontSize??14,fontWeight:700,fontFamily:'sans-serif',padding:'2px 3px',textAlign:textInput.titleOnly?'center':'left'}}
           />
           {!textInput.titleOnly && (
-            <textarea
-              value={textInput.noteValue ?? ''}
-              onChange={e=>setTextInput(prev=>prev?{...prev,noteValue:e.target.value}:null)}
-              onFocus={()=>setTextInput(prev=>prev?{...prev,activeField:'note'}:null)}
-              onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();setTextInput(null)}}}
-              placeholder="Write a note…"
-              rows={2}
-              style={{border:'none',outline:'none',background:'transparent',color:drawColor,fontSize:textInput.noteFontSizeLive??12.5,fontFamily:'sans-serif',padding:'2px 3px',resize:'vertical',minHeight:36}}
-            />
+            <div style={{position:'relative'}}>
+              {/* Shows the chosen list type's first marker the instant it's picked —
+                  purely a visual cue over an EMPTY note (never baked into noteValue,
+                  which stays plain text; the real marker rendering is dynamic, see
+                  wrapNoteContent) so the user doesn't have to type before seeing it. */}
+              {activeNoteListType!=='none' && !(textInput.noteValue ?? '').trim() && (
+                <span aria-hidden="true" style={{
+                  position:'absolute', left:3, top:2, pointerEvents:'none', userSelect:'none',
+                  fontSize:textInput.noteFontSizeLive??12.5, fontFamily:'sans-serif', color:drawColor, opacity:0.55,
+                }}>{getListMarker(activeNoteListType,0)}&nbsp;</span>
+              )}
+              <textarea
+                value={textInput.noteValue ?? ''}
+                onChange={e=>setTextInput(prev=>prev?{...prev,noteValue:e.target.value}:null)}
+                onFocus={()=>setTextInput(prev=>prev?{...prev,activeField:'note'}:null)}
+                onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();setTextInput(null)}}}
+                placeholder="Write a note…"
+                rows={2}
+                style={{border:'none',outline:'none',background:'transparent',color:drawColor,fontSize:textInput.noteFontSizeLive??12.5,fontFamily:'sans-serif',padding:'2px 3px',resize:'vertical',minHeight:36,width:'100%',display:'block'}}
+              />
+            </div>
           )}
         </div>
       )}

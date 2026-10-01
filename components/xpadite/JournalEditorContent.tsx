@@ -868,11 +868,12 @@ interface InlineMediaBlockProps {
   isDark: boolean
   onEdit: () => void
   onMoveActivate: () => void
+  onResizeActivate: () => void
   onDelete: () => void
   onCollapseToggle: () => void
 }
 
-function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete, onCollapseToggle }: InlineMediaBlockProps) {
+function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onResizeActivate, onDelete, onCollapseToggle }: InlineMediaBlockProps) {
   const { setToast } = useApp()
   const [menuOpen, setMenuOpen] = useState(false)
   const [lightbox, setLightbox] = useState(false)
@@ -966,7 +967,7 @@ function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete, onC
               <button onClick={() => { onMoveActivate(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
               ✥ Move
             </button>
-            <button onClick={() => setMenuOpen(false)} style={menuItemStyle(isDark)}>
+            <button onClick={() => { onResizeActivate(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
               ⤡ Resize
             </button>
             {block.type === 'drawing' && (
@@ -3505,16 +3506,21 @@ export function JournalEditorContent({
                               setMoveModeId(block.id)
                               setSelectedBlockId(block.id)
                             }}
+                            onResizeActivate={() => {
+                              setResizeModeId(block.id)
+                              setSelectedBlockId(block.id)
+                            }}
                             onDelete={() => deleteBlock(block.id)}
                             onCollapseToggle={() => updateBlock(block.id, { collapsed: !block.collapsed })}
                           />
                         )}
                       </div>
 
-                      {/* Resize handles: images/drawings when selected; sections in explicit resize mode */}
-                      {!isDragging && (
-                        (isSelected && !block.collapsed && (block.type === 'image' || block.type === 'drawing')) ||
-                        (resizeModeId === block.id && block.type === 'section')
+                      {/* Resize handles only in explicit resize mode (3-dot menu → Resize) —
+                          for images/drawings too now; plain selection no longer shows them. */}
+                      {!isDragging && resizeModeId === block.id && (
+                        (!block.collapsed && (block.type === 'image' || block.type === 'drawing')) ||
+                        block.type === 'section'
                       ) && (
                         <ResizeHandles onResizeStart={(dir, e) => startBlockResize(block.id, dir, e)} />
                       )}
@@ -3783,8 +3789,25 @@ export function JournalEditorContent({
                           boxShadow: '0 8px 32px rgba(0,0,0,0.65)',
                           animation: 'xpSecMenuIn 140ms cubic-bezier(0.16,1,0.3,1) both',
                         }}>
-                          <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'rgba(255,255,255,0.38)', marginBottom: 10, userSelect: 'none' }}>
-                            Journal Time
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                            <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'rgba(255,255,255,0.38)', userSelect: 'none' }}>
+                              Journal Time
+                            </div>
+                            {/* Closes the whole popup — visibly larger than each session's
+                                own small × so the hierarchy (close-all vs delete-one) is obvious. */}
+                            <button
+                              onClick={() => { setShowSessions(false); setConfirmDeleteIdx(null) }}
+                              title="Close"
+                              aria-label="Close"
+                              style={{
+                                width: 22, height: 22, borderRadius: 6, flexShrink: 0,
+                                border: 'none', background: 'transparent', color: 'rgba(255,255,255,0.55)',
+                                fontSize: 16, lineHeight: 1, cursor: 'pointer',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+                              }}
+                              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#fff' }}
+                              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.55)' }}
+                            >×</button>
                           </div>
                           {timerSessions.map((s, i) => {
                             const isPending = confirmDeleteIdx === i

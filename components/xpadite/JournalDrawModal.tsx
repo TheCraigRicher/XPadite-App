@@ -81,6 +81,16 @@ interface DrawObj {
   // ('end' matches all prior behavior/saved data). "Switch Arrow" flips this
   // without touching x1/y1/x2/y2/mx/my or any attachment — purely cosmetic.
   headAt: 'start' | 'end'
+  // elbow/elbow-curved only: which of the TWO geometrically valid orthogonal
+  // corners is in use — 'v' = (x1,y2) (vertical leg from the start, then
+  // horizontal to the end — the original/default look), 'h' = (x2,y1)
+  // (horizontal leg first, then vertical). A single bend between two FIXED
+  // endpoints has exactly these two orthogonal solutions; any other point
+  // makes one leg diagonal, which was the bug. The corner is always DERIVED
+  // from this flag + the current x1/y1/x2/y2 (see getElbowCorner) rather than
+  // stored as a free coordinate, so move/rotate/flip/resize never need to
+  // touch it — it's automatically still orthogonal after any of them.
+  elbowBend: 'v' | 'h'
 }
 
 // Shared full-geometry snapshot — captured once at drag-start and read back
@@ -148,7 +158,7 @@ function mkObj(p: Partial<DrawObj> & { id: string; type: ObjType }): DrawObj {
     flipX:false,flipY:false,gid:'',src:'',rotation:0,
     attachStartId:null,attachStartAngle:0,attachEndId:null,attachEndAngle:0,
     attachStartConnId:null,attachStartT:0,attachEndConnId:null,attachEndT:0,
-    doubleEnded:false, headAt:'end', ...p,
+    doubleEnded:false, headAt:'end', elbowBend:'v', ...p,
   }
 }
 
@@ -328,6 +338,18 @@ function findAttachTarget(objs: DrawObj[], excludeId: string, pos: Pt): { target
   return null
 }
 
+// The ONLY two points that keep both legs of a single-bend elbow connector
+// orthogonal between its two FIXED endpoints — 'v' puts the vertical leg
+// first (down/up from the start, then across — the original default look),
+// 'h' puts the horizontal leg first. Any OTHER point makes one leg diagonal,
+// which was the bug: the corner used to be stored as a free (mx,my) coordinate
+// that dragging could move anywhere. Deriving it fresh from elbowBend + the
+// CURRENT endpoints means it's automatically still orthogonal after every
+// move/rotate/flip/resize, with nothing to remap.
+function getElbowCorner(obj: DrawObj): Pt {
+  return obj.elbowBend === 'h' ? { x: obj.x2, y: obj.y1 } : { x: obj.x1, y: obj.y2 }
+}
+
 // The actual point at normalized position `t` (0=start..1=end) along a
 // connector's OWN rendered path — mirrors renderObj's path construction per
 // connType. Elbow/elbow-curved are parametrized as a two-segment polyline
@@ -344,7 +366,7 @@ function getPointAtT(conn: DrawObj, t: number): Pt {
     }
   }
   if (conn.connType === 'elbow' || conn.connType === 'elbow-curved') {
-    const cornerX = conn.mx, cornerY = conn.my // the corner is a free point, same as renderObj
+    const { x:cornerX, y:cornerY } = getElbowCorner(conn)
     if (ct < 0.5) { const u = ct*2; return { x: conn.x1+(cornerX-conn.x1)*u, y: conn.y1+(cornerY-conn.y1)*u } }
     const u = (ct-0.5)*2
     return { x: cornerX+(conn.x2-cornerX)*u, y: cornerY+(conn.y2-cornerY)*u }
@@ -692,12 +714,10 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<str
 
   if (obj.type === 'arrow') {
     const isElbow = obj.connType === 'elbow' || obj.connType === 'elbow-curved'
-    // The elbow corner is a free, draggable point stored in mx/my — the SAME
-    // field 'curved' already uses for its control point — defaulted to the
-    // classic "vertical trunk then horizontal" position at creation/connType-
-    // switch time (see endStroke / setConnType) but freely repositionable
-    // afterward via the same mid/bend handle every other connType exposes.
-    const cornerX = obj.mx, cornerY = obj.my
+    // The elbow corner is DERIVED from elbowBend + the current endpoints (see
+    // getElbowCorner) — the only two points that keep both legs orthogonal —
+    // never a free coordinate, so it can't be dragged into a diagonal leg.
+    const { x:cornerX, y:cornerY } = isElbow ? getElbowCorner(obj) : { x:0, y:0 }
     c.beginPath()
     if (obj.connType === 'curved') { c.moveTo(obj.x1,obj.y1); c.quadraticCurveTo(obj.mx,obj.my,obj.x2,obj.y2) }
     else if (obj.connType === 'elbow') { c.moveTo(obj.x1,obj.y1); c.lineTo(cornerX,cornerY); c.lineTo(obj.x2,obj.y2) }
@@ -897,6 +917,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const connSnapPointRef = useRef<Pt | null>(null) // exact point a connector endpoint is currently hovering/snapping to on ANOTHER connector
   const activeRef   = useRef<DrawObj | null>(null)
   const isDownRef   = useRef(false)
+  const erasedDuringGestureRef = useRef(false) // true once an eraser drag has actually removed something — one Undo step per gesture, not per tick
   const shapeStart  = useRef<Pt | null>(null)
   const textInputRef = useRef<HTMLInputElement>(null)
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map())
@@ -1047,8 +1068,10 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       c.beginPath(); c.moveTo(obj.x1,obj.y1); c.lineTo(obj.x2,obj.y2); c.stroke(); c.restore()
       drawHandleDot(c, obj.x1, obj.y1); drawHandleDot(c, obj.x2, obj.y2)
       // Every connType gets the same draggable mid/bend handle — for elbow/
-      // elbow-curved this dot sits at the corner (mx/my), freely repositionable.
-      drawHandleDot(c, obj.mx, obj.my, '#ede9fe')
+      // elbow-curved this dot sits at the current (always-orthogonal) corner.
+      const isElbowSel = obj.type === 'arrow' && (obj.connType === 'elbow' || obj.connType === 'elbow-curved')
+      const midDot = isElbowSel ? getElbowCorner(obj) : { x:obj.mx, y:obj.my }
+      drawHandleDot(c, midDot.x, midDot.y, '#ede9fe')
       return
     }
     if (obj.type === 'text') {
@@ -1122,9 +1145,11 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         if (obj.type === 'line' || obj.type === 'arrow') {
           if (Math.hypot(obj.x1-px,obj.y1-py) < HR) return {kind:'handle',id,which:'start'}
           if (Math.hypot(obj.x2-px,obj.y2-py) < HR) return {kind:'handle',id,which:'end'}
-          // Every connType (including elbow/elbow-curved, whose corner lives
-          // in mx/my too — see renderObj) exposes the same draggable mid/bend handle.
-          if (Math.hypot(obj.mx-px,obj.my-py) < HR) return {kind:'handle',id,which:'mid'}
+          // Every connType exposes the same draggable mid/bend handle — for
+          // elbow/elbow-curved it sits at the current (always-orthogonal) corner.
+          const isElbowObj = obj.type === 'arrow' && (obj.connType === 'elbow' || obj.connType === 'elbow-curved')
+          const mid = isElbowObj ? getElbowCorner(obj) : { x:obj.mx, y:obj.my }
+          if (Math.hypot(mid.x-px,mid.y-py) < HR) return {kind:'handle',id,which:'mid'}
         } else if (obj.type !== 'text') {
           for (const h of getHandlePositions(obj)) {
             if (Math.hypot(h.x-px,h.y-py) < HR) return {kind:'handle',id,which:h.pos}
@@ -1220,9 +1245,13 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       syncSel([]); dragRef.current = {kind:'marquee',start:pos,cur:pos}; renderAll(); return
     }
 
-    const sw = tool === 'eraser' ? ERASER_SIZES[eraserIdx] : PEN_SIZES[penIdx]
-    if (tool === 'pen' || tool === 'eraser') {
-      activeRef.current = mkObj({id:uid(),type:'stroke',color:drawColor,sw,eraser:tool==='eraser',pts:[pos]})
+    if (tool === 'eraser') {
+      erasedDuringGestureRef.current = false
+      eraseAt(pos, ERASER_SIZES[eraserIdx]/2)
+      renderAll(); return
+    }
+    if (tool === 'pen') {
+      activeRef.current = mkObj({id:uid(),type:'stroke',color:drawColor,sw:PEN_SIZES[penIdx],pts:[pos]})
       renderAll(); return
     }
     shapeStart.current = pos
@@ -1236,6 +1265,11 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     const canvas = canvasRef.current; if (!canvas) return
     const pos = getPos(e, canvas); if (!pos) return
     const dm = dragRef.current
+
+    if (tool === 'eraser') {
+      if (eraseAt(pos, ERASER_SIZES[eraserIdx]/2)) renderAll()
+      return
+    }
 
     if (dm?.kind === 'move') {
       let dx = pos.x-dm.start.x, dy = pos.y-dm.start.y
@@ -1382,12 +1416,20 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         }))
         renderAll(); return
       }
-      // Mid/bend-handle drag — repositions the free control point (mx/my),
-      // which is the curve control point for 'curved' and the corner for
-      // 'elbow'/'elbow-curved'; dragging it never attaches to a shape. A
-      // straight connector auto-promotes to 'curved' on its first such drag.
+      // Mid/bend-handle drag never attaches to a shape. For 'curved' it
+      // repositions the free control point (mx/my), and a straight connector
+      // auto-promotes to 'curved' on its first such drag. For elbow/elbow-
+      // curved there is NO free point to move — dragging instead picks
+      // whichever of the two orthogonal corners (see getElbowCorner) the
+      // pointer is currently closer to, so the bend always stays a clean 90°
+      // and neither leg can ever go diagonal.
       objectsRef.current = objectsRef.current.map(o => {
         if (o.id !== dm.id) return o
+        if (o.type === 'arrow' && (o.connType === 'elbow' || o.connType === 'elbow-curved')) {
+          const cornerV = { x:o.x1, y:o.y2 }, cornerH = { x:o.x2, y:o.y1 }
+          const closerToH = Math.hypot(pos.x-cornerH.x,pos.y-cornerH.y) < Math.hypot(pos.x-cornerV.x,pos.y-cornerV.y)
+          return { ...o, elbowBend: closerToH ? 'h' : 'v' }
+        }
         if (o.type === 'arrow' && o.connType === 'straight') return {...o,mx:pos.x,my:pos.y,connType:'curved' as ConnType}
         return {...o,mx:pos.x,my:pos.y}
       })
@@ -1490,6 +1532,15 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     const pos = getPos(e, canvas)
     const dm  = dragRef.current
 
+    if (tool === 'eraser') {
+      // One Undo step per erase GESTURE (not per tick) — only snapshot if
+      // something actually got removed, matching every other tool's behavior
+      // of not polluting history with a no-op gesture.
+      if (erasedDuringGestureRef.current) snapshot(objectsRef.current)
+      erasedDuringGestureRef.current = false
+      renderAll(); return
+    }
+
     if (dm?.kind === 'move' || dm?.kind === 'resize' || dm?.kind === 'endpoint' || dm?.kind === 'rotate' || dm?.kind === 'group-resize') {
       dragRef.current = null; alignGuidesRef.current = []; snapTargetRef.current = null; connSnapPointRef.current = null
       syncObjs(objectsRef.current); snapshot(objectsRef.current); renderAll(); return
@@ -1518,12 +1569,10 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       if (Math.hypot(pos.x-shapeStart.current.x,pos.y-shapeStart.current.y)>4) {
         const x1=shapeStart.current.x, y1=shapeStart.current.y, x2=pos.x, y2=pos.y
         const finalConnType = active.type==='arrow' ? arrowConnDefault : active.connType
-        // The elbow corner is a free point stored in mx/my (see renderObj) —
-        // default it to the classic "vertical trunk then horizontal" position
-        // so a freshly drawn elbow looks exactly as before until manually bent.
-        const isElbow = finalConnType==='elbow' || finalConnType==='elbow-curved'
-        const mx = isElbow ? x1 : (x1+x2)/2, my = isElbow ? y2 : (y1+y2)/2
-        const obj={...active,x1,y1,x2,y2,connType:finalConnType,doubleEnded: active.type==='arrow' && doubleEndedDefault,mx,my}
+        // elbowBend already defaults to 'v' (see mkObj) — the classic "vertical
+        // trunk then horizontal" look — so no elbow-specific default is needed
+        // here; mx/my only matters for 'curved' and defaults to the chord midpoint.
+        const obj={...active,x1,y1,x2,y2,connType:finalConnType,doubleEnded: active.type==='arrow' && doubleEndedDefault,mx:(x1+x2)/2,my:(y1+y2)/2}
         const n=[...objectsRef.current,obj]; syncObjs(n); snapshot(n); syncSel([obj.id])
       }
     } else {
@@ -1650,6 +1699,52 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     const n=[...objectsRef.current,...copies]; syncObjs(n); syncSel(copies.map(c=>c.id)); snapshot(n); renderAll()
   }
 
+  // Genuinely removes the portion(s) of any freehand stroke under the eraser's
+  // circle — NOT a white overlay stroke (the old approach: it rendered '#fff'
+  // over the drawing, leaving a real, selectable, deletable "white stroke"
+  // object behind forever). A stroke is tested — and, if it has rotation,
+  // tested in its own LOCAL space, same as hitObj — point-by-point AND
+  // segment-by-segment (via distToSeg, reused from line/arrow hit-testing) so
+  // a fast eraser pass can't "hop over" a point without erasing the segment
+  // it belongs to. Surviving runs of points become their own stroke objects
+  // (a single pass through the middle of a stroke splits it into two); a
+  // fully-erased stroke is simply dropped. Returns whether anything changed.
+  function eraseAt(pos: Pt, radius: number): boolean {
+    const out: DrawObj[] = []
+    let changed = false
+    for (const obj of objectsRef.current) {
+      if (obj.type !== 'stroke') { out.push(obj); continue }
+      const bb = getObjBB(obj)
+      const center = { x:(bb.minX+bb.maxX)/2, y:(bb.minY+bb.maxY)/2 }
+      const local = obj.rotation ? rotatePt(pos, center, -obj.rotation) : pos
+      const n = obj.pts.length
+      const erase = new Array(n).fill(false)
+      for (let i=0;i<n;i++) {
+        if (Math.hypot(obj.pts[i].x-local.x, obj.pts[i].y-local.y) <= radius) erase[i] = true
+      }
+      for (let i=0;i<n-1;i++) {
+        if (erase[i] && erase[i+1]) continue
+        if (distToSeg(local.x,local.y,obj.pts[i].x,obj.pts[i].y,obj.pts[i+1].x,obj.pts[i+1].y) <= radius) { erase[i]=true; erase[i+1]=true }
+      }
+      if (!erase.some(Boolean)) { out.push(obj); continue }
+      changed = true
+      let run: Pt[] = []
+      for (let i=0;i<n;i++) {
+        if (!erase[i]) { run.push(obj.pts[i]); continue }
+        if (run.length >= 2) out.push({...obj, id:uid(), pts:run})
+        run = []
+      }
+      if (run.length >= 2) out.push({...obj, id:uid(), pts:run})
+    }
+    if (changed) {
+      objectsRef.current = out
+      syncObjs(out)
+      syncSel(selIdsRef.current.filter(id => out.some(o => o.id === id)))
+      erasedDuringGestureRef.current = true
+    }
+    return changed
+  }
+
   function deleteSelected() {
     if (selIdsRef.current.length===0) return
     const ids=selIdsRef.current; const n=objectsRef.current.filter(o=>!ids.includes(o.id))
@@ -1758,16 +1853,15 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   }
 
   function setConnType(ct: ConnType) {
-    // The elbow corner lives in mx/my (see renderObj) — switching TO elbow/
-    // elbow-curved resets it to the classic derived corner (a leftover curve
-    // control point would otherwise land somewhere arbitrary); switching away
-    // from elbow leaves mx/my as-is, which gives 'curved' a sensible starting
-    // control point based on where the corner used to be.
+    // Switching TO elbow/elbow-curved resets elbowBend to the classic 'v'
+    // corner (a leftover 'h' from an earlier bend would otherwise persist
+    // and look arbitrary); switching away leaves it as-is, ready to resume
+    // from the same corner if the connector is switched back to elbow later.
     const ids=selIdsRef.current
     const isElbow = ct==='elbow' || ct==='elbow-curved'
     const n=objectsRef.current.map(o=>{
       if (!ids.includes(o.id)||o.type!=='arrow') return o
-      return isElbow ? {...o,connType:ct,mx:o.x1,my:o.y2} : {...o,connType:ct}
+      return isElbow ? {...o,connType:ct,elbowBend:'v' as const} : {...o,connType:ct}
     })
     syncObjs(n); snapshot(n); renderAll()
   }
@@ -1933,6 +2027,24 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   // ── Styles ─────────────────────────────────────────────────────────────────
   const dockBg  = isDark ? 'rgba(9,4,22,0.97)' : '#f1f5f9'
   const dockBdr = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)'
+  // Bottom toolbar only — the SAME dark navy token the Planner Editor's own
+  // bottom dock uses (see dockBg/dockBdr in JournalEditorContent.tsx), not a
+  // separately-invented navy. The top toolbar stays on the light dockBg above.
+  const navyBg  = 'rgba(8,20,58,0.98)'
+  const navyBdr = 'rgba(124,58,237,0.20)'
+
+  // Mirrors dkBtn's active/danger/disabled states but in the light-on-navy
+  // palette the Planner Editor's own dockBtn() already uses for its navy dock,
+  // so bottom-toolbar controls stay clearly readable against navyBg.
+  function navyBtn(active=false, danger=false, disabled=false): React.CSSProperties {
+    return {
+      padding:'4px 10px', borderRadius:7, cursor:disabled?'default':'pointer',
+      border:`0.5px solid ${active?'rgba(124,58,237,0.65)':disabled?'rgba(255,255,255,0.06)':danger?'rgba(239,68,68,0.35)':'rgba(255,255,255,0.09)'}`,
+      background:active?'rgba(124,58,237,0.28)':disabled?'rgba(255,255,255,0.02)':danger?'rgba(239,68,68,0.10)':'rgba(255,255,255,0.04)',
+      color:active?'#c4b5fd':disabled?'rgba(255,255,255,0.22)':danger?'#fca5a5':'rgba(255,255,255,0.60)',
+      fontSize:12, fontWeight:active?600:400, transition:'all 120ms', flexShrink:0, whiteSpace:'nowrap' as const, lineHeight:'1.4',
+    }
+  }
 
   function dkBtn(active=false, danger=false, disabled=false): React.CSSProperties {
     // `disabled` is checked before `danger` (active still wins over both) so a
@@ -2245,17 +2357,17 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   // the top toolbar. Cancel/Save stay pinned alongside it, same pattern as the
   // top toolbar previously used.
   const bottomToolbar = (
-    <div style={{display:'flex',alignItems:'stretch',background:dockBg,borderTop:`0.5px solid ${dockBdr}`,boxShadow:isDark?'0 -2px 12px rgba(0,0,0,0.40)':'0 -1px 6px rgba(0,0,0,0.08)',flexShrink:0}}>
+    <div style={{display:'flex',alignItems:'stretch',background:navyBg,borderTop:`0.5px solid ${navyBdr}`,boxShadow:'0 -2px 12px rgba(0,0,0,0.40)',flexShrink:0}}>
 
       <div style={{display:'flex',alignItems:'center',gap:4,padding:'9px 10px 9px 14px',flex:1,minWidth:0,overflowX:'auto',flexWrap:'nowrap'}}>
 
         {/* Select */}
-        <button title="Select (click / drag)" onClick={()=>{if(textInput)commitText();setTool('select')}} style={{...dkBtn(tool==='select'),minWidth:28,textAlign:'center',padding:'4px 8px',fontSize:13}}>↖</button>
+        <button title="Select (click / drag)" onClick={()=>{if(textInput)commitText();setTool('select')}} style={{...navyBtn(tool==='select'),minWidth:28,textAlign:'center',padding:'4px 8px',fontSize:13}}>↖</button>
 
         {/* Rotate — quick ±90°, works on the current selection */}
         <div style={{flexShrink:0}} data-pop-trigger="">
           <button title="Rotate" disabled={!selHasRotatable} onClick={(e)=>{if(!selHasRotatable)return;openPop('rotate',e)}}
-            style={{...dkBtn(false,false,!selHasRotatable),display:'flex',alignItems:'center',padding:'4px 8px',fontSize:13}}>↻</button>
+            style={{...navyBtn(false,false,!selHasRotatable),display:'flex',alignItems:'center',padding:'4px 8px',fontSize:13}}>↻</button>
           {openPopover==='rotate' && (
             <div data-popover="" style={fixedPopStyle({flexDirection:'row',gap:4,minWidth:'auto',padding:'6px 8px'})}>
               <button title="Rotate 90° left" onClick={()=>rotateSelectedBy(-Math.PI/2)}
@@ -2272,7 +2384,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
 
         {/* Stroke color */}
         <label title="Stroke Color" style={{position:'relative',cursor:'pointer',flexShrink:0}}>
-          <div style={{width:22,height:22,borderRadius:'50%',background:drawColor,border:`2px solid ${isDark?'rgba(255,255,255,0.30)':'rgba(0,0,0,0.20)'}`,boxShadow:'0 0 0 1px rgba(124,58,237,0.30)'}}/>
+          <div style={{width:22,height:22,borderRadius:'50%',background:drawColor,border:'2px solid rgba(255,255,255,0.30)',boxShadow:'0 0 0 1px rgba(124,58,237,0.30)'}}/>
           <input type="color" value={drawColor} onChange={e=>updateSelColor(e.target.value)} style={{position:'absolute',opacity:0,width:0,height:0,pointerEvents:'none'}} tabIndex={-1}/>
         </label>
 
@@ -2282,8 +2394,8 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
             with nothing selected — disabled rather than removed. */}
         <div style={{flexShrink:0}} data-pop-trigger="">
           <button title="Fill Color" disabled={!showFill} onClick={(e)=>{if(!showFill)return;if(textInput)commitText();openPop('fill',e)}}
-            style={{...dkBtn(false,false,!showFill),display:'flex',alignItems:'center',gap:5,padding:'4px 8px'}}>
-            <span style={{width:16,height:16,borderRadius:4,background:fillColor,border:`1.5px solid ${isDark?'rgba(255,255,255,0.35)':'rgba(0,0,0,0.25)'}`,display:'inline-block',flexShrink:0,opacity:showFill?1:0.4}}/>
+            style={{...navyBtn(false,false,!showFill),display:'flex',alignItems:'center',gap:5,padding:'4px 8px'}}>
+            <span style={{width:16,height:16,borderRadius:4,background:fillColor,border:'1.5px solid rgba(255,255,255,0.35)',display:'inline-block',flexShrink:0,opacity:showFill?1:0.4}}/>
             Fill
           </button>
           {openPopover==='fill' && showFill && (
@@ -2316,7 +2428,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         </div>
 
         {/* Fill toggle */}
-        <button title="Toggle fill" disabled={!showFill} onClick={()=>{if(showFill)toggleFilled()}} style={dkBtn(curFilled,false,!showFill)}>
+        <button title="Toggle fill" disabled={!showFill} onClick={()=>{if(showFill)toggleFilled()}} style={navyBtn(curFilled,false,!showFill)}>
           {curFilled ? '◉' : '○'} Fill
         </button>
 
@@ -2325,7 +2437,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         {/* Flip popover */}
         <div style={{flexShrink:0}} data-pop-trigger="">
           <button title="Flip" disabled={!selHasFlippable} onClick={(e)=>{if(!selHasFlippable)return;openPop('flip',e)}}
-            style={{...dkBtn(false,false,!selHasFlippable),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>⇆ Flip▾</button>
+            style={{...navyBtn(false,false,!selHasFlippable),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>⇆ Flip▾</button>
           {openPopover==='flip' && (
             <div data-popover="" style={fixedPopStyle()}>
               <button onClick={()=>flipSelected('x')} style={{...dkBtn(),textAlign:'left',width:'100%',padding:'5px 10px'}}>↔  Flip Horizontal</button>
@@ -2337,20 +2449,20 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         {dvdr}
 
         {/* Delete */}
-        <button title="Delete" disabled={selIds.length===0} onClick={deleteSelected} style={{...dkBtn(false,true,selIds.length===0),display:'flex',alignItems:'center',padding:'4px 8px'}}>
+        <button title="Delete" disabled={selIds.length===0} onClick={deleteSelected} style={{...navyBtn(false,true,selIds.length===0),display:'flex',alignItems:'center',padding:'4px 8px'}}>
           <TrashIcon/>
         </button>
 
         {dvdr}
 
         {/* Undo / Redo */}
-        <button style={dkBtn(false,false,!canUndo)} onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">↩</button>
-        <button style={dkBtn(false,false,!canRedo)} onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)">↪</button>
+        <button style={navyBtn(false,false,!canUndo)} onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">↩</button>
+        <button style={navyBtn(false,false,!canRedo)} onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Y)">↪</button>
       </div>
 
       {/* ── Fixed Cancel + Save ────────────────────────────────────────────── */}
-      <div style={{display:'flex',alignItems:'center',gap:5,padding:'9px 12px',flexShrink:0,borderLeft:`0.5px solid ${dockBdr}`,background:dockBg}}>
-        <button onClick={onClose} className="xp-dm-cancel-btn" style={dkBtn(false,true)}>Cancel</button>
+      <div style={{display:'flex',alignItems:'center',gap:5,padding:'9px 12px',flexShrink:0,borderLeft:`0.5px solid ${navyBdr}`,background:navyBg}}>
+        <button onClick={onClose} className="xp-dm-cancel-btn" style={navyBtn(false,true)}>Cancel</button>
         <button onClick={handleSave} style={{padding:'5px 16px',borderRadius:7,border:'none',cursor:'pointer',background:'linear-gradient(135deg,#7c3aed,#6d28d9)',color:'#fff',fontSize:12,fontWeight:600,flexShrink:0,boxShadow:'0 2px 8px rgba(124,58,237,0.35)'}}>Save</button>
       </div>
 

@@ -3093,17 +3093,19 @@ export function JournalEditorContent({
 
   return (
     <>
-      {/* Fit mode: portal {header + canvas} to document.body so they escape this
-          Journal modal's own z-index stacking context entirely — that's the
-          only way to visually sit above the main mobile bottom nav (z-index:50),
-          since no z-index set from WITHIN that stacking context ever could. */}
+      {/* Fit mode: portal JUST the canvas (no header — true full-screen, the
+          header's own 52px is reclaimed by the workspace too) to document.body
+          so it escapes this Journal modal's own z-index stacking context
+          entirely — the only way to visually sit above the main mobile bottom
+          nav (z-index:50), since no z-index set from WITHIN that stacking
+          context ever could. Restore stays reachable via the MMC's own
+          bottom-toolbar Fit/Restore button, still rendered inside. */}
       {mmcFit && drawState && createPortal(
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
           display: 'flex', flexDirection: 'column',
           background: isDark ? '#10071e' : '#ffffff',
         }}>
-          {headerEl}
           {journalDrawModalEl}
         </div>,
         document.body

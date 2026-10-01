@@ -551,8 +551,16 @@ function drawShapeText(c: CanvasRenderingContext2D, obj: DrawObj, bb: { minX:num
 function getPos(e: React.MouseEvent | React.TouchEvent, canvas: HTMLCanvasElement): Pt | null {
   const rect = canvas.getBoundingClientRect()
   if ('touches' in e) {
-    if (e.touches.length === 0) return null
-    return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top }
+    // On touchend/touchcancel the lifted finger is no longer "currently
+    // touching," so `touches` is already empty by the time the handler runs —
+    // the touch that just ended lives in `changedTouches` instead. Without
+    // this fallback, every drag-to-create gesture (shapes/lines/arrows) reads
+    // a null release position on mobile and silently fails to commit, while
+    // freehand strokes look unaffected since they never need the release
+    // position (they finalize from the points already accumulated on move).
+    const t = e.touches.length > 0 ? e.touches[0] : e.changedTouches.length > 0 ? e.changedTouches[0] : null
+    if (!t) return null
+    return { x: t.clientX - rect.left, y: t.clientY - rect.top }
   }
   return { x: (e as React.MouseEvent).clientX - rect.left, y: (e as React.MouseEvent).clientY - rect.top }
 }

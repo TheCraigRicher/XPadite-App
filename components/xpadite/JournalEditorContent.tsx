@@ -478,19 +478,31 @@ function SectionImageCell({ blockId, which, cell, selected, onSelect, onResizeSt
   onSelect: () => void
   onResizeStart: (dir: ResizeDir, e: React.MouseEvent) => void
 }) {
+  // Neutral by default — no cursor affordance, no resize box — until selected
+  // by a single click/tap. Double-click/tap opens the full image instead of
+  // the old click-to-zoom behavior.
+  const [lightbox, setLightbox] = useState(false)
   return (
     <div
       data-cell-id={`${blockId}:${which}`}
       onClick={e => { e.stopPropagation(); onSelect() }}
+      onDoubleClick={e => { e.stopPropagation(); setLightbox(true) }}
       style={{ position: 'relative', display: 'flex', justifyContent: 'center', padding: 4 }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={cell.src}
         alt={cell.name ?? ''}
-        style={{ width: `${cell.width ?? 100}%`, maxWidth: '100%', borderRadius: 8, display: 'block', cursor: 'pointer' }}
+        style={{
+          width: `${cell.width ?? 100}%`, maxWidth: '100%', borderRadius: 8, display: 'block',
+          cursor: 'default',
+          outline: selected ? '1.5px solid rgba(124,58,237,0.55)' : '1.5px solid transparent',
+        }}
       />
       {selected && <ResizeHandles onResizeStart={onResizeStart} />}
+      {lightbox && cell.src && (
+        <ImageLightbox src={cell.src} alt={cell.name ?? 'Image'} onClose={() => setLightbox(false)} />
+      )}
     </div>
   )
 }
@@ -547,6 +559,7 @@ interface JournalTextBlockProps {
   onMergeSection?: () => void
   onUpdateBlock?: (updates: Partial<JournalBlock>) => void
   onCellResizeStart?: (which: 'single' | 'p0' | 'p1', dir: ResizeDir, e: React.MouseEvent) => void
+  onDeleteImageCell?: (which: 'single' | 'p0' | 'p1') => void
   canMoveUp: boolean
   canMoveDown: boolean
   onMoveUp: () => void
@@ -558,7 +571,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
   onContentChange, onFocus, onSelectionUpdate,
   onDelete, onDuplicate, onTransferSection,
   onMoveActivate, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
-  onPasteImage, onSplitSection, onMergeSection, onUpdateBlock, onCellResizeStart,
+  onPasteImage, onSplitSection, onMergeSection, onUpdateBlock, onCellResizeStart, onDeleteImageCell,
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
 }: JournalTextBlockProps) {
   const { updateDay, setToast } = useApp()
@@ -636,6 +649,33 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
     document.addEventListener('mousedown', outside)
     return () => document.removeEventListener('mousedown', outside)
   }, [menuOpen])
+
+  // Exclusive image-cell selection: clicking/tapping anywhere outside the
+  // selected cell deselects it; Delete/Backspace removes just that image
+  // (leaving a split section's layout intact — never auto-merges).
+  useEffect(() => {
+    const cell = selectedCell
+    if (!cell) return
+    function outside(e: MouseEvent) {
+      const cellEl = document.querySelector(`[data-cell-id="${block.id}:${cell}"]`)
+      if (cellEl?.contains(e.target as Node)) return
+      setSelectedCell(null)
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return
+      const active = document.activeElement as HTMLElement | null
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return
+      e.preventDefault()
+      onDeleteImageCell?.(cell as 'single' | 'p0' | 'p1')
+      setSelectedCell(null)
+    }
+    document.addEventListener('mousedown', outside)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', outside)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [selectedCell, block.id, onDeleteImageCell])
 
   // ── "Send to…" ────────────────────────────────────────────────────────────────
   // Builds a fresh task tree for this section and opens the modal — everything
@@ -1167,9 +1207,10 @@ function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onResizeActiv
           data-has-fixed-height={block.height != null ? 'true' : undefined}
           src={block.thumbnail ?? block.src}
           alt={block.name ?? (block.type === 'drawing' ? 'Mind Map' : 'Image')}
-          onClick={() => setLightbox(true)}
+          onClick={e => { e.stopPropagation(); onResizeActivate() }}
+          onDoubleClick={e => { e.stopPropagation(); setLightbox(true) }}
           style={{
-            display: 'block', cursor: 'zoom-in',
+            display: 'block', cursor: 'default',
             width: '100%',
             height: block.height != null ? block.height + 'px' : 'auto',
             objectFit: block.height != null ? 'contain' : undefined,
@@ -2041,6 +2082,10 @@ export function JournalEditorContent({
   // ── Move / resize mode state ─────────────────────────────────────────────────
   const [moveModeId,   setMoveModeId]   = useState<string | null>(null)
   const [resizeModeId, setResizeModeId] = useState<string | null>(null)
+  // Mirrors resizeModeId for the mount-time-only global keydown handler below
+  // (Delete/Backspace while a top-level image/drawing is selected).
+  const resizeModeIdRef = useRef<string | null>(null)
+  useEffect(() => { resizeModeIdRef.current = resizeModeId }, [resizeModeId])
   // dragPos: non-null while mouse is held down during a move drag
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
   const [dropIdx,  setDropIdx]  = useState(0)
@@ -2694,6 +2739,23 @@ export function JournalEditorContent({
     })
   }
 
+  // Deletes only the image — a split section's layout (both panes, divider)
+  // stays intact; the vacated pane becomes an empty content cell rather than
+  // auto-merging (the user can still Merge Section manually if they want to).
+  function handleDeleteImageCell(blockId: string, which: 'single' | 'p0' | 'p1') {
+    const block = blocksRef.current.find(b => b.id === blockId)
+    if (!block) return
+    if (which === 'single') {
+      if (!block.sectionImage) return
+      updateBlock(blockId, { sectionImage: undefined })
+    } else if (block.partitions) {
+      const idx = which === 'p0' ? 0 : 1
+      const parts = [...block.partitions] as [SectionCell, SectionCell]
+      parts[idx] = mkContentCell('')
+      updateBlock(blockId, { partitions: parts })
+    }
+  }
+
   // Never deletes content: text sides concatenate, image sides get ejected as
   // new adjacent top-level blocks (reusing createImageBlock/createDrawingBlock)
   // rather than being discarded.
@@ -3182,6 +3244,20 @@ export function JournalEditorContent({
         if (drawStateRef.current) return
         e.preventDefault()
         handleManualSave()
+        return
+      }
+      // Delete/Backspace deletes a resize-selected top-level image/drawing
+      // block — never while the user is typing in a text field or editor.
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const selId = resizeModeIdRef.current
+        if (!selId) return
+        const active = document.activeElement as HTMLElement | null
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return
+        const selBlock = blocksRef.current.find(b => b.id === selId)
+        if (!selBlock || (selBlock.type !== 'image' && selBlock.type !== 'drawing')) return
+        e.preventDefault()
+        deleteBlock(selId)
+        setResizeModeId(null)
         return
       }
       if (e.key !== 'Escape') return
@@ -4008,6 +4084,9 @@ export function JournalEditorContent({
                               : undefined}
                             onCellResizeStart={block.type === 'section'
                               ? (which, dir, e) => startCellResize(block.id, which, dir, e)
+                              : undefined}
+                            onDeleteImageCell={block.type === 'section'
+                              ? (which) => handleDeleteImageCell(block.id, which)
                               : undefined}
                             canMoveUp={idx > 0}
                             canMoveDown={idx < blocks.length - 1}

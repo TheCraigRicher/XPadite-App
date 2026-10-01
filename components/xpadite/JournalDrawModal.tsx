@@ -7,8 +7,8 @@ import { COLOR_PALETTE, normalizeHexColor } from './utils'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type DrawTool = 'select' | 'pen' | 'eraser' | 'text' | 'line' | 'arrow' | 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starburst'
-type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starburst' | 'line' | 'arrow' | 'text' | 'stroke' | 'image'
+type DrawTool = 'select' | 'pen' | 'eraser' | 'text' | 'line' | 'arrow' | 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starburst' | 'capsule'
+type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starburst' | 'capsule' | 'line' | 'arrow' | 'text' | 'stroke' | 'image'
 // 'elbow' = sharp 90° two-segment connector; 'elbow-curved' = the same two-segment
 // route with a smoothly rounded corner. Both are distinct from the older 'curved'
 // (a single free-form quadratic bezier from start to end, unrelated to the elbow tool).
@@ -23,12 +23,26 @@ type EditField = 'title' | 'note'
 
 interface Pt { x: number; y: number }
 
-// Shape types (rect/rect-r/circle/triangle/diamond/starburst) double as mind-map
-// nodes: `text`/`fontSize` hold the Title (centered alone, or top-aligned once a
-// Note exists); `note`/`noteFontSize`/`noteListType` hold the optional body below
-// it. Both wrap/auto-grow the shape — see wrapTextLines/computeRequiredHeight.
-const TEXT_CAPABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst']
+// Shape types double as mind-map nodes: `text`/`fontSize` hold the Title,
+// `note`/`noteFontSize`/`noteListType` hold an optional body below it. Not every
+// shape gets both — compact/non-rectangular shapes (circle/triangle/diamond/
+// starburst) are Title-only so the label stays readable inside their silhouette;
+// rect/rect-r/capsule have the full Title+Note area. Both wrap/auto-grow the
+// shape — see wrapTextLines/computeRequiredHeight.
+const TITLE_NOTE_TYPES: ObjType[] = ['rect', 'rect-r', 'capsule']
+const TITLE_ONLY_TYPES: ObjType[] = ['circle', 'triangle', 'diamond', 'starburst']
+const TEXT_CAPABLE_TYPES: ObjType[] = [...TITLE_NOTE_TYPES, ...TITLE_ONLY_TYPES]
 const SHAPE_TEXT_PAD = 10
+// Approximate inscribed-rectangle ratios (fraction of the shape's own bbox
+// width/height) used to keep a Title-only shape's text inside its visible
+// silhouette instead of its full rectangular bbox — bbox-approximation, not
+// exact polygon math, same philosophy as the connector anchor system below.
+const TITLE_SAFE_RATIO: Partial<Record<ObjType, { w: number; h: number }>> = {
+  circle:    { w: 1 / Math.SQRT2, h: 1 / Math.SQRT2 },
+  diamond:   { w: 0.5,  h: 0.5  },
+  triangle:  { w: 0.55, h: 0.32 }, // weighted toward the triangle's wider base
+  starburst: { w: 0.46, h: 0.46 },
+}
 
 interface DrawObj {
   id: string; type: ObjType
@@ -80,8 +94,8 @@ const PEN_SIZES    = [2, 4, 8, 14] as const
 const ERASER_SIZES = [8, 16, 28, 44] as const
 const TEXT_SIZES   = [12, 18, 26, 36] as const
 const THICKNESS_LEVELS = [1, 2, 3, 5, 8] as const
-const SHAPE_TOOLS: DrawTool[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst']
-const ROTATABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst']
+const SHAPE_TOOLS: DrawTool[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule']
+const ROTATABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule']
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -152,16 +166,43 @@ function wrapNoteContent(c: CanvasRenderingContext2D, note: string, maxWidth: nu
   return out
 }
 
+// The Title's usable wrap width for a Title-only shape at the given bbox
+// width — a fixed fraction of the bbox (TITLE_SAFE_RATIO) for the compact
+// non-rectangular shapes, or the plain padded bbox width for everything else.
+function getTitleSafeWidth(type: ObjType, bboxW: number): number {
+  const r = TITLE_SAFE_RATIO[type]
+  return r ? Math.max(10, Math.abs(bboxW) * r.w) : Math.max(10, Math.abs(bboxW) - SHAPE_TEXT_PAD * 2)
+}
+
+// The centered box the Title is drawn/edited in for a Title-only shape, in
+// SCREEN space — width from getTitleSafeWidth, height/position approximated
+// per shape (triangle's usable band sits low, near its wider base).
+function getTitleSafeRect(type: ObjType, bb: { minX:number;minY:number;maxX:number;maxY:number }): { cx:number; cy:number; w:number } {
+  const fullH = bb.maxY - bb.minY
+  const cx = (bb.minX + bb.maxX) / 2
+  const w = getTitleSafeWidth(type, bb.maxX - bb.minX)
+  if (type === 'triangle') return { cx, cy: bb.minY + fullH * 0.64, w }
+  return { cx, cy: (bb.minY + bb.maxY) / 2, w }
+}
+
 // The minimum height needed so the current Title/Note content never overflows
 // the shape at its CURRENT width — callers grow (never shrink below this) `h`.
 function computeRequiredHeight(c: CanvasRenderingContext2D, obj: DrawObj): number {
-  const innerW = Math.max(10, Math.abs(obj.w) - SHAPE_TEXT_PAD * 2)
   const hasTitle = !!obj.text.trim(), hasNote = !!obj.note.trim()
   if (!hasTitle && !hasNote) return 40
+  const isTitleOnly = TITLE_ONLY_TYPES.includes(obj.type)
   if (hasTitle && !hasNote) {
+    const innerW = isTitleOnly ? getTitleSafeWidth(obj.type, obj.w) : Math.max(10, Math.abs(obj.w) - SHAPE_TEXT_PAD * 2)
     const lines = wrapTextLines(c, obj.text, innerW, obj.fontSize, '600')
-    return Math.max(40, lines.length * (obj.fontSize * 1.25) + SHAPE_TEXT_PAD * 2)
+    const textH = lines.length * (obj.fontSize * 1.25) + SHAPE_TEXT_PAD * 2
+    if (!isTitleOnly) return Math.max(40, textH)
+    // Non-rect Title-only shapes: the usable interior is only a fraction of the
+    // bbox height (TITLE_SAFE_RATIO), so the bbox itself must grow by the
+    // inverse of that fraction for the text to actually fit inside the shape.
+    const heightRatio = TITLE_SAFE_RATIO[obj.type]?.h ?? 1
+    return Math.max(40, textH / heightRatio)
   }
+  const innerW = Math.max(10, Math.abs(obj.w) - SHAPE_TEXT_PAD * 2)
   let h = SHAPE_TEXT_PAD
   if (hasTitle) h += wrapTextLines(c, obj.text, innerW, obj.fontSize, '700').length * (obj.fontSize * 1.25) + 4
   if (hasNote) h += wrapNoteContent(c, obj.note, innerW, obj.noteFontSize, obj.noteListType).length * (obj.noteFontSize * 1.3)
@@ -180,7 +221,7 @@ function rotatePt(p: Pt, center: Pt, rad: number): Pt {
 // point), so it can be re-resolved against the shape's current geometry after
 // any move/resize/rotate/auto-grow. Angle 0 = due right of center, increasing
 // clockwise in screen space (atan2 convention) — matches Math.atan2(dy,dx).
-const CONNECTABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'image']
+const CONNECTABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule', 'image']
 
 // Ray-box intersection in the box's own LOCAL frame (center at origin) — used
 // directly for rect/rect-r, and as a reasonable approximation of the true
@@ -310,9 +351,11 @@ function drawShapeText(c: CanvasRenderingContext2D, obj: DrawObj, bb: { minX:num
   c.fillStyle = obj.color
 
   if (hasTitle && !hasNote) {
-    const lines = wrapTextLines(c, obj.text, innerW, obj.fontSize, '600')
+    const isTitleOnly = TITLE_ONLY_TYPES.includes(obj.type)
+    const safe = isTitleOnly ? getTitleSafeRect(obj.type, bb) : { cx: (bb.minX + bb.maxX) / 2, cy: (bb.minY + bb.maxY) / 2, w: innerW }
+    const lines = wrapTextLines(c, obj.text, safe.w, obj.fontSize, '600')
     const lineH = obj.fontSize * 1.25
-    const cx = (bb.minX + bb.maxX) / 2, cy = (bb.minY + bb.maxY) / 2
+    const cx = safe.cx, cy = safe.cy
     c.font = `600 ${obj.fontSize}px sans-serif`
     c.textAlign = 'center'; c.textBaseline = 'alphabetic'
     let y = cy - (lines.length * lineH) / 2 + lineH * 0.78
@@ -473,6 +516,10 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<str
   }
   else if (obj.type === 'rect') { c.beginPath(); c.rect(obj.x,obj.y,obj.w,obj.h); if (obj.filled) c.fill(); c.stroke() }
   else if (obj.type === 'rect-r') { roundRect(c,obj.x,obj.y,obj.w,obj.h,10); if (obj.filled) c.fill(); c.stroke() }
+  // Capsule/pill: roundRect's own radius clamp (min(r, |w|/2, |h|/2)) already
+  // caps out at exactly half the shorter side when asked for a huge radius —
+  // that IS the true capsule shape, fully rounded regardless of orientation.
+  else if (obj.type === 'capsule') { roundRect(c,obj.x,obj.y,obj.w,obj.h,9999); if (obj.filled) c.fill(); c.stroke() }
   else if (obj.type === 'circle') { c.beginPath(); c.ellipse(obj.x+obj.w/2,obj.y+obj.h/2,Math.abs(obj.w)/2,Math.abs(obj.h)/2,0,0,Math.PI*2); if (obj.filled) c.fill(); c.stroke() }
   else if (obj.type === 'triangle') { c.beginPath(); c.moveTo(obj.x+obj.w/2,obj.y); c.lineTo(obj.x+obj.w,obj.y+obj.h); c.lineTo(obj.x,obj.y+obj.h); c.closePath(); if (obj.filled) c.fill(); c.stroke() }
   else if (obj.type === 'diamond') { c.beginPath(); c.moveTo(obj.x+obj.w/2,obj.y); c.lineTo(obj.x+obj.w,obj.y+obj.h/2); c.lineTo(obj.x+obj.w/2,obj.y+obj.h); c.lineTo(obj.x,obj.y+obj.h/2); c.closePath(); if (obj.filled) c.fill(); c.stroke() }
@@ -614,7 +661,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const [canRedo,     setCanRedo]     = useState(false)
   const [objects,     setObjects]     = useState<DrawObj[]>([])
   const [selIds,      setSelIds]      = useState<string[]>([])
-  const [textInput,   setTextInput]   = useState<{ x:number; y:number; w?:number; value:string; targetId?:string; noteValue?:string; activeField?:EditField; titleFontSize?:number; noteFontSizeLive?:number } | null>(null)
+  const [textInput,   setTextInput]   = useState<{ x:number; y:number; w?:number; value:string; targetId?:string; noteValue?:string; activeField?:EditField; titleFontSize?:number; noteFontSizeLive?:number; titleOnly?:boolean } | null>(null)
   const [openPopover, setOpenPopover] = useState<PopoverId | null>(null)
   const [popAnchor,   setPopAnchor]   = useState<{ top:number; left:number } | null>(null)
   const [arrowConnDefault, setArrowConnDefault] = useState<ConnType>('elbow')
@@ -1126,7 +1173,11 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       if (!pos||!shapeStart.current){renderAll();return}
       if (Math.abs(pos.x-shapeStart.current.x)>4&&Math.abs(pos.y-shapeStart.current.y)>4) {
         const obj={...active,x:shapeStart.current.x,y:shapeStart.current.y,w:pos.x-shapeStart.current.x,h:pos.y-shapeStart.current.y}
-        const n=[...objectsRef.current,obj]; syncObjs(n); snapshot(n); syncSel([obj.id])
+        const n=[...objectsRef.current,obj]; syncObjs(n); snapshot(n)
+        // A newly placed shape's Title/Note fields are available immediately —
+        // no double-click/second-tap needed to discover them (startShapeTextEdit
+        // also handles the Title-only vs Title+Note split per shape type).
+        if (TEXT_CAPABLE_TYPES.includes(obj.type)) startShapeTextEdit(obj); else syncSel([obj.id])
       }
     }
     shapeStart.current=null; renderAll()
@@ -1181,9 +1232,17 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   // baked into the text, so switching list types can't "stack" formatting.
   function startShapeTextEdit(obj: DrawObj) {
     const bb = getObjBB(obj)
+    syncSel([obj.id])
+    if (TITLE_ONLY_TYPES.includes(obj.type)) {
+      // Compact shapes get a Title-only panel, centered in the shape's own
+      // usable interior (not its full rectangular bbox) so the editor sits
+      // exactly where the rendered, contained Title will be drawn.
+      const safe = getTitleSafeRect(obj.type, bb)
+      setTextInput({ x: safe.cx-safe.w/2, y: safe.cy-15, w: safe.w, value: obj.text ?? '', targetId: obj.id, activeField: 'title', titleFontSize: obj.fontSize, titleOnly: true })
+      return
+    }
     const cx = (bb.minX+bb.maxX)/2
     const w = Math.max(100, (bb.maxX-bb.minX)-16)
-    syncSel([obj.id])
     setTextInput({ x: cx-w/2, y: bb.minY+8, w, value: obj.text ?? '', noteValue: obj.note ?? '', targetId: obj.id, activeField: 'title', titleFontSize: obj.fontSize, noteFontSizeLive: obj.noteFontSize })
   }
 
@@ -1202,7 +1261,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     if (textInput?.targetId) {
       const id = textInput.targetId
       const title = textInput.value.trim()
-      const note = (textInput.noteValue ?? '').trim()
+      const note = textInput.titleOnly ? '' : (textInput.noteValue ?? '').trim()
       const canvas = canvasRef.current
       const ctx = canvas?.getContext('2d')
       const n = resolveAttachments(objectsRef.current.map(o => {
@@ -1636,12 +1695,13 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         <div style={{flexShrink:0}} data-pop-trigger="">
           <button title="Shapes" onClick={(e)=>{if(textInput)commitText();openPop('shapes',e)}}
             style={{...dkBtn(SHAPE_TOOLS.includes(tool)),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>
-            {tool==='rect'?'□':tool==='rect-r'?'⊡':tool==='circle'?'○':tool==='triangle'?'△':tool==='diamond'?'◇':tool==='starburst'?'✦':'□'} Shapes▾
+            {tool==='rect'?'□':tool==='rect-r'?'⊡':tool==='circle'?'○':tool==='triangle'?'△':tool==='diamond'?'◇':tool==='starburst'?'✦':tool==='capsule'?'⬭':'□'} Shapes▾
           </button>
           {openPopover==='shapes' && (
             <div data-popover="" style={fixedPopStyle()}>
               {pbtn('□  Rectangle', ()=>{setTool('rect');      setOpenPopover(null)}, tool==='rect')}
               {pbtn('⊡  Round Rect',()=>{setTool('rect-r');    setOpenPopover(null)}, tool==='rect-r')}
+              {pbtn('⬭  Capsule',   ()=>{setTool('capsule');   setOpenPopover(null)}, tool==='capsule')}
               {pbtn('○  Circle',    ()=>{setTool('circle');    setOpenPopover(null)}, tool==='circle')}
               {pbtn('△  Triangle',  ()=>{setTool('triangle');  setOpenPopover(null)}, tool==='triangle')}
               {pbtn('◇  Diamond',   ()=>{setTool('diamond');   setOpenPopover(null)}, tool==='diamond')}
@@ -1873,17 +1933,19 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
             onFocus={()=>setTextInput(prev=>prev?{...prev,activeField:'title'}:null)}
             onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();commitText()}if(e.key==='Escape'){e.preventDefault();setTextInput(null)}}}
             placeholder="Title"
-            style={{border:'none',outline:'none',background:'transparent',color:drawColor,fontSize:textInput.titleFontSize??14,fontWeight:700,fontFamily:'sans-serif',padding:'2px 3px'}}
+            style={{border:'none',outline:'none',background:'transparent',color:drawColor,fontSize:textInput.titleFontSize??14,fontWeight:700,fontFamily:'sans-serif',padding:'2px 3px',textAlign:textInput.titleOnly?'center':'left'}}
           />
-          <textarea
-            value={textInput.noteValue ?? ''}
-            onChange={e=>setTextInput(prev=>prev?{...prev,noteValue:e.target.value}:null)}
-            onFocus={()=>setTextInput(prev=>prev?{...prev,activeField:'note'}:null)}
-            onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();setTextInput(null)}}}
-            placeholder="Write a note…"
-            rows={2}
-            style={{border:'none',outline:'none',background:'transparent',color:drawColor,fontSize:textInput.noteFontSizeLive??12.5,fontFamily:'sans-serif',padding:'2px 3px',resize:'vertical',minHeight:36}}
-          />
+          {!textInput.titleOnly && (
+            <textarea
+              value={textInput.noteValue ?? ''}
+              onChange={e=>setTextInput(prev=>prev?{...prev,noteValue:e.target.value}:null)}
+              onFocus={()=>setTextInput(prev=>prev?{...prev,activeField:'note'}:null)}
+              onKeyDown={e=>{if(e.key==='Escape'){e.preventDefault();setTextInput(null)}}}
+              placeholder="Write a note…"
+              rows={2}
+              style={{border:'none',outline:'none',background:'transparent',color:drawColor,fontSize:textInput.noteFontSizeLive??12.5,fontFamily:'sans-serif',padding:'2px 3px',resize:'vertical',minHeight:36}}
+            />
+          )}
         </div>
       )}
       {textInput && !textInput.targetId && (

@@ -17,7 +17,7 @@ type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starbur
 // vertex. This guarantees a clean, deliberate default and keeps move/resize/flip trivial.
 type ConnType = 'straight' | 'curved' | 'elbow' | 'elbow-curved'
 type HPos     = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
-type PopoverId = 'pen-size' | 'eraser-size' | 'shapes' | 'flip' | 'text-size' | 'arrow-type' | 'fill' | 'rotate' | 'line-thickness' | 'arrow-thickness' | 'list-type'
+type PopoverId = 'pen-size' | 'eraser-size' | 'shapes' | 'flip' | 'text-size' | 'arrow-type' | 'fill' | 'rotate' | 'line-thickness' | 'arrow-thickness' | 'list-type' | 'group'
 type NoteListType = 'none' | 'bullet' | 'numbered' | 'lettered'
 type EditField = 'title' | 'note'
 
@@ -66,16 +66,35 @@ interface DrawObj {
   // rotate/auto-grow — see resolveAttachments.
   attachStartId: string | null; attachStartAngle: number
   attachEndId: string | null; attachEndAngle: number
+  // Connector-to-connector junction (line/arrow only): the SAME idea as above,
+  // but the endpoint is anchored to a normalized position (0=start..1=end)
+  // ALONG another connector's own path instead of a perimeter angle on a shape
+  // — see getPointAtT/resolveAttachments. A connector endpoint is attached to
+  // at most one of {shape, connector} at a time; mutually exclusive with the
+  // attach*Id/attach*Angle pair above for the same end.
+  attachStartConnId: string | null; attachStartT: number
+  attachEndConnId: string | null; attachEndT: number
+  // Arrow only: draws an arrowhead at BOTH ends instead of just the end point.
+  doubleEnded: boolean
 }
 
-type RotateBaseline = { x:number;y:number;w:number;h:number;x1:number;y1:number;x2:number;y2:number;mx:number;my:number;rotation:number }
+// Shared full-geometry snapshot — captured once at drag-start and read back
+// against the TOTAL delta/scale-so-far on every subsequent move tick, never
+// re-derived from the (already-mutated) live object. Re-deriving from the live
+// object instead of this baseline is exactly the bug that made freehand-stroke
+// rotation drift (each tick re-rotated an already-rotated point set by the
+// cumulative angle) — 'move' already did this correctly; 'rotate' and the new
+// 'group-resize' now follow the same rule.
+type GeomSnapshot = { x:number;y:number;w:number;h:number;x1:number;y1:number;x2:number;y2:number;mx:number;my:number;pts:Pt[] }
+type RotateBaseline = GeomSnapshot & { rotation: number }
 
 type DragMode =
-  | { kind: 'move';     ids: string[]; start: Pt; snap: Map<string, { x:number;y:number;w:number;h:number;x1:number;y1:number;x2:number;y2:number;mx:number;my:number;pts:Pt[] }> }
+  | { kind: 'move';     ids: string[]; start: Pt; snap: Map<string, GeomSnapshot> }
   | { kind: 'resize';   id: string; handle: HPos; orig: DrawObj; start: Pt }
   | { kind: 'endpoint'; id: string; which: 'start'|'end'|'mid'; start: Pt }
   | { kind: 'marquee';  start: Pt; cur: Pt }
   | { kind: 'rotate';   ids: string[]; pivot: Pt; startAngle: number; baseline: Map<string, RotateBaseline> }
+  | { kind: 'group-resize'; ids: string[]; handle: HPos; origBB: { minX:number;minY:number;maxX:number;maxY:number }; baseline: Map<string, GeomSnapshot> }
   | null
 
 interface JournalDrawModalProps {
@@ -108,7 +127,9 @@ function mkObj(p: Partial<DrawObj> & { id: string; type: ObjType }): DrawObj {
     pts:[],eraser:false,color:'#1a1a1a',fillColor:'#7c3aed',filled:false,sw:2,
     text:'',fontSize:18,note:'',noteFontSize:13,noteListType:'none',
     flipX:false,flipY:false,gid:'',src:'',rotation:0,
-    attachStartId:null,attachStartAngle:0,attachEndId:null,attachEndAngle:0, ...p,
+    attachStartId:null,attachStartAngle:0,attachEndId:null,attachEndAngle:0,
+    attachStartConnId:null,attachStartT:0,attachEndConnId:null,attachEndT:0,
+    doubleEnded:false, ...p,
   }
 }
 
@@ -221,7 +242,9 @@ function rotatePt(p: Pt, center: Pt, rad: number): Pt {
 // point), so it can be re-resolved against the shape's current geometry after
 // any move/resize/rotate/auto-grow. Angle 0 = due right of center, increasing
 // clockwise in screen space (atan2 convention) — matches Math.atan2(dy,dx).
-const CONNECTABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule', 'image']
+// 'stroke' (freehand) participates too — connectors attach to its bbox via the
+// same rayBoxIntersection approximation already used for the custom shapes.
+const CONNECTABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule', 'image', 'stroke']
 
 // Ray-box intersection in the box's own LOCAL frame (center at origin) — used
 // directly for rect/rect-r, and as a reasonable approximation of the true
@@ -283,19 +306,139 @@ function findAttachTarget(objs: DrawObj[], excludeId: string, pos: Pt): { target
   return null
 }
 
+// The actual point at normalized position `t` (0=start..1=end) along a
+// connector's OWN rendered path — mirrors renderObj's path construction per
+// connType. Elbow/elbow-curved are parametrized as a two-segment polyline
+// (t<0.5 on the first leg, t>=0.5 on the second) — a bbox-style approximation
+// of elbow-curved's rounded corner, same "good enough" philosophy already
+// used for the custom-shape connector anchors above.
+function getPointAtT(conn: DrawObj, t: number): Pt {
+  const ct = Math.max(0, Math.min(1, t))
+  if (conn.connType === 'curved') {
+    const mt = 1 - ct
+    return {
+      x: mt*mt*conn.x1 + 2*mt*ct*conn.mx + ct*ct*conn.x2,
+      y: mt*mt*conn.y1 + 2*mt*ct*conn.my + ct*ct*conn.y2,
+    }
+  }
+  if (conn.connType === 'elbow' || conn.connType === 'elbow-curved') {
+    const cornerX = conn.x1, cornerY = conn.y2
+    if (ct < 0.5) { const u = ct*2; return { x: conn.x1+(cornerX-conn.x1)*u, y: conn.y1+(cornerY-conn.y1)*u } }
+    const u = (ct-0.5)*2
+    return { x: cornerX+(conn.x2-cornerX)*u, y: cornerY+(conn.y2-cornerY)*u }
+  }
+  return { x: conn.x1+(conn.x2-conn.x1)*ct, y: conn.y1+(conn.y2-conn.y1)*ct }
+}
+
+// Samples a connector's path to find the closest point to `pos` — "nearest
+// valid point along that path," not just its endpoints/midpoint. The path is
+// short on-screen, so a dense sample is cheap and precise enough without
+// needing a closed-form/calculus-based nearest-point solve.
+const CONNECTOR_SNAP_SAMPLES = 48
+function findNearestPointOnConnector(conn: DrawObj, pos: Pt): { t: number; point: Pt; dist: number } {
+  let best = { t: 0, point: getPointAtT(conn, 0), dist: Infinity }
+  for (let i = 0; i <= CONNECTOR_SNAP_SAMPLES; i++) {
+    const t = i / CONNECTOR_SNAP_SAMPLES
+    const p = getPointAtT(conn, t)
+    const d = Math.hypot(p.x-pos.x, p.y-pos.y)
+    if (d < best.dist) best = { t, point: p, dist: d }
+  }
+  return best
+}
+
+type AttachCandidate =
+  | { kind: 'shape'; target: DrawObj; angle: number }
+  | { kind: 'connector'; target: DrawObj; t: number; point: Pt }
+
+// Combines the existing shape-attach search with a new connector-to-connector
+// junction search — a shape target always wins when both are in range (shapes
+// are the far more common target and this keeps the existing behavior's
+// priority unchanged); only when no shape is near does a nearby connector
+// become a valid junction target.
+const CONNECTOR_SNAP_DIST = 14
+function findAttachTargetAny(objs: DrawObj[], excludeId: string, pos: Pt): AttachCandidate | null {
+  const shapeHit = findAttachTarget(objs, excludeId, pos)
+  if (shapeHit) return { kind: 'shape', target: shapeHit.target, angle: shapeHit.angle }
+  let best: AttachCandidate | null = null
+  let bestDist = CONNECTOR_SNAP_DIST
+  for (const o of objs) {
+    if (o.id === excludeId || (o.type !== 'line' && o.type !== 'arrow')) continue
+    const near = findNearestPointOnConnector(o, pos)
+    if (near.dist < bestDist) { bestDist = near.dist; best = { kind: 'connector', target: o, t: near.t, point: near.point } }
+  }
+  return best
+}
+
+// Re-maps a chord-relative control point from an OLD chord to a NEW one so a
+// manually bent curve keeps its RELATIVE shape (how far along the chord, how
+// far off to the side) instead of snapping back to the straight midpoint
+// whenever an attached object moves — that unconditional reset was the bug
+// behind curves regressing to straight lines after any attached-object update.
+function remapControlPoint(ox1:number,oy1:number,ox2:number,oy2:number, mx:number,my:number, nx1:number,ny1:number,nx2:number,ny2:number): Pt {
+  const oldLen = Math.hypot(ox2-ox1, oy2-oy1)
+  const newMid = { x:(nx1+nx2)/2, y:(ny1+ny2)/2 }
+  if (oldLen < 0.01) return newMid
+  const dirX = (ox2-ox1)/oldLen, dirY = (oy2-oy1)/oldLen
+  const perpX = -dirY, perpY = dirX
+  const offX = mx-(ox1+ox2)/2, offY = my-(oy1+oy2)/2
+  const alongFrac = (offX*dirX + offY*dirY) / oldLen
+  const perpFrac  = (offX*perpX + offY*perpY) / oldLen
+  const newLen = Math.hypot(nx2-nx1, ny2-ny1)
+  if (newLen < 0.01) return newMid
+  const ndirX = (nx2-nx1)/newLen, ndirY = (ny2-ny1)/newLen
+  const nperpX = -ndirY, nperpY = ndirX
+  return {
+    x: newMid.x + alongFrac*newLen*ndirX + perpFrac*newLen*nperpX,
+    y: newMid.y + alongFrac*newLen*ndirY + perpFrac*newLen*nperpY,
+  }
+}
+
 // Re-resolves every attached connector endpoint against its target's CURRENT
 // geometry — called after every move/resize/rotate/auto-grow so "if the shape
-// moves/resizes/rotates, the connector follows" holds unconditionally.
+// moves/resizes/rotates, the connector follows" holds unconditionally. Also
+// resolves connector-to-connector junctions (attachStartConnId/attachEndConnId),
+// which may themselves be attached to something else — resolved recursively
+// (memoized so a connector with many children is only computed once, and a
+// `resolving` guard + depth cap bail out of any cycle instead of looping).
 function resolveAttachments(objs: DrawObj[]): DrawObj[] {
   const byId = new Map(objs.map(o => [o.id, o]))
-  return objs.map(o => {
-    if (o.type !== 'line' && o.type !== 'arrow') return o
-    if (!o.attachStartId && !o.attachEndId) return o
-    let x1=o.x1, y1=o.y1, x2=o.x2, y2=o.y2
-    if (o.attachStartId) { const t = byId.get(o.attachStartId); if (t) { const p = getPerimeterPoint(t, o.attachStartAngle); x1=p.x; y1=p.y } }
-    if (o.attachEndId)   { const t = byId.get(o.attachEndId);   if (t) { const p = getPerimeterPoint(t, o.attachEndAngle);   x2=p.x; y2=p.y } }
-    return { ...o, x1, y1, x2, y2, mx:(x1+x2)/2, my:(y1+y2)/2 }
-  })
+  const resolved = new Map<string, DrawObj>()
+  const resolving = new Set<string>()
+
+  function resolve(id: string, depth = 0): DrawObj | undefined {
+    const cached = resolved.get(id); if (cached) return cached
+    const o = byId.get(id); if (!o) return undefined
+    if (o.type !== 'line' && o.type !== 'arrow') { resolved.set(id, o); return o }
+    if (!o.attachStartId && !o.attachEndId && !o.attachStartConnId && !o.attachEndConnId) { resolved.set(id, o); return o }
+    if (resolving.has(id) || depth > 24) return o // cycle/depth guard — keep current geometry rather than recurse forever
+    resolving.add(id)
+
+    const oldX1=o.x1, oldY1=o.y1, oldX2=o.x2, oldY2=o.y2
+    let x1=oldX1, y1=oldY1, x2=oldX2, y2=oldY2
+
+    if (o.attachStartId) {
+      const t = byId.get(o.attachStartId)
+      if (t) { const p = getPerimeterPoint(t, o.attachStartAngle); x1=p.x; y1=p.y }
+    } else if (o.attachStartConnId) {
+      const t = resolve(o.attachStartConnId, depth+1)
+      if (t) { const p = getPointAtT(t, o.attachStartT); x1=p.x; y1=p.y }
+    }
+    if (o.attachEndId) {
+      const t = byId.get(o.attachEndId)
+      if (t) { const p = getPerimeterPoint(t, o.attachEndAngle); x2=p.x; y2=p.y }
+    } else if (o.attachEndConnId) {
+      const t = resolve(o.attachEndConnId, depth+1)
+      if (t) { const p = getPointAtT(t, o.attachEndT); x2=p.x; y2=p.y }
+    }
+
+    const mp = remapControlPoint(oldX1,oldY1,oldX2,oldY2, o.mx,o.my, x1,y1,x2,y2)
+    const out = { ...o, x1, y1, x2, y2, mx:mp.x, my:mp.y }
+    resolving.delete(id)
+    resolved.set(id, out)
+    return out
+  }
+
+  return objs.map(o => resolve(o.id) ?? o)
 }
 
 // The pivot a rotation acts around: a single object's own bbox center, or the
@@ -449,6 +592,19 @@ function hitObj(obj: DrawObj, px: number, py: number, thresh = 8): boolean {
   return px>=minX-thresh&&px<=maxX+thresh&&py>=minY-thresh&&py<=maxY+thresh
 }
 
+// A freehand stroke counts as "closed" (fillable) when its start/end points
+// land close together relative to its own size — a sensible tolerance, not an
+// exact test, so a deliberate loop (heart, circle sketch) fills while an
+// obviously open scribble never produces a huge malformed fill.
+function isStrokeClosed(pts: Pt[]): boolean {
+  if (pts.length < 3) return false
+  const xs = pts.map(p=>p.x), ys = pts.map(p=>p.y)
+  const diag = Math.hypot(Math.max(...xs)-Math.min(...xs), Math.max(...ys)-Math.min(...ys))
+  if (diag < 6) return false
+  const gap = Math.hypot(pts[pts.length-1].x-pts[0].x, pts[pts.length-1].y-pts[0].y)
+  return gap <= Math.max(16, diag*0.12)
+}
+
 function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<string, HTMLImageElement>, onImgLoad?: () => void) {
   c.save()
   c.strokeStyle = obj.color; c.fillStyle = obj.filled ? obj.fillColor : obj.color
@@ -456,9 +612,13 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<str
 
   if (obj.type === 'stroke') {
     if (obj.pts.length < 2) { c.restore(); return }
-    c.strokeStyle = obj.eraser ? '#ffffff' : obj.color
     c.beginPath(); c.moveTo(obj.pts[0].x, obj.pts[0].y)
     for (const pt of obj.pts.slice(1)) c.lineTo(pt.x, pt.y)
+    // canvas fill() implicitly closes the path for filling purposes only — the
+    // stroke drawn right after still outlines just the actual drawn points, so
+    // the original freehand outline is preserved even where it never quite met.
+    if (!obj.eraser && obj.filled && isStrokeClosed(obj.pts)) { c.fillStyle = obj.fillColor; c.fill() }
+    c.strokeStyle = obj.eraser ? '#ffffff' : obj.color
     c.stroke(); c.restore(); return
   }
 
@@ -497,6 +657,14 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<str
     const tx = isElbow ? cornerX : (obj.connType !== 'straight' ? obj.mx : obj.x1)
     const ty = isElbow ? cornerY : (obj.connType !== 'straight' ? obj.my : obj.y1)
     drawArrowHead(c, tx, ty, obj.x2, obj.y2, obj.sw)
+    if (obj.doubleEnded) {
+      // Same "approach point" logic mirrored for the START end — the near-start
+      // leg of a curve/elbow points back toward the same reference point its
+      // near-end leg points away from (mx,my for curved; the corner for elbow).
+      const tx2 = isElbow ? cornerX : (obj.connType !== 'straight' ? obj.mx : obj.x2)
+      const ty2 = isElbow ? cornerY : (obj.connType !== 'straight' ? obj.my : obj.y2)
+      drawArrowHead(c, tx2, ty2, obj.x1, obj.y1, obj.sw)
+    }
     c.restore(); return
   }
 
@@ -642,6 +810,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const dragRef     = useRef<DragMode>(null)
   const alignGuidesRef = useRef<Array<{ axis:'v'|'h'; pos:number }>>([]) // active snap guides while moving
   const snapTargetRef  = useRef<string | null>(null) // shape id a connector endpoint is currently hovering/snapping to
+  const connSnapPointRef = useRef<Pt | null>(null) // exact point a connector endpoint is currently hovering/snapping to on ANOTHER connector
   const activeRef   = useRef<DrawObj | null>(null)
   const isDownRef   = useRef(false)
   const shapeStart  = useRef<Pt | null>(null)
@@ -665,6 +834,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const [openPopover, setOpenPopover] = useState<PopoverId | null>(null)
   const [popAnchor,   setPopAnchor]   = useState<{ top:number; left:number } | null>(null)
   const [arrowConnDefault, setArrowConnDefault] = useState<ConnType>('elbow')
+  const [doubleEndedDefault, setDoubleEndedDefault] = useState(false) // default for NEW arrows; editing a selected arrow uses toggleDoubleEnded instead
   const [showCustomFill, setShowCustomFill] = useState(false)
   const [lineThickIdx,  setLineThickIdx]  = useState(1) // index into THICKNESS_LEVELS — default new-line thickness
   const [arrowThickIdx, setArrowThickIdx] = useState(1) // same, for new arrows
@@ -752,6 +922,13 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           c.restore()
         }
       }
+      // Connector-to-connector junction feedback — a small purple dot at the
+      // exact point the dragged endpoint will attach to on ANOTHER connector,
+      // visible only during the drag; the real junction stays visually clean.
+      if (dm?.kind === 'endpoint' && connSnapPointRef.current) {
+        const p = connSnapPointRef.current
+        c.save(); c.fillStyle = '#7c3aed'; c.beginPath(); c.arc(p.x, p.y, 5, 0, Math.PI*2); c.fill(); c.restore()
+      }
       if (selIdsRef.current.length > 0) renderSelHandles(c)
     }
   }
@@ -767,6 +944,13 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       c.save(); c.strokeStyle='#7c3aed'; c.lineWidth=1; c.setLineDash([4,3])
       c.strokeRect(minX-6, minY-6, maxX-minX+12, maxY-minY+12); c.restore()
       drawHandleDot(c, (minX+maxX)/2, minY-6, '#ede9fe')
+      // Group resize handles — the whole selection scales as one rigid unit
+      // (see the 'group-resize' DragMode), same 8-handle layout as a single shape.
+      const gminX=minX-6, gminY=minY-6, gmaxX=maxX+6, gmaxY=maxY+6
+      const ggx=(gminX+gmaxX)/2, ggy=(gminY+gmaxY)/2
+      for (const h of [{x:gminX,y:gminY},{x:ggx,y:gminY},{x:gmaxX,y:gminY},{x:gmaxX,y:ggy},{x:gmaxX,y:gmaxY},{x:ggx,y:gmaxY},{x:gminX,y:gmaxY},{x:gminX,y:ggy}]) {
+        drawHandleDot(c, h.x, h.y)
+      }
       // Group rotation handle — rotates the whole selection around the group's center
       const gcx = (minX+maxX)/2, gTop = minY-6, gHandleY = gTop-20
       c.save(); c.strokeStyle='#7c3aed'; c.lineWidth=1; c.setLineDash([2,2])
@@ -810,7 +994,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   useEffect(() => { renderAll() }, [objects, selIds]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Hit testing ────────────────────────────────────────────────────────────
-  type ItTarget = {kind:'none'} | {kind:'object';id:string} | {kind:'handle';id:string;which:HPos|'start'|'end'|'mid'} | {kind:'rotate';ids:string[]}
+  type ItTarget = {kind:'none'} | {kind:'object';id:string} | {kind:'handle';id:string;which:HPos|'start'|'end'|'mid'} | {kind:'rotate';ids:string[]} | {kind:'group-handle';handle:HPos}
 
   function getTarget(px: number, py: number): ItTarget {
     const HR = 10
@@ -824,21 +1008,36 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     } else if (selObjsNow.length > 1) {
       const bbs = selObjsNow.map(getObjBB)
       const minX = Math.min(...bbs.map(b=>b.minX)), maxX = Math.max(...bbs.map(b=>b.maxX))
-      const minY = Math.min(...bbs.map(b=>b.minY))
+      const minY = Math.min(...bbs.map(b=>b.minY)), maxY = Math.max(...bbs.map(b=>b.maxY))
       const gx = (minX+maxX)/2, gy = minY-6-20
       if (Math.hypot(gx-px, gy-py) < HR) return {kind:'rotate', ids:selIdsRef.current}
+      // Group resize handles — a multi-selection (incl. an expanded group) is
+      // resized as ONE rigid unit via 8 handles around its combined dashed
+      // bbox, same layout as a single shape's own handles (see renderSelHandles).
+      const gminX=minX-6, gminY=minY-6, gmaxX=maxX+6, gmaxY=maxY+6
+      const ggx=(gminX+gmaxX)/2, ggy=(gminY+gmaxY)/2
+      const groupHandles: Array<{pos:HPos;x:number;y:number}> = [
+        {pos:'nw',x:gminX,y:gminY},{pos:'n',x:ggx,y:gminY},{pos:'ne',x:gmaxX,y:gminY},
+        {pos:'e',x:gmaxX,y:ggy},{pos:'se',x:gmaxX,y:gmaxY},
+        {pos:'s',x:ggx,y:gmaxY},{pos:'sw',x:gminX,y:gmaxY},{pos:'w',x:gminX,y:ggy},
+      ]
+      for (const gh of groupHandles) if (Math.hypot(gh.x-px,gh.y-py) < HR) return {kind:'group-handle', handle:gh.pos}
     }
 
-    for (const id of selIdsRef.current) {
-      const obj = objectsRef.current.find(o => o.id === id); if (!obj) continue
-      if (obj.type === 'line' || obj.type === 'arrow') {
-        if (Math.hypot(obj.x1-px,obj.y1-py) < HR) return {kind:'handle',id,which:'start'}
-        if (Math.hypot(obj.x2-px,obj.y2-py) < HR) return {kind:'handle',id,which:'end'}
-        const hasBendHandle = !(obj.type === 'arrow' && (obj.connType === 'elbow' || obj.connType === 'elbow-curved'))
-        if (hasBendHandle && Math.hypot(obj.mx-px,obj.my-py) < HR) return {kind:'handle',id,which:'mid'}
-      } else if (obj.type !== 'text') {
-        for (const h of getHandlePositions(obj)) {
-          if (Math.hypot(h.x-px,h.y-py) < HR) return {kind:'handle',id,which:h.pos}
+    // Per-object resize/endpoint handles only apply to a single selection —
+    // once 2+ objects are selected the group handles above own resizing instead.
+    if (selIdsRef.current.length === 1) {
+      for (const id of selIdsRef.current) {
+        const obj = objectsRef.current.find(o => o.id === id); if (!obj) continue
+        if (obj.type === 'line' || obj.type === 'arrow') {
+          if (Math.hypot(obj.x1-px,obj.y1-py) < HR) return {kind:'handle',id,which:'start'}
+          if (Math.hypot(obj.x2-px,obj.y2-py) < HR) return {kind:'handle',id,which:'end'}
+          const hasBendHandle = !(obj.type === 'arrow' && (obj.connType === 'elbow' || obj.connType === 'elbow-curved'))
+          if (hasBendHandle && Math.hypot(obj.mx-px,obj.my-py) < HR) return {kind:'handle',id,which:'mid'}
+        } else if (obj.type !== 'text') {
+          for (const h of getHandlePositions(obj)) {
+            if (Math.hypot(h.x-px,h.y-py) < HR) return {kind:'handle',id,which:h.pos}
+          }
         }
       }
     }
@@ -872,8 +1071,20 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         const objs = objectsRef.current.filter(o => target.ids.includes(o.id))
         const pivot = getGroupPivot(objs)
         const baseline = new Map<string, RotateBaseline>()
-        for (const o of objs) baseline.set(o.id, {x:o.x,y:o.y,w:o.w,h:o.h,x1:o.x1,y1:o.y1,x2:o.x2,y2:o.y2,mx:o.mx,my:o.my,rotation:o.rotation})
+        for (const o of objs) baseline.set(o.id, {x:o.x,y:o.y,w:o.w,h:o.h,x1:o.x1,y1:o.y1,x2:o.x2,y2:o.y2,mx:o.mx,my:o.my,rotation:o.rotation,pts:[...o.pts]})
         dragRef.current = { kind:'rotate', ids:target.ids, pivot, startAngle: Math.atan2(pos.y-pivot.y, pos.x-pivot.x), baseline }
+        return
+      }
+      if (target.kind === 'group-handle') {
+        const objs = objectsRef.current.filter(o => selIdsRef.current.includes(o.id))
+        const bbs = objs.map(getObjBB)
+        const origBB = {
+          minX: Math.min(...bbs.map(b=>b.minX)), minY: Math.min(...bbs.map(b=>b.minY)),
+          maxX: Math.max(...bbs.map(b=>b.maxX)), maxY: Math.max(...bbs.map(b=>b.maxY)),
+        }
+        const baseline = new Map<string, GeomSnapshot>()
+        for (const o of objs) baseline.set(o.id, {x:o.x,y:o.y,w:o.w,h:o.h,x1:o.x1,y1:o.y1,x2:o.x2,y2:o.y2,mx:o.mx,my:o.my,pts:[...o.pts]})
+        dragRef.current = { kind:'group-resize', ids:selIdsRef.current, handle:target.handle, origBB, baseline }
         return
       }
       if (target.kind === 'handle') {
@@ -925,7 +1136,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     }
     shapeStart.current = pos
     const shapeSw = tool==='line' ? THICKNESS_LEVELS[lineThickIdx] : tool==='arrow' ? THICKNESS_LEVELS[arrowThickIdx] : PEN_SIZES[penIdx]
-    activeRef.current = mkObj({id:uid(),type:tool as ObjType,color:drawColor,fillColor,filled,sw:shapeSw,connType: tool==='arrow' ? arrowConnDefault : 'straight'})
+    activeRef.current = mkObj({id:uid(),type:tool as ObjType,color:drawColor,fillColor,filled,sw:shapeSw,connType: tool==='arrow' ? arrowConnDefault : 'straight', doubleEnded: tool==='arrow' && doubleEndedDefault})
   }
 
   function continueStroke(e: React.MouseEvent | React.TouchEvent) {
@@ -1058,19 +1269,25 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
 
     if (dm?.kind === 'endpoint') {
       if (dm.which === 'start' || dm.which === 'end') {
-        const attach = findAttachTarget(objectsRef.current, dm.id, pos)
-        snapTargetRef.current = attach?.target.id ?? null
+        const attach = findAttachTargetAny(objectsRef.current, dm.id, pos)
+        snapTargetRef.current = attach?.kind === 'shape' ? attach.target.id : null
+        connSnapPointRef.current = attach?.kind === 'connector' ? attach.point : null
         objectsRef.current = resolveAttachments(objectsRef.current.map(o => {
           if (o.id !== dm.id) return o
-          if (attach) {
+          if (attach?.kind === 'shape') {
             const p = getPerimeterPoint(attach.target, attach.angle)
             return dm.which === 'start'
-              ? { ...o, x1:p.x, y1:p.y, attachStartId:attach.target.id, attachStartAngle:attach.angle }
-              : { ...o, x2:p.x, y2:p.y, attachEndId:attach.target.id, attachEndAngle:attach.angle }
+              ? { ...o, x1:p.x, y1:p.y, attachStartId:attach.target.id, attachStartAngle:attach.angle, attachStartConnId:null }
+              : { ...o, x2:p.x, y2:p.y, attachEndId:attach.target.id, attachEndAngle:attach.angle, attachEndConnId:null }
+          }
+          if (attach?.kind === 'connector') {
+            return dm.which === 'start'
+              ? { ...o, x1:attach.point.x, y1:attach.point.y, attachStartId:null, attachStartConnId:attach.target.id, attachStartT:attach.t }
+              : { ...o, x2:attach.point.x, y2:attach.point.y, attachEndId:null, attachEndConnId:attach.target.id, attachEndT:attach.t }
           }
           return dm.which === 'start'
-            ? { ...o, x1:pos.x, y1:pos.y, attachStartId:null }
-            : { ...o, x2:pos.x, y2:pos.y, attachEndId:null }
+            ? { ...o, x1:pos.x, y1:pos.y, attachStartId:null, attachStartConnId:null }
+            : { ...o, x2:pos.x, y2:pos.y, attachEndId:null, attachEndConnId:null }
         }))
         renderAll(); return
       }
@@ -1097,7 +1314,10 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           return {...o, x1:p1.x,y1:p1.y, x2:p2.x,y2:p2.y, mx:pm.x,my:pm.y}
         }
         if (o.type === 'stroke') {
-          return {...o, pts: o.pts.map(p => rotatePt(p, dm.pivot, delta))}
+          // Rotate from the DRAG-START point set (base.pts), not the live o.pts —
+          // delta is the TOTAL angle since the drag began, so re-applying it to
+          // already-rotated points on every tick would compound each frame.
+          return {...o, pts: base.pts.map(p => rotatePt(p, dm.pivot, delta))}
         }
         // Shapes/text/image: rotate the bbox center around the pivot (repositions
         // it for a multi-select group; a no-op position-wise for a single
@@ -1107,6 +1327,41 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         const baseCenter = { x: base.x+bw/2, y: base.y+bh/2 }
         const newCenter = rotatePt(baseCenter, dm.pivot, delta)
         return {...o, x:newCenter.x-bw/2, y:newCenter.y-bh/2, rotation: (base.rotation||0)+delta}
+      }))
+      renderAll(); return
+    }
+
+    if (dm?.kind === 'group-resize') {
+      const { minX, minY, maxX, maxY } = dm.origBB
+      let nx1=minX, ny1=minY, nx2=maxX, ny2=maxY
+      const h = dm.handle
+      if (h.includes('w')) nx1 = pos.x; if (h.includes('e')) nx2 = pos.x
+      if (h.includes('n')) ny1 = pos.y; if (h.includes('s')) ny2 = pos.y
+      const origW = maxX-minX || 1, origH = maxY-minY || 1
+      let sx = (nx2-nx1)/origW, sy = (ny2-ny1)/origH
+      if (h==='n'||h==='s') sx = 1 // edge-only handles never distort the other axis
+      if (h==='e'||h==='w') sy = 1
+      if (!isFinite(sx) || Math.abs(sx) < 0.05) sx = sx<0 ? -0.05 : 0.05
+      if (!isFinite(sy) || Math.abs(sy) < 0.05) sy = sy<0 ? -0.05 : 0.05
+      // Anchor = the corner OPPOSITE the dragged handle — it stays fixed in
+      // place while every member scales relative to it, same as a single
+      // shape's own resize but applied uniformly across the whole selection.
+      const anchorX = h.includes('w') ? maxX : minX
+      const anchorY = h.includes('n') ? maxY : minY
+      const sX = (v:number) => anchorX + (v-anchorX)*sx
+      const sY = (v:number) => anchorY + (v-anchorY)*sy
+      objectsRef.current = resolveAttachments(objectsRef.current.map(o => {
+        const base = dm.baseline.get(o.id); if (!base) return o
+        if (o.type === 'stroke') return {...o, pts: base.pts.map(p => ({x:sX(p.x), y:sY(p.y)}))}
+        if (o.type === 'line' || o.type === 'arrow') {
+          return {...o, x1:sX(base.x1),y1:sY(base.y1), x2:sX(base.x2),y2:sY(base.y2), mx:sX(base.mx),my:sY(base.my)}
+        }
+        // Shapes/text/image: scale the object's own bbox corners (computed from
+        // the BASELINE x/y/w/h, never the live/already-scaled ones) and re-derive
+        // x/y/w/h from the scaled corners — rotation is left untouched (V1 scope).
+        const bb = getObjBB({ ...o, x:base.x, y:base.y, w:base.w, h:base.h })
+        const ax = sX(bb.minX), bx = sX(bb.maxX), ay = sY(bb.minY), by = sY(bb.maxY)
+        return { ...o, x: Math.min(ax,bx), y: Math.min(ay,by), w: Math.abs(bx-ax), h: Math.abs(by-ay) }
       }))
       renderAll(); return
     }
@@ -1137,8 +1392,8 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     const pos = getPos(e, canvas)
     const dm  = dragRef.current
 
-    if (dm?.kind === 'move' || dm?.kind === 'resize' || dm?.kind === 'endpoint' || dm?.kind === 'rotate') {
-      dragRef.current = null; alignGuidesRef.current = []; snapTargetRef.current = null
+    if (dm?.kind === 'move' || dm?.kind === 'resize' || dm?.kind === 'endpoint' || dm?.kind === 'rotate' || dm?.kind === 'group-resize') {
+      dragRef.current = null; alignGuidesRef.current = []; snapTargetRef.current = null; connSnapPointRef.current = null
       syncObjs(objectsRef.current); snapshot(objectsRef.current); renderAll(); return
     }
 
@@ -1166,7 +1421,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         const x1=shapeStart.current.x, y1=shapeStart.current.y, x2=pos.x, y2=pos.y
         // Elbow corners are always derived from (x1,y2) at render time — see
         // renderObj — so no special-cased default coordinates are needed here.
-        const obj={...active,x1,y1,x2,y2,connType: active.type==='arrow' ? arrowConnDefault : active.connType,mx:(x1+x2)/2,my:(y1+y2)/2}
+        const obj={...active,x1,y1,x2,y2,connType: active.type==='arrow' ? arrowConnDefault : active.connType,doubleEnded: active.type==='arrow' && doubleEndedDefault,mx:(x1+x2)/2,my:(y1+y2)/2}
         const n=[...objectsRef.current,obj]; syncObjs(n); snapshot(n); syncSel([obj.id])
       }
     } else {
@@ -1312,6 +1567,55 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     syncObjs(n); snapshot(n); renderAll()
   }
 
+  // Builds a Parent → Junction → each-Child hierarchy out of REAL persistent
+  // connector-to-connector attachments (attachStartConnId/attachEndConnId —
+  // see resolveAttachments) instead of faking the look with overlapping
+  // lines: one 'straight' TRUNK runs from the parent to a free junction point
+  // at the parent's own height, and each 'elbow' ARM attaches its own start to
+  // that trunk's end (t=1) and its end to a child. Because every segment is an
+  // ordinary attached connector, Save/reopen, moving the parent, moving a
+  // child, and manually re-editing any individual segment afterward all behave
+  // exactly like any other connector — Branch is just a creation convenience.
+  // selIdsRef.current preserves click order (see beginStroke's select/shift
+  // logic), so the FIRST object selected is treated as the parent.
+  function createBranch() {
+    const ids = selIdsRef.current
+    if (ids.length < 3) return
+    const [parentId, ...childIds] = ids
+    const parent = objectsRef.current.find(o => o.id === parentId)
+    if (!parent || !CONNECTABLE_TYPES.includes(parent.type)) { setToast('Select 1 parent and at least 2 child objects.'); return }
+    const children = childIds
+      .map(id => objectsRef.current.find(o => o.id === id))
+      .filter((o): o is DrawObj => !!o && o.id !== parentId && CONNECTABLE_TYPES.includes(o.type))
+    if (children.length < 2) { setToast('Select 1 parent and at least 2 child objects.'); return }
+
+    const parentBB = getObjBB(parent)
+    const parentCenterY = (parentBB.minY + parentBB.maxY) / 2
+    const childLeftMostX = Math.min(...children.map(ch => getObjBB(ch).minX))
+    const pStart = getPerimeterPoint(parent, 0) // due right of the parent
+    const junction: Pt = { x: pStart.x + Math.max(44, (childLeftMostX-pStart.x) * 0.35), y: parentCenterY }
+
+    const trunkId = uid()
+    const trunk = mkObj({
+      id: trunkId, type:'arrow', color:drawColor, sw:THICKNESS_LEVELS[arrowThickIdx], connType:'straight',
+      x1:pStart.x, y1:pStart.y, x2:junction.x, y2:junction.y, mx:(pStart.x+junction.x)/2, my:(pStart.y+junction.y)/2,
+      attachStartId:parent.id, attachStartAngle:0,
+    })
+    const arms = children.map(child => {
+      const bb = getObjBB(child)
+      const childCenter = { x:(bb.minX+bb.maxX)/2, y:(bb.minY+bb.maxY)/2 }
+      const endAngle = snapAnchorAngle(Math.atan2(junction.y-childCenter.y, junction.x-childCenter.x))
+      const pEnd = getPerimeterPoint(child, endAngle)
+      return mkObj({
+        id:uid(), type:'arrow', color:drawColor, sw:THICKNESS_LEVELS[arrowThickIdx], connType:'elbow',
+        x1:junction.x, y1:junction.y, x2:pEnd.x, y2:pEnd.y, mx:(junction.x+pEnd.x)/2, my:(junction.y+pEnd.y)/2,
+        attachStartConnId:trunkId, attachStartT:1, attachEndId:child.id, attachEndAngle:endAngle,
+      })
+    })
+    const n = resolveAttachments([...objectsRef.current, trunk, ...arms])
+    syncObjs(n); snapshot(n); syncSel([parent.id, trunkId, ...arms.map(a=>a.id)]); renderAll()
+  }
+
   function flipSelected(axis: 'x'|'y') {
     if (selIdsRef.current.length===0) return
     const ids=selIdsRef.current
@@ -1396,6 +1700,19 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     // renderObj — so switching connector type never needs to touch mx/my.
     const ids=selIdsRef.current
     const n=objectsRef.current.map(o=>(!ids.includes(o.id)||o.type!=='arrow')?o:{...o,connType:ct})
+    syncObjs(n); snapshot(n); renderAll()
+  }
+
+  // Double-ended is independent of connType (straight/curved/elbow all accept
+  // it) — same connector architecture, just a second arrowhead at the start.
+  // Dual-purpose like updateSelColor: with an arrow selected it edits that
+  // arrow; with nothing selected it flips the default new arrows are created with.
+  function toggleDoubleEnded() {
+    const ids=selIdsRef.current
+    const selArrowsNow = objectsRef.current.filter(o=>ids.includes(o.id)&&o.type==='arrow')
+    if (selArrowsNow.length===0) { setDoubleEndedDefault(v=>!v); return }
+    const next = !selArrowsNow[0].doubleEnded
+    const n=objectsRef.current.map(o=>(!ids.includes(o.id)||o.type!=='arrow')?o:{...o,doubleEnded:next})
     syncObjs(n); snapshot(n); renderAll()
   }
 
@@ -1513,7 +1830,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const selObjs   = objects.filter(o => selIds.includes(o.id))
-  const selHasShape = selObjs.some(o => SHAPE_TOOLS.includes(o.type as DrawTool))
+  const selHasShape = selObjs.some(o => SHAPE_TOOLS.includes(o.type as DrawTool) || o.type === 'stroke')
   const selHasFlippable = selIds.length>0 && selObjs.some(o => o.type !== 'text')
   const selHasRotatable = selIds.length>0 && selObjs.some(o => ROTATABLE_TYPES.includes(o.type) || o.type==='line' || o.type==='arrow' || o.type==='stroke')
   const selLines    = selObjs.filter(o => o.type==='line')
@@ -1773,6 +2090,15 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           )}
         </div>
 
+        {/* Double-ended arrow — a THIRD connector option alongside straight/
+            elbow, orthogonal to connType (works with any of them): with an
+            arrow selected this edits it, otherwise it sets the default for
+            the next arrow drawn (same dual-purpose pattern as stroke color). */}
+        <button title="Double-Ended Arrow" onClick={()=>{if(textInput)commitText();toggleDoubleEnded()}}
+          style={{...dkBtn(selArrow?selArrow.doubleEnded:doubleEndedDefault),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:13}}>
+          ⟷
+        </button>
+
         {dvdr}
 
         {/* Stroke color */}
@@ -1857,11 +2183,25 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
 
         <span style={{flex:1,minWidth:8}}/>
 
-        {/* Contextual: Group / Ungroup / Dup / Delete */}
+        {/* Contextual: Branch / Group ▾ (Group/Ungroup) / Dup / Delete */}
         {selIds.length>0 && (<>
           {dvdr}
-          {canGroup   && <button onClick={groupSelected}   style={dkBtn()}>Group</button>}
-          {selIsGroup && <button onClick={ungroupSelected} style={dkBtn()}>Ungroup</button>}
+          <button title="Branch — select 1 parent + Shift-select 2 or more children, then click Branch"
+            disabled={selIds.length<3} onClick={createBranch} style={dkBtn(false,false,selIds.length<3)}>┣ Branch</button>
+          <div style={{flexShrink:0}} data-pop-trigger="">
+            <button title="Group" onClick={(e)=>{if(textInput)commitText();openPop('group',e)}}
+              style={{...dkBtn(selIsGroup),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>
+              ⛓ Group▾
+            </button>
+            {openPopover==='group' && (
+              <div data-popover="" style={fixedPopStyle()}>
+                <button onClick={()=>{ if(canGroup){groupSelected(); setOpenPopover(null)} }} disabled={!canGroup}
+                  style={{...dkBtn(false,false,!canGroup),textAlign:'left',width:'100%',padding:'5px 10px'}}>Group</button>
+                <button onClick={()=>{ if(selIsGroup){ungroupSelected(); setOpenPopover(null)} }} disabled={!selIsGroup}
+                  style={{...dkBtn(false,false,!selIsGroup),textAlign:'left',width:'100%',padding:'5px 10px'}}>Ungroup</button>
+              </div>
+            )}
+          </div>
           <button onClick={duplicateSelected} style={dkBtn()}>Dup</button>
           <button title="Delete" onClick={deleteSelected} style={{...dkBtn(false,true),display:'flex',alignItems:'center',padding:'4px 8px'}}>
             <TrashIcon/>

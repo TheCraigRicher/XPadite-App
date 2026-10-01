@@ -3328,17 +3328,22 @@ export function JournalEditorContent({
               }}
             >Today</button>
           )}
-          {/* Close — hidden on mobile (bottom nav handles close) */}
-          <button
-            onClick={() => guardedNavigate(onClose)}
-            className="hidden sm:block"
-            style={{
-              padding: '5px 10px', borderRadius: 8,
-              border: '0.5px solid rgba(239,68,68,0.28)',
-              background: 'rgba(239,68,68,0.15)', color: '#fca5a5',
-              fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
-            }}
-          >× Close</button>
+          {/* Close — hidden on mobile (bottom nav handles close) and removed
+              entirely while the Mind Mapping Canvas is open on any device: its
+              own mobile Back / desktop-tablet Cancel already handle exiting,
+              so × Close there was a redundant second exit control. */}
+          {!drawState && (
+            <button
+              onClick={() => guardedNavigate(onClose)}
+              className="hidden sm:block"
+              style={{
+                padding: '5px 10px', borderRadius: 8,
+                border: '0.5px solid rgba(239,68,68,0.28)',
+                background: 'rgba(239,68,68,0.15)', color: '#fca5a5',
+                fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
+              }}
+            >× Close</button>
+          )}
         </div>
       </div>
 

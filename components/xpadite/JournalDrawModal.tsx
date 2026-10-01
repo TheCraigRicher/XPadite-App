@@ -1623,9 +1623,9 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           </button>
           {openPopover==='list-type' && textInput?.targetId && (
             <div data-popover="" style={fixedPopStyle()}>
-              <button onClick={()=>applyNoteListType('bullet')} style={{...dkBtn(activeNoteListType==='bullet'),textAlign:'left',width:'100%',padding:'5px 10px'}}>• Bullet List</button>
-              <button onClick={()=>applyNoteListType('numbered')} style={{...dkBtn(activeNoteListType==='numbered'),textAlign:'left',width:'100%',padding:'5px 10px'}}>1. Numbered List</button>
-              <button onClick={()=>applyNoteListType('lettered')} style={{...dkBtn(activeNoteListType==='lettered'),textAlign:'left',width:'100%',padding:'5px 10px'}}>a. Lettered List</button>
+              <button onClick={()=>applyNoteListType('bullet')} style={{...dkBtn(activeNoteListType==='bullet'),textAlign:'left',width:'100%',padding:'5px 10px'}}>• Bullet Points</button>
+              <button onClick={()=>applyNoteListType('numbered')} style={{...dkBtn(activeNoteListType==='numbered'),textAlign:'left',width:'100%',padding:'5px 10px'}}>1. Numbers</button>
+              <button onClick={()=>applyNoteListType('lettered')} style={{...dkBtn(activeNoteListType==='lettered'),textAlign:'left',width:'100%',padding:'5px 10px'}}>a. Letters</button>
             </div>
           )}
         </div>

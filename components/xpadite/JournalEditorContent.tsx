@@ -1780,6 +1780,8 @@ export function JournalEditorContent({
   const timerStartTsRef   = useRef<number | null>(null)
   const showSessionsRef   = useRef(false)
   const timerWrapperRef    = useRef<HTMLDivElement>(null)
+  const timerBadgeBtnRef   = useRef<HTMLButtonElement>(null)
+  const [sessionsPopPos, setSessionsPopPos] = useState<{ left: number; bottom: number } | null>(null)
   // Planner → Task Manager link: persisted in journal doc JSON so it survives remounts
   const plannerTaskLinkRef    = useRef<{ taskId: string; sessionDate: string } | null>(null)
   const plannerTmSessionIdRef = useRef<string | null>(null)
@@ -2026,7 +2028,7 @@ export function JournalEditorContent({
     } catch { setSelectionRect(null) }
   }, [])
 
-  const isActive = (name: string) => focusedEditor.current?.isActive(name) ?? false
+  const isActive = (name: string, attrs?: Record<string, unknown>) => focusedEditor.current?.isActive(name, attrs) ?? false
   const isSubItem = () => {
     const ed = focusedEditor.current
     if (!ed) return false
@@ -2979,7 +2981,8 @@ export function JournalEditorContent({
         .xp-j-prose h2 { font-size: 1.30em; font-weight: 700; margin: 0 0 8px; line-height: 1.3; letter-spacing: -0.01em; color: inherit; }
         .xp-j-prose h3 { font-size: 1.12em; font-weight: 600; margin: 0 0 6px; line-height: 1.4; color: inherit; }
         .xp-j-prose ul:not([data-type="taskList"]) { padding-left: 20px; margin: 0 0 6px; list-style: disc; }
-        .xp-j-prose ol { padding-left: 22px; margin: 0 0 6px; list-style: decimal; }
+        .xp-j-prose ol { padding-left: 22px; margin: 0 0 6px; list-style-type: decimal; }
+        .xp-j-prose ol[type="a"] { list-style-type: lower-alpha; }
         .xp-j-prose li { margin-bottom: 3px; }
         .xp-j-prose ul[data-type="taskList"] { list-style: none; padding-left: 0; margin: 0 0 6px; }
         .xp-j-prose ul[data-type="taskList"] > li { display: flex; align-items: flex-start; gap: 7px; margin-bottom: 4px; }
@@ -3575,12 +3578,24 @@ export function JournalEditorContent({
                   scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch',
                 } as React.CSSProperties}
               >
-                {/* ☷ List ▾ — consolidated Bullet/Numbered picker, same underlying commands */}
+                {/* ☷ List ▾ — Bullet Points / Numbers / Letters. Numbers and Letters are
+                    the SAME orderedList node — Letters just sets its native `type: 'a'`
+                    attribute (real <ol type="a"> — the browser continues a,b,c…z,aa,bb…
+                    on its own, no custom numbering logic needed). Switching between any
+                    of the three always changes the existing list in place, never stacks. */}
                 <ListPicker
-                  activeType={isActive('bulletList') ? 'bullet' : isActive('orderedList') ? 'ordered' : null}
+                  activeType={
+                    isActive('bulletList') ? 'bullet'
+                    : isActive('orderedList', { type: 'a' }) ? 'letters'
+                    : isActive('orderedList') ? 'numbers'
+                    : null
+                  }
                   onPick={type => {
-                    if (type === 'bullet') focusedEditor.current?.chain().focus().toggleBulletList().run()
-                    else focusedEditor.current?.chain().focus().toggleOrderedList().run()
+                    const ed = focusedEditor.current
+                    if (!ed) return
+                    if (type === 'bullet') { ed.chain().focus().toggleBulletList().run(); return }
+                    if (!ed.isActive('orderedList')) ed.chain().focus().toggleOrderedList().run()
+                    ed.chain().focus().updateAttributes('orderedList', { type: type === 'letters' ? 'a' : null }).run()
                   }}
                 />
                 {/* ☐ Check */}
@@ -3732,7 +3747,17 @@ export function JournalEditorContent({
                       </button>
                       {hasSessions && !isRunning && (
                         <button
-                          onClick={() => { setShowSessions(v => !v); setConfirmDeleteIdx(null) }}
+                          ref={timerBadgeBtnRef}
+                          onClick={() => {
+                            if (showSessions) { setShowSessions(false); return }
+                            const rect = timerBadgeBtnRef.current?.getBoundingClientRect()
+                            if (rect) {
+                              const left = Math.min(rect.left, window.innerWidth - 240 - 12)
+                              setSessionsPopPos({ left: Math.max(8, left), bottom: window.innerHeight - rect.top + 8 })
+                            }
+                            setShowSessions(true)
+                            setConfirmDeleteIdx(null)
+                          }}
                           title="View journal sessions"
                           style={{
                             position: 'absolute', top: -6, right: -6,
@@ -3743,10 +3768,10 @@ export function JournalEditorContent({
                           }}
                         >{timerSessions.length}</button>
                       )}
-                      {showSessions && (
+                      {showSessions && sessionsPopPos && (
                         <div style={{
-                          position: 'absolute', bottom: 'calc(100% + 8px)', right: 0,
-                          minWidth: 240, zIndex: 60,
+                          position: 'fixed', bottom: sessionsPopPos.bottom, left: sessionsPopPos.left,
+                          minWidth: 240, maxWidth: 280, maxHeight: '60vh', overflowY: 'auto', zIndex: 9999,
                           background: 'rgba(10,6,30,0.98)',
                           border: '0.5px solid rgba(124,58,237,0.28)',
                           borderRadius: 10, padding: '10px 14px 12px',
@@ -4095,7 +4120,7 @@ export function JournalEditorContent({
 
 // ─── List picker inline component — consolidates Bullet/Numbered into one control ──
 
-function ListPicker({ activeType, onPick }: { activeType: 'bullet' | 'ordered' | null; onPick: (type: 'bullet' | 'ordered') => void }) {
+function ListPicker({ activeType, onPick }: { activeType: 'bullet' | 'numbers' | 'letters' | null; onPick: (type: 'bullet' | 'numbers' | 'letters') => void }) {
   const [open, setOpen] = useState(false)
   const [popPos, setPopPos] = useState<{ left: number; bottom: number } | null>(null)
   const ref = useRef<HTMLDivElement>(null)
@@ -4152,15 +4177,23 @@ function ListPicker({ activeType, onPick }: { activeType: 'bullet' | 'ordered' |
               color: activeType === 'bullet' ? '#c4b5fd' : 'rgba(255,255,255,0.82)',
               fontWeight: activeType === 'bullet' ? 600 : 400,
             }}
-          >• Bullet List{activeType === 'bullet' && <span style={{ marginLeft: 'auto', fontSize: 10 }}>✓</span>}</button>
+          >• Bullet Points{activeType === 'bullet' && <span style={{ marginLeft: 'auto', fontSize: 10 }}>✓</span>}</button>
           <button
-            onClick={() => { onPick('ordered'); setOpen(false) }}
+            onClick={() => { onPick('numbers'); setOpen(false) }}
             style={{
               ...menuItemStyle(true), display: 'flex', alignItems: 'center', gap: 8, borderRadius: 7,
-              color: activeType === 'ordered' ? '#c4b5fd' : 'rgba(255,255,255,0.82)',
-              fontWeight: activeType === 'ordered' ? 600 : 400,
+              color: activeType === 'numbers' ? '#c4b5fd' : 'rgba(255,255,255,0.82)',
+              fontWeight: activeType === 'numbers' ? 600 : 400,
             }}
-          >1. Numbered List{activeType === 'ordered' && <span style={{ marginLeft: 'auto', fontSize: 10 }}>✓</span>}</button>
+          >1. Numbers{activeType === 'numbers' && <span style={{ marginLeft: 'auto', fontSize: 10 }}>✓</span>}</button>
+          <button
+            onClick={() => { onPick('letters'); setOpen(false) }}
+            style={{
+              ...menuItemStyle(true), display: 'flex', alignItems: 'center', gap: 8, borderRadius: 7,
+              color: activeType === 'letters' ? '#c4b5fd' : 'rgba(255,255,255,0.82)',
+              fontWeight: activeType === 'letters' ? 600 : 400,
+            }}
+          >a. Letters{activeType === 'letters' && <span style={{ marginLeft: 'auto', fontSize: 10 }}>✓</span>}</button>
         </div>
       )}
     </div>

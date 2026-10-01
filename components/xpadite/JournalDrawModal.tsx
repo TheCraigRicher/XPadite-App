@@ -17,7 +17,7 @@ type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starbur
 // vertex. This guarantees a clean, deliberate default and keeps move/resize/flip trivial.
 type ConnType = 'straight' | 'curved' | 'elbow' | 'elbow-curved'
 type HPos     = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
-type PopoverId = 'pen-size' | 'eraser-size' | 'shapes' | 'flip' | 'text-size' | 'arrow-type' | 'fill'
+type PopoverId = 'pen-size' | 'eraser-size' | 'shapes' | 'flip' | 'text-size' | 'arrow-type' | 'fill' | 'rotate' | 'line-thickness' | 'arrow-thickness'
 
 interface Pt { x: number; y: number }
 
@@ -36,18 +36,30 @@ interface DrawObj {
   text: string; fontSize: number
   flipX: boolean; flipY: boolean; gid: string
   src: string // data URL — pasted 'image' objects only
+  // Radians, applied as a render-time transform around the shape's own bbox
+  // center — only meaningful for the 6 SHAPE_TOOLS types (lines/arrows rotate
+  // by re-deriving their endpoints directly, so they never need this field).
+  rotation: number
 }
+
+type RotateBaseline = { x:number;y:number;w:number;h:number;x1:number;y1:number;x2:number;y2:number;mx:number;my:number;rotation:number }
 
 type DragMode =
   | { kind: 'move';     ids: string[]; start: Pt; snap: Map<string, { x:number;y:number;w:number;h:number;x1:number;y1:number;x2:number;y2:number;mx:number;my:number;pts:Pt[] }> }
   | { kind: 'resize';   id: string; handle: HPos; orig: DrawObj; start: Pt }
   | { kind: 'endpoint'; id: string; which: 'start'|'end'|'mid'; start: Pt }
   | { kind: 'marquee';  start: Pt; cur: Pt }
+  | { kind: 'rotate';   ids: string[]; pivot: Pt; startAngle: number; baseline: Map<string, RotateBaseline> }
   | null
 
 interface JournalDrawModalProps {
   isDark: boolean; initialSrc?: string
-  onSave: (dataUrl: string) => void; onClose: () => void
+  // The live, editable object list from a previous save (see JournalBlock.canvasData).
+  // When present and valid, re-editing starts from these real objects instead
+  // of the flattened initialSrc PNG — undefined/invalid falls back to the PNG
+  // (drawings saved before this field existed, or any parse failure).
+  initialObjects?: string
+  onSave: (dataUrl: string, objectsJson: string) => void; onClose: () => void
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -55,7 +67,9 @@ interface JournalDrawModalProps {
 const PEN_SIZES    = [2, 4, 8, 14] as const
 const ERASER_SIZES = [8, 16, 28, 44] as const
 const TEXT_SIZES   = [12, 18, 26, 36] as const
+const THICKNESS_LEVELS = [1, 2, 3, 5, 8] as const
 const SHAPE_TOOLS: DrawTool[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst']
+const ROTATABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst']
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -66,7 +80,25 @@ function mkObj(p: Partial<DrawObj> & { id: string; type: ObjType }): DrawObj {
   return {
     x:0,y:0,w:0,h:0,x1:0,y1:0,x2:0,y2:0,mx:0,my:0,connType:'straight',
     pts:[],eraser:false,color:'#1a1a1a',fillColor:'#7c3aed',filled:false,sw:2,
-    text:'',fontSize:18,flipX:false,flipY:false,gid:'',src:'', ...p,
+    text:'',fontSize:18,flipX:false,flipY:false,gid:'',src:'',rotation:0, ...p,
+  }
+}
+
+function rotatePt(p: Pt, center: Pt, rad: number): Pt {
+  if (!rad) return p
+  const cos = Math.cos(rad), sin = Math.sin(rad)
+  const dx = p.x - center.x, dy = p.y - center.y
+  return { x: center.x + dx * cos - dy * sin, y: center.y + dx * sin + dy * cos }
+}
+
+// The pivot a rotation acts around: a single object's own bbox center, or the
+// combined bbox center of a multi-selection — shared by both the drag-handle
+// rotation and the quick ↺90°/↻90° actions so they rotate identically.
+function getGroupPivot(objs: DrawObj[]): Pt {
+  const bbs = objs.map(getObjBB)
+  return {
+    x: (Math.min(...bbs.map(b=>b.minX)) + Math.max(...bbs.map(b=>b.maxX))) / 2,
+    y: (Math.min(...bbs.map(b=>b.minY)) + Math.max(...bbs.map(b=>b.maxY))) / 2,
   }
 }
 
@@ -170,9 +202,17 @@ function hitObj(obj: DrawObj, px: number, py: number, thresh = 8): boolean {
   if (obj.type === 'line' || obj.type === 'arrow') return distToSeg(px,py,obj.x1,obj.y1,obj.x2,obj.y2) < thresh
   if (obj.type === 'stroke') return obj.pts.some(pt => Math.hypot(pt.x-px,pt.y-py) < thresh+obj.sw/2)
   const { minX,minY,maxX,maxY } = getObjBB(obj)
+  // Rotated shapes are tested in their own local (unrotated) space — inverse-
+  // rotate the pointer around the shape's center before the plain bbox test.
+  if (obj.rotation && ROTATABLE_TYPES.includes(obj.type)) {
+    const center = { x: (minX+maxX)/2, y: (minY+maxY)/2 }
+    const local = rotatePt({ x: px, y: py }, center, -obj.rotation)
+    px = local.x; py = local.y
+  }
   if (obj.type === 'text' || obj.type === 'image') return px>=minX&&px<=maxX&&py>=minY&&py<=maxY
-  if (!obj.filled) return (px>=minX-thresh&&px<=maxX+thresh&&py>=minY-thresh&&py<=maxY+thresh&&!(px>minX+thresh&&px<maxX-thresh&&py>minY+thresh&&py<maxY-thresh))
-  return px>=minX&&px<=maxX&&py>=minY&&py<=maxY
+  // Any reasonable visible portion of a shape selects it — including an
+  // unfilled shape's hollow interior, not just its border band.
+  return px>=minX-thresh&&px<=maxX+thresh&&py>=minY-thresh&&py<=maxY+thresh
 }
 
 function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<string, HTMLImageElement>, onImgLoad?: () => void) {
@@ -227,10 +267,14 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<str
   }
 
   const bb = getObjBB(obj)
-  c.save()
+  const shapeCx = (bb.minX+bb.maxX)/2, shapeCy = (bb.minY+bb.maxY)/2
+  c.save() // outer: rotation (also wraps the label, so text rotates with the shape)
+  if (obj.rotation && ROTATABLE_TYPES.includes(obj.type)) {
+    c.translate(shapeCx,shapeCy); c.rotate(obj.rotation); c.translate(-shapeCx,-shapeCy)
+  }
+  c.save() // inner: flip (label is drawn after this restores, so it's never mirrored)
   if (obj.flipX || obj.flipY) {
-    const cx = (bb.minX+bb.maxX)/2, cy = (bb.minY+bb.maxY)/2
-    c.translate(cx,cy); c.scale(obj.flipX?-1:1, obj.flipY?-1:1); c.translate(-cx,-cy)
+    c.translate(shapeCx,shapeCy); c.scale(obj.flipX?-1:1, obj.flipY?-1:1); c.translate(-shapeCx,-shapeCy)
   }
   if (obj.type === 'image') {
     const img = imgCache ? getCachedImage(imgCache, obj.src, onImgLoad ?? (() => {})) : null
@@ -242,25 +286,50 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<str
   else if (obj.type === 'triangle') { c.beginPath(); c.moveTo(obj.x+obj.w/2,obj.y); c.lineTo(obj.x+obj.w,obj.y+obj.h); c.lineTo(obj.x,obj.y+obj.h); c.closePath(); if (obj.filled) c.fill(); c.stroke() }
   else if (obj.type === 'diamond') { c.beginPath(); c.moveTo(obj.x+obj.w/2,obj.y); c.lineTo(obj.x+obj.w,obj.y+obj.h/2); c.lineTo(obj.x+obj.w/2,obj.y+obj.h); c.lineTo(obj.x,obj.y+obj.h/2); c.closePath(); if (obj.filled) c.fill(); c.stroke() }
   else if (obj.type === 'starburst') { drawStarburstPath(c,obj.x,obj.y,obj.w,obj.h); if (obj.filled) c.fill(); c.stroke() }
-  c.restore() // pairs with the flip-transform save above
+  c.restore() // undo flip only — label below rotates with the shape but is never mirrored
 
   if (TEXT_CAPABLE_TYPES.includes(obj.type)) drawShapeText(c, obj, bb)
+  c.restore() // undo rotation
   c.restore() // pairs with the outer save at the top of this function
 }
 
+// Returns SCREEN-space handle positions — rotated around the shape's own
+// center when the object has a rotation, so they sit on the visually-rotated
+// shape (and hit-testing against them, which iterates these same positions,
+// stays correct automatically). A no-op for rotation 0, i.e. every object
+// that isn't a rotated shape — unchanged from the original behavior.
 function getHandlePositions(obj: DrawObj): Array<{ pos: HPos; x: number; y: number }> {
   const { minX,minY,maxX,maxY } = getObjBB(obj)
   const mx = (minX+maxX)/2, my = (minY+maxY)/2
-  return [
+  const local: Array<{ pos: HPos; x: number; y: number }> = [
     {pos:'nw',x:minX,y:minY},{pos:'n',x:mx,y:minY},{pos:'ne',x:maxX,y:minY},
     {pos:'e',x:maxX,y:my},{pos:'se',x:maxX,y:maxY},
     {pos:'s',x:mx,y:maxY},{pos:'sw',x:minX,y:maxY},{pos:'w',x:minX,y:my},
   ]
+  if (!obj.rotation || !ROTATABLE_TYPES.includes(obj.type)) return local
+  const center = { x: mx, y: my }
+  return local.map(h => ({ pos: h.pos, ...rotatePt({ x: h.x, y: h.y }, center, obj.rotation) }))
+}
+
+// The rotation handle's SCREEN position for a single rotatable object — a
+// fixed distance above its own (rotated) top-center.
+function getRotateHandlePos(obj: DrawObj): Pt {
+  const { minX,minY,maxX,maxY } = getObjBB(obj)
+  const center = { x: (minX+maxX)/2, y: (minY+maxY)/2 }
+  const local = { x: center.x, y: minY - 26 }
+  return obj.rotation ? rotatePt(local, center, obj.rotation) : local
 }
 
 function drawHandleDot(c: CanvasRenderingContext2D, x: number, y: number, fill = '#ffffff') {
   c.save(); c.setLineDash([]); c.fillStyle = fill; c.strokeStyle = '#7c3aed'; c.lineWidth = 1.5
   c.beginPath(); c.rect(x-4,y-4,8,8); c.fill(); c.stroke(); c.restore()
+}
+
+// Round, distinct from the square resize handles — a different shape reads
+// as a different action at a glance.
+function drawRotateHandle(c: CanvasRenderingContext2D, x: number, y: number) {
+  c.save(); c.setLineDash([]); c.fillStyle = '#ffffff'; c.strokeStyle = '#7c3aed'; c.lineWidth = 1.5
+  c.beginPath(); c.arc(x, y, 5, 0, Math.PI*2); c.fill(); c.stroke(); c.restore()
 }
 
 // ─── EraserIcon ───────────────────────────────────────────────────────────────
@@ -317,7 +386,13 @@ const ElbowArrowIcon = ({ curved = false, size = 15 }: { curved?: boolean; size?
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: JournalDrawModalProps) {
+export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects, onSave, onClose }: JournalDrawModalProps) {
+  // The toolbar always uses a subtle light-gray chrome regardless of app theme
+  // (per XPadite spec — the toolbar must never go dark/heavy), so every
+  // existing `isDark`-branched style below the toolbar now resolves to its
+  // light branch automatically. The two outer-wrapper backgrounds that should
+  // still follow the real app theme use `isDarkApp` explicitly instead.
+  const isDark = false
   const { customColors, addCustomColor, setToast } = useApp()
   const canvasRef   = useRef<HTMLCanvasElement>(null)
   const wrapRef     = useRef<HTMLDivElement>(null)
@@ -327,6 +402,7 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
   const historyRef  = useRef<string[]>([])
   const redoRef     = useRef<string[]>([])
   const dragRef     = useRef<DragMode>(null)
+  const alignGuidesRef = useRef<Array<{ axis:'v'|'h'; pos:number }>>([]) // active snap guides while moving
   const activeRef   = useRef<DrawObj | null>(null)
   const isDownRef   = useRef(false)
   const shapeStart  = useRef<Pt | null>(null)
@@ -351,6 +427,8 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
   const [popAnchor,   setPopAnchor]   = useState<{ top:number; left:number } | null>(null)
   const [arrowConnDefault, setArrowConnDefault] = useState<ConnType>('elbow')
   const [showCustomFill, setShowCustomFill] = useState(false)
+  const [lineThickIdx,  setLineThickIdx]  = useState(1) // index into THICKNESS_LEVELS — default new-line thickness
+  const [arrowThickIdx, setArrowThickIdx] = useState(1) // same, for new arrows
 
   // ── sync helpers ───────────────────────────────────────────────────────────
   function syncObjs(objs: DrawObj[]) { objectsRef.current = objs; setObjects(objs) }
@@ -368,7 +446,25 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
       canvas.style.width = w+'px'; canvas.style.height = h+'px'
       const c = canvas.getContext('2d')!; c.scale(dpr, dpr)
       c.fillStyle = '#ffffff'; c.fillRect(0, 0, w, h)
-      if (initialSrc) {
+
+      // Re-editing: real objects (from JournalBlock.canvasData) take priority
+      // over the flattened PNG — they stay individually selectable/movable/
+      // resizable/rotatable exactly as if the canvas had never closed.
+      let restored: DrawObj[] | null = null
+      if (initialObjects) {
+        try {
+          const parsed = JSON.parse(initialObjects)
+          if (Array.isArray(parsed)) restored = parsed.map(o => mkObj(o))
+        } catch { /* malformed/old data — fall back to the flat image below */ }
+      }
+      if (restored) {
+        // setObjects below re-renders via the existing
+        // useEffect(() => renderAll(), [objects, selIds]) — no explicit call needed.
+        syncObjs(restored)
+        historyRef.current = [JSON.stringify(restored)]; setCanUndo(false); setCanRedo(false)
+      } else if (initialSrc) {
+        // No object data (a drawing saved before canvasData existed) — load
+        // the old flattened PNG as a background, exactly as before.
         const img = new Image()
         img.onload = () => { bgImgRef.current = img; c.drawImage(img,0,0,w,h); historyRef.current = ['[]']; setCanUndo(false); setCanRedo(false) }
         img.src = initialSrc
@@ -395,6 +491,16 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
         c.save(); c.strokeStyle='#7c3aed'; c.lineWidth=1; c.setLineDash([4,3]); c.fillStyle='rgba(124,58,237,0.05)'
         c.fillRect(mx,my,mw,mh); c.strokeRect(mx,my,mw,mh); c.restore()
       }
+      // Smart-alignment guides — only visible while actively snapped during a move
+      if (dm?.kind === 'move' && alignGuidesRef.current.length > 0) {
+        c.save(); c.strokeStyle = '#ec4899'; c.lineWidth = 1; c.setLineDash([5,4])
+        for (const g of alignGuidesRef.current) {
+          c.beginPath()
+          if (g.axis === 'v') { c.moveTo(g.pos, 0); c.lineTo(g.pos, h) } else { c.moveTo(0, g.pos); c.lineTo(w, g.pos) }
+          c.stroke()
+        }
+        c.restore()
+      }
       if (selIdsRef.current.length > 0) renderSelHandles(c)
     }
   }
@@ -410,6 +516,11 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
       c.save(); c.strokeStyle='#7c3aed'; c.lineWidth=1; c.setLineDash([4,3])
       c.strokeRect(minX-6, minY-6, maxX-minX+12, maxY-minY+12); c.restore()
       drawHandleDot(c, (minX+maxX)/2, minY-6, '#ede9fe')
+      // Group rotation handle — rotates the whole selection around the group's center
+      const gcx = (minX+maxX)/2, gTop = minY-6, gHandleY = gTop-20
+      c.save(); c.strokeStyle='#7c3aed'; c.lineWidth=1; c.setLineDash([2,2])
+      c.beginPath(); c.moveTo(gcx,gTop); c.lineTo(gcx,gHandleY); c.stroke(); c.restore()
+      drawRotateHandle(c, gcx, gHandleY)
       return
     }
     const obj = objs[0]
@@ -431,16 +542,39 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     const { minX,minY,maxX,maxY } = getObjBB(obj)
     c.strokeRect(minX-2, minY-2, maxX-minX+4, maxY-minY+4); c.restore()
     for (const h of getHandlePositions(obj)) drawHandleDot(c, h.x, h.y)
+    if (ROTATABLE_TYPES.includes(obj.type)) {
+      const center = { x:(minX+maxX)/2, y:(minY+maxY)/2 }
+      const topScreen = obj.rotation ? rotatePt({x:center.x,y:minY}, center, obj.rotation) : { x:center.x, y:minY }
+      const rp = getRotateHandlePos(obj)
+      c.save(); c.strokeStyle='#7c3aed'; c.lineWidth=1; c.setLineDash([2,2])
+      c.beginPath(); c.moveTo(topScreen.x,topScreen.y); c.lineTo(rp.x,rp.y); c.stroke(); c.restore()
+      drawRotateHandle(c, rp.x, rp.y)
+    }
   }
 
   // ── useEffect re-render ────────────────────────────────────────────────────
   useEffect(() => { renderAll() }, [objects, selIds]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Hit testing ────────────────────────────────────────────────────────────
-  type ItTarget = {kind:'none'} | {kind:'object';id:string} | {kind:'handle';id:string;which:HPos|'start'|'end'|'mid'}
+  type ItTarget = {kind:'none'} | {kind:'object';id:string} | {kind:'handle';id:string;which:HPos|'start'|'end'|'mid'} | {kind:'rotate';ids:string[]}
 
   function getTarget(px: number, py: number): ItTarget {
     const HR = 10
+
+    // Rotation handle(s) — checked first since they sit outside every other
+    // hit region and never overlap resize/endpoint handles.
+    const selObjsNow = objectsRef.current.filter(o => selIdsRef.current.includes(o.id))
+    if (selObjsNow.length === 1 && ROTATABLE_TYPES.includes(selObjsNow[0].type)) {
+      const rp = getRotateHandlePos(selObjsNow[0])
+      if (Math.hypot(rp.x-px, rp.y-py) < HR) return {kind:'rotate', ids:[selObjsNow[0].id]}
+    } else if (selObjsNow.length > 1) {
+      const bbs = selObjsNow.map(getObjBB)
+      const minX = Math.min(...bbs.map(b=>b.minX)), maxX = Math.max(...bbs.map(b=>b.maxX))
+      const minY = Math.min(...bbs.map(b=>b.minY))
+      const gx = (minX+maxX)/2, gy = minY-6-20
+      if (Math.hypot(gx-px, gy-py) < HR) return {kind:'rotate', ids:selIdsRef.current}
+    }
+
     for (const id of selIdsRef.current) {
       const obj = objectsRef.current.find(o => o.id === id); if (!obj) continue
       if (obj.type === 'line' || obj.type === 'arrow') {
@@ -480,6 +614,14 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
 
     if (tool === 'select') {
       const target = getTarget(pos.x, pos.y)
+      if (target.kind === 'rotate') {
+        const objs = objectsRef.current.filter(o => target.ids.includes(o.id))
+        const pivot = getGroupPivot(objs)
+        const baseline = new Map<string, RotateBaseline>()
+        for (const o of objs) baseline.set(o.id, {x:o.x,y:o.y,w:o.w,h:o.h,x1:o.x1,y1:o.y1,x2:o.x2,y2:o.y2,mx:o.mx,my:o.my,rotation:o.rotation})
+        dragRef.current = { kind:'rotate', ids:target.ids, pivot, startAngle: Math.atan2(pos.y-pivot.y, pos.x-pivot.x), baseline }
+        return
+      }
       if (target.kind === 'handle') {
         const obj = objectsRef.current.find(o=>o.id===target.id)!
         if (target.which === 'start' || target.which === 'end' || target.which === 'mid') {
@@ -528,7 +670,8 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
       renderAll(); return
     }
     shapeStart.current = pos
-    activeRef.current = mkObj({id:uid(),type:tool as ObjType,color:drawColor,fillColor,filled,sw:PEN_SIZES[penIdx],connType: tool==='arrow' ? arrowConnDefault : 'straight'})
+    const shapeSw = tool==='line' ? THICKNESS_LEVELS[lineThickIdx] : tool==='arrow' ? THICKNESS_LEVELS[arrowThickIdx] : PEN_SIZES[penIdx]
+    activeRef.current = mkObj({id:uid(),type:tool as ObjType,color:drawColor,fillColor,filled,sw:shapeSw,connType: tool==='arrow' ? arrowConnDefault : 'straight'})
   }
 
   function continueStroke(e: React.MouseEvent | React.TouchEvent) {
@@ -539,7 +682,61 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     const dm = dragRef.current
 
     if (dm?.kind === 'move') {
-      const dx = pos.x-dm.start.x, dy = pos.y-dm.start.y
+      let dx = pos.x-dm.start.x, dy = pos.y-dm.start.y
+      const guides: Array<{ axis:'v'|'h'; pos:number }> = []
+      const SNAP_THRESH = 6
+
+      // Smart alignment: snap the dragged set's own edges/center to the
+      // nearest edge/center of any object NOT being dragged, within a small
+      // threshold. The group's relative spacing never changes — the whole
+      // delta (dx,dy) just gets nudged by the snap amount before it's applied.
+      {
+        let gMinX=Infinity,gMinY=Infinity,gMaxX=-Infinity,gMaxY=-Infinity
+        for (const id of dm.ids) {
+          const orig = objectsRef.current.find(o=>o.id===id); const s = dm.snap.get(id)
+          if (!orig || !s) continue
+          const fake: DrawObj = {...orig, x:s.x+dx,y:s.y+dy, w:s.w,h:s.h, x1:s.x1+dx,y1:s.y1+dy, x2:s.x2+dx,y2:s.y2+dy, pts:s.pts.map(p=>({x:p.x+dx,y:p.y+dy}))}
+          const bb = getObjBB(fake)
+          gMinX=Math.min(gMinX,bb.minX); gMinY=Math.min(gMinY,bb.minY); gMaxX=Math.max(gMaxX,bb.maxX); gMaxY=Math.max(gMaxY,bb.maxY)
+        }
+        if (gMinX !== Infinity) {
+          const groupXs = [gMinX, (gMinX+gMaxX)/2, gMaxX]
+          const groupYs = [gMinY, (gMinY+gMaxY)/2, gMaxY]
+          let bestXDiff = SNAP_THRESH, bestXTarget: number | null = null
+          let bestYDiff = SNAP_THRESH, bestYTarget: number | null = null
+          for (const other of objectsRef.current) {
+            if (dm.ids.includes(other.id)) continue
+            const obb = getObjBB(other)
+            for (const ox of [obb.minX, (obb.minX+obb.maxX)/2, obb.maxX]) {
+              for (const gx of groupXs) {
+                const diff = Math.abs(gx-ox)
+                if (diff < bestXDiff) { bestXDiff = diff; bestXTarget = ox }
+              }
+            }
+            for (const oy of [obb.minY, (obb.minY+obb.maxY)/2, obb.maxY]) {
+              for (const gy of groupYs) {
+                const diff = Math.abs(gy-oy)
+                if (diff < bestYDiff) { bestYDiff = diff; bestYTarget = oy }
+              }
+            }
+          }
+          // Snap by the exact amount needed to land the closest group edge on
+          // its match — compare against the ORIGINAL (pre-snap) group edges,
+          // since bestXTarget/bestYTarget were found against those.
+          if (bestXTarget !== null) {
+            const closestGx = groupXs.reduce((a,b)=>Math.abs(b-bestXTarget!)<Math.abs(a-bestXTarget!)?b:a)
+            dx += bestXTarget - closestGx
+            guides.push({ axis:'v', pos: bestXTarget })
+          }
+          if (bestYTarget !== null) {
+            const closestGy = groupYs.reduce((a,b)=>Math.abs(b-bestYTarget!)<Math.abs(a-bestYTarget!)?b:a)
+            dy += bestYTarget - closestGy
+            guides.push({ axis:'h', pos: bestYTarget })
+          }
+        }
+      }
+      alignGuidesRef.current = guides
+
       objectsRef.current = objectsRef.current.map(o => {
         if (!dm.ids.includes(o.id)) return o
         const s = dm.snap.get(o.id)!
@@ -555,8 +752,16 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
       const {minX:ox1,minY:oy1,maxX:ox2,maxY:oy2} = getObjBB(orig)
       let nx1=ox1,ny1=oy1,nx2=ox2,ny2=oy2
       const h = dm.handle
-      if (h.includes('w')) nx1=pos.x; if (h.includes('e')) nx2=pos.x
-      if (h.includes('n')) ny1=pos.y; if (h.includes('s')) ny2=pos.y
+      // Resize math always runs in the shape's own LOCAL (unrotated) space —
+      // the handles themselves are drawn/hit-tested at their rotated screen
+      // position (see getHandlePositions), but dragging one still just moves
+      // that corner along the shape's own axes, so inverse-rotate the pointer
+      // around the shape's (fixed, pre-resize) center before using it.
+      const resizePos = (orig.rotation && ROTATABLE_TYPES.includes(orig.type))
+        ? rotatePt(pos, { x:(ox1+ox2)/2, y:(oy1+oy2)/2 }, -orig.rotation)
+        : pos
+      if (h.includes('w')) nx1=resizePos.x; if (h.includes('e')) nx2=resizePos.x
+      if (h.includes('n')) ny1=resizePos.y; if (h.includes('s')) ny2=resizePos.y
       // Images resize proportionally from a corner handle, like most creative
       // tools — the axis that moved more wins and the other is derived from it.
       if (orig.type === 'image' && (h==='nw'||h==='ne'||h==='se'||h==='sw')) {
@@ -589,6 +794,32 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
       renderAll(); return
     }
 
+    if (dm?.kind === 'rotate') {
+      const angleNow = Math.atan2(pos.y-dm.pivot.y, pos.x-dm.pivot.x)
+      const delta = angleNow - dm.startAngle
+      objectsRef.current = objectsRef.current.map(o => {
+        const base = dm.baseline.get(o.id); if (!base) return o
+        if (o.type === 'line' || o.type === 'arrow') {
+          const p1 = rotatePt({x:base.x1,y:base.y1}, dm.pivot, delta)
+          const p2 = rotatePt({x:base.x2,y:base.y2}, dm.pivot, delta)
+          const pm = rotatePt({x:base.mx,y:base.my}, dm.pivot, delta)
+          return {...o, x1:p1.x,y1:p1.y, x2:p2.x,y2:p2.y, mx:pm.x,my:pm.y}
+        }
+        if (o.type === 'stroke') {
+          return {...o, pts: o.pts.map(p => rotatePt(p, dm.pivot, delta))}
+        }
+        // Shapes/text/image: rotate the bbox center around the pivot (repositions
+        // it for a multi-select group; a no-op position-wise for a single
+        // selection, since its own center IS the pivot) and add the delta to
+        // its own stored rotation so the shape itself visually spins in place.
+        const bw = base.w, bh = base.h
+        const baseCenter = { x: base.x+bw/2, y: base.y+bh/2 }
+        const newCenter = rotatePt(baseCenter, dm.pivot, delta)
+        return {...o, x:newCenter.x-bw/2, y:newCenter.y-bh/2, rotation: (base.rotation||0)+delta}
+      })
+      renderAll(); return
+    }
+
     if (dm?.kind === 'marquee') { dragRef.current = {...dm,cur:pos}; renderAll(); return }
 
     if (activeRef.current?.type === 'stroke') {
@@ -615,8 +846,8 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     const pos = getPos(e, canvas)
     const dm  = dragRef.current
 
-    if (dm?.kind === 'move' || dm?.kind === 'resize' || dm?.kind === 'endpoint') {
-      dragRef.current = null; syncObjs(objectsRef.current); snapshot(objectsRef.current); renderAll(); return
+    if (dm?.kind === 'move' || dm?.kind === 'resize' || dm?.kind === 'endpoint' || dm?.kind === 'rotate') {
+      dragRef.current = null; alignGuidesRef.current = []; syncObjs(objectsRef.current); snapshot(objectsRef.current); renderAll(); return
     }
 
     if (dm?.kind === 'marquee') {
@@ -690,7 +921,10 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     c.fillStyle='#ffffff'; c.fillRect(0,0,w,h)
     if (bgImgRef.current) c.drawImage(bgImgRef.current,0,0,w,h)
     for (const obj of objectsRef.current) renderObj(c, obj, imageCacheRef.current)
-    onSave(off.toDataURL('image/png'))
+    // PNG stays the thumbnail/preview shown everywhere else; the object list
+    // is what makes reopening the canvas resume as a REAL editable Mind Map
+    // instead of a flattened picture — see JournalBlock.canvasData.
+    onSave(off.toDataURL('image/png'), JSON.stringify(objectsRef.current))
   }
 
   // ── Text ───────────────────────────────────────────────────────────────────
@@ -779,6 +1013,46 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
     syncObjs(n); snapshot(n); setOpenPopover(null); renderAll()
   }
 
+  // Quick ±90° rotation — same pivot/geometry rules as the drag-handle rotation.
+  function rotateSelectedBy(deltaRad: number) {
+    const ids = selIdsRef.current
+    if (ids.length===0) return
+    const objs = objectsRef.current.filter(o=>ids.includes(o.id))
+    const pivot = getGroupPivot(objs)
+    const n = objectsRef.current.map(o => {
+      if (!ids.includes(o.id)) return o
+      if (o.type==='line' || o.type==='arrow') {
+        const p1=rotatePt({x:o.x1,y:o.y1},pivot,deltaRad), p2=rotatePt({x:o.x2,y:o.y2},pivot,deltaRad), pm=rotatePt({x:o.mx,y:o.my},pivot,deltaRad)
+        return {...o,x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y,mx:pm.x,my:pm.y}
+      }
+      if (o.type==='stroke') return {...o,pts:o.pts.map(p=>rotatePt(p,pivot,deltaRad))}
+      const center={x:o.x+o.w/2,y:o.y+o.h/2}, nc=rotatePt(center,pivot,deltaRad)
+      return {...o,x:nc.x-o.w/2,y:nc.y-o.h/2,rotation:(o.rotation||0)+deltaRad}
+    })
+    syncObjs(n); snapshot(n); setOpenPopover(null); renderAll()
+  }
+
+  // No selected line/arrow of that kind → just sets the default for the NEXT
+  // one drawn. A selected line/arrow → updates it immediately and persists.
+  function applyLineThickness(px: number) {
+    setLineThickIdx(THICKNESS_LEVELS.indexOf(px as typeof THICKNESS_LEVELS[number]))
+    if (selLines.length > 0) {
+      const ids = selLines.map(o=>o.id)
+      const n = objectsRef.current.map(o => ids.includes(o.id) ? {...o, sw:px} : o)
+      syncObjs(n); snapshot(n); renderAll()
+    }
+    setOpenPopover(null)
+  }
+  function applyArrowThickness(px: number) {
+    setArrowThickIdx(THICKNESS_LEVELS.indexOf(px as typeof THICKNESS_LEVELS[number]))
+    if (selArrows.length > 0) {
+      const ids = selArrows.map(o=>o.id)
+      const n = objectsRef.current.map(o => ids.includes(o.id) ? {...o, sw:px} : o)
+      syncObjs(n); snapshot(n); renderAll()
+    }
+    setOpenPopover(null)
+  }
+
   function setConnType(ct: ConnType) {
     // Elbow corners are always derived from (x1,y2) at render time — see
     // renderObj — so switching connector type never needs to touch mx/my.
@@ -818,12 +1092,29 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement
+      // The shape-text-edit/free-text <input> has its own onKeyDown (Enter
+      // commits, Escape discards and keeps the shape selected) — leave it alone.
       if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t?.isContentEditable) return
       if (e.key==='Escape' && openPopover) { e.preventDefault(); setOpenPopover(null); return }
+      if (e.key==='Escape' && selIdsRef.current.length>0) { e.preventDefault(); syncSel([]); renderAll(); return }
       if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s') { e.preventDefault(); handleSave(); return }
       if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return }
       if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y') { e.preventDefault(); redo(); return }
-      if ((e.key==='Delete'||e.key==='Backspace')&&selIdsRef.current.length>0) { e.preventDefault(); deleteSelected() }
+      if ((e.key==='Delete'||e.key==='Backspace')&&selIdsRef.current.length>0) { e.preventDefault(); deleteSelected(); return }
+      if ((e.key==='ArrowUp'||e.key==='ArrowDown'||e.key==='ArrowLeft'||e.key==='ArrowRight')&&selIdsRef.current.length>0) {
+        e.preventDefault()
+        const step = e.shiftKey ? 10 : 1
+        const dx = e.key==='ArrowLeft' ? -step : e.key==='ArrowRight' ? step : 0
+        const dy = e.key==='ArrowUp'   ? -step : e.key==='ArrowDown'  ? step : 0
+        const ids = selIdsRef.current
+        const n = objectsRef.current.map(o => {
+          if (!ids.includes(o.id)) return o
+          if (o.type==='line' || o.type==='arrow') return {...o,x1:o.x1+dx,y1:o.y1+dy,x2:o.x2+dx,y2:o.y2+dy,mx:o.mx+dx,my:o.my+dy}
+          if (o.type==='stroke') return {...o,pts:o.pts.map(p=>({x:p.x+dx,y:p.y+dy}))}
+          return {...o,x:o.x+dx,y:o.y+dy}
+        })
+        syncObjs(n); snapshot(n); renderAll()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -886,6 +1177,9 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
   const selObjs   = objects.filter(o => selIds.includes(o.id))
   const selHasShape = selObjs.some(o => SHAPE_TOOLS.includes(o.type as DrawTool))
   const selHasFlippable = selIds.length>0 && selObjs.some(o => o.type !== 'text')
+  const selHasRotatable = selIds.length>0 && selObjs.some(o => ROTATABLE_TYPES.includes(o.type) || o.type==='line' || o.type==='arrow' || o.type==='stroke')
+  const selLines    = selObjs.filter(o => o.type==='line')
+  const selArrows   = selObjs.filter(o => o.type==='arrow')
   const selArrow    = selObjs.length===1 && selObjs[0].type==='arrow' ? selObjs[0] : null
   const selIsGroup  = selObjs.length>=2 && selObjs.every(o=>o.gid&&o.gid===selObjs[0].gid)
   const canGroup    = selIds.length>=2 && !selIsGroup
@@ -950,12 +1244,28 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
       {/* ── Scrollable tools ─────────────────────────────────────────────── */}
       <div style={{display:'flex',alignItems:'center',gap:4,padding:'9px 10px 9px 14px',flex:1,minWidth:0,overflowX:'auto',flexWrap:'nowrap'}}>
 
-        <span style={{fontSize:12,fontWeight:700,letterSpacing:'-0.01em',color:isDark?'rgba(255,255,255,0.85)':'#1e293b',marginRight:2,flexShrink:0}}>✏️ Draw</span>
+        <span style={{fontSize:12,fontWeight:700,letterSpacing:'-0.01em',color:isDark?'rgba(255,255,255,0.85)':'#1e293b',marginRight:2,flexShrink:0}}>🧠 Mind Mapping Canvas</span>
 
         {dvdr}
 
         {/* Select */}
         <button title="Select (click / drag)" onClick={()=>{if(textInput)commitText();setTool('select')}} style={{...dkBtn(tool==='select'),minWidth:28,textAlign:'center',padding:'4px 8px',fontSize:13}}>↖</button>
+
+        {/* Rotate — quick ±90°, works on the current selection */}
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Rotate" disabled={!selHasRotatable} onClick={(e)=>{if(!selHasRotatable)return;openPop('rotate',e)}}
+            style={{...dkBtn(false,false,!selHasRotatable),display:'flex',alignItems:'center',padding:'4px 8px',fontSize:13}}>↻</button>
+          {openPopover==='rotate' && (
+            <div data-popover="" style={fixedPopStyle({flexDirection:'row',gap:4,minWidth:'auto',padding:'6px 8px'})}>
+              <button title="Rotate 90° left" onClick={()=>rotateSelectedBy(-Math.PI/2)}
+                style={{width:30,height:28,borderRadius:7,padding:0,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,
+                  border:'0.5px solid rgba(0,0,0,0.15)',background:'rgba(0,0,0,0.04)',fontSize:14}}>↺</button>
+              <button title="Rotate 90° right" onClick={()=>rotateSelectedBy(Math.PI/2)}
+                style={{width:30,height:28,borderRadius:7,padding:0,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,
+                  border:'0.5px solid rgba(0,0,0,0.15)',background:'rgba(0,0,0,0.04)',fontSize:14}}>↻</button>
+            </div>
+          )}
+        </div>
 
         {dvdr}
 
@@ -1026,11 +1336,47 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
           )}
         </div>
 
-        {/* Line */}
-        <button title="Line" onClick={()=>{if(textInput)commitText();setTool('line')}} style={{...dkBtn(tool==='line'),minWidth:28,textAlign:'center',padding:'4px 8px'}}>—</button>
+        {/* Line — click selects the tool (unless a line is already selected, in
+            which case the popover retargets that line instead) and opens its
+            thickness popover, same pattern as Pen's size trigger. */}
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Line" onClick={(e)=>{if(textInput)commitText();if(selLines.length===0)setTool('line');openPop('line-thickness',e)}}
+            style={{...dkBtn(tool==='line'),minWidth:28,textAlign:'center',padding:'4px 8px'}}>—</button>
+          {openPopover==='line-thickness' && (
+            <div data-popover="" style={fixedPopStyle({flexDirection:'row',gap:4,minWidth:'auto',padding:'6px 8px'})}>
+              {THICKNESS_LEVELS.map(px => {
+                const active = (selLines[0]?.sw ?? THICKNESS_LEVELS[lineThickIdx]) === px
+                return (
+                  <button key={px} title={`${px}px`} onClick={()=>applyLineThickness(px)}
+                    style={{width:30,height:28,borderRadius:7,padding:0,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,
+                      border:`0.5px solid ${active?'rgba(124,58,237,0.55)':'rgba(0,0,0,0.15)'}`,background:active?'rgba(124,58,237,0.20)':'rgba(0,0,0,0.04)'}}>
+                    <span style={{display:'block',width:20,height:px,borderRadius:px/2,background:'rgba(0,0,0,0.70)'}}/>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
 
         {/* Arrow */}
-        <button title="Arrow / Connector" onClick={()=>{if(textInput)commitText();setTool('arrow');setArrowConnDefault('straight')}} style={{...dkBtn(tool==='arrow'&&arrowConnDefault==='straight'),minWidth:28,textAlign:'center',padding:'4px 8px'}}>→</button>
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Arrow / Connector" onClick={(e)=>{if(textInput)commitText();if(selArrows.length===0){setTool('arrow');setArrowConnDefault('straight')}openPop('arrow-thickness',e)}}
+            style={{...dkBtn(tool==='arrow'&&arrowConnDefault==='straight'),minWidth:28,textAlign:'center',padding:'4px 8px'}}>→</button>
+          {openPopover==='arrow-thickness' && (
+            <div data-popover="" style={fixedPopStyle({flexDirection:'row',gap:4,minWidth:'auto',padding:'6px 8px'})}>
+              {THICKNESS_LEVELS.map(px => {
+                const active = (selArrows[0]?.sw ?? THICKNESS_LEVELS[arrowThickIdx]) === px
+                return (
+                  <button key={px} title={`${px}px`} onClick={()=>applyArrowThickness(px)}
+                    style={{width:30,height:28,borderRadius:7,padding:0,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,
+                      border:`0.5px solid ${active?'rgba(124,58,237,0.55)':'rgba(0,0,0,0.15)'}`,background:active?'rgba(124,58,237,0.20)':'rgba(0,0,0,0.04)'}}>
+                    <span style={{display:'block',width:20,height:px,borderRadius:px/2,background:'rgba(0,0,0,0.70)'}}/>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
 
         {/* Elbow Arrow — two visual icon choices (sharp / curved corner), primary UI is the icon, tooltip is secondary */}
         <div style={{flexShrink:0}} data-pop-trigger="">
@@ -1250,14 +1596,14 @@ export function JournalDrawModal({ isDark, initialSrc, onSave, onClose }: Journa
 
   if (fitToScreen) {
     return (
-      <div style={{position:'fixed',inset:0,zIndex:200,display:'flex',flexDirection:'column',background:isDark?'#10071e':'#ffffff'}}>
+      <div style={{position:'fixed',inset:0,zIndex:200,display:'flex',flexDirection:'column',background:isDarkApp?'#10071e':'#ffffff'}}>
         {innerContent}
       </div>
     )
   }
 
   return (
-    <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minHeight:0,background:isDark?'#10071e':'#ffffff'}}>
+    <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minHeight:0,background:isDarkApp?'#10071e':'#ffffff'}}>
       {innerContent}
     </div>
   )

@@ -879,7 +879,7 @@ function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete, onC
   const [sendToOpen, setSendToOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const collapsed = block.collapsed === true
-  const mediaLabel = block.name || (block.type === 'drawing' ? 'Drawing' : 'Image')
+  const mediaLabel = block.name || (block.type === 'drawing' ? 'Mind Map' : 'Image')
 
   useEffect(() => {
     if (!menuOpen) return
@@ -928,7 +928,7 @@ function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete, onC
           className="xp-media-img"
           data-has-fixed-height={block.height != null ? 'true' : undefined}
           src={block.thumbnail ?? block.src}
-          alt={block.name ?? (block.type === 'drawing' ? 'Drawing' : 'Image')}
+          alt={block.name ?? (block.type === 'drawing' ? 'Mind Map' : 'Image')}
           onClick={() => setLightbox(true)}
           style={{
             display: 'block', cursor: 'zoom-in',
@@ -971,7 +971,7 @@ function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete, onC
             </button>
             {block.type === 'drawing' && (
               <button onClick={() => { onEdit(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
-                ✏️ Edit Drawing
+                🧠 Edit Mind Map
               </button>
             )}
             <button onClick={() => { setSendToOpen(true); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
@@ -1766,6 +1766,7 @@ export function JournalEditorContent({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closeIntent])
   const showExitDialogRef = useRef(false)  // for ESC handler stable closure
+  const drawStateRef = useRef<typeof drawState>(null)  // lets the capture-phase ESC/Ctrl+S handler know the Mind Mapping Canvas owns the key right now
 
   // ── Journal session timer ────────────────────────────────────────────────────
   const [timerSessions,    setTimerSessions]    = useState<JournalTimerSession[]>([])
@@ -1829,6 +1830,7 @@ export function JournalEditorContent({
   onBackRef.current         = onBack
   showExitDialogRef.current = showExitDialog
   showSessionsRef.current   = showSessions
+  drawStateRef.current      = drawState
 
   // Keep blocksRef in sync with blocks state
   useEffect(() => { blocksRef.current = blocks }, [blocks])
@@ -2473,14 +2475,14 @@ export function JournalEditorContent({
   }
 
   // Draw handlers
-  function handleDrawSave(dataUrl: string) {
+  function handleDrawSave(dataUrl: string, objectsJson: string) {
     if (!drawState) return
     let next: JournalBlock[]
     if (drawState.editingBlock) {
-      const updatedBlock: JournalBlock = { ...drawState.editingBlock, src: dataUrl, thumbnail: dataUrl, updatedAt: Date.now() }
+      const updatedBlock: JournalBlock = { ...drawState.editingBlock, src: dataUrl, thumbnail: dataUrl, canvasData: objectsJson, updatedAt: Date.now() }
       next = blocksRef.current.map(b => b.id === drawState.editingBlock!.id ? updatedBlock : b)
     } else {
-      const drawBlock = createDrawingBlock(dataUrl, `Drawing — ${fmtShortDate(dateKey)}`)
+      const drawBlock = createDrawingBlock(dataUrl, `Mind Map — ${fmtShortDate(dateKey)}`, objectsJson)
       next = [...blocksRef.current]
       next.splice(drawState.insertAt + 1, 0, drawBlock)
       // New drawings become Gallery assets automatically; re-editing an existing
@@ -2489,7 +2491,7 @@ export function JournalEditorContent({
         id: 'draw-' + Date.now(),
         type: 'drawing',
         createdAt: Date.now(),
-        title: `Drawing — ${fmtShortDate(dateKey)}`,
+        title: `Mind Map — ${fmtShortDate(dateKey)}`,
         dataUri: dataUrl,
         source: 'Planner/Journal',
         relatedDateLabel: fmtShortDate(dateKey),
@@ -2694,7 +2696,21 @@ export function JournalEditorContent({
   // ── ESC key — capture phase so it fires before the parent's bubble handler ──
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // Ctrl+S / Cmd+S — save the Planner document through the exact same
+      // handler the Save button uses. When the Mind Mapping Canvas is open it
+      // owns the key instead (its own listener saves the canvas) — never fire
+      // both saves for one keypress.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        if (drawStateRef.current) return
+        e.preventDefault()
+        handleManualSave()
+        return
+      }
       if (e.key !== 'Escape') return
+      // The Mind Mapping Canvas has its own Escape behavior (exit text-edit,
+      // then deselect) — let its bubble-phase listener handle it instead of
+      // navigating back out of the Planner.
+      if (drawStateRef.current) return
       e.stopImmediatePropagation()
       if (showExitDialogRef.current) {
         setShowExitDialog(false)
@@ -3286,6 +3302,7 @@ export function JournalEditorContent({
         <JournalDrawModal
           isDark={isDark}
           initialSrc={drawState.editingBlock?.src}
+          initialObjects={drawState.editingBlock?.canvasData}
           onSave={handleDrawSave}
           onClose={() => setDrawState(null)}
         />
@@ -3629,13 +3646,13 @@ export function JournalEditorContent({
 
                 <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
 
-                {/* Draw */}
+                {/* Mind Map — opens the Mind Mapping Canvas (internal name stays drawState/createDrawingBlock) */}
                 <button
                   className="xp-jd-btn"
                   style={dockBtn()}
                   onClick={() => setDrawState({ insertAt: blocks.length - 1, editingBlock: null })}
-                  title="Open draw canvas"
-                >✏️ Draw</button>
+                  title="Open Mind Mapping Canvas"
+                >🧠 Mind Map</button>
 
                 {/* + Section — desktop slot (mobile version is before Undo/Redo) */}
                 <div className="xp-jd-sec-dt" style={{ display: 'contents' }}>

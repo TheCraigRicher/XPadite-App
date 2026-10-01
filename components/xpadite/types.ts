@@ -93,6 +93,12 @@ export interface JournalBlock {
   height?: number       // explicit height in px; undefined = auto (natural image height)
   collapsed?: boolean   // section body hidden (presentational only); undefined/false = expanded
   sourceTaskId?: string // TM source task id — for duplicate-detection only, no sync
+  // Mind Mapping Canvas ('drawing' blocks only): the live, editable object list
+  // (JSON array of the canvas's own object shape) — `src`/`thumbnail` stay the
+  // flattened PNG preview shown everywhere else. Absent on drawings saved
+  // before this field existed; the canvas falls back to its old flat-image
+  // behavior for those rather than breaking on missing data.
+  canvasData?: string
   createdAt: number
   updatedAt: number
 }

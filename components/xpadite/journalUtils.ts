@@ -106,8 +106,8 @@ export function createSectionBlock(sectionColor: SectionColorKey = 'lavender'): 
   return { id: mkId(), type: 'section', content: '', sectionColor, createdAt: now(), updatedAt: now() }
 }
 
-export function createDrawingBlock(src: string, name: string): JournalBlock {
-  return { id: mkId(), type: 'drawing', src, thumbnail: src, name, createdAt: now(), updatedAt: now() }
+export function createDrawingBlock(src: string, name: string, canvasData?: string): JournalBlock {
+  return { id: mkId(), type: 'drawing', src, thumbnail: src, name, canvasData, createdAt: now(), updatedAt: now() }
 }
 
 export function createImageBlock(src: string, name: string): JournalBlock {

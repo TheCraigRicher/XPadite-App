@@ -27,6 +27,7 @@ export const SECTION_COLORS = [
   { key: 'peach',   label: 'Peach'   },
   { key: 'pink',    label: 'Pink'    },
   { key: 'lavender',label: 'Lavender'},
+  { key: 'yellow',  label: 'Yellow'  },
 ] as const
 
 export type SectionColorKey = (typeof SECTION_COLORS)[number]['key']
@@ -63,9 +64,36 @@ export function getSectionStyle(colorKey: string, isDark: boolean): SectionStyle
       d: { background: 'rgba(124,58,237,0.10)', border: 'rgba(124,58,237,0.28)', labelColor: '#a78bfa' },
       l: { background: 'rgba(124,58,237,0.07)', border: 'rgba(124,58,237,0.22)', labelColor: '#7c3aed' },
     },
+    // Same soft/translucent design philosophy as the other pastels above —
+    // a low-opacity tint, not a solid fill, so normal theme text stays readable.
+    yellow: {
+      d: { background: 'rgba(234,179,8,0.10)',  border: 'rgba(234,179,8,0.28)',  labelColor: '#fbbf24' },
+      l: { background: 'rgba(234,179,8,0.08)',  border: 'rgba(202,138,4,0.24)',  labelColor: '#a16207' },
+    },
   }
   const entry = map[colorKey] ?? map.plain
   return isDark ? entry.d : entry.l
+}
+
+// ─── Table colors ─────────────────────────────────────────────────────────────
+// Tables live inside the ProseMirror-managed editor content, whose DOM only
+// re-renders on editor transactions — not on ordinary React re-renders like an
+// app-wide dark/light toggle. So table fills use one fixed, theme-independent
+// set of values per color key (same names/family as SECTION_COLORS) rather
+// than getSectionStyle's isDark-branched values, to stay correct regardless of
+// when ProseMirror happens to paint the node.
+export const TABLE_COLOR_HEX: Record<string, { bg: string; text: string }> = {
+  plain:    { bg: '#eef0f4', text: '#1e1e2e' },
+  blue:     { bg: '#dbeafe', text: '#1e3a8a' },
+  green:    { bg: '#dcfce7', text: '#14532d' },
+  peach:    { bg: '#ffe4d1', text: '#7c2d12' },
+  pink:     { bg: '#fce7f3', text: '#831843' },
+  lavender: { bg: '#ede9fe', text: '#4c1d95' },
+  yellow:   { bg: '#fef3c7', text: '#78350f' },
+}
+
+export function getTableColor(key: string | undefined) {
+  return TABLE_COLOR_HEX[key ?? 'plain'] ?? TABLE_COLOR_HEX.plain
 }
 
 // ─── Block factories ──────────────────────────────────────────────────────────

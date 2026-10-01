@@ -12,6 +12,7 @@ import Placeholder from '@tiptap/extension-placeholder'
 import Underline from '@tiptap/extension-underline'
 import { TextStyle } from '@tiptap/extension-text-style'
 import { Color } from '@tiptap/extension-color'
+import { Table as TiptapTable, TableRow, TableHeader, TableCell } from '@tiptap/extension-table'
 import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
 import { addGalleryItem } from './GalleryModal'
@@ -23,7 +24,7 @@ import { JournalDrawModal } from './JournalDrawModal'
 import {
   parseJournalDoc, parseJournalContent, serializeJournalContent, serializeJournalDoc,
   getSectionStyle, SECTION_COLORS, createTextBlock, createSectionBlock,
-  createDrawingBlock, createImageBlock, mkId,
+  createDrawingBlock, createImageBlock, mkId, getTableColor,
 } from './journalUtils'
 import { TransferSectionModal } from './TransferSectionModal'
 import { SendToOptionsModal } from './SendToOptionsModal'
@@ -141,6 +142,231 @@ function GridBlockItem({
   )
 }
 
+// ─── AddTableModal ────────────────────────────────────────────────────────────
+
+interface AddTableConfig {
+  rows: number
+  cols: number
+  headerOn: boolean
+  headerColor: SectionColorKey
+  firstColOn: boolean
+  firstColColor: SectionColorKey
+  fillColor: SectionColorKey
+  corners: 'square' | 'rounded'
+}
+
+function TableSwitch({ isDark, value, onChange, label }: { isDark: boolean; value: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={value}
+      aria-label={label}
+      onClick={() => onChange(!value)}
+      style={{
+        width: 36, height: 20, borderRadius: 999, border: 'none', cursor: 'pointer', flexShrink: 0,
+        background: value ? '#7c3aed' : (isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.16)'),
+        position: 'relative', transition: 'background 150ms',
+      }}
+    >
+      <span style={{
+        position: 'absolute', top: 2, left: value ? 18 : 2,
+        width: 16, height: 16, borderRadius: '50%', background: '#fff',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.35)', transition: 'left 150ms',
+      }} />
+    </button>
+  )
+}
+
+function TableStepper({ isDark, label, value, onChange, min, max }: {
+  isDark: boolean; label: string; value: number; onChange: (n: number) => void; min: number; max: number
+}) {
+  const btnStyle: React.CSSProperties = {
+    width: 24, height: 24, borderRadius: 7, border: 'none', cursor: 'pointer',
+    background: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.07)',
+    color: isDark ? '#fff' : '#0f172a', fontSize: 15, lineHeight: 1,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+      <span style={{ fontSize: 12, fontWeight: 600, color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)' }}>{label}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <button onClick={() => onChange(Math.max(min, value - 1))} disabled={value <= min} style={{ ...btnStyle, opacity: value <= min ? 0.4 : 1 }}>−</button>
+        <span style={{ fontSize: 13, fontWeight: 700, minWidth: 18, textAlign: 'center', color: isDark ? '#fff' : '#0f172a' }}>{value}</span>
+        <button onClick={() => onChange(Math.min(max, value + 1))} disabled={value >= max} style={{ ...btnStyle, opacity: value >= max ? 0.4 : 1 }}>+</button>
+      </div>
+    </div>
+  )
+}
+
+function TableColorRow({ isDark, label, value, onChange }: {
+  isDark: boolean; label: string; value: SectionColorKey; onChange: (c: SectionColorKey) => void
+}) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 10.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: isDark ? 'rgba(255,255,255,0.42)' : 'rgba(0,0,0,0.40)', marginBottom: 6 }}>
+        {label}
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+        {SECTION_COLORS.map(c => {
+          const hex = getTableColor(c.key)
+          const selected = value === c.key
+          return (
+            <button
+              key={c.key}
+              onClick={() => onChange(c.key)}
+              title={c.label}
+              aria-label={c.label}
+              style={{
+                width: 22, height: 22, borderRadius: '50%', flexShrink: 0, padding: 0, cursor: 'pointer',
+                background: hex.bg,
+                border: selected ? '2px solid #7c3aed' : `1px solid ${isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.15)'}`,
+                boxShadow: selected ? '0 0 0 2px rgba(124,58,237,0.30)' : 'none',
+              }}
+            />
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function TableCornerToggle({ isDark, value, onChange }: {
+  isDark: boolean; value: 'square' | 'rounded'; onChange: (v: 'square' | 'rounded') => void
+}) {
+  const opts: Array<{ key: 'square' | 'rounded'; label: string }> = [
+    { key: 'square', label: '◻ Square' },
+    { key: 'rounded', label: '▢ Rounded' },
+  ]
+  return (
+    <div style={{
+      display: 'flex', gap: 3, padding: 3, borderRadius: 10,
+      background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)',
+    }}>
+      {opts.map(o => {
+        const selected = value === o.key
+        return (
+          <button
+            key={o.key}
+            onClick={() => onChange(o.key)}
+            style={{
+              flex: 1, padding: '6px 0', borderRadius: 7, border: 'none', cursor: 'pointer',
+              fontSize: 11.5, fontWeight: selected ? 700 : 500,
+              background: selected ? '#7c3aed' : 'transparent',
+              color: selected ? '#fff' : (isDark ? 'rgba(255,255,255,0.60)' : 'rgba(0,0,0,0.55)'),
+              transition: 'background 120ms, color 120ms',
+            }}
+          >
+            {o.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function AddTableModal({ isDark, onClose, onConfirm }: {
+  isDark: boolean
+  onClose: () => void
+  onConfirm: (config: AddTableConfig) => void
+}) {
+  const [cols, setCols]                 = useState(3)
+  const [rows, setRows]                 = useState(3)
+  const [headerOn, setHeaderOn]         = useState(true)
+  const [headerColor, setHeaderColor]   = useState<SectionColorKey>('lavender')
+  const [firstColOn, setFirstColOn]     = useState(false)
+  const [firstColColor, setFirstColColor] = useState<SectionColorKey>('lavender')
+  const [fillColor, setFillColor]       = useState<SectionColorKey>('plain')
+  const [corners, setCorners]           = useState<'square' | 'rounded'>('rounded')
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const dividerStyle: React.CSSProperties = { height: 1, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', margin: '10px 0 12px' }
+  const rowLabelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.65)' }
+
+  return (
+    <div
+      className="fixed inset-0 z-[220] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.55)' }}
+      onClick={onClose}
+    >
+      {/* Same vh→dvh progressive enhancement as SendToOptionsModal's .xp-sendto-card —
+          plain vh measures the tallest possible mobile viewport (address bar hidden),
+          which overshoots the actually-visible area when the address bar is showing,
+          letting the card run off the bottom of the screen. */}
+      <style>{`
+        .xp-addtbl-card { max-height: 88vh; }
+        @supports (height: 88dvh) { .xp-addtbl-card { max-height: 88dvh; } }
+      `}</style>
+      <div
+        className="xp-addtbl-card w-full max-w-[340px] rounded-2xl overflow-hidden flex flex-col"
+        style={{ background: isDark ? '#160a30' : '#fff', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.10)'}`, boxShadow: '0 24px 64px rgba(0,0,0,0.32)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 px-4 py-3.5 flex-shrink-0" style={{ background: 'linear-gradient(135deg, #5b21b6 0%, #7c3aed 100%)' }}>
+          <h3 className="text-[14px] font-semibold" style={{ color: '#fff' }}>Add Table</h3>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: 'rgba(255,255,255,0.16)', color: '#fff', border: 'none', cursor: 'pointer' }}
+          >✕</button>
+        </div>
+
+        <div className="px-4 py-3.5 overflow-y-auto" style={{ minHeight: 0 }}>
+          <TableStepper isDark={isDark} label="Columns" value={cols} onChange={setCols} min={1} max={10} />
+          <TableStepper isDark={isDark} label="Rows" value={rows} onChange={setRows} min={1} max={30} />
+
+          <div style={dividerStyle} />
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: headerOn ? 8 : 10 }}>
+            <span style={rowLabelStyle}>Header Row</span>
+            <TableSwitch isDark={isDark} value={headerOn} onChange={setHeaderOn} label="Header row" />
+          </div>
+          {headerOn && <TableColorRow isDark={isDark} label="Header Color" value={headerColor} onChange={setHeaderColor} />}
+
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: firstColOn ? 8 : 10 }}>
+            <span style={rowLabelStyle}>First Column Emphasis</span>
+            <TableSwitch isDark={isDark} value={firstColOn} onChange={setFirstColOn} label="First column emphasis" />
+          </div>
+          {firstColOn && <TableColorRow isDark={isDark} label="First Column Color" value={firstColColor} onChange={setFirstColColor} />}
+
+          <div style={dividerStyle} />
+
+          <TableColorRow isDark={isDark} label="Table Fill" value={fillColor} onChange={setFillColor} />
+
+          <div style={{ marginTop: 4 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: isDark ? 'rgba(255,255,255,0.42)' : 'rgba(0,0,0,0.40)', marginBottom: 6 }}>
+              Table Corners
+            </div>
+            <TableCornerToggle isDark={isDark} value={corners} onChange={setCorners} />
+          </div>
+        </div>
+
+        <div className="px-4 pt-2 pb-3.5 flex items-center gap-2.5 flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="flex-1 text-[12.5px] font-semibold"
+            style={{ padding: '9px 0', borderRadius: 10, background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)', color: isDark ? '#fff' : '#0f172a', border: 'none', cursor: 'pointer' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onConfirm({ rows, cols, headerOn, headerColor, firstColOn, firstColColor, fillColor, corners })}
+            className="flex-1 text-[12.5px] font-semibold text-white"
+            style={{ padding: '9px 0', borderRadius: 10, background: '#7c3aed', border: 'none', cursor: 'pointer' }}
+          >
+            Add Table
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── JournalTextBlock ─────────────────────────────────────────────────────────
 
 interface JournalTextBlockProps {
@@ -187,6 +413,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
   // each time it opens and performs the actual Task Manager write on confirm.
   const [sendToOpen, setSendToOpen] = useState(false)
   const [tmTaskTree, setTmTaskTree] = useState<PlannerTaskNode[]>([])
+  const [showAddTable, setShowAddTable] = useState(false)
 
   const editor = useEditor({
     extensions: [
@@ -210,6 +437,10 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
       Color,
       XpHighlight,
       BoxTitle,
+      XpTable.configure({ resizable: false }),
+      TableRow,
+      TableHeader,
+      TableCell,
     ],
     content: { type: 'doc', content: [{ type: 'paragraph' }] },
     editorProps: { attributes: { class: 'xp-j-prose' } },
@@ -325,6 +556,34 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
     const trimmed = titleValue.trim()
     onNameChange?.(trimmed || undefined)
     setAddingTitle(false)
+  }
+
+  // Inserts the configured table at the current cursor in THIS block's own
+  // editor, then bakes the chosen colors onto the table node itself — chained
+  // in one command sequence so updateAttributes reads the selection insertTable
+  // just placed inside the new table's first cell.
+  function handleAddTable(config: AddTableConfig) {
+    setShowAddTable(false)
+    if (!editor) return
+    // Two separate .run() calls, not one chained sequence: insertTable must
+    // fully dispatch and land in the editor's real state before
+    // updateAttributes reads "the table at the current selection" — chaining
+    // both under one transaction risks updateAttributes resolving against a
+    // selection/doc pairing from a half-applied step.
+    const inserted = editor.chain().focus()
+      .insertTable({ rows: config.rows, cols: config.cols, withHeaderRow: config.headerOn })
+      .run()
+    if (!inserted) {
+      setToast('Could not insert the table here — try clicking inside the section first.')
+      return
+    }
+    editor.chain().updateAttributes('table', {
+      fillColor: config.fillColor,
+      headerColor: config.headerColor,
+      firstColColor: config.firstColColor,
+      firstColOn: config.firstColOn,
+      corners: config.corners,
+    }).run()
   }
 
   const isSection   = block.type === 'section'
@@ -525,6 +784,9 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                     }} style={menuItemStyle(isDark)}>
                       ✏ Edit Section
                     </button>
+                    <button onClick={() => { setShowAddTable(true); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                      ▦ Add Table
+                    </button>
                     <button onClick={() => setShowColorPick(true)} style={menuItemStyle(isDark)}>
                       🎨 Change Color
                     </button>
@@ -587,6 +849,14 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
           onAICoachComingSoon={tmSendAICoachComingSoon}
         />
       )}
+
+      {showAddTable && (
+        <AddTableModal
+          isDark={isDark}
+          onClose={() => setShowAddTable(false)}
+          onConfirm={handleAddTable}
+        />
+      )}
     </div>
   )
 })
@@ -599,14 +869,17 @@ interface InlineMediaBlockProps {
   onEdit: () => void
   onMoveActivate: () => void
   onDelete: () => void
+  onCollapseToggle: () => void
 }
 
-function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete }: InlineMediaBlockProps) {
+function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete, onCollapseToggle }: InlineMediaBlockProps) {
   const { setToast } = useApp()
   const [menuOpen, setMenuOpen] = useState(false)
   const [lightbox, setLightbox] = useState(false)
   const [sendToOpen, setSendToOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
+  const collapsed = block.collapsed === true
+  const mediaLabel = block.name || (block.type === 'drawing' ? 'Drawing' : 'Image')
 
   useEffect(() => {
     if (!menuOpen) return
@@ -620,11 +893,37 @@ function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete }: I
 
   return (
     <div style={{ position: 'relative', margin: '4px 0' }}>
+      {/* Header row: collapse triangle + label — same visual language as a Planner
+          section's own header, so media follows the identical collapse pattern. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: collapsed ? 0 : 5, paddingRight: 32 }}>
+        <button
+          onClick={onCollapseToggle}
+          title={collapsed ? 'Expand media' : 'Collapse media'}
+          aria-label={collapsed ? 'Expand media' : 'Collapse media'}
+          style={{
+            flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: 18, height: 18, border: 'none', background: 'transparent', cursor: 'pointer',
+            borderRadius: 5, color: isDark ? 'rgba(255,255,255,0.40)' : 'rgba(0,0,0,0.35)',
+            transition: 'background 120ms, color 120ms',
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
+        >
+          <span style={{ display: 'inline-block', fontSize: 10, lineHeight: 1, transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)', transition: 'transform 200ms cubic-bezier(0.4,0,0.2,1)' }}>▶</span>
+        </button>
+        <span style={{
+          fontSize: 11, fontWeight: 600, color: isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)',
+          minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none',
+        }}>
+          {block.type === 'drawing' ? '✏️ ' : '📷 '}{mediaLabel}
+        </span>
+      </div>
+
       {/* Image — explicit height when user has resized vertically (desktop/tablet
           only; mobile always shows the image at its natural aspect ratio via the
           xp-media-img CSS override below, so a resized box never letterboxes with
-          gray bars on a narrow screen). */}
-      {block.src && (
+          gray bars on a narrow screen). Hidden entirely while collapsed. */}
+      {!collapsed && block.src && (
         <img
           className="xp-media-img"
           data-has-fixed-height={block.height != null ? 'true' : undefined}
@@ -641,16 +940,6 @@ function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onDelete }: I
             boxShadow: isDark ? '0 2px 12px rgba(0,0,0,0.35)' : '0 2px 8px rgba(0,0,0,0.08)',
           }}
         />
-      )}
-
-      {/* Label — hidden once explicit height is set (keeps handle positions clean) */}
-      {block.name && block.height == null && (
-        <div style={{
-          fontSize: 10, color: isDark ? 'rgba(255,255,255,0.40)' : 'rgba(0,0,0,0.40)',
-          marginTop: 4, textAlign: 'center', userSelect: 'none',
-        }}>
-          {block.type === 'drawing' ? '✏️ ' : '📷 '}{block.name}
-        </div>
       )}
 
       {/* ⋮ menu — Move, Resize, Edit, Delete */}
@@ -849,6 +1138,39 @@ const SubItemTaskItem = TaskItem.extend({
         renderHTML: (attrs: { xpSentTaskId?: string | null }) => attrs.xpSentTaskId ? { 'data-xp-sent-task-id': attrs.xpSentTaskId } : {},
       },
     }
+  },
+})
+
+// Planner "Add Table" — colors are resolved once via getTableColor and baked
+// into CSS custom properties on the <table> element itself. This node lives
+// inside ProseMirror-managed content, which only repaints on editor
+// transactions (not on ordinary React re-renders like the app's dark/light
+// toggle), so its colors are fixed at creation time — see getTableColor's
+// comment in journalUtils.ts for why that's the deliberate tradeoff.
+const XpTable = TiptapTable.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      fillColor:     { default: 'plain' },
+      headerColor:   { default: 'lavender' },
+      firstColColor: { default: 'lavender' },
+      firstColOn:    { default: false },
+      corners:       { default: 'rounded' },
+    }
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    const fill     = getTableColor(node.attrs.fillColor)
+    const header   = getTableColor(node.attrs.headerColor)
+    const firstCol = getTableColor(node.attrs.firstColColor)
+    const style =
+      `--xp-tbl-fill:${fill.bg};--xp-tbl-fill-text:${fill.text};` +
+      `--xp-tbl-header:${header.bg};--xp-tbl-header-text:${header.text};` +
+      `--xp-tbl-firstcol:${firstCol.bg};--xp-tbl-firstcol-text:${firstCol.text};`
+    const wrapClass = 'xp-j-table-wrap' + (node.attrs.corners === 'square' ? ' xp-j-table-square' : '')
+    return ['div', { class: wrapClass }, ['table', mergeAttributes(HTMLAttributes, {
+      class: 'xp-j-table' + (node.attrs.firstColOn ? ' xp-j-table-firstcol' : ''),
+      style,
+    }), ['tbody', 0]]]
   },
 })
 
@@ -1485,8 +1807,13 @@ export function JournalEditorContent({
   // ── Voice-to-notes state ────────────────────────────────────────────────────
   const [isRecording, setIsRecording] = useState(false)
   const [voiceError,  setVoiceError]  = useState<string | null>(null)
-  const isRecordingRef = useRef(false)
-  const recognitionRef = useRef<any>(null)
+  const isRecordingRef     = useRef(false)
+  const recognitionRef     = useRef<any>(null)
+  // The section editor focused WHEN Mic was pressed — stays the dictation
+  // target for the whole session even though clicking the Mic button itself
+  // moves DOM focus away from that section.
+  const micTargetEditorRef = useRef<Editor | null>(null)
+  const silenceTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Refs ────────────────────────────────────────────────────────────────────
   const contentMapRef   = useRef<Map<string, string>>(new Map())
@@ -1524,13 +1851,7 @@ export function JournalEditorContent({
   }, [updateScrollArrows])
 
   // ── Unmount cleanup — stop voice recording ──────────────────────────────────
-  useEffect(() => () => {
-    if (isRecordingRef.current) {
-      isRecordingRef.current = false
-      try { recognitionRef.current?.stop() } catch {}
-      recognitionRef.current = null
-    }
-  }, [])
+  useEffect(() => () => { stopVoiceSession() }, [])
 
   // ── Unmount cleanup — close any open Task Manager session ────────────────────
   useEffect(() => {
@@ -1554,12 +1875,7 @@ export function JournalEditorContent({
   // ── Init / date change ───────────────────────────────────────────────────────
   useEffect(() => {
     // Stop any active voice recording when navigating to a new date
-    if (isRecordingRef.current) {
-      isRecordingRef.current = false
-      setIsRecording(false)
-      try { recognitionRef.current?.stop() } catch {}
-      recognitionRef.current = null
-    }
+    stopVoiceSession()
     setVoiceError(null)
 
     const doc = parseJournalDoc(rawContent)
@@ -2263,13 +2579,27 @@ export function JournalEditorContent({
       .run()
   }
 
-  // Voice-to-notes
+  // Voice-to-notes — session stays active across the browser's own recognition
+  // cycles (which end on their own even in continuous mode); it only stops on
+  // a manual toggle, 10s of continuous silence, or a genuinely fatal error.
+  function clearSilenceTimer() {
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
+  }
+  function resetSilenceTimer() {
+    clearSilenceTimer()
+    silenceTimerRef.current = setTimeout(() => stopVoiceSession(), 10000)
+  }
+  function stopVoiceSession() {
+    isRecordingRef.current = false
+    setIsRecording(false)
+    clearSilenceTimer()
+    micTargetEditorRef.current = null
+    try { recognitionRef.current?.stop() } catch {}
+    recognitionRef.current = null
+  }
   function handleVoiceToggle() {
     if (isRecordingRef.current) {
-      isRecordingRef.current = false
-      setIsRecording(false)
-      try { recognitionRef.current?.stop() } catch {}
-      recognitionRef.current = null
+      stopVoiceSession()
       return
     }
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -2277,39 +2607,56 @@ export function JournalEditorContent({
       setVoiceError('Voice recognition is not supported in this browser. Try Chrome or Edge.')
       return
     }
+    // Remember the section focused BEFORE Mic was pressed — that section is
+    // the dictation target for the whole session, not whatever has DOM focus
+    // by the time a result comes back (which by then is the Mic button itself).
+    const target = focusedEditor.current
+    if (!target) {
+      setVoiceError('Click inside a section first, then press Mic to dictate into it.')
+      return
+    }
+    micTargetEditorRef.current = target
     const rec = new SR()
     rec.continuous = true
-    rec.interimResults = false
+    rec.interimResults = true
     rec.lang = navigator.language || 'en-US'
     rec.onresult = (e: any) => {
+      resetSilenceTimer() // any recognition activity — interim or final — proves the user is still talking
       let transcript = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) transcript += e.results[i][0].transcript
       }
       if (transcript.trim()) {
-        const ed = focusedEditor.current
-        if (ed) ed.chain().focus().insertContent(transcript.trim() + ' ').run()
+        // No .focus() — dictation must not steal UI focus from wherever the
+        // user is looking (the Mic button/Listening indicator).
+        micTargetEditorRef.current?.chain().insertContent(transcript.trim() + ' ').run()
       }
     }
     rec.onerror = (e: any) => {
-      if (e.error === 'not-allowed') {
+      // 'no-speech' fires on ordinary pauses and 'aborted' fires from our own
+      // .stop() calls — neither means the session should end.
+      if (e.error === 'no-speech' || e.error === 'aborted') return
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         setVoiceError('Microphone access denied. Allow microphone access in your browser settings and try again.')
-      } else if (e.error !== 'no-speech') {
+      } else {
         setVoiceError(`Voice error (${e.error}). Please try again.`)
       }
-      isRecordingRef.current = false
-      setIsRecording(false)
-      recognitionRef.current = null
+      stopVoiceSession()
     }
     rec.onend = () => {
-      // Auto-restart if user hasn't stopped — handles browser's silence timeout
-      if (isRecordingRef.current) {
+      // The browser ending its own recognition cycle is NOT the same as the
+      // XPadite session ending — restart it as long as the user hasn't
+      // manually stopped and the silence timer hasn't already fired. A short
+      // delay avoids some browsers throwing if .start() is called again in
+      // the same tick the previous cycle finished.
+      if (!isRecordingRef.current) return
+      setTimeout(() => {
+        if (!isRecordingRef.current) return
         try { rec.start() } catch {
-          isRecordingRef.current = false
-          setIsRecording(false)
-          recognitionRef.current = null
+          setVoiceError('Voice recognition stopped unexpectedly. Please try again.')
+          stopVoiceSession()
         }
-      }
+      }, 200)
     }
     recognitionRef.current = rec
     try {
@@ -2317,9 +2664,11 @@ export function JournalEditorContent({
       isRecordingRef.current = true
       setIsRecording(true)
       setVoiceError(null)
+      resetSilenceTimer()
     } catch {
       setVoiceError('Could not start voice recognition. Please check your microphone.')
       recognitionRef.current = null
+      micTargetEditorRef.current = null
     }
   }
   useEffect(() => {
@@ -2718,6 +3067,26 @@ export function JournalEditorContent({
           color: ${isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.30)'};
           float: left; pointer-events: none; height: 0;
         }
+        /* Planner tables — a bounded scroll container so a wide table can never
+           push the Planner viewport wider; colors come from CSS vars the XpTable
+           node bakes onto the <table> itself (see getTableColor). Precedence:
+           base fill → first-column override (td only, never th) → header (th,
+           always wins the top-left intersection since a cell is never both). */
+        .xp-j-table-wrap {
+          overflow-x: auto; max-width: 100%; margin: 6px 0; -webkit-overflow-scrolling: touch;
+          border-radius: 10px; border: 1px solid ${isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'};
+        }
+        .xp-j-table-wrap.xp-j-table-square { border-radius: 0; }
+        .xp-j-table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 12.5px; }
+        .xp-j-prose .xp-j-table p { margin: 0; }
+        .xp-j-table td, .xp-j-table th {
+          border: 1px solid ${isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'};
+          padding: 6px 8px; vertical-align: top; min-width: 84px;
+          background: var(--xp-tbl-fill); color: var(--xp-tbl-fill-text);
+        }
+        .xp-j-table th { background: var(--xp-tbl-header); color: var(--xp-tbl-header-text); font-weight: 700; text-align: left; }
+        .xp-j-table-firstcol td:first-child { background: var(--xp-tbl-firstcol); color: var(--xp-tbl-firstcol-text); }
+        .xp-j-table .selectedCell { background: rgba(124,58,237,0.28) !important; }
         /* Selectable blocks */
         .xp-j-blk { cursor: pointer; }
         .xp-j-blk:hover { box-shadow: 0 0 0 1.5px rgba(124,58,237,0.22); border-radius: 10px; }
@@ -2798,6 +3167,15 @@ export function JournalEditorContent({
           100% { box-shadow: 0 0 0 0   rgba(239,68,68,0);    }
         }
         .xp-j-mic-rec { animation: xpMicPulse 1.5s ease-out infinite; }
+        /* Listening-indicator dot — restrained pulse, no scale/flash */
+        @keyframes xpMicDotPulse {
+          0%, 100% { opacity: 1; }
+          50%      { opacity: 0.35; }
+        }
+        .xp-mic-dot { animation: xpMicDotPulse 1.3s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          .xp-mic-dot { animation: none; }
+        }
       `}</style>
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
@@ -3061,13 +3439,14 @@ export function JournalEditorContent({
                               setSelectedBlockId(block.id)
                             }}
                             onDelete={() => deleteBlock(block.id)}
+                            onCollapseToggle={() => updateBlock(block.id, { collapsed: !block.collapsed })}
                           />
                         )}
                       </div>
 
                       {/* Resize handles: images/drawings when selected; sections in explicit resize mode */}
                       {!isDragging && (
-                        (isSelected && (block.type === 'image' || block.type === 'drawing')) ||
+                        (isSelected && !block.collapsed && (block.type === 'image' || block.type === 'drawing')) ||
                         (resizeModeId === block.id && block.type === 'section')
                       ) && (
                         <ResizeHandles onResizeStart={(dir, e) => startBlockResize(block.id, dir, e)} />
@@ -3087,6 +3466,20 @@ export function JournalEditorContent({
               })()}
             </div>
           </div>
+
+          {/* Listening indicator — small strip directly above the toolbar, only while Mic is active */}
+          {isRecording && (
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              padding: '3px 0', flexShrink: 0,
+              background: dockBg, borderTop: `0.5px solid ${dockBdr}`,
+            }}>
+              <span className="xp-mic-dot" aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: '#a78bfa', flexShrink: 0 }} />
+              <span style={{ fontSize: 10.5, fontWeight: 600, color: '#c4b5fd', letterSpacing: '0.01em', userSelect: 'none' }}>
+                Listening…
+              </span>
+            </div>
+          )}
 
           {/* ── Editor tools bar (single row, horizontally scrollable) ──── */}
           <div style={{

@@ -1363,6 +1363,56 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     })
   }, [libraryEntries, libMonthYearFilter, libCategoryFilter])
 
+  // ── Month grouping — same pattern Gallery's own monthGroups/isMonthExpanded/
+  // toggleMonth already use (see GalleryModal.tsx), just keyed off each
+  // entry's own year/month instead of a createdAt timestamp. idx 0 is always
+  // the chronologically latest group regardless of libSortOrder, since groups
+  // themselves are always sorted newest-first here independent of how
+  // entries within filteredLibraryEntries happen to be ordered.
+  const libMonthGroups = useMemo(() => {
+    const map = new Map<string, typeof filteredLibraryEntries>()
+    filteredLibraryEntries.forEach(e => {
+      const k = `${e.year}-${String(e.month).padStart(2, '0')}`
+      if (!map.has(k)) map.set(k, [])
+      map.get(k)!.push(e)
+    })
+    return [...map.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, entries]) => ({ key, label: `${MONTH_NAMES[entries[0].month]} ${entries[0].year}`, entries }))
+  }, [filteredLibraryEntries])
+
+  const [libMonthOverrides, setLibMonthOverrides] = useState<Map<string, boolean>>(new Map())
+  function isLibMonthExpanded(key: string, idx: number): boolean {
+    if (libMonthOverrides.has(key)) return libMonthOverrides.get(key)!
+    return idx === 0
+  }
+  function toggleLibMonth(key: string, idx: number) {
+    setLibMonthOverrides(prev => { const next = new Map(prev); next.set(key, !isLibMonthExpanded(key, idx)); return next })
+  }
+
+  // Shared month-section header for all 4 Library view modes below — `spanStyle`
+  // is the one thing that differs per mode's own layout (a CSS-grid row needs
+  // gridColumn:'1/-1' to span full width; a flex-wrap row needs width:'100%'
+  // to force a line break; a column flex needs neither).
+  function renderLibMonthHeader(group: { key: string; label: string; entries: typeof filteredLibraryEntries }, idx: number, expanded: boolean, spanStyle?: React.CSSProperties) {
+    return (
+      <button
+        key={`lib-month-${group.key}`}
+        onClick={() => toggleLibMonth(group.key, idx)}
+        style={{
+          ...spanStyle,
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '4px 2px', marginBottom: 8, marginTop: idx === 0 ? 0 : 14,
+          background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', width: spanStyle?.width ?? '100%',
+        }}
+      >
+        <span style={{ color: isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)' }}><Chevron open={expanded} /></span>
+        <h3 style={{ fontSize: 13, fontWeight: 600, margin: 0, color: isDark ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.85)' }}>{group.label}</h3>
+        <span style={{ fontSize: 10.5, color: muted }}>{group.entries.length} {group.entries.length === 1 ? 'document' : 'documents'}</span>
+      </button>
+    )
+  }
+
   // All categories (built-in + custom), for rendering dots/checkmarks and
   // resolving a labelId to its display color.
   const allCategories = useMemo<LibraryCategory[]>(() => [
@@ -2006,7 +2056,11 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             display: 'flex', flexWrap: 'wrap',
             gap: 6, alignContent: 'flex-start',
           }}>
-            {filteredLibraryEntries.map(entry => {
+            {libMonthGroups.flatMap((group, gi) => {
+              const expanded = isLibMonthExpanded(group.key, gi)
+              return [
+                renderLibMonthHeader(group, gi, expanded, { flexBasis: '100%' }),
+                ...(expanded ? group.entries.map(entry => {
               const isSel = selectedLibEntry === entry.dateKey
               const isRen = renamingEntry === entry.dateKey
               const isChecked = selectedKeys.has(entry.dateKey)
@@ -2126,12 +2180,18 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   )}
                 </div>
               )
+                }) : [])
+              ]
             })}
           </div>
         ) : libViewMode === 'detail' ? (
           /* ── Detail mode: one row per entry ───────────────────────────── */
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {filteredLibraryEntries.map(entry => {
+            {libMonthGroups.flatMap((group, gi) => {
+              const expanded = isLibMonthExpanded(group.key, gi)
+              return [
+                renderLibMonthHeader(group, gi, expanded),
+                ...(expanded ? group.entries.map(entry => {
               const isSel = selectedLibEntry === entry.dateKey
               const isRen = renamingEntry === entry.dateKey
               const isChecked = selectedKeys.has(entry.dateKey)
@@ -2236,12 +2296,18 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   )}
                 </div>
               )
+                }) : [])
+              ]
             })}
           </div>
         ) : libViewMode === 'tile' ? (
           /* ── Tile mode: 2-column grid ──────────────────────────────────── */
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
-            {filteredLibraryEntries.map(entry => {
+            {libMonthGroups.flatMap((group, gi) => {
+              const expanded = isLibMonthExpanded(group.key, gi)
+              return [
+                renderLibMonthHeader(group, gi, expanded, { gridColumn: '1 / -1' }),
+                ...(expanded ? group.entries.map(entry => {
               const isSel = selectedLibEntry === entry.dateKey
               const isRen = renamingEntry === entry.dateKey
               const isChecked = selectedKeys.has(entry.dateKey)
@@ -2344,12 +2410,18 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   )}
                 </div>
               )
+                }) : [])
+              ]
             })}
           </div>
         ) : (
           /* ── Thumbnail mode: 3-column grid, larger cards ───────────────── */
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-            {filteredLibraryEntries.map(entry => {
+            {libMonthGroups.flatMap((group, gi) => {
+              const expanded = isLibMonthExpanded(group.key, gi)
+              return [
+                renderLibMonthHeader(group, gi, expanded, { gridColumn: '1 / -1' }),
+                ...(expanded ? group.entries.map(entry => {
               const isSel = selectedLibEntry === entry.dateKey
               const isRen = renamingEntry === entry.dateKey
               const isChecked = selectedKeys.has(entry.dateKey)
@@ -2458,6 +2530,8 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   )}
                 </div>
               )
+                }) : [])
+              ]
             })}
           </div>
         )}

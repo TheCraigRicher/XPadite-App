@@ -688,6 +688,10 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
   const [sendToOpen, setSendToOpen] = useState(false)
   const [tmTaskTree, setTmTaskTree] = useState<PlannerTaskNode[]>([])
   const [showAddTable, setShowAddTable] = useState(false)
+  // Add Table is temporarily intercepted — see the V2 notice dialog below.
+  // showAddTable/AddTableModal/handleAddTable are left completely intact
+  // (unused for now) so the existing table feature can be re-enabled later.
+  const [showTableV2Notice, setShowTableV2Notice] = useState(false)
 
   // Unsplit section/text content — when block.sectionImage or block.partitions
   // is set this editor's content is simply unused (see the render branch
@@ -1133,7 +1137,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                     }} style={menuItemStyle(isDark)}>
                       ✏ Edit Section
                     </button>
-                    <button onClick={() => { setShowAddTable(true); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                    <button onClick={() => { setShowTableV2Notice(true); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
                       ▦ Add Table
                     </button>
                     {!block.partitions ? (
@@ -1213,6 +1217,14 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
           isDark={isDark}
           onClose={() => setShowAddTable(false)}
           onConfirm={handleAddTable}
+        />
+      )}
+
+      {showTableV2Notice && (
+        <InfoDialog
+          title="Add Table"
+          message="Tables are getting an upgrade and will be available in XPadite V2."
+          onClose={() => setShowTableV2Notice(false)}
         />
       )}
     </div>
@@ -1899,6 +1911,51 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
             </div>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Generic info dialog — single "Got it" acknowledgement ────────────────────
+// Same overlay/card visual language as UnsavedChangesDialog below, just a
+// one-button informational variant (currently used for the Add Table → V2
+// placeholder notice).
+
+function InfoDialog({ title, message, onClose }: { title: string; message: string; onClose: () => void }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 99999,
+      background: 'rgba(0,0,0,0.72)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }} onClick={onClose}>
+      <div style={{
+        background: '#0f0a1e',
+        border: '0.5px solid rgba(124,58,237,0.30)',
+        borderRadius: 16,
+        boxShadow: '0 24px 80px rgba(0,0,0,0.80), 0 0 0 1px rgba(124,58,237,0.08)',
+        padding: '28px 32px',
+        maxWidth: 360, width: '100%',
+        display: 'flex', flexDirection: 'column', gap: 20,
+      }} onClick={e => e.stopPropagation()}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#f1f5f9', marginBottom: 8, letterSpacing: '-0.01em' }}>
+            {title}
+          </div>
+          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.58)', lineHeight: 1.65 }}>
+            {message}
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          style={{
+            padding: '10px 16px', borderRadius: 9, border: 'none',
+            background: 'linear-gradient(135deg, #5b21b6 0%, #7c3aed 100%)',
+            color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            transition: 'opacity 120ms',
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.88' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
+        >Got it</button>
       </div>
     </div>
   )

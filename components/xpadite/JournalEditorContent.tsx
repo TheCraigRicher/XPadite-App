@@ -1148,9 +1148,11 @@ interface InlineMediaBlockProps {
   onResizeActivate: () => void
   onDelete: () => void
   onCollapseToggle: () => void
+  onBeginDrag?: (e: React.MouseEvent | React.TouchEvent) => void
+  wasJustDragged?: () => boolean
 }
 
-function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onResizeActivate, onDelete, onCollapseToggle }: InlineMediaBlockProps) {
+function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onResizeActivate, onDelete, onCollapseToggle, onBeginDrag, wasJustDragged }: InlineMediaBlockProps) {
   const { setToast } = useApp()
   const [menuOpen, setMenuOpen] = useState(false)
   const [lightbox, setLightbox] = useState(false)
@@ -1207,7 +1209,13 @@ function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onResizeActiv
           data-has-fixed-height={block.height != null ? 'true' : undefined}
           src={block.thumbnail ?? block.src}
           alt={block.name ?? (block.type === 'drawing' ? 'Mind Map' : 'Image')}
-          onClick={e => { e.stopPropagation(); onResizeActivate() }}
+          onMouseDown={e => { e.stopPropagation(); onBeginDrag?.(e) }}
+          onTouchStart={e => { e.stopPropagation(); onBeginDrag?.(e) }}
+          onClick={e => {
+            e.stopPropagation()
+            if (wasJustDragged?.()) return
+            onResizeActivate()
+          }}
           onDoubleClick={e => { e.stopPropagation(); setLightbox(true) }}
           style={{
             display: 'block', cursor: 'default',
@@ -2109,6 +2117,10 @@ export function JournalEditorContent({
     offsetX: number; offsetY: number
     blockW: number;  blockH: number
   } | null>(null)
+  // Set right when a direct image press-drag ends in an actual move, so the
+  // click event the browser still fires afterward doesn't also re-trigger
+  // select-for-resize on the same image.
+  const suppressImageClickRef = useRef(false)
 
   // ── Voice-to-notes state ────────────────────────────────────────────────────
   const [isRecording, setIsRecording] = useState(false)
@@ -2917,9 +2929,23 @@ export function JournalEditorContent({
     scheduleSave()
   }
 
-  function startBlockMove(blockId: string, e: React.MouseEvent) {
-    e.preventDefault()
-    e.stopPropagation()
+  // Extracts the pointer position from either a mouse or a touch event, so the
+  // same drag machinery below drives both the menu-activated ✥ Move (mouse
+  // only, via startBlockMove) and the image's own direct press/hold-drag
+  // (mouse + touch, via startImagePressDrag).
+  function getEventXY(ev: MouseEvent | TouchEvent): { x: number; y: number } | null {
+    if ('touches' in ev) {
+      const t = ev.touches[0] ?? ev.changedTouches[0]
+      return t ? { x: t.clientX, y: t.clientY } : null
+    }
+    return { x: ev.clientX, y: ev.clientY }
+  }
+
+  // Core block-drag machinery (reorder, or — for image/drawing blocks — drop
+  // into a different section). `startBlockMove` (the existing ✥ Move menu
+  // flow) and `startImagePressDrag` (direct click/press-drag on an image,
+  // below) both funnel into this once a drag is actually underway.
+  function beginBlockDrag(blockId: string, startX: number, startY: number) {
     const container = blockListRef.current
     const blockEl   = container?.querySelector(`[data-block-id="${blockId}"]`) as HTMLElement | null
     if (!blockEl) return
@@ -2930,25 +2956,29 @@ export function JournalEditorContent({
     const rect = blockEl.getBoundingClientRect()
     dragMoveRef.current = {
       blockId,
-      offsetX: e.clientX - rect.left,
-      offsetY: e.clientY - rect.top,
+      offsetX: startX - rect.left,
+      offsetY: startY - rect.top,
       blockW:  rect.width,
       blockH:  rect.height,
     }
-    setDragPos({ x: e.clientX, y: e.clientY })
+    setDragPos({ x: startX, y: startY })
     setDropIdx(blocksRef.current.findIndex(b => b.id === blockId))
+    if (isMediaDrag) { setMoveModeId(blockId); setSelectedBlockId(blockId) }
 
-    function onMove(ev: MouseEvent) {
+    function onMove(ev: MouseEvent | TouchEvent) {
       const dm = dragMoveRef.current
       if (!dm) return
-      setDragPos({ x: ev.clientX, y: ev.clientY })
+      const xy = getEventXY(ev)
+      if (!xy) return
+      if ('touches' in ev) ev.preventDefault() // dragging on touch must not also scroll the page
+      setDragPos({ x: xy.x, y: xy.y })
 
       // Image/drawing blocks may additionally target a different section to
       // drop INTO (auto-splitting it) — every other block type keeps the
       // reorder-only ghost-slot behavior below, untouched.
       let overSection: string | null = null
       if (isMediaDrag) {
-        const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-block-id]') as HTMLElement | null
+        const el = document.elementFromPoint(xy.x, xy.y)?.closest('[data-block-id]') as HTMLElement | null
         const targetId = el?.getAttribute('data-block-id')
         if (targetId && targetId !== blockId) {
           const targetBlock = blocksRef.current.find(b => b.id === targetId)
@@ -2962,19 +2992,24 @@ export function JournalEditorContent({
         // the two affordances never show at once.
         setSnapGuides([])
       } else {
-        setDropIdx(computeDropIdx(blockId, ev.clientX, ev.clientY))
+        setDropIdx(computeDropIdx(blockId, xy.x, xy.y))
         setSnapGuides(computeAlignGuides(
           blockId,
-          ev.clientX - dm.offsetX,
-          ev.clientY - dm.offsetY,
+          xy.x - dm.offsetX,
+          xy.y - dm.offsetY,
           dm.blockW,
           dm.blockH,
         ))
       }
     }
-    function onUp(ev: MouseEvent) {
+    function onUp(ev: MouseEvent | TouchEvent) {
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup',   onUp)
+      document.removeEventListener('touchmove', onMove)
+      document.removeEventListener('touchend',  onUp)
+      const xy = getEventXY(ev) ?? { x: startX, y: startY }
+
+      if (isMediaDrag) suppressImageClickRef.current = true
 
       if (isMediaDrag && dropTargetSectionIdRef.current) {
         const targetId = dropTargetSectionIdRef.current
@@ -2984,7 +3019,7 @@ export function JournalEditorContent({
           let side: 'left' | 'right' | undefined
           if (targetBlock.partitions) {
             const targetRect = (document.querySelector(`[data-block-id="${targetId}"]`) as HTMLElement | null)?.getBoundingClientRect()
-            side = targetRect && ev.clientX < targetRect.left + targetRect.width / 2 ? 'left' : 'right'
+            side = targetRect && xy.x < targetRect.left + targetRect.width / 2 ? 'left' : 'right'
           }
           insertImageIntoSection(targetId, { src: dragged.src, name: dragged.name ?? 'Image', canvasData: dragged.canvasData }, side)
           const next = blocksRef.current.filter(b => b.id !== blockId)
@@ -2994,7 +3029,7 @@ export function JournalEditorContent({
           scheduleSave()
         }
       } else {
-        const finalIdx = computeDropIdx(blockId, ev.clientX, ev.clientY)
+        const finalIdx = computeDropIdx(blockId, xy.x, xy.y)
         doMoveBlockToIdx(blockId, finalIdx)
       }
 
@@ -3006,6 +3041,64 @@ export function JournalEditorContent({
     }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup',   onUp)
+    document.addEventListener('touchmove', onMove, { passive: false })
+    document.addEventListener('touchend',  onUp)
+  }
+
+  function startBlockMove(blockId: string, e: React.MouseEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    beginBlockDrag(blockId, e.clientX, e.clientY)
+  }
+
+  // Direct press/drag on an existing image/drawing block's own thumbnail —
+  // no need to open the ⋮ menu and activate ✥ Move first. Distinguishes a
+  // drag from a plain click/tap so the existing single-click-to-select and
+  // double-click-to-expand behavior (InlineMediaBlock) is never disturbed:
+  // desktop starts dragging as soon as the mouse moves past a small
+  // threshold; touch requires a brief press/hold (so a scroll gesture is
+  // never mistaken for a drag) with its own, smaller movement tolerance.
+  function startImagePressDrag(blockId: string, e: React.MouseEvent | React.TouchEvent) {
+    const isTouch = 'touches' in e
+    const start = isTouch ? e.touches[0] : e
+    if (!start) return
+    const startX = start.clientX, startY = start.clientY
+    const MOVE_THRESHOLD = 6
+    const HOLD_MS = 200
+    let armed = false
+    let holdTimer: ReturnType<typeof setTimeout> | null = null
+
+    function cleanup() {
+      document.removeEventListener('mousemove', onWatch)
+      document.removeEventListener('mouseup',   onCancel)
+      document.removeEventListener('touchmove', onWatch)
+      document.removeEventListener('touchend',  onCancel)
+      if (holdTimer) { clearTimeout(holdTimer); holdTimer = null }
+    }
+    function beginNow(x: number, y: number) {
+      if (armed) return
+      armed = true
+      cleanup()
+      beginBlockDrag(blockId, x, y)
+    }
+    function onWatch(ev: MouseEvent | TouchEvent) {
+      const xy = getEventXY(ev)
+      if (!xy) return
+      const dist = Math.hypot(xy.x - startX, xy.y - startY)
+      if (!isTouch) {
+        if (dist > MOVE_THRESHOLD) beginNow(xy.x, xy.y)
+      } else if (dist > MOVE_THRESHOLD * 2) {
+        // Moved too far before the hold completed — a scroll/swipe, not a drag.
+        cleanup()
+      }
+    }
+    function onCancel() { cleanup() }
+
+    if (isTouch) holdTimer = setTimeout(() => beginNow(startX, startY), HOLD_MS)
+    document.addEventListener('mousemove', onWatch)
+    document.addEventListener('mouseup',   onCancel)
+    document.addEventListener('touchmove', onWatch)
+    document.addEventListener('touchend',  onCancel)
   }
 
   // Draw handlers
@@ -4112,6 +4205,12 @@ export function JournalEditorContent({
                             }}
                             onDelete={() => deleteBlock(block.id)}
                             onCollapseToggle={() => updateBlock(block.id, { collapsed: !block.collapsed })}
+                            onBeginDrag={e => startImagePressDrag(block.id, e)}
+                            wasJustDragged={() => {
+                              if (!suppressImageClickRef.current) return false
+                              suppressImageClickRef.current = false
+                              return true
+                            }}
                           />
                         )}
                       </div>

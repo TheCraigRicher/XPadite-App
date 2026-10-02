@@ -829,6 +829,7 @@ function TaskRow({
   const [isDragOver,     setIsDragOver]     = useState(false)
   const [isCardHovered,  setIsCardHovered]  = useState(false)
   const [notesJustSaved, setNotesJustSaved] = useState(false)
+  const [notesCancelConfirmOpen, setNotesCancelConfirmOpen] = useState(false)
   const [titleJustSaved, setTitleJustSaved] = useState(false)
   const notesSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const titleSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -955,6 +956,24 @@ function TaskRow({
     } else {
       setToast('No changes to save.')
     }
+  }
+
+  function handleNotesCancelClick() {
+    if (notesDirty) {
+      setNotesCancelConfirmOpen(true)
+    } else {
+      onExpandToggle()
+    }
+  }
+  function handleNotesCancelSaveAndClose() {
+    onNotesSave()
+    setNotesCancelConfirmOpen(false)
+    onExpandToggle()
+  }
+  function handleNotesCancelDiscard() {
+    onNotesDraftChange(task.journal)
+    setNotesCancelConfirmOpen(false)
+    onExpandToggle()
   }
 
   // Shared by the mobile emoji picker and mobile List dropdown: positions a
@@ -1484,16 +1503,16 @@ function TaskRow({
               {/* Controls row */}
               <div className="flex items-center justify-between mt-1.5" style={{ flexWrap: 'wrap', gap: 4 }}>
                 {/* Left: formatting + upload + camera */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                  <button onClick={() => applyListType('bullet')} title="Bullet list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>• List</button>
-                  <button onClick={() => applyListType('number')} title="Numbered list" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>1. Number</button>
-                  <button onClick={() => applyListType('check')} title="Checklist" className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>☐ Check</button>
+                <div className="flex items-center flex-wrap gap-0.5 sm:gap-1">
+                  <button onClick={() => applyListType('bullet')} title="Bullet list" className="text-[10px] px-1 sm:px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>• List</button>
+                  <button onClick={() => applyListType('number')} title="Numbered list" className="text-[10px] px-1 sm:px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>1. Number</button>
+                  <button onClick={() => applyListType('check')} title="Checklist" className="text-[10px] px-1 sm:px-2 py-0.5 rounded-md transition-colors hover:bg-black/5" style={{ color: 'var(--xp-txt3)' }}>☐ Check</button>
 
                   <button
                     onClick={() => uploadRef.current?.click()}
                     disabled={uploading}
                     title="Upload file or photo"
-                    className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
+                    className="text-[10px] px-1 sm:px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
                     style={{ color: 'var(--xp-txt3)', opacity: uploading ? 0.5 : 1, cursor: 'pointer' }}
                   >
                     📎
@@ -1503,7 +1522,7 @@ function TaskRow({
                     onClick={() => setCameraOpen(true)}
                     disabled={uploading}
                     title="Take a photo with your camera"
-                    className="text-[10px] px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
+                    className="text-[10px] px-1 sm:px-2 py-0.5 rounded-md transition-colors hover:bg-black/5"
                     style={{ color: 'var(--xp-txt3)', opacity: uploading ? 0.5 : 1, cursor: 'pointer' }}
                   >
                     📷
@@ -1525,14 +1544,32 @@ function TaskRow({
                 </div>
 
                 <div className="flex items-center gap-1.5">
+                  {/* Cancel — closes/collapses the editor; confirms first if there are unsaved changes */}
+                  <button
+                    onClick={handleNotesCancelClick}
+                    tabIndex={expanded ? 0 : -1}
+                    aria-label="Cancel"
+                    style={{
+                      display: 'flex', alignItems: 'center',
+                      padding: '2px 8px', height: 22, borderRadius: 5,
+                      border: '1.5px solid var(--xp-bdr2)',
+                      background: 'transparent',
+                      fontSize: 10, fontWeight: 600,
+                      cursor: 'pointer',
+                      color: 'var(--xp-txt2)',
+                      flexShrink: 0, whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Cancel
+                  </button>
                   {/* Notes save — always visible, purple-themed */}
                   <button
                     onClick={handleNotesSaveClick}
                     tabIndex={expanded ? 0 : -1}
                     aria-label={notesJustSaved ? 'Notes saved' : notesDirty ? 'Save notes' : 'No unsaved changes'}
                     style={{
-                      display: 'flex', alignItems: 'center', gap: 3,
-                      padding: '2px 8px', height: 22, borderRadius: 5,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
+                      padding: '2px 8px', height: 22, minWidth: 60, borderRadius: 5,
                       border: '1.5px solid rgba(124,58,237,0.45)',
                       background: notesJustSaved ? '#16a34a' : notesDirty ? '#7c3aed' : 'rgba(124,58,237,0.10)',
                       fontSize: 10, fontWeight: 600,
@@ -1546,6 +1583,30 @@ function TaskRow({
                   </button>
                 </div>
               </div>
+
+              {/* Cancel confirmation dialog — only shown when there are actual unsaved notes changes */}
+              {notesCancelConfirmOpen && (
+                <div style={{ position: 'fixed', inset: 0, zIndex: 9995, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, background: 'rgba(0,0,0,0.55)' }} onClick={() => setNotesCancelConfirmOpen(false)}>
+                  <div style={{ background: isDark ? '#1a1530' : '#ffffff', borderRadius: 18, padding: '22px 22px 18px', maxWidth: 320, width: '100%', boxShadow: '0 24px 60px rgba(0,0,0,0.35), 0 4px 16px rgba(0,0,0,0.12)', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.25)' : 'rgba(0,0,0,0.08)'}` }} onClick={e => e.stopPropagation()}>
+                    <p style={{ fontWeight: 700, fontSize: 14, color: isDark ? '#ffffff' : '#111827', margin: '0 0 6px' }}>Unsaved changes</p>
+                    <p style={{ fontSize: 12, color: 'var(--xp-txt3)', margin: '0 0 20px', lineHeight: 1.55 }}>This task&apos;s notes have unsaved changes. Save them before closing, or discard them?</p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <button
+                        onClick={handleNotesCancelDiscard}
+                        style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: isDark ? 'rgba(239,68,68,0.10)' : 'rgba(239,68,68,0.06)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.22)', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}
+                      >
+                        Discard changes
+                      </button>
+                      <button
+                        onClick={handleNotesCancelSaveAndClose}
+                        style={{ width: '100%', padding: '10px 16px', borderRadius: 10, background: '#7c3aed', color: '#ffffff', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                      >
+                        Save before closing
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Emoji picker portal — kept for future use; currently no trigger in the toolbar */}
               {emojiOpen && emojiAnchor && createPortal(

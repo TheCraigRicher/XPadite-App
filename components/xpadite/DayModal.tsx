@@ -413,6 +413,13 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   const [endAP,   setEndAP]   = useState(endInit.ap)
   const [activePicker, setActivePicker] = useState<string | null>(null)
 
+  // Hover emphasis for the "Set Current Time" buttons — same purple
+  // outline/glow treatment as the Settings Language/Time Zone SelectMenu
+  // (onMouseEnter/onMouseLeave + border+boxShadow only, no background fill),
+  // so hover never triggers the action, just previews the purple affordance.
+  const [startBtnHovered, setStartBtnHovered] = useState(false)
+  const [endBtnHovered,   setEndBtnHovered]   = useState(false)
+
   // Brief purple acknowledgement on the "Set Current Time" button + its
   // corresponding Start/End field group after a click — a one-shot
   // confirmation, not a persistent selected state, so it auto-reverts.
@@ -546,22 +553,26 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
             <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--xp-txt2)', whiteSpace: 'nowrap' }}>Set Current Time:</span>
             <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
               <button type="button" onClick={handleSetCurrentStart}
-                className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors hover:bg-black/5 active:scale-95"
+                onMouseEnter={() => setStartBtnHovered(true)} onMouseLeave={() => setStartBtnHovered(false)}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg active:scale-95"
                 style={{
-                  border: `1px solid ${startPulse ? '#7c3aed' : 'var(--xp-bdr2)'}`,
+                  border: `1px solid ${(startBtnHovered || startPulse) ? '#7c3aed' : 'var(--xp-bdr2)'}`,
+                  boxShadow: (startBtnHovered || startPulse) ? '0 0 0 3px rgba(124,58,237,0.12)' : 'none',
                   color: startPulse ? '#7c3aed' : 'var(--xp-txt)',
                   background: startPulse ? 'rgba(124,58,237,0.08)' : 'transparent',
-                  transition: 'border-color 350ms ease, color 350ms ease, background 350ms ease, transform 100ms ease',
+                  transition: 'border-color 150ms ease, box-shadow 150ms ease, color 350ms ease, background 350ms ease, transform 100ms ease',
                 }}>
                 Start Time
               </button>
               <button type="button" onClick={handleSetCurrentEnd}
-                className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors hover:bg-black/5 active:scale-95"
+                onMouseEnter={() => setEndBtnHovered(true)} onMouseLeave={() => setEndBtnHovered(false)}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg active:scale-95"
                 style={{
-                  border: `1px solid ${endPulse ? '#7c3aed' : 'var(--xp-bdr2)'}`,
+                  border: `1px solid ${(endBtnHovered || endPulse) ? '#7c3aed' : 'var(--xp-bdr2)'}`,
+                  boxShadow: (endBtnHovered || endPulse) ? '0 0 0 3px rgba(124,58,237,0.12)' : 'none',
                   color: endPulse ? '#7c3aed' : 'var(--xp-txt)',
                   background: endPulse ? 'rgba(124,58,237,0.08)' : 'transparent',
-                  transition: 'border-color 350ms ease, color 350ms ease, background 350ms ease, transform 100ms ease',
+                  transition: 'border-color 150ms ease, box-shadow 150ms ease, color 350ms ease, background 350ms ease, transform 100ms ease',
                 }}>
                 End Time
               </button>

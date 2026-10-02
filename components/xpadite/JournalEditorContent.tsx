@@ -28,6 +28,7 @@ import {
   getSectionStyle, SECTION_COLORS, createTextBlock, createSectionBlock,
   createDrawingBlock, createImageBlock, mkId, getTableColor,
   mkContentCell, mkImageCell, isSectionEmpty, mergeTiptapContents,
+  journalClipboardTextSerializer, transformPastedChecklist,
 } from './journalUtils'
 import { TransferSectionModal } from './TransferSectionModal'
 import { SendToOptionsModal } from './SendToOptionsModal'
@@ -424,6 +425,8 @@ function useProseEditor({
     content: { type: 'doc', content: [{ type: 'paragraph' }] },
     editorProps: {
       attributes: { class: 'xp-j-prose' },
+      clipboardTextSerializer: slice => journalClipboardTextSerializer(slice.content),
+      transformPasted: (slice, view) => transformPastedChecklist(slice, view.state.schema),
       handlePaste: onPasteImage ? (_view, event) => {
         const items = event.clipboardData?.items
         if (!items) return false

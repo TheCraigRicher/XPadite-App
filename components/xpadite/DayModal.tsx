@@ -417,6 +417,15 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
     setEndAP(now.ap)
   }
 
+  // Resets only affect the fields currently being edited in this modal — they
+  // are not persisted until Save, and Cancel discards them like any other edit.
+  function handleResetStart() {
+    setStartH(''); setStartM(''); setStartAP('AM')
+  }
+  function handleResetEnd() {
+    setEndH(''); setEndM(''); setEndAP('AM')
+  }
+
   const isValid    = validH(startH) && validM(startM) && validH(endH) && validM(endM)
   const startTs    = isValid ? h12ToTs(startH, startM, startAP, baseTs) : 0
   let   endTs      = isValid ? h12ToTs(endH, endM, endAP, baseTs) : 0
@@ -439,24 +448,38 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
         <div style={{ padding: '18px 20px 16px' }}>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16 }}>
-            <TimeRow
-              label="Start Time" h={startH} m={startM} ap={startAP}
-              onH={setStartH} onM={setStartM} onAP={setStartAP}
-              isDark={isDark} activePicker={activePicker} setActivePicker={setActivePicker} prefix="start"
-              manualMode={true} rawH={startH} rawM={startM}
-              onRawH={setStartH} onRawM={setStartM}
-              hInvalid={startH !== '' && !validH(startH)} mInvalid={startM !== '' && !validM(startM)}
-              onFirstFocus={handleStartFirstFocus}
-            />
-            <TimeRow
-              label="End Time" h={endH} m={endM} ap={endAP}
-              onH={setEndH} onM={setEndM} onAP={setEndAP}
-              isDark={isDark} activePicker={activePicker} setActivePicker={setActivePicker} prefix="end"
-              manualMode={true} rawH={endH} rawM={endM}
-              onRawH={setEndH} onRawM={setEndM}
-              hInvalid={endH !== '' && !validH(endH)} mInvalid={endM !== '' && !validM(endM)}
-              onFirstFocus={handleEndFirstFocus}
-            />
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 10 }}>
+              <TimeRow
+                label="Start Time" h={startH} m={startM} ap={startAP}
+                onH={setStartH} onM={setStartM} onAP={setStartAP}
+                isDark={isDark} activePicker={activePicker} setActivePicker={setActivePicker} prefix="start"
+                manualMode={true} rawH={startH} rawM={startM}
+                onRawH={setStartH} onRawM={setStartM}
+                hInvalid={startH !== '' && !validH(startH)} mInvalid={startM !== '' && !validM(startM)}
+                onFirstFocus={handleStartFirstFocus}
+              />
+              <button type="button" onClick={handleResetStart}
+                className="text-xs font-bold px-4 py-2 rounded-full text-white flex-shrink-0"
+                style={{ background: '#7c3aed' }}>
+                Reset
+              </button>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 10 }}>
+              <TimeRow
+                label="End Time" h={endH} m={endM} ap={endAP}
+                onH={setEndH} onM={setEndM} onAP={setEndAP}
+                isDark={isDark} activePicker={activePicker} setActivePicker={setActivePicker} prefix="end"
+                manualMode={true} rawH={endH} rawM={endM}
+                onRawH={setEndH} onRawM={setEndM}
+                hInvalid={endH !== '' && !validH(endH)} mInvalid={endM !== '' && !validM(endM)}
+                onFirstFocus={handleEndFirstFocus}
+              />
+              <button type="button" onClick={handleResetEnd}
+                className="text-xs font-bold px-4 py-2 rounded-full text-white flex-shrink-0"
+                style={{ background: '#7c3aed' }}>
+                Reset
+              </button>
+            </div>
           </div>
 
           {/* Total Duration card */}
@@ -607,6 +630,7 @@ interface TaskMenuProps {
   onEdit: () => void
   onAdjustTime: () => void
   onDuplicate: () => void
+  onIncrementSession: () => void
   onDelete: () => void
   onSetReminder: () => void
   onCopy: () => void
@@ -625,7 +649,7 @@ interface TaskMenuProps {
   onClose: () => void
 }
 
-function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onPlannerNotes, onChooseColor, onTogglePriority, onTransfer, pasteEnabled, transferDisabled, isChild, isPriority, onClose, menuAnchor, isDark }: TaskMenuProps) {
+function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onIncrementSession, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onPlannerNotes, onChooseColor, onTogglePriority, onTransfer, pasteEnabled, transferDisabled, isChild, isPriority, onClose, menuAnchor, isDark }: TaskMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     function onOut(e: PointerEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
@@ -639,6 +663,7 @@ function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onDelete, onSetReminder, 
     { icon: '🔔', label: 'Set Reminder',     action: onSetReminder },
     { icon: '🕒', label: 'Adjust Time',      action: onAdjustTime  },
     { icon: '📄', label: 'Duplicate Task',   action: onDuplicate, sep: true },
+    { icon: '⏭️', label: 'Increment Session', action: onIncrementSession },
     { icon: '📋', label: 'Copy Task',        action: onCopy        },
     { icon: '📌', label: 'Paste Task',       action: onPaste, disabled: !pasteEnabled },
     { icon: '📅', label: 'Move Task',        action: onTransfer, disabled: transferDisabled },
@@ -741,6 +766,7 @@ interface TaskRowProps {
   onToggle: () => void
   onDelete: () => void
   onDuplicate: () => void
+  onIncrementSession: () => void
   onStartTimer: () => void
   onStopTimer: () => void
   draftJournal: string | null
@@ -780,7 +806,7 @@ interface TaskRowProps {
 function TaskRow({
   task, index, isActive, blockedByOtherTimer, now, isEditing, onEditStart, onEditEnd, dateKey,
   expanded, onExpandToggle,
-  onToggle, onDelete, onDuplicate, onStartTimer, onStopTimer,
+  onToggle, onDelete, onDuplicate, onIncrementSession, onStartTimer, onStopTimer,
   draftJournal, onNotesDraftChange, onNotesSave,
   onTextChange, onActChange, onAdjustTime, onSetReminder,
   onDragStart, onDragOver, onDrop, bellTriggerKey,
@@ -1337,6 +1363,7 @@ function TaskRow({
                 onSetReminder={onSetReminder}
                 onAdjustTime={() => setAdjustOpen(true)}
                 onDuplicate={onDuplicate}
+                onIncrementSession={onIncrementSession}
                 onDelete={onDelete}
                 onCopy={onCopy}
                 onPaste={onPaste}
@@ -2560,6 +2587,35 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     })
   }
 
+  // "Increment Session" lets the user continue unfinished work as a new,
+  // independently timed session while keeping a clear sequence in the title
+  // (e.g. "Task - Session 1", "Task - Session 2", ...). The trailing
+  // "- Session N" suffix is recognized and incremented rather than stacked,
+  // so re-running this on "Task - Session 2" produces "Task - Session 3"
+  // without renaming the existing Session 2 task.
+  function incrementSession(id: string) {
+    const src = dayData.tasks.find(t => t.id === id); if (!src) return
+    const m = src.text.match(/^(.*) - Session (\d+)$/)
+    const baseTitle = m ? m[1] : src.text
+    const nextNum = (m ? Number(m[2]) : 1) + 1
+    const renamedOriginal = m ? src.text : `${baseTitle} - Session 1`
+    const newTask: Task = {
+      id: 't' + Date.now() + Math.random().toString(36).slice(2),
+      text: `${baseTitle} - Session ${nextNum}`,
+      done: false, journal: src.journal, timerStart: null, timerEnd: null,
+      actId: src.actId, sessions: [],
+      taskColor: src.taskColor, isPriority: src.isPriority, parentTaskId: src.parentTaskId,
+    }
+    updateDay(dateKey, prev => {
+      const idx = prev.tasks.findIndex(t => t.id === id)
+      const tasks = prev.tasks.map(t => t.id === id ? { ...t, text: renamedOriginal } : t)
+      const next = [...tasks]
+      next.splice(idx + 1, 0, newTask)
+      return { ...prev, tasks: next }
+    })
+    setToast('New session created ✓')
+  }
+
   function copyTask(id: string) {
     const task = dayData.tasks.find(t => t.id === id); if (!task) return
     const children = dayData.tasks
@@ -3069,6 +3125,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                     onExpandToggle: () => setExpandedTaskId(prev => prev === t.id ? null : t.id),
                     onToggle: () => toggleTask(t.id), onDelete: () => deleteTask(t.id),
                     onDuplicate: () => duplicateTask(t.id),
+                    onIncrementSession: () => incrementSession(t.id),
                     onStartTimer: () => startTimer(t.id, idx), onStopTimer: () => stopTimer(t.id),
                     draftJournal: dirtyNotesMap[t.id] ?? null,
                     onNotesDraftChange: (text: string) => handleNotesDraftChange(t.id, text),

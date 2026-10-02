@@ -1,5 +1,92 @@
 import type { Editor } from '@tiptap/react'
+import { Fragment, Slice } from '@tiptap/pm/model'
+import type { Node as PMNode, Schema } from '@tiptap/pm/model'
 import type { JournalBlock, JournalDoc, SectionCell } from './types'
+
+// ─── Checklist clipboard compatibility (Journal Notes ↔ Task Notes) ───────────
+// Task Notes' notes textarea is plain text and represents a checklist line as
+// a literal "☐ "/"☑ " prefix (see DayModal.tsx's applyListType/toggleChecklistLine).
+// Journal Notes represents the same thing as a real Tiptap taskList/taskItem
+// node. These two helpers translate between the representations at the
+// clipboard boundary so a checklist survives copy/paste in both directions,
+// reusing the exact "☐ "/"☑ " marker convention Task Notes already uses
+// instead of inventing a new one.
+
+const CHECK_LINE_RE = /^([☐☑]) (.*)$/
+
+/** Plain-text clipboard serialization for a copied Tiptap slice — gives
+ * taskItem nodes their "☐ "/"☑ " prefix so pasting into a plain-text
+ * destination (e.g. the Task Notes textarea) still reads as a checklist. */
+export function journalClipboardTextSerializer(content: Fragment): string {
+  function nodeText(node: PMNode): string {
+    if (node.type.name === 'taskItem') {
+      return (node.attrs.checked ? '☑ ' : '☐ ') + node.textContent
+    }
+    if (node.type.name === 'taskList') {
+      const lines: string[] = []
+      node.forEach(child => lines.push(nodeText(child)))
+      return lines.join('\n')
+    }
+    return node.textContent
+  }
+  const parts: string[] = []
+  content.forEach(node => parts.push(nodeText(node)))
+  return parts.join('\n\n')
+}
+
+/** Converts "☐ "/"☑ " prefixed plain-text lines pasted into a Journal editor
+ * (e.g. copied from a Task Notes textarea) into real taskList/taskItem nodes.
+ * Only touches fully-closed top-level paragraphs — the first/last node of an
+ * "open" slice (merging into surrounding text) is left untouched so the
+ * paste never produces an invalid/corrupt slice. */
+export function transformPastedChecklist(slice: Slice, schema: Schema): Slice {
+  const { content, openStart, openEnd } = slice
+  const taskItemType = schema.nodes.taskItem
+  const taskListType = schema.nodes.taskList
+  const paragraphType = schema.nodes.paragraph
+  if (!taskItemType || !taskListType || !paragraphType || content.childCount === 0) return slice
+
+  type Entry = { task: { checked: boolean; rest: string } } | { node: PMNode }
+  const entries: Entry[] = []
+  let changed = false
+
+  content.forEach((node, _offset, index) => {
+    const isOpenEdge = (index === 0 && openStart > 0) || (index === content.childCount - 1 && openEnd > 0)
+    if (!isOpenEdge && node.isTextblock) {
+      const m = node.textContent.match(CHECK_LINE_RE)
+      if (m) {
+        entries.push({ task: { checked: m[1] === '☑', rest: m[2] } })
+        changed = true
+        return
+      }
+    }
+    entries.push({ node })
+  })
+
+  if (!changed) return slice
+
+  const outNodes: PMNode[] = []
+  let i = 0
+  while (i < entries.length) {
+    const entry = entries[i]
+    if ('task' in entry) {
+      const items: PMNode[] = []
+      while (i < entries.length) {
+        const e = entries[i]
+        if (!('task' in e)) break
+        const para = e.task.rest ? paragraphType.create(null, schema.text(e.task.rest)) : paragraphType.create(null)
+        items.push(taskItemType.create({ checked: e.task.checked }, para))
+        i++
+      }
+      outNodes.push(taskListType.create(null, items))
+    } else {
+      outNodes.push(entry.node)
+      i++
+    }
+  }
+
+  return new Slice(Fragment.from(outNodes), openStart, openEnd)
+}
 
 // ─── ID helpers ───────────────────────────────────────────────────────────────
 

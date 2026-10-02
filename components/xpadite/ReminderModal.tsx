@@ -112,10 +112,14 @@ export function ReminderModal({
     background: 'var(--xp-card)',
     border: '0.5px solid var(--xp-bdr2)',
     borderRadius: 20,
-    padding: '24px 24px 20px',
+    overflow: 'hidden',
     width: '100%',
     maxWidth: 400,
     boxShadow: '0 24px 80px rgba(0,0,0,0.45)',
+  }
+
+  const body: React.CSSProperties = {
+    padding: '24px 24px 20px',
     display: 'flex',
     flexDirection: 'column',
     gap: 20,
@@ -162,33 +166,31 @@ export function ReminderModal({
       onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}
     >
       <div style={card}>
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--xp-txt)', marginBottom: 3 }}>
-              🔔 Set Reminder
-            </div>
-            <div
-              style={{
-                fontSize: 11,
-                color: 'var(--xp-txt3)',
-                maxWidth: 280,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {taskText}
-            </div>
+        {/* XPadite signature purple header */}
+        <div style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)', padding: '18px 44px 16px 20px', position: 'relative', boxShadow: '0 2px 10px rgba(124,58,237,0.25)' }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'white', marginBottom: 3 }}>
+            🔔 Set Reminder
+          </div>
+          <div
+            style={{
+              fontSize: 11,
+              color: 'rgba(255,255,255,0.72)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {taskText}
           </div>
           <button
             onClick={onClose}
-            style={{ color: 'var(--xp-txt3)', fontSize: 18, lineHeight: 1, flexShrink: 0, marginTop: 2 }}
+            style={{ position: 'absolute', top: 14, right: 16, color: 'rgba(255,255,255,0.85)', fontSize: 18, lineHeight: 1, flexShrink: 0, background: 'transparent', border: 'none', cursor: 'pointer' }}
           >
             ×
           </button>
         </div>
 
+        <div style={body}>
         {/* Time picker */}
         <div>
           <div style={label}>Reminder Time</div>
@@ -350,6 +352,7 @@ export function ReminderModal({
           >
             {saving ? 'Saving…' : 'Save Reminder'}
           </button>
+        </div>
         </div>
       </div>
     </div>

@@ -222,11 +222,30 @@ export function SendToOptionsModal({
         @media (prefers-reduced-motion: no-preference) {
           .xp-sendto-btn { transition: transform 140ms ease, background 140ms ease, border-color 140ms ease, box-shadow 140ms ease; }
           .xp-sendto-hint, .xp-sendto-hint-text { transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease; }
+          .xp-sendto-date-btn { transition: background 160ms ease, border-color 160ms ease, transform 100ms ease; }
+          .xp-sendto-cal { transition: grid-template-rows 220ms ease-out; }
         }
         @media (prefers-reduced-motion: reduce) {
           .xp-sendto-btn { transition: background 80ms linear; }
           .xp-sendto-hint, .xp-sendto-hint-text { transition: background 80ms linear, color 80ms linear; }
+          .xp-sendto-date-btn { transition: background 80ms linear; }
+          .xp-sendto-cal { transition: grid-template-rows 1ms linear; }
         }
+        /* Task Manager Date control — purple button affordance + hover/press feedback.
+           Hover never opens the selector (only onClick does); :active gives
+           immediate press feedback before the click handler toggles it open. */
+        .xp-sendto-date-btn:hover {
+          border-color: rgba(124,58,237,0.55) !important;
+          background: ${isDark ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.10)'} !important;
+        }
+        .xp-sendto-date-btn:active {
+          transform: scale(0.98);
+          background: ${isDark ? 'rgba(124,58,237,0.24)' : 'rgba(124,58,237,0.14)'} !important;
+        }
+        /* Animated expand/collapse for the date selector — a 0fr/1fr grid-row
+           tween clips smoothly via the inner overflow:hidden wrapper, so it
+           never needs manual height measurement or a delayed unmount. */
+        .xp-sendto-cal { display: grid; }
         .xp-sendto-btn:not(:disabled):hover {
           border-color: rgba(124,58,237,0.45) !important;
           background: ${isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.07)'} !important;
@@ -390,75 +409,84 @@ export function SendToOptionsModal({
                 <div className="mt-3 pt-3" style={{ borderTop: `0.5px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}` }}>
                   <button
                     onClick={() => setCalendarOpen(o => !o)}
-                    className="w-full flex items-center justify-between rounded-xl transition-opacity hover:opacity-85"
-                    style={{ padding: '8px 10px', background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)', cursor: 'pointer' }}
+                    title="Choose a date to send tasks to"
+                    aria-expanded={calendarOpen}
+                    className="xp-sendto-date-btn w-full flex items-center justify-between rounded-xl"
+                    style={{
+                      padding: '9px 11px',
+                      background: isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)',
+                      border: '1px solid rgba(124,58,237,0.35)',
+                      cursor: 'pointer',
+                    }}
                   >
-                    <span className="text-[11px] font-semibold" style={{ color: 'var(--xp-txt3)' }}>
+                    <span className="text-[11px] font-semibold" style={{ color: isDark ? '#c4b5fd' : '#7c3aed' }}>
                       Task Manager Date
                     </span>
-                    <span className="flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: 'var(--xp-txt)' }}>
+                    <span className="flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: isDark ? '#c4b5fd' : '#7c3aed' }}>
                       {tmDateKey === todayKey(effectiveTimezone) ? 'Today' : fmtLongDate(tmDateKey)}
-                      <span style={{ fontSize: 9, transform: calendarOpen ? 'rotate(180deg)' : 'none', transition: 'transform 140ms', color: 'var(--xp-txt3)' }}>▾</span>
+                      <span style={{ fontSize: 13, lineHeight: 1, transform: calendarOpen ? 'rotate(180deg)' : 'none', transition: 'transform 180ms ease' }}>▾</span>
                     </span>
                   </button>
 
-                  {calendarOpen && (
-                    <div className="mt-2">
-                      <div className="flex items-center justify-center gap-2.5 mb-2">
-                        <button
-                          onClick={() => setMonthCursor(d => new Date(d.getFullYear(), d.getMonth() - 1, 1))}
-                          aria-label="Previous month"
-                          className="flex items-center justify-center flex-shrink-0"
-                          style={{ width: 22, height: 22, borderRadius: 7, background: 'var(--xp-bg3)', color: 'var(--xp-txt2)', border: 'none', cursor: 'pointer' }}
-                        >
-                          <PrevTriangle />
-                        </button>
-                        <span className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt)', minWidth: 110, textAlign: 'center' }}>
-                          {MONTHS[monthCursor.getMonth()]} {monthCursor.getFullYear()}
-                        </span>
-                        <button
-                          onClick={() => setMonthCursor(d => new Date(d.getFullYear(), d.getMonth() + 1, 1))}
-                          aria-label="Next month"
-                          className="flex items-center justify-center flex-shrink-0"
-                          style={{ width: 22, height: 22, borderRadius: 7, background: 'var(--xp-bg3)', color: 'var(--xp-txt2)', border: 'none', cursor: 'pointer' }}
-                        >
-                          <NextTriangle />
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-7 gap-0.5 mb-1">
-                        {DAY_HEADERS.map(d => (
-                          <div key={d} className="text-center text-[9px] font-semibold py-0.5" style={{ color: 'var(--xp-txt3)' }}>{d}</div>
-                        ))}
-                      </div>
-                      <div className="flex flex-col gap-0.5">
-                        {weeks.map((row, ri) => (
-                          <div key={ri} className="grid grid-cols-7 gap-0.5">
-                            {row.map((d, ci) => {
-                              if (!d) return <div key={ci} />
-                              const key = buildDateKey(d.getFullYear(), d.getMonth(), d.getDate())
-                              const selected = key === tmDateKey
-                              const isTodayCell = isToday(d.getFullYear(), d.getMonth(), d.getDate(), effectiveTimezone)
-                              return (
-                                <button
-                                  key={ci}
-                                  onClick={() => setTmDateKey(key)}
-                                  className="aspect-square flex items-center justify-center text-[10.5px]"
-                                  style={{
-                                    borderRadius: 7, border: !selected && isTodayCell ? '1.5px solid #7c3aed' : '1.5px solid transparent', cursor: 'pointer',
-                                    fontWeight: selected ? 700 : isTodayCell ? 600 : 500,
-                                    background: selected ? '#7c3aed' : 'transparent',
-                                    color: selected ? '#ffffff' : isTodayCell ? '#7c3aed' : 'var(--xp-txt)',
-                                  }}
-                                >
-                                  {d.getDate()}
-                                </button>
-                              )
-                            })}
-                          </div>
-                        ))}
+                  <div className="xp-sendto-cal" style={{ gridTemplateRows: calendarOpen ? '1fr' : '0fr' }}>
+                    <div style={{ overflow: 'hidden', minHeight: 0 }}>
+                      <div className="pt-2.5">
+                        <div className="flex items-center justify-center gap-2.5 mb-2">
+                          <button
+                            onClick={() => setMonthCursor(d => new Date(d.getFullYear(), d.getMonth() - 1, 1))}
+                            aria-label="Previous month"
+                            className="flex items-center justify-center flex-shrink-0"
+                            style={{ width: 22, height: 22, borderRadius: 7, background: 'var(--xp-bg3)', color: 'var(--xp-txt2)', border: 'none', cursor: 'pointer' }}
+                          >
+                            <PrevTriangle />
+                          </button>
+                          <span className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt)', minWidth: 110, textAlign: 'center' }}>
+                            {MONTHS[monthCursor.getMonth()]} {monthCursor.getFullYear()}
+                          </span>
+                          <button
+                            onClick={() => setMonthCursor(d => new Date(d.getFullYear(), d.getMonth() + 1, 1))}
+                            aria-label="Next month"
+                            className="flex items-center justify-center flex-shrink-0"
+                            style={{ width: 22, height: 22, borderRadius: 7, background: 'var(--xp-bg3)', color: 'var(--xp-txt2)', border: 'none', cursor: 'pointer' }}
+                          >
+                            <NextTriangle />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-7 gap-0.5 mb-1">
+                          {DAY_HEADERS.map(d => (
+                            <div key={d} className="text-center text-[9px] font-semibold py-0.5" style={{ color: 'var(--xp-txt3)' }}>{d}</div>
+                          ))}
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          {weeks.map((row, ri) => (
+                            <div key={ri} className="grid grid-cols-7 gap-0.5">
+                              {row.map((d, ci) => {
+                                if (!d) return <div key={ci} />
+                                const key = buildDateKey(d.getFullYear(), d.getMonth(), d.getDate())
+                                const selected = key === tmDateKey
+                                const isTodayCell = isToday(d.getFullYear(), d.getMonth(), d.getDate(), effectiveTimezone)
+                                return (
+                                  <button
+                                    key={ci}
+                                    onClick={() => setTmDateKey(key)}
+                                    className="aspect-square flex items-center justify-center text-[10.5px]"
+                                    style={{
+                                      borderRadius: 7, border: !selected && isTodayCell ? '1.5px solid #7c3aed' : '1.5px solid transparent', cursor: 'pointer',
+                                      fontWeight: selected ? 700 : isTodayCell ? 600 : 500,
+                                      background: selected ? '#7c3aed' : 'transparent',
+                                      color: selected ? '#ffffff' : isTodayCell ? '#7c3aed' : 'var(--xp-txt)',
+                                    }}
+                                  >
+                                    {d.getDate()}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
-                  )}
+                  </div>
                 </div>
               )}
             </>

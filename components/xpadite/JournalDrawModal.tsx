@@ -17,7 +17,7 @@ type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starbur
 // vertex. This guarantees a clean, deliberate default and keeps move/resize/flip trivial.
 type ConnType = 'straight' | 'curved' | 'elbow' | 'elbow-curved'
 type HPos     = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
-type PopoverId = 'pen-size' | 'eraser-size' | 'shapes' | 'flip' | 'text-size' | 'arrow-type' | 'fill' | 'rotate' | 'line-thickness' | 'arrow-thickness' | 'list-type' | 'group' | 'order'
+type PopoverId = 'pen-size' | 'eraser-size' | 'shapes' | 'flip' | 'text-size' | 'arrow-type' | 'fill' | 'stroke' | 'rotate' | 'line-thickness' | 'arrow-thickness' | 'list-type' | 'group' | 'order'
 type NoteListType = 'none' | 'bullet' | 'numbered' | 'lettered' | 'checkbox'
 type EditField = 'title' | 'note'
 
@@ -52,6 +52,11 @@ interface DrawObj {
   mx: number; my: number; connType: ConnType
   pts: Pt[]; eraser: boolean
   color: string; fillColor: string; filled: boolean; sw: number
+  // "No Outline" — hides the stroke entirely while leaving color/sw/fill/the
+  // object itself untouched, so turning the outline back on restores exactly
+  // what it looked like before. Optional/defaults false so every object saved
+  // before this field existed keeps drawing its outline exactly as today.
+  noOutline?: boolean
   text: string; fontSize: number           // shape Title (or the free Text tool's only field)
   note: string; noteFontSize: number; noteListType: NoteListType  // shape Note — optional, below the Title
   flipX: boolean; flipY: boolean; gid: string
@@ -106,7 +111,7 @@ type RotateBaseline = GeomSnapshot & { rotation: number }
 type DragMode =
   | { kind: 'move';     ids: string[]; start: Pt; snap: Map<string, GeomSnapshot> }
   | { kind: 'resize';   id: string; handle: HPos; orig: DrawObj; start: Pt }
-  | { kind: 'endpoint'; id: string; which: 'start'|'end'|'mid'; start: Pt }
+  | { kind: 'endpoint'; id: string; which: 'start'|'end'|'mid'|'turn'; turnIndex?: number; start: Pt }
   | { kind: 'marquee';  start: Pt; cur: Pt }
   | { kind: 'rotate';   ids: string[]; pivot: Pt; startAngle: number; baseline: Map<string, RotateBaseline> }
   | { kind: 'group-resize'; ids: string[]; handle: HPos; origBB: { minX:number;minY:number;maxX:number;maxY:number }; baseline: Map<string, GeomSnapshot> }
@@ -366,12 +371,42 @@ function getPointAtT(conn: DrawObj, t: number): Pt {
     }
   }
   if (conn.connType === 'elbow' || conn.connType === 'elbow-curved') {
+    // A multi-turn path (see the live orthogonal-drawing tool): parametrize by
+    // distance along the full polyline rather than a fixed 2-segment split, so
+    // this generalizes to any number of turns.
+    if (conn.pts.length >= 2) {
+      const pts = conn.pts
+      const segLens: number[] = []
+      let total = 0
+      for (let i = 0; i < pts.length-1; i++) { const d = Math.hypot(pts[i+1].x-pts[i].x, pts[i+1].y-pts[i].y); segLens.push(d); total += d }
+      if (total < 0.001) return pts[0]
+      let target = ct*total
+      for (let i = 0; i < segLens.length; i++) {
+        if (target <= segLens[i] || i === segLens.length-1) {
+          const u = segLens[i] < 0.001 ? 0 : Math.max(0, Math.min(1, target/segLens[i]))
+          return { x: pts[i].x+(pts[i+1].x-pts[i].x)*u, y: pts[i].y+(pts[i+1].y-pts[i].y)*u }
+        }
+        target -= segLens[i]
+      }
+      return pts[pts.length-1]
+    }
     const { x:cornerX, y:cornerY } = getElbowCorner(conn)
     if (ct < 0.5) { const u = ct*2; return { x: conn.x1+(cornerX-conn.x1)*u, y: conn.y1+(cornerY-conn.y1)*u } }
     const u = (ct-0.5)*2
     return { x: cornerX+(conn.x2-cornerX)*u, y: cornerY+(conn.y2-cornerY)*u }
   }
   return { x: conn.x1+(conn.x2-conn.x1)*ct, y: conn.y1+(conn.y2-conn.y1)*ct }
+}
+
+// Keeps the segment between a dragged joint (its NEW position `moved`) and an
+// adjacent joint orthogonal: whichever coordinate the two shared BEFORE the
+// drag (compared against the pre-drag positions in `oldPts`) is kept shared
+// afterward too — the standard "dragging a corner extends its rails" technique
+// orthogonal-connector editors use, generalized to any joint in the path.
+function adjustNeighborForOrthogonality(oldPts: Pt[], movedIdx: number, neighborIdx: number, moved: Pt): Pt {
+  const neighbor = oldPts[neighborIdx], old = oldPts[movedIdx]
+  const sameY = Math.abs(neighbor.y - old.y) <= Math.abs(neighbor.x - old.x)
+  return sameY ? { x: neighbor.x, y: moved.y } : { x: moved.x, y: neighbor.y }
 }
 
 // Samples a connector's path to find the closest point to `pos` — "nearest
@@ -674,7 +709,16 @@ function distToSeg(px: number, py: number, x1: number, y1: number, x2: number, y
 }
 
 function getObjBB(obj: DrawObj): { minX:number;minY:number;maxX:number;maxY:number } {
-  if (obj.type === 'line' || obj.type === 'arrow') return { minX:Math.min(obj.x1,obj.x2),minY:Math.min(obj.y1,obj.y2),maxX:Math.max(obj.x1,obj.x2),maxY:Math.max(obj.y1,obj.y2) }
+  if (obj.type === 'line' || obj.type === 'arrow') {
+    // A multi-turn path (see the live orthogonal drawing tool) can bow out
+    // past its own start/end — its bbox must span every joint, not just the
+    // two ends, so marquee-select/group-bbox/rotation-pivot all stay correct.
+    if (obj.pts.length >= 2) {
+      const xs = obj.pts.map(p=>p.x), ys = obj.pts.map(p=>p.y)
+      return { minX:Math.min(...xs),minY:Math.min(...ys),maxX:Math.max(...xs),maxY:Math.max(...ys) }
+    }
+    return { minX:Math.min(obj.x1,obj.x2),minY:Math.min(obj.y1,obj.y2),maxX:Math.max(obj.x1,obj.x2),maxY:Math.max(obj.y1,obj.y2) }
+  }
   if (obj.type === 'stroke') {
     if (obj.pts.length === 0) return { minX:0,minY:0,maxX:0,maxY:0 }
     const xs = obj.pts.map(p=>p.x), ys = obj.pts.map(p=>p.y)
@@ -724,7 +768,12 @@ function isStrokeClosed(pts: Pt[]): boolean {
 function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<string, HTMLImageElement>, onImgLoad?: () => void) {
   c.save()
   c.strokeStyle = obj.color; c.fillStyle = obj.filled ? obj.fillColor : obj.color
-  c.lineWidth = obj.sw; c.lineCap = 'round'; c.lineJoin = 'round'
+  // "No Outline": a 0-width canvas stroke paints nothing (per spec), so every
+  // c.stroke() call below naturally becomes invisible without touching each
+  // shape branch individually — sw/color themselves are untouched, so turning
+  // the outline back on restores exactly what it looked like before.
+  c.lineWidth = obj.noOutline ? 0 : obj.sw
+  c.lineCap = 'round'; c.lineJoin = 'round'
 
   if (obj.type === 'stroke') {
     if (obj.pts.length < 2) { c.restore(); return }
@@ -760,12 +809,30 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<str
 
   if (obj.type === 'arrow') {
     const isElbow = obj.connType === 'elbow' || obj.connType === 'elbow-curved'
+    // A path traced with the live multi-turn orthogonal tool (see
+    // continueStroke) — any number of 90° turns, not just the single derived
+    // corner the 2-point legacy elbow uses below.
+    const multiPath = isElbow && obj.pts.length >= 2 ? obj.pts : null
     // The elbow corner is DERIVED from elbowBend + the current endpoints (see
     // getElbowCorner) — the only two points that keep both legs orthogonal —
     // never a free coordinate, so it can't be dragged into a diagonal leg.
-    const { x:cornerX, y:cornerY } = isElbow ? getElbowCorner(obj) : { x:0, y:0 }
+    const { x:cornerX, y:cornerY } = (isElbow && !multiPath) ? getElbowCorner(obj) : { x:0, y:0 }
     c.beginPath()
-    if (obj.connType === 'curved') { c.moveTo(obj.x1,obj.y1); c.quadraticCurveTo(obj.mx,obj.my,obj.x2,obj.y2) }
+    if (multiPath) {
+      c.moveTo(multiPath[0].x, multiPath[0].y)
+      for (let i = 1; i < multiPath.length-1; i++) {
+        if (obj.connType === 'elbow-curved') {
+          const leg1 = Math.hypot(multiPath[i].x-multiPath[i-1].x, multiPath[i].y-multiPath[i-1].y)
+          const leg2 = Math.hypot(multiPath[i+1].x-multiPath[i].x, multiPath[i+1].y-multiPath[i].y)
+          const r = Math.max(0, Math.min(16, leg1/2, leg2/2))
+          c.arcTo(multiPath[i].x, multiPath[i].y, multiPath[i+1].x, multiPath[i+1].y, r)
+        } else {
+          c.lineTo(multiPath[i].x, multiPath[i].y)
+        }
+      }
+      c.lineTo(multiPath[multiPath.length-1].x, multiPath[multiPath.length-1].y)
+    }
+    else if (obj.connType === 'curved') { c.moveTo(obj.x1,obj.y1); c.quadraticCurveTo(obj.mx,obj.my,obj.x2,obj.y2) }
     else if (obj.connType === 'elbow') { c.moveTo(obj.x1,obj.y1); c.lineTo(cornerX,cornerY); c.lineTo(obj.x2,obj.y2) }
     else if (obj.connType === 'elbow-curved') {
       // Same two-segment elbow route as 'elbow', but with a rounded corner —
@@ -779,13 +846,21 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<str
     }
     else { c.moveTo(obj.x1,obj.y1); c.lineTo(obj.x2,obj.y2) }
     c.stroke()
-    const tx = isElbow ? cornerX : (obj.connType !== 'straight' ? obj.mx : obj.x1)
-    const ty = isElbow ? cornerY : (obj.connType !== 'straight' ? obj.my : obj.y1)
-    // Same "approach point" logic mirrored for the START end — the near-start
-    // leg of a curve/elbow points back toward the same reference point its
-    // near-end leg points away from (mx,my for curved; the corner for elbow).
-    const tx2 = isElbow ? cornerX : (obj.connType !== 'straight' ? obj.mx : obj.x2)
-    const ty2 = isElbow ? cornerY : (obj.connType !== 'straight' ? obj.my : obj.y2)
+    // Arrowhead reference points — the point just before each end, so the
+    // head points along that end's own final segment direction.
+    let tx: number, ty: number, tx2: number, ty2: number
+    if (multiPath) {
+      tx = multiPath[multiPath.length-2].x; ty = multiPath[multiPath.length-2].y
+      tx2 = multiPath[1].x; ty2 = multiPath[1].y
+    } else {
+      tx = isElbow ? cornerX : (obj.connType !== 'straight' ? obj.mx : obj.x1)
+      ty = isElbow ? cornerY : (obj.connType !== 'straight' ? obj.my : obj.y1)
+      // Same "approach point" logic mirrored for the START end — the near-start
+      // leg of a curve/elbow points back toward the same reference point its
+      // near-end leg points away from (mx,my for curved; the corner for elbow).
+      tx2 = isElbow ? cornerX : (obj.connType !== 'straight' ? obj.mx : obj.x2)
+      ty2 = isElbow ? cornerY : (obj.connType !== 'straight' ? obj.my : obj.y2)
+    }
     // Switch Arrow (headAt) swaps which single endpoint owns the arrowhead
     // without touching geometry/attachments/bends — moot once doubleEnded
     // already draws both, so that always wins regardless of headAt.
@@ -930,6 +1005,24 @@ const RestoreIcon = ({ size = 14 }: { size?: number }) => (
 // A small hub-and-branches glyph — a root node with a trunk splitting into
 // three evenly-spaced, aligned branches — mirrors what Align actually does
 // to a mind map, rather than a generic alignment-guide icon.
+// Shared circular "none" swatch — white/transparent interior + a red
+// diagonal slash, the standard "no fill"/"no outline" convention — used by
+// both the Fill and Outline color popovers so neither invents its own icon.
+function NoFillSwatch({ active, isDark, title, onClick }: { active: boolean; isDark: boolean; title: string; onClick: () => void }) {
+  return (
+    <button title={title} onClick={onClick}
+      style={{
+        width:22, height:22, borderRadius:'50%', flexShrink:0, cursor:'pointer', padding:0, overflow:'hidden',
+        border:`1px solid ${isDark?'rgba(255,255,255,0.30)':'rgba(0,0,0,0.20)'}`,
+        background:isDark?'#2a2340':'#ffffff',
+        transform:active?'scale(1.15)':'scale(1)',
+        boxShadow:active?`0 0 0 2px ${isDark?'#1e1033':'#fff'}, 0 0 0 3.5px #7c3aed`:'none',
+      }}>
+      <span style={{ display:'block', width:'100%', height:'100%', background:'linear-gradient(135deg, transparent 47%, #ef4444 47%, #ef4444 53%, transparent 53%)' }}/>
+    </button>
+  )
+}
+
 const AlignIcon = ({ size = 14 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ display:'block' }}>
     <circle cx="2.2" cy="8" r="1.6" fill="currentColor"/>
@@ -978,6 +1071,14 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const isDownRef   = useRef(false)
   const erasedDuringGestureRef = useRef(false) // true once an eraser drag has actually removed something — one Undo step per gesture, not per tick
   const shapeStart  = useRef<Pt | null>(null)
+  // Live multi-turn orthogonal drawing state (Sharp/Curved arrow tools) — see
+  // continueStroke. elbowLockedPtsRef holds every permanently-committed
+  // waypoint so far (starts as just the drag's start point); elbowDirRef is
+  // the orientation ('h'|'v') of whichever segment is currently in progress,
+  // decided by the first real movement and re-decided each time the user
+  // commits a turn. Neither applies to any other tool/connType.
+  const elbowLockedPtsRef = useRef<Pt[]>([])
+  const elbowDirRef = useRef<'h' | 'v' | null>(null)
   const textInputRef = useRef<HTMLInputElement>(null)
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map())
   const lastTapRef  = useRef<{ id: string; ts: number } | null>(null)
@@ -1004,6 +1105,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const [arrowConnDefault, setArrowConnDefault] = useState<ConnType>('elbow')
   const [doubleEndedDefault, setDoubleEndedDefault] = useState(false) // default for NEW arrows; editing a selected arrow uses toggleDoubleEnded instead
   const [showCustomFill, setShowCustomFill] = useState(false)
+  const [showCustomStroke, setShowCustomStroke] = useState(false)
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
   const [lineThickIdx,  setLineThickIdx]  = useState(1) // index into THICKNESS_LEVELS — default new-line thickness
   const [arrowThickIdx, setArrowThickIdx] = useState(1) // same, for new arrows
@@ -1132,13 +1234,26 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     const obj = objs[0]
     c.save(); c.strokeStyle='#7c3aed'; c.lineWidth=1; c.setLineDash([4,3])
     if (obj.type === 'line' || obj.type === 'arrow') {
-      c.beginPath(); c.moveTo(obj.x1,obj.y1); c.lineTo(obj.x2,obj.y2); c.stroke(); c.restore()
-      drawHandleDot(c, obj.x1, obj.y1); drawHandleDot(c, obj.x2, obj.y2)
-      // Every connType gets the same draggable mid/bend handle — for elbow/
-      // elbow-curved this dot sits at the current (always-orthogonal) corner.
       const isElbowSel = obj.type === 'arrow' && (obj.connType === 'elbow' || obj.connType === 'elbow-curved')
-      const midDot = isElbowSel ? getElbowCorner(obj) : { x:obj.mx, y:obj.my }
-      drawHandleDot(c, midDot.x, midDot.y, '#ede9fe')
+      const multiPath = isElbowSel && obj.pts.length >= 2 ? obj.pts : null
+      c.beginPath()
+      if (multiPath) { c.moveTo(multiPath[0].x,multiPath[0].y); for (const p of multiPath.slice(1)) c.lineTo(p.x,p.y) }
+      else { c.moveTo(obj.x1,obj.y1); c.lineTo(obj.x2,obj.y2) }
+      c.stroke(); c.restore()
+      if (multiPath) {
+        // One draggable joint dot per point on the path — start/end plus every
+        // turn in between, each individually selectable/movable (see getTarget
+        // and the 'turn' DragMode below).
+        drawHandleDot(c, multiPath[0].x, multiPath[0].y)
+        drawHandleDot(c, multiPath[multiPath.length-1].x, multiPath[multiPath.length-1].y)
+        for (let i = 1; i < multiPath.length - 1; i++) drawHandleDot(c, multiPath[i].x, multiPath[i].y, '#ede9fe')
+      } else {
+        drawHandleDot(c, obj.x1, obj.y1); drawHandleDot(c, obj.x2, obj.y2)
+        // Every connType gets the same draggable mid/bend handle — for elbow/
+        // elbow-curved this dot sits at the current (always-orthogonal) corner.
+        const midDot = isElbowSel ? getElbowCorner(obj) : { x:obj.mx, y:obj.my }
+        drawHandleDot(c, midDot.x, midDot.y, '#ede9fe')
+      }
       return
     }
     if (obj.type === 'text') {
@@ -1174,7 +1289,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   useEffect(() => { renderAll() }, [objects, selIds]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Hit testing ────────────────────────────────────────────────────────────
-  type ItTarget = {kind:'none'} | {kind:'object';id:string} | {kind:'handle';id:string;which:HPos|'start'|'end'|'mid'} | {kind:'rotate';ids:string[]} | {kind:'group-handle';handle:HPos}
+  type ItTarget = {kind:'none'} | {kind:'object';id:string} | {kind:'handle';id:string;which:HPos|'start'|'end'|'mid'|'turn';turnIndex?:number} | {kind:'rotate';ids:string[]} | {kind:'group-handle';handle:HPos}
 
   function getTarget(px: number, py: number): ItTarget {
     const HR = 10
@@ -1210,6 +1325,21 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       for (const id of selIdsRef.current) {
         const obj = objectsRef.current.find(o => o.id === id); if (!obj) continue
         if (obj.type === 'line' || obj.type === 'arrow') {
+          const isMultiElbow = obj.type === 'arrow' && (obj.connType === 'elbow' || obj.connType === 'elbow-curved') && obj.pts.length >= 2
+          if (isMultiElbow) {
+            // Every point on a multi-turn path is its own handle: the two ends
+            // behave exactly like a normal connector's start/end (re-attach on
+            // drag, via resolveJointRedirect below); each interior point is a
+            // 'turn' joint (see continueStroke's endpoint-drag handling).
+            for (let i = 0; i < obj.pts.length; i++) {
+              const p = obj.pts[i]
+              if (Math.hypot(p.x-px,p.y-py) >= HR) continue
+              if (i === 0) return {kind:'handle',id,which:'start'}
+              if (i === obj.pts.length-1) return {kind:'handle',id,which:'end'}
+              return {kind:'handle',id,which:'turn',turnIndex:i}
+            }
+            continue
+          }
           if (Math.hypot(obj.x1-px,obj.y1-py) < HR) return {kind:'handle',id,which:'start'}
           if (Math.hypot(obj.x2-px,obj.y2-py) < HR) return {kind:'handle',id,which:'end'}
           // Every connType exposes the same draggable mid/bend handle — for
@@ -1277,6 +1407,8 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           dragRef.current = {kind:'endpoint',id:joint.id,which:joint.which,start:pos}
         } else if (target.which === 'mid') {
           dragRef.current = {kind:'endpoint',id:target.id,which:target.which,start:pos}
+        } else if (target.which === 'turn') {
+          dragRef.current = {kind:'endpoint',id:target.id,which:'turn',turnIndex:target.turnIndex,start:pos}
         } else {
           dragRef.current = {kind:'resize',id:target.id,handle:target.which as HPos,orig:{...obj,pts:[...obj.pts]},start:pos}
         }
@@ -1326,7 +1458,11 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     }
     shapeStart.current = pos
     const shapeSw = tool==='line' ? THICKNESS_LEVELS[lineThickIdx] : tool==='arrow' ? THICKNESS_LEVELS[arrowThickIdx] : PEN_SIZES[penIdx]
-    activeRef.current = mkObj({id:uid(),type:tool as ObjType,color:drawColor,fillColor,filled,sw:shapeSw,connType: tool==='arrow' ? arrowConnDefault : 'straight', doubleEnded: tool==='arrow' && doubleEndedDefault})
+    const connType = tool==='arrow' ? arrowConnDefault : 'straight'
+    const isOrtho = tool==='arrow' && (connType==='elbow' || connType==='elbow-curved')
+    elbowLockedPtsRef.current = isOrtho ? [pos] : []
+    elbowDirRef.current = null
+    activeRef.current = mkObj({id:uid(),type:tool as ObjType,color:drawColor,fillColor,filled,sw:shapeSw,connType, doubleEnded: tool==='arrow' && doubleEndedDefault, pts: isOrtho ? [pos] : []})
   }
 
   function continueStroke(e: React.MouseEvent | React.TouchEvent) {
@@ -1469,20 +1605,49 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         connSnapPointRef.current = attach?.kind === 'connector' ? attach.point : null
         objectsRef.current = resolveAttachments(objectsRef.current.map(o => {
           if (o.id !== dm.id) return o
-          if (attach?.kind === 'shape') {
-            const p = getPerimeterPoint(attach.target, attach.angle)
+          const newPt = attach?.kind === 'shape' ? getPerimeterPoint(attach.target, attach.angle)
+            : attach?.kind === 'connector' ? attach.point
+            : pos
+          const attachPatch: Partial<DrawObj> = attach?.kind === 'shape'
+            ? (dm.which === 'start'
+                ? { attachStartId:attach.target.id, attachStartAngle:attach.angle, attachStartConnId:null }
+                : { attachEndId:attach.target.id, attachEndAngle:attach.angle, attachEndConnId:null })
+            : attach?.kind === 'connector'
+            ? (dm.which === 'start'
+                ? { attachStartId:null, attachStartConnId:attach.target.id, attachStartT:attach.t }
+                : { attachEndId:null, attachEndConnId:attach.target.id, attachEndT:attach.t })
+            : (dm.which === 'start' ? { attachStartId:null, attachStartConnId:null } : { attachEndId:null, attachEndConnId:null })
+          // A multi-turn path (see the live orthogonal drawing tool) also keeps
+          // the segment next to this endpoint orthogonal when there's an actual
+          // interior turn to preserve — a plain 2-point path has no corner to
+          // keep, so dragging either end there behaves like any normal endpoint.
+          if (o.pts.length > 2) {
+            const idx = dm.which === 'start' ? 0 : o.pts.length-1
+            const neighborIdx = dm.which === 'start' ? 1 : o.pts.length-2
+            const pts = [...o.pts]
+            pts[idx] = newPt
+            pts[neighborIdx] = adjustNeighborForOrthogonality(o.pts, idx, neighborIdx, newPt)
             return dm.which === 'start'
-              ? { ...o, x1:p.x, y1:p.y, attachStartId:attach.target.id, attachStartAngle:attach.angle, attachStartConnId:null }
-              : { ...o, x2:p.x, y2:p.y, attachEndId:attach.target.id, attachEndAngle:attach.angle, attachEndConnId:null }
+              ? { ...o, ...attachPatch, x1:newPt.x, y1:newPt.y, pts }
+              : { ...o, ...attachPatch, x2:newPt.x, y2:newPt.y, pts }
           }
-          if (attach?.kind === 'connector') {
-            return dm.which === 'start'
-              ? { ...o, x1:attach.point.x, y1:attach.point.y, attachStartId:null, attachStartConnId:attach.target.id, attachStartT:attach.t }
-              : { ...o, x2:attach.point.x, y2:attach.point.y, attachEndId:null, attachEndConnId:attach.target.id, attachEndT:attach.t }
-          }
+          const pts2 = o.pts.length === 2 ? (dm.which === 'start' ? [newPt, o.pts[1]] : [o.pts[0], newPt]) : o.pts
           return dm.which === 'start'
-            ? { ...o, x1:pos.x, y1:pos.y, attachStartId:null, attachStartConnId:null }
-            : { ...o, x2:pos.x, y2:pos.y, attachEndId:null, attachEndConnId:null }
+            ? { ...o, ...attachPatch, x1:newPt.x, y1:newPt.y, pts:pts2 }
+            : { ...o, ...attachPatch, x2:newPt.x, y2:newPt.y, pts:pts2 }
+        }))
+        renderAll(); return
+      }
+      if (dm.which === 'turn' && dm.turnIndex !== undefined) {
+        const turnIndex = dm.turnIndex
+        objectsRef.current = resolveAttachments(objectsRef.current.map(o => {
+          if (o.id !== dm.id) return o
+          if (turnIndex <= 0 || turnIndex >= o.pts.length-1) return o // must be a genuine interior joint
+          const pts = [...o.pts]
+          pts[turnIndex] = pos
+          pts[turnIndex-1] = adjustNeighborForOrthogonality(o.pts, turnIndex, turnIndex-1, pos)
+          pts[turnIndex+1] = adjustNeighborForOrthogonality(o.pts, turnIndex, turnIndex+1, pos)
+          return { ...o, pts, x1:pts[0].x, y1:pts[0].y, x2:pts[pts.length-1].x, y2:pts[pts.length-1].y }
         }))
         renderAll(); return
       }
@@ -1515,7 +1680,11 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           const p1 = rotatePt({x:base.x1,y:base.y1}, dm.pivot, delta)
           const p2 = rotatePt({x:base.x2,y:base.y2}, dm.pivot, delta)
           const pm = rotatePt({x:base.mx,y:base.my}, dm.pivot, delta)
-          return {...o, x1:p1.x,y1:p1.y, x2:p2.x,y2:p2.y, mx:pm.x,my:pm.y}
+          // A multi-turn path (see the live orthogonal drawing tool) rotates as
+          // one rigid set of points — relative 90° corners stay exactly 90°,
+          // the whole path just tilts, same as rotating any other object.
+          const pts = base.pts.length >= 2 ? base.pts.map(p => rotatePt(p, dm.pivot, delta)) : base.pts
+          return {...o, x1:p1.x,y1:p1.y, x2:p2.x,y2:p2.y, mx:pm.x,my:pm.y, pts}
         }
         if (o.type === 'stroke') {
           // pts stay in LOCAL/unrotated space (see renderObj) — only their
@@ -1564,7 +1733,11 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         const base = dm.baseline.get(o.id); if (!base) return o
         if (o.type === 'stroke') return {...o, pts: base.pts.map(p => ({x:sX(p.x), y:sY(p.y)}))}
         if (o.type === 'line' || o.type === 'arrow') {
-          return {...o, x1:sX(base.x1),y1:sY(base.y1), x2:sX(base.x2),y2:sY(base.y2), mx:sX(base.mx),my:sY(base.my)}
+          // Independent sx/sy scaling keeps every horizontal segment horizontal
+          // and every vertical one vertical (only a rotation would break that),
+          // so a multi-turn path's corners stay exactly 90° under a group resize.
+          const pts = base.pts.length >= 2 ? base.pts.map(p => ({x:sX(p.x), y:sY(p.y)})) : base.pts
+          return {...o, x1:sX(base.x1),y1:sY(base.y1), x2:sX(base.x2),y2:sY(base.y2), mx:sX(base.mx),my:sY(base.my), pts}
         }
         // Shapes/text/image: scale the object's own bbox corners (computed from
         // the BASELINE x/y/w/h, never the live/already-scaled ones) and re-derive
@@ -1586,7 +1759,36 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     const start = shapeStart.current
     if (!start || !activeRef.current) return
     const type = activeRef.current.type
-    if (type === 'line' || type === 'arrow') {
+    const isOrtho = type==='arrow' && (activeRef.current.connType==='elbow' || activeRef.current.connType==='elbow-curved')
+    if (isOrtho) {
+      // Live multi-turn orthogonal drawing: each segment follows the pointer
+      // along whichever axis (h/v) currently dominates; a clear, sustained
+      // change in dominant direction commits a 90° turn at the point where
+      // that happened and starts the next segment — repeatable for as many
+      // turns as the user draws, never limited to one corner.
+      const TURN_MIN = 14
+      const locked = elbowLockedPtsRef.current
+      const last = locked[locked.length-1]
+      const dx = pos.x-last.x, dy = pos.y-last.y
+      if (Math.hypot(dx,dy) > TURN_MIN) {
+        const proposedDir: 'h'|'v' = Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v'
+        if (elbowDirRef.current === null) {
+          elbowDirRef.current = proposedDir
+        } else if (proposedDir !== elbowDirRef.current) {
+          const turnPt = elbowDirRef.current==='h' ? { x:pos.x, y:last.y } : { x:last.x, y:pos.y }
+          if (Math.hypot(turnPt.x-last.x, turnPt.y-last.y) > TURN_MIN) {
+            elbowLockedPtsRef.current = [...locked, turnPt]
+            elbowDirRef.current = proposedDir
+          }
+        }
+      }
+      const lockedNow = elbowLockedPtsRef.current
+      const lastNow = lockedNow[lockedNow.length-1]
+      const dir = elbowDirRef.current ?? 'h'
+      const liveEnd = dir==='h' ? { x:pos.x, y:lastNow.y } : { x:lastNow.x, y:pos.y }
+      const fullPath = [...lockedNow, liveEnd]
+      activeRef.current = { ...activeRef.current, pts: fullPath, x1:fullPath[0].x, y1:fullPath[0].y, x2:liveEnd.x, y2:liveEnd.y }
+    } else if (type === 'line' || type === 'arrow') {
       activeRef.current = {...activeRef.current,x1:start.x,y1:start.y,x2:pos.x,y2:pos.y,mx:(start.x+pos.x)/2,my:(start.y+pos.y)/2}
     } else {
       activeRef.current = {...activeRef.current,x:start.x,y:start.y,w:pos.x-start.x,h:pos.y-start.y}
@@ -1636,7 +1838,24 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
 
     if (active.type === 'line' || active.type === 'arrow') {
       if (!pos||!shapeStart.current){renderAll();return}
-      if (Math.hypot(pos.x-shapeStart.current.x,pos.y-shapeStart.current.y)>4) {
+      const isOrtho = active.type==='arrow' && (active.connType==='elbow' || active.connType==='elbow-curved')
+      if (isOrtho) {
+        // Finalize the live multi-turn path traced during the drag — one
+        // continuous connector, whatever number of 90° turns it ended up with
+        // (zero turns is just a straight single segment, which is valid too).
+        const finalPts = active.pts
+        if (finalPts.length >= 2) {
+          const first = finalPts[0], last = finalPts[finalPts.length-1]
+          if (finalPts.length > 2 || Math.hypot(last.x-first.x,last.y-first.y) > 4) {
+            const obj = {
+              ...active, pts:finalPts, x1:first.x, y1:first.y, x2:last.x, y2:last.y,
+              doubleEnded: doubleEndedDefault,
+            }
+            const n=[...objectsRef.current,obj]; syncObjs(n); snapshot(n); syncSel([obj.id])
+          }
+        }
+        elbowLockedPtsRef.current = []; elbowDirRef.current = null
+      } else if (Math.hypot(pos.x-shapeStart.current.x,pos.y-shapeStart.current.y)>4) {
         const x1=shapeStart.current.x, y1=shapeStart.current.y, x2=pos.x, y2=pos.y
         const finalConnType = active.type==='arrow' ? arrowConnDefault : active.connType
         // elbowBend already defaults to 'v' (see mkObj) — the classic "vertical
@@ -1891,9 +2110,30 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   function alignSelected() {
     if (textInput) commitText()
     const selSet = new Set(selIdsRef.current)
-    const all = objectsRef.current
-    const shapes = all.filter(o => selSet.has(o.id) && o.type !== 'line' && o.type !== 'arrow')
+    const rawAll = objectsRef.current
+    const shapes = rawAll.filter(o => selSet.has(o.id) && o.type !== 'line' && o.type !== 'arrow')
     if (shapes.length < 2) { setToast('Select at least 2 shapes to align'); return }
+
+    // Retroactively attach any connector endpoint that's only ever been
+    // visually touching one of these shapes (drawn close by hand but never
+    // actually snapped) — otherwise moving the shapes below would strand it
+    // mid-air instead of "remaining attached to its intended shape." Reuses
+    // the exact same shape-proximity search a freshly-drawn endpoint already
+    // uses; only endpoints with no existing attachment are checked, so a
+    // connector someone deliberately detached is never re-grabbed.
+    const all = rawAll.map(o => {
+      if (o.type !== 'line' && o.type !== 'arrow') return o
+      const patch: Partial<DrawObj> = {}
+      if (!o.attachStartId && !o.attachStartConnId) {
+        const hit = findAttachTarget(shapes, o.id, { x:o.x1, y:o.y1 })
+        if (hit) { patch.attachStartId = hit.target.id; patch.attachStartAngle = hit.angle }
+      }
+      if (!o.attachEndId && !o.attachEndConnId) {
+        const hit = findAttachTarget(shapes, o.id, { x:o.x2, y:o.y2 })
+        if (hit) { patch.attachEndId = hit.target.id; patch.attachEndAngle = hit.angle }
+      }
+      return Object.keys(patch).length ? { ...o, ...patch } : o
+    })
 
     const centerOf = (o: DrawObj) => { const bb = getObjBB(o); return { x: (bb.minX+bb.maxX)/2, y: (bb.minY+bb.maxY)/2 } }
     const items = shapes.map(o => ({ id: o.id, pos: centerOf(o) }))
@@ -2024,6 +2264,16 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       // elbow arrows it automatically re-derives a valid orthogonal corner (the
       // mirrored corner of a mirrored orthogonal route is itself orthogonal).
       if (o.type==='line' || o.type==='arrow') {
+        // A multi-turn path (see the live orthogonal drawing tool) mirrors
+        // every joint around the path's own bbox center, not just its two
+        // ends — mirroring an orthogonal route keeps every corner exactly 90°.
+        if (o.pts.length >= 2) {
+          const bb = getObjBB(o)
+          const pts = axis==='x'
+            ? o.pts.map(p=>({x:2*((bb.minX+bb.maxX)/2)-p.x, y:p.y}))
+            : o.pts.map(p=>({x:p.x, y:2*((bb.minY+bb.maxY)/2)-p.y}))
+          return {...o, pts, x1:pts[0].x, y1:pts[0].y, x2:pts[pts.length-1].x, y2:pts[pts.length-1].y}
+        }
         if (axis==='x') {
           const cx=(o.x1+o.x2)/2
           return {...o,x1:2*cx-o.x1,x2:2*cx-o.x2,mx:2*cx-o.mx}
@@ -2052,7 +2302,8 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       if (!ids.includes(o.id)) return o
       if (o.type==='line' || o.type==='arrow') {
         const p1=rotatePt({x:o.x1,y:o.y1},pivot,deltaRad), p2=rotatePt({x:o.x2,y:o.y2},pivot,deltaRad), pm=rotatePt({x:o.mx,y:o.my},pivot,deltaRad)
-        return {...o,x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y,mx:pm.x,my:pm.y}
+        const pts = o.pts.length >= 2 ? o.pts.map(p => rotatePt(p, pivot, deltaRad)) : o.pts
+        return {...o,x1:p1.x,y1:p1.y,x2:p2.x,y2:p2.y,mx:pm.x,my:pm.y,pts}
       }
       if (o.type==='stroke') {
         // pts stay in local space — only their shared bbox center orbits the
@@ -2144,7 +2395,17 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   function updateSelColor(color: string) {
     setDrawColor(color)
     if(selIdsRef.current.length===0) return
-    const ids=selIdsRef.current; const n=objectsRef.current.map(o=>ids.includes(o.id)?{...o,color}:o)
+    const ids=selIdsRef.current; const n=objectsRef.current.map(o=>ids.includes(o.id)?{...o,color,noOutline:false}:o)
+    syncObjs(n); renderAll()
+  }
+
+  // "No Outline" — mirrors clearSelFill: a dedicated flag rather than
+  // touching color/sw, so re-picking a color (updateSelColor above clears it)
+  // restores the prior outline exactly as it was.
+  function clearSelOutline() {
+    const ids = selIdsRef.current
+    if (ids.length === 0) return
+    const n = objectsRef.current.map(o => ids.includes(o.id) ? {...o, noOutline:true} : o)
     syncObjs(n); renderAll()
   }
 
@@ -2163,6 +2424,17 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       const n=objectsRef.current.map(o=>ids.includes(o.id)?{...o,filled:nf}:o)
       syncObjs(n); renderAll()
     } else { setFilled(f=>!f) }
+  }
+
+  // "No Fill" — same `filled` flag toggleFilled already flips, just forced to
+  // false rather than toggled, so fillColor/every other property (including
+  // the shape itself) is untouched; only the interior stops being painted.
+  function clearSelFill() {
+    setFilled(false)
+    const ids = selIdsRef.current
+    if (ids.length === 0) return
+    const n = objectsRef.current.map(o => ids.includes(o.id) ? {...o, filled:false} : o)
+    syncObjs(n); renderAll()
   }
 
   // ── Keyboard ───────────────────────────────────────────────────────────────
@@ -2276,6 +2548,11 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const isPresetFill      = (COLOR_PALETTE as readonly string[]).some(c=>normalizeHexColor(c)===normalizedFill)
   const isSavedCustomFill = customColors.some(c=>normalizeHexColor(c)===normalizedFill)
   const isCustomFill      = !isPresetFill && !isSavedCustomFill
+  const curNoOutline = selObjs.length>0 ? (selObjs[0]?.noOutline??false) : false
+  const normalizedStroke   = normalizeHexColor(drawColor)
+  const isPresetStroke      = (COLOR_PALETTE as readonly string[]).some(c=>normalizeHexColor(c)===normalizedStroke)
+  const isSavedCustomStroke = customColors.some(c=>normalizeHexColor(c)===normalizedStroke)
+  const isCustomStroke      = !isPresetStroke && !isSavedCustomStroke && !curNoOutline
 
   // ── Styles ─────────────────────────────────────────────────────────────────
   const dockBg  = isDark ? 'rgba(9,4,22,0.97)' : '#f1f5f9'
@@ -2670,11 +2947,44 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
 
         {dvdr}
 
-        {/* Stroke color */}
-        <label title="Stroke Color" style={{position:'relative',cursor:'pointer',flexShrink:0}}>
-          <div style={{width:22,height:22,borderRadius:'50%',background:drawColor,border:'2px solid rgba(255,255,255,0.30)',boxShadow:'0 0 0 1px rgba(124,58,237,0.30)'}}/>
-          <input type="color" value={drawColor} onChange={e=>updateSelColor(e.target.value)} style={{position:'absolute',opacity:0,width:0,height:0,pointerEvents:'none'}} tabIndex={-1}/>
-        </label>
+        {/* Stroke/outline color — same custom palette popover as Fill (not the
+            native browser picker, whose own popup position we can't control —
+            that was exactly the bottom-toolbar clipping bug), anchored upward
+            like every other bottom-toolbar popover. */}
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Stroke Color" onClick={(e)=>{if(textInput)commitText();openPop('stroke',e,'up')}}
+            style={{...navyBtn(false),display:'flex',alignItems:'center',padding:'4px'}}>
+            <span style={{width:22,height:22,borderRadius:'50%',background:curNoOutline?'transparent':drawColor,border:'2px solid rgba(255,255,255,0.30)',boxShadow:'0 0 0 1px rgba(124,58,237,0.30)',display:'inline-block'}}/>
+          </button>
+          {openPopover==='stroke' && (
+            <div data-popover="" style={fixedPopStyle({flexDirection:'row',flexWrap:'wrap',gap:6,width:172,minWidth:'auto',padding:'8px'})}>
+              {COLOR_PALETTE.map(c => {
+                const sel = normalizeHexColor(c)===normalizedStroke && !curNoOutline
+                return (
+                  <button key={c} title={c} onClick={()=>{updateSelColor(c);setOpenPopover(null)}}
+                    style={{width:22,height:22,borderRadius:'50%',flexShrink:0,cursor:'pointer',background:c,border:'none',padding:0,
+                      transform:sel?'scale(1.15)':'scale(1)',
+                      boxShadow:sel?`0 0 0 2px ${isDark?'#1e1033':'#fff'}, 0 0 0 3.5px #7c3aed`:'none'}}/>
+                )
+              })}
+              {customColors.map(c => {
+                const sel = normalizeHexColor(c)===normalizedStroke && !curNoOutline
+                return (
+                  <button key={c} title={c} onClick={()=>{updateSelColor(c);setOpenPopover(null)}}
+                    style={{width:22,height:22,borderRadius:'50%',flexShrink:0,cursor:'pointer',background:c,border:'none',padding:0,
+                      transform:sel?'scale(1.15)':'scale(1)',
+                      boxShadow:sel?`0 0 0 2px ${isDark?'#1e1033':'#fff'}, 0 0 0 3.5px #7c3aed`:'none'}}/>
+                )
+              })}
+              <button title="Custom color" onClick={()=>{setOpenPopover(null);setShowCustomStroke(true)}}
+                style={{width:22,height:22,borderRadius:'50%',flexShrink:0,cursor:'pointer',border:'none',padding:0,
+                  background:isCustomStroke?drawColor:'conic-gradient(from 0deg, #ff0000,#ffff00,#00ff00,#00ffff,#0000ff,#ff00ff,#ff0000)',
+                  transform:isCustomStroke?'scale(1.15)':'scale(1)',
+                  boxShadow:isCustomStroke?`0 0 0 2px ${isDark?'#1e1033':'#fff'}, 0 0 0 3.5px ${drawColor}`:'none'}}/>
+              <NoFillSwatch active={curNoOutline} isDark={isDark} title="No Outline" onClick={()=>{clearSelOutline();setOpenPopover(null)}}/>
+            </div>
+          )}
+        </div>
 
         {/* Fill color — XPadite palette popover (reuses the same preset swatches +
             rainbow custom-color trigger + ColorPickerModal used by Activity Manager),
@@ -2711,6 +3021,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
                   background:isCustomFill?fillColor:'conic-gradient(from 0deg, #ff0000,#ffff00,#00ff00,#00ffff,#0000ff,#ff00ff,#ff0000)',
                   transform:isCustomFill?'scale(1.15)':'scale(1)',
                   boxShadow:isCustomFill?`0 0 0 2px ${isDark?'#1e1033':'#fff'}, 0 0 0 3.5px ${fillColor}`:'none'}}/>
+              <NoFillSwatch active={!curFilled} isDark={isDark} title="No Fill" onClick={()=>{clearSelFill();setOpenPopover(null)}}/>
             </div>
           )}
         </div>
@@ -2878,6 +3189,17 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       }}
     />
   )
+  const customStrokePicker = showCustomStroke && (
+    <ColorPickerModal
+      initialColor={drawColor}
+      onCancel={()=>setShowCustomStroke(false)}
+      onApply={hex => {
+        updateSelColor(hex)
+        setShowCustomStroke(false)
+        if (!addCustomColor(hex)) setToast('Custom color limit reached. Remove a saved color to add another.')
+      }}
+    />
+  )
 
   // ── Unsaved-changes guard dialog (Cancel/Close with pending edits) ─────────
   const unsavedDialog = showUnsavedDialog && (
@@ -2936,7 +3258,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   // this component always renders the same embedded layout either way.
   return (
     <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minHeight:0,background:isDarkApp?'#10071e':'#ffffff'}}>
-      {popoverStyleTag}{topToolbar}{canvasArea}{bottomToolbar}{customFillPicker}{unsavedDialog}
+      {popoverStyleTag}{topToolbar}{canvasArea}{bottomToolbar}{customFillPicker}{customStrokePicker}{unsavedDialog}
     </div>
   )
 }

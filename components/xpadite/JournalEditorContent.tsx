@@ -490,7 +490,6 @@ function SectionImageCell({ blockId, which, cell, isDark, selected, onSelect, on
   const [menuOpen, setMenuOpen] = useState(false)
   const [sendToOpen, setSendToOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const isMmc = !!cell.canvasData
 
   useEffect(() => {
     if (!menuOpen) return
@@ -548,11 +547,13 @@ function SectionImageCell({ blockId, which, cell, isDark, selected, onSelect, on
             <button onClick={() => { onSelect(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
               ⤡ Resize
             </button>
-            {isMmc && (
-              <button onClick={() => { onEditMindMap?.(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
-                🧠 Edit Mind Map
-              </button>
-            )}
+            {/* Available for every image, not just MMC-originated ones — an
+                ordinary externally pasted/uploaded image opens with a
+                synthesized starting state (see openEditMindMapForCell) and
+                only becomes MMC-backed once the user actually saves. */}
+            <button onClick={() => { onEditMindMap?.(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+              🧠 Edit Mind Map
+            </button>
             <button onClick={() => { setSendToOpen(true); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
               📤 Send to →
             </button>
@@ -1336,11 +1337,13 @@ function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onResizeActiv
             <button onClick={() => { onResizeActivate(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
               ⤡ Resize
             </button>
-            {block.type === 'drawing' && (
-              <button onClick={() => { onEdit(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
-                🧠 Edit Mind Map
-              </button>
-            )}
+            {/* Available for every image, not just MMC-originated drawings —
+                an ordinary externally pasted/uploaded image opens with a
+                synthesized starting state (see openEditMindMapForImage) and
+                only becomes MMC-backed once the user actually saves. */}
+            <button onClick={() => { onEdit(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+              🧠 Edit Mind Map
+            </button>
             <button onClick={() => { setSendToOpen(true); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
               📤 Send to →
             </button>
@@ -2093,6 +2096,14 @@ export function JournalEditorContent({
     // its partitions) rather than a top-level drawing block — saving must
     // write back into that same cell, never create/duplicate a top-level block.
     editingCell?: { blockId: string; which: 'single' | 'p0' | 'p1' }
+    // "Edit Mind Map" opened on an ORDINARY (externally pasted/uploaded)
+    // image that has no canvasData yet — a synthesized one-object MMC state
+    // (that single image, sized/positioned to fit) used ONLY as this
+    // session's starting point. editingBlock/editingCell above still say
+    // WHERE a save writes back to; nothing is persisted onto the
+    // block/cell unless the user actually saves (Cancel/Discard leaves the
+    // original plain image completely untouched).
+    syntheticInitialObjects?: string
   } | null>(null)
   // Mind Mapping Canvas immersive "Fit" mode — owned here (not inside
   // JournalDrawModal) because only the PARENT can portal {header + canvas}
@@ -2892,15 +2903,60 @@ export function JournalEditorContent({
     return which === 'p0' ? block.partitions?.[0] : block.partitions?.[1]
   }
 
+  // Fits an image's natural size into a sensible default MMC working area,
+  // preserving aspect ratio and centering it — used only to seed the ONE
+  // starting image-object for an ordinary image's first "Edit Mind Map" (see
+  // openEditMindMapForImage/openEditMindMapForCell below). Matches the same
+  // fallback canvas size JournalDrawModal itself assumes before its own
+  // canvas has mounted.
+  function fitImageToMmcCanvas(naturalW: number, naturalH: number): { x: number; y: number; w: number; h: number } {
+    const CANVAS_W = 720, CANVAS_H = 480
+    const maxW = CANVAS_W * 0.8, maxH = CANVAS_H * 0.8
+    let w = naturalW || maxW, h = naturalH || maxH
+    const scale = Math.min(1, maxW / (w || 1), maxH / (h || 1))
+    w *= scale; h *= scale
+    return { x: (CANVAS_W - w) / 2, y: (CANVAS_H - h) / 2, w, h }
+  }
+
   // Opens the Mind Mapping Canvas against the ACTUAL underlying drawing an
-  // MMC-originated section/partition image still carries (cell.canvasData) —
-  // never a fresh canvas from the flattened thumbnail. Only ever reachable
-  // from the cell's own ⋮ menu, which only shows "Edit Mind Map" when
-  // cell.canvasData is present (see SectionImageCell).
-  function openEditMindMapForCell(blockId: string, which: 'single' | 'p0' | 'p1') {
+  // MMC-originated section/partition image still carries (cell.canvasData).
+  // An ORDINARY image (no canvasData yet — externally pasted/uploaded)
+  // instead opens with a synthesized one-object starting state: that same
+  // image, sized to fit, as a real, editable MMC image object — reusing the
+  // existing image-object type/rendering/persistence rather than the
+  // separate flattened-background fallback, so saving naturally carries the
+  // base image forward inside canvasData (see handleDrawSave's editingCell
+  // branch, unchanged) instead of losing it. Nothing is written back onto
+  // the cell until the user actually saves — Cancel/Discard leaves an
+  // ordinary image completely untouched.
+  async function openEditMindMapForCell(blockId: string, which: 'single' | 'p0' | 'p1') {
     const idx = blocksRef.current.findIndex(b => b.id === blockId)
     if (idx < 0) return
-    setDrawState({ insertAt: idx, editingBlock: null, editingCell: { blockId, which } })
+    const cell = getSectionImageCell(blockId, which)
+    if (cell?.canvasData || !cell?.src) {
+      setDrawState({ insertAt: idx, editingBlock: null, editingCell: { blockId, which } })
+      return
+    }
+    const { w: naturalW, h: naturalH } = await loadImageNaturalSize(cell.src)
+    const rect = fitImageToMmcCanvas(naturalW, naturalH)
+    const synthetic = JSON.stringify([{ id: `img-${Date.now()}`, type: 'image', src: cell.src, ...rect }])
+    setDrawState({ insertAt: idx, editingBlock: null, editingCell: { blockId, which }, syntheticInitialObjects: synthetic })
+  }
+
+  // Same idea as openEditMindMapForCell above, for a top-level image/drawing
+  // block — see that function's comment for the full reasoning.
+  async function openEditMindMapForImage(blockId: string) {
+    const idx = blocksRef.current.findIndex(b => b.id === blockId)
+    if (idx < 0) return
+    const block = blocksRef.current[idx]
+    if (block.canvasData || !block.src) {
+      setDrawState({ insertAt: idx, editingBlock: block })
+      return
+    }
+    const { w: naturalW, h: naturalH } = await loadImageNaturalSize(block.src)
+    const rect = fitImageToMmcCanvas(naturalW, naturalH)
+    const synthetic = JSON.stringify([{ id: `img-${Date.now()}`, type: 'image', src: block.src, ...rect }])
+    setDrawState({ insertAt: idx, editingBlock: block, syntheticInitialObjects: synthetic })
   }
 
   // Never deletes content: text sides concatenate, image sides get ejected as
@@ -3881,7 +3937,7 @@ export function JournalEditorContent({
       ref={drawModalRef}
       isDark={isDark}
       initialSrc={drawState.editingCell ? editingCellData?.src : drawState.editingBlock?.src}
-      initialObjects={drawState.editingCell ? editingCellData?.canvasData : drawState.editingBlock?.canvasData}
+      initialObjects={drawState.syntheticInitialObjects ?? (drawState.editingCell ? editingCellData?.canvasData : drawState.editingBlock?.canvasData)}
       onSave={handleDrawSave}
       onClose={() => { setDrawState(null); setMmcFit(false) }}
       fitScreen={mmcFit}
@@ -4364,7 +4420,7 @@ export function JournalEditorContent({
                           <InlineMediaBlock
                             block={block}
                             isDark={isDark}
-                            onEdit={() => setDrawState({ insertAt: idx, editingBlock: block })}
+                            onEdit={() => openEditMindMapForImage(block.id)}
                             onMoveActivate={() => {
                               setMoveModeId(block.id)
                               setSelectedBlockId(block.id)

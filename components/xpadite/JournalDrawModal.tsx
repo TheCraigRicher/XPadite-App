@@ -1152,6 +1152,26 @@ export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawMo
   // commits a turn. Neither applies to any other tool/connType.
   const elbowLockedPtsRef = useRef<Pt[]>([])
   const elbowDirRef = useRef<'h' | 'v' | null>(null)
+  // Coalesces touchmove into at most one continueStroke/render per animation
+  // frame — mobile/tablet only (see onTouchMoveCoalesced below). On some
+  // touch devices touchmove can fire faster than the canvas can repaint;
+  // processing every single one let an intermediate frame briefly paint a
+  // connector's line at its NEW endpoint while the arrowhead — computed in
+  // that same draw call, but from an update that was still queued behind it —
+  // hadn't caught up yet, reading as the arrowhead "detaching" and then
+  // snapping back once the backlog cleared. Capturing only the latest touch
+  // and applying it once per frame keeps every actually-painted frame fully
+  // consistent. Desktop's onMouseMove calls continueStroke directly and is
+  // completely untouched by this.
+  const touchMoveRafRef = useRef<number | null>(null)
+  const latestTouchMoveRef = useRef<React.TouchEvent | null>(null)
+  // Captures the floating Title/Note editor's starting position when the
+  // shape it's attached to is ALSO the one being dragged, so continueStroke's
+  // 'move' handler can apply the SAME delta to it every tick — otherwise the
+  // editor panel (a plain React-rendered overlay, not part of the canvas
+  // drawing) stayed frozen at its original spot while the shape moved out
+  // from under it, only catching up once the drag ended.
+  const textInputMoveStartRef = useRef<{ x: number; y: number } | null>(null)
   const textInputRef = useRef<HTMLInputElement>(null)
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map())
   const lastTapRef  = useRef<{ id: string; ts: number } | null>(null)
@@ -1516,6 +1536,8 @@ export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawMo
         syncSel(newSel)
         const snap = new Map<string,{x:number;y:number;w:number;h:number;x1:number;y1:number;x2:number;y2:number;mx:number;my:number;pts:Pt[]}>()
         for (const id of newSel) { const o = objectsRef.current.find(ob=>ob.id===id)!; snap.set(id,{x:o.x,y:o.y,w:o.w,h:o.h,x1:o.x1,y1:o.y1,x2:o.x2,y2:o.y2,mx:o.mx,my:o.my,pts:[...o.pts]}) }
+        textInputMoveStartRef.current = (textInput?.targetId && newSel.includes(textInput.targetId))
+          ? { x: textInput.x, y: textInput.y } : null
         dragRef.current = {kind:'move',ids:newSel,start:pos,snap}
         renderAll(); return
       }
@@ -1538,6 +1560,22 @@ export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawMo
     elbowLockedPtsRef.current = isOrtho ? [pos] : []
     elbowDirRef.current = null
     activeRef.current = mkObj({id:uid(),type:tool as ObjType,color:drawColor,fillColor,filled,sw:shapeSw,connType, doubleEnded: tool==='arrow' && doubleEndedDefault, pts: isOrtho ? [pos] : []})
+  }
+
+  // Touch-only entry point wired to onTouchMove (see the canvas JSX below) —
+  // preventDefault must still happen synchronously, within the real event
+  // dispatch, to block page scroll/zoom while drawing; only the actual
+  // geometry update + render is deferred to the next animation frame.
+  function onTouchMoveCoalesced(e: React.TouchEvent) {
+    e.preventDefault()
+    latestTouchMoveRef.current = e
+    if (touchMoveRafRef.current !== null) return
+    touchMoveRafRef.current = requestAnimationFrame(() => {
+      touchMoveRafRef.current = null
+      const ev = latestTouchMoveRef.current
+      latestTouchMoveRef.current = null
+      if (ev) continueStroke(ev)
+    })
   }
 
   function continueStroke(e: React.MouseEvent | React.TouchEvent) {
@@ -1615,6 +1653,13 @@ export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawMo
         if (o.type === 'stroke') return {...o,pts:s.pts.map(p=>({x:p.x+dx,y:p.y+dy}))}
         return {...o,x:s.x+dx,y:s.y+dy}
       }))
+      // Keep the floating Title/Note editor glued to its shape for every
+      // frame of the drag (not just once it ends) — same dx/dy (including any
+      // smart-alignment snap nudge above) the shape itself just moved by.
+      if (textInputMoveStartRef.current) {
+        const start = textInputMoveStartRef.current
+        setTextInput(prev => prev ? { ...prev, x: start.x + dx, y: start.y + dy } : prev)
+      }
       renderAll(); return
     }
 
@@ -1880,6 +1925,13 @@ export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawMo
     e.preventDefault()
     if (!isDownRef.current) return
     isDownRef.current = false
+    // Drop any touchmove still queued for the next frame — the gesture is
+    // over, so applying it now would just be stale/wasted work (continueStroke
+    // already no-ops once isDownRef is false, but this also avoids committing
+    // the FINAL drag state from a slightly-later coalesced frame instead of
+    // this release's own, more current position).
+    if (touchMoveRafRef.current !== null) { cancelAnimationFrame(touchMoveRafRef.current); touchMoveRafRef.current = null }
+    latestTouchMoveRef.current = null
     const canvas = canvasRef.current; if (!canvas) return
     const pos = getPos(e, canvas)
     const dm  = dragRef.current
@@ -1895,6 +1947,7 @@ export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawMo
 
     if (dm?.kind === 'move' || dm?.kind === 'resize' || dm?.kind === 'endpoint' || dm?.kind === 'rotate' || dm?.kind === 'group-resize') {
       dragRef.current = null; alignGuidesRef.current = []; snapTargetRef.current = null; connSnapPointRef.current = null
+      textInputMoveStartRef.current = null
       syncObjs(objectsRef.current); snapshot(objectsRef.current); renderAll(); return
     }
 
@@ -1985,23 +2038,39 @@ export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawMo
     bgImgRef.current=null; syncObjs([]); syncSel([]); snapshot([]); renderAll()
   }
 
-  function handleSave() {
-    if (textInput) commitText()
-    const canvas = canvasRef.current; if (!canvas) return
-    const off = document.createElement('canvas')
-    off.width=canvas.width; off.height=canvas.height
-    const c=off.getContext('2d')!; const dpr=window.devicePixelRatio||1; c.scale(dpr,dpr)
-    const w=canvas.offsetWidth, h=canvas.offsetHeight
-    c.fillStyle='#ffffff'; c.fillRect(0,0,w,h)
-    if (bgImgRef.current) c.drawImage(bgImgRef.current,0,0,w,h)
-    for (const obj of objectsRef.current) renderObj(c, obj, imageCacheRef.current)
-    // PNG stays the thumbnail/preview shown everywhere else; the object list
-    // is what makes reopening the canvas resume as a REAL editable Mind Map
-    // instead of a flattened picture — see JournalBlock.canvasData.
-    const objectsJson = JSON.stringify(objectsRef.current)
-    onSave(off.toDataURL('image/png'), objectsJson)
-    lastSavedJsonRef.current = objectsJson
-    setToast('Mind Map saved ✓')
+  // Returns whether the save actually succeeded — callers that need to gate
+  // an exit/close on a real save (the unsaved-changes dialog's own Save
+  // button) must only proceed when this is true, never unconditionally.
+  // Wrapped in try/catch so a thrown error (e.g. a canvas operation failing)
+  // surfaces as a toast instead of silently aborting mid-save, which on some
+  // mobile browsers could otherwise look like "Save does nothing."
+  function handleSave(): boolean {
+    try {
+      if (textInput) commitText()
+      const canvas = canvasRef.current
+      if (!canvas) { setToast('Could not save — please try again'); return false }
+      const off = document.createElement('canvas')
+      off.width=canvas.width; off.height=canvas.height
+      const c=off.getContext('2d')
+      if (!c) { setToast('Could not save — please try again'); return false }
+      const dpr=window.devicePixelRatio||1; c.scale(dpr,dpr)
+      const w=canvas.offsetWidth, h=canvas.offsetHeight
+      c.fillStyle='#ffffff'; c.fillRect(0,0,w,h)
+      if (bgImgRef.current) c.drawImage(bgImgRef.current,0,0,w,h)
+      for (const obj of objectsRef.current) renderObj(c, obj, imageCacheRef.current)
+      // PNG stays the thumbnail/preview shown everywhere else; the object list
+      // is what makes reopening the canvas resume as a REAL editable Mind Map
+      // instead of a flattened picture — see JournalBlock.canvasData.
+      const objectsJson = JSON.stringify(objectsRef.current)
+      onSave(off.toDataURL('image/png'), objectsJson)
+      lastSavedJsonRef.current = objectsJson
+      setToast('Mind Map saved ✓')
+      return true
+    } catch (err) {
+      console.error('Mind Map save failed:', err)
+      setToast('Could not save the Mind Map — please try again')
+      return false
+    }
   }
 
   // ── Unsaved-changes guard (Cancel/Close) ────────────────────────────────────
@@ -2199,16 +2268,26 @@ export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawMo
     const step = n > 1 ? (bottomY-topY)/(n-1) : 0
     const connType: ConnType = corner === 'rounded' ? 'elbow-curved' : 'elbow'
     const sw = THICKNESS_LEVELS[arrowThickIdx]
+    const hostId = uid()
     const branches: DrawObj[] = []
     for (let i = 0; i < n; i++) {
       const branchY = topY + step*i
       branches.push(mkObj({
-        id: uid(), type:'arrow', color:drawColor, sw, connType, elbowBend:'v',
+        id: i === 0 ? hostId : uid(), type:'arrow', color:drawColor, sw, connType, elbowBend:'v',
         x1:spineX, y1:topY, x2:endX, y2:branchY, mx:(spineX+endX)/2, my:(topY+branchY)/2,
+        // Every branch after the first has its start STRUCTURALLY joined to
+        // the first branch's start — the same unified-joint mechanism two
+        // separately-drawn connectors' endpoints already share — rather than
+        // merely coinciding at the same coordinate. Grabbing any branch's
+        // start handle redirects (see resolveJointRedirect) to drag the
+        // host's real start instead, so every branch's shared point moves
+        // together and the spine can never visually detach. Each branch's
+        // own END stays completely independent/attachable, as intended.
+        ...(i === 0 ? {} : { attachStartConnId: hostId, attachStartT: 0 }),
       }))
     }
-    const n2 = [...objectsRef.current, ...branches]
-    syncObjs(n2); syncSel(branches.map(o=>o.id)); snapshot(n2); renderAll()
+    const resolved = resolveAttachments([...objectsRef.current, ...branches])
+    syncObjs(resolved); syncSel(branches.map(o=>o.id)); snapshot(resolved); renderAll()
     setTool('select')
   }
 
@@ -3239,7 +3318,7 @@ export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawMo
         ref={canvasRef}
         style={{display:'block',touchAction:'none'}}
         onMouseDown={beginStroke} onMouseMove={continueStroke} onMouseUp={endStroke} onMouseLeave={endStroke}
-        onTouchStart={beginStroke} onTouchMove={continueStroke} onTouchEnd={endStroke}
+        onTouchStart={beginStroke} onTouchMove={onTouchMoveCoalesced} onTouchEnd={endStroke}
         onDoubleClick={e=>{
           if (tool!=='select') return
           const canvas = canvasRef.current; if (!canvas) return
@@ -3383,7 +3462,12 @@ export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawMo
         </div>
         <div style={{display:'flex',flexDirection:'column',gap:8}}>
           <button
-            onClick={() => { handleSave(); setShowUnsavedDialog(false); onClose() }}
+            onClick={() => {
+              // Only close once the save actually succeeded — if it failed,
+              // the error toast already explained why, the dialog stays open,
+              // and the unsaved work is still intact (never discarded).
+              if (handleSave()) { setShowUnsavedDialog(false); onClose() }
+            }}
             style={{
               padding:'10px 16px',borderRadius:9,border:'none',
               background:'linear-gradient(135deg,#5b21b6,#7c3aed)',

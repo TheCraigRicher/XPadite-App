@@ -44,7 +44,10 @@ function parseDateKey(key: string): Date {
 
 function fmtLongDate(key: string): string {
   const d = parseDateKey(key)
-  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+  // Abbreviated weekday ("Wed") to conserve horizontal space in the date
+  // control; month stays unabbreviated unless an existing small-screen
+  // treatment already shortens it elsewhere.
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })
 }
 
 // Same solid-triangle glyphs as the main Planner header's day-nav arrows, for
@@ -67,6 +70,7 @@ export function SendToOptionsModal({
   const [dupInfo, setDupInfo]         = useState<{ nodes: PlannerTaskNode[]; total: number; sentCount: number } | null>(null)
   const [openTip, setOpenTip]         = useState<string | null>(null)
   const [showZeroCheckboxInfo, setShowZeroCheckboxInfo] = useState(false)
+  const [showGuide, setShowGuide] = useState(false)
 
   const [tmDateKey, setTmDateKey]     = useState(() => todayKey(effectiveTimezone))
   const [calendarOpen, setCalendarOpen] = useState(false)
@@ -90,6 +94,7 @@ export function SendToOptionsModal({
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key !== 'Escape') return
+    if (showGuide) { setShowGuide(false); return }
     if (showZeroCheckboxInfo) { setShowZeroCheckboxInfo(false); return }
     if (view === 'main') onClose(); else goBack()
   }
@@ -222,26 +227,35 @@ export function SendToOptionsModal({
         @media (prefers-reduced-motion: no-preference) {
           .xp-sendto-btn { transition: transform 140ms ease, background 140ms ease, border-color 140ms ease, box-shadow 140ms ease; }
           .xp-sendto-hint, .xp-sendto-hint-text { transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease; }
-          .xp-sendto-date-btn { transition: background 160ms ease, border-color 160ms ease, transform 100ms ease; }
+          .xp-sendto-date-btn { transition: background 160ms ease, box-shadow 160ms ease, transform 100ms ease; }
           .xp-sendto-cal { transition: grid-template-rows 220ms ease-out; }
+          .xp-sendto-info-btn { transition: background 150ms ease, transform 100ms ease; }
         }
         @media (prefers-reduced-motion: reduce) {
           .xp-sendto-btn { transition: background 80ms linear; }
           .xp-sendto-hint, .xp-sendto-hint-text { transition: background 80ms linear, color 80ms linear; }
           .xp-sendto-date-btn { transition: background 80ms linear; }
           .xp-sendto-cal { transition: grid-template-rows 1ms linear; }
+          .xp-sendto-info-btn { transition: background 80ms linear; }
         }
-        /* Task Manager Date control — purple button affordance + hover/press feedback.
-           Hover never opens the selector (only onClick does); :active gives
-           immediate press feedback before the click handler toggles it open. */
+        /* Task Manager Date control — solid XPadite-purple button. Hover never
+           opens the selector (only onClick does); :active gives immediate press
+           feedback before the click handler toggles it open. */
+        .xp-sendto-date-btn {
+          background: #7c3aed;
+        }
         .xp-sendto-date-btn:hover {
-          border-color: rgba(124,58,237,0.55) !important;
-          background: ${isDark ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.10)'} !important;
+          background: #6d28d9;
+          box-shadow: 0 2px 12px rgba(124,58,237,0.35);
         }
         .xp-sendto-date-btn:active {
           transform: scale(0.98);
-          background: ${isDark ? 'rgba(124,58,237,0.24)' : 'rgba(124,58,237,0.14)'} !important;
+          background: #5b21b6;
         }
+        /* Header info button — must read as a real button, not a passive glyph */
+        .xp-sendto-info-btn:hover { background: rgba(255,255,255,0.30) !important; }
+        .xp-sendto-info-btn:active { background: rgba(255,255,255,0.40) !important; transform: scale(0.92); }
+        .xp-sendto-info-btn:focus-visible { outline: 2px solid rgba(255,255,255,0.85); outline-offset: 2px; }
         /* Animated expand/collapse for the date selector — a 0fr/1fr grid-row
            tween clips smoothly via the inner overflow:hidden wrapper, so it
            never needs manual height measurement or a delayed unmount. */
@@ -321,6 +335,18 @@ export function SendToOptionsModal({
                 style={{ width: 22, height: 22, borderRadius: '50%', background: 'rgba(255,255,255,0.16)', color: '#fff', fontSize: 13, marginTop: 1, border: 'none', cursor: 'pointer' }}
               >
                 ‹
+              </button>
+            )}
+            {view === 'main' && (
+              <button
+                onClick={() => setShowGuide(true)}
+                title="Open Send to guide"
+                aria-label="Open Send to guide"
+                aria-haspopup="dialog"
+                className="xp-sendto-info-btn flex items-center justify-center flex-shrink-0"
+                style={{ width: 20, height: 20, borderRadius: '50%', background: 'rgba(255,255,255,0.20)', color: '#fff', fontSize: 11, fontWeight: 700, fontStyle: 'italic', marginTop: 1, border: 'none', cursor: 'pointer' }}
+              >
+                i
               </button>
             )}
             <div className="min-w-0">
@@ -412,19 +438,14 @@ export function SendToOptionsModal({
                     title="Choose a date to send tasks to"
                     aria-expanded={calendarOpen}
                     className="xp-sendto-date-btn w-full flex items-center justify-between rounded-xl"
-                    style={{
-                      padding: '9px 11px',
-                      background: isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)',
-                      border: '1px solid rgba(124,58,237,0.35)',
-                      cursor: 'pointer',
-                    }}
+                    style={{ padding: '10px 12px', border: 'none', cursor: 'pointer' }}
                   >
-                    <span className="text-[11px] font-semibold" style={{ color: isDark ? '#c4b5fd' : '#7c3aed' }}>
-                      Task Manager Date
+                    <span className="text-[11px] font-semibold" style={{ color: '#ffffff' }}>
+                      Select Task Manager Date
                     </span>
-                    <span className="flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: isDark ? '#c4b5fd' : '#7c3aed' }}>
+                    <span className="flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: '#ffffff' }}>
                       {tmDateKey === todayKey(effectiveTimezone) ? 'Today' : fmtLongDate(tmDateKey)}
-                      <span style={{ fontSize: 13, lineHeight: 1, transform: calendarOpen ? 'rotate(180deg)' : 'none', transition: 'transform 180ms ease' }}>▾</span>
+                      <span style={{ fontSize: 15, lineHeight: 1, color: '#ffffff', transform: calendarOpen ? 'rotate(180deg)' : 'none', transition: 'transform 180ms ease' }}>▾</span>
                     </span>
                   </button>
 
@@ -578,6 +599,78 @@ export function SendToOptionsModal({
               >
                 Got it
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Send To guide — a lightweight overlay on top of the Send To modal;
+          closing it never touches the Send To modal's own state (view,
+          tmDateKey, selectedIds, …), so the user returns exactly where they left off. */}
+      {showGuide && (
+        <div
+          className="fixed inset-0 flex items-center justify-center p-4"
+          style={{ zIndex: 220, background: 'rgba(0,0,0,0.45)' }}
+          onClick={() => setShowGuide(false)}
+        >
+          <div
+            className="w-full max-w-[340px] rounded-2xl overflow-hidden flex flex-col"
+            style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.32)', maxHeight: '80vh' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div
+              className="flex items-center justify-between gap-3 px-4 py-3 flex-shrink-0"
+              style={{ background: 'linear-gradient(135deg, #5b21b6 0%, #7c3aed 100%)' }}
+            >
+              <h3 className="text-[13.5px] font-semibold" style={{ color: '#ffffff' }}>How to use Send to</h3>
+              <button
+                onClick={() => setShowGuide(false)}
+                aria-label="Close guide"
+                className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 transition-opacity hover:opacity-75"
+                style={{ background: 'rgba(255,255,255,0.16)', color: '#ffffff', border: 'none', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="px-4 py-3.5 overflow-y-auto" style={{ minHeight: 0 }}>
+              <div className="flex flex-col gap-3">
+                <div>
+                  <p className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: isDark ? '#c4b5fd' : '#7c3aed' }}>Step 1 · Open Send to</p>
+                  <p className="text-[11.5px] leading-relaxed mt-1" style={{ color: 'var(--xp-txt)' }}>
+                    From a Planner section&apos;s 3-dots menu, choose <strong>Send to…</strong>
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: isDark ? '#c4b5fd' : '#7c3aed' }}>Step 2 · Choose what to send</p>
+                  <div className="flex flex-col gap-1.5 mt-1">
+                    <p className="text-[11.5px] leading-relaxed" style={{ color: 'var(--xp-txt3)' }}>
+                      <strong style={{ color: 'var(--xp-txt)' }}>Send Selected to Task Manager</strong> — sends only the selected/checked eligible items to Task Manager.
+                    </p>
+                    <p className="text-[11.5px] leading-relaxed" style={{ color: 'var(--xp-txt3)' }}>
+                      <strong style={{ color: 'var(--xp-txt)' }}>Send All to Task Manager</strong> — sends all eligible items from the current Planner section to Task Manager.
+                    </p>
+                    <p className="text-[11.5px] leading-relaxed" style={{ color: 'var(--xp-txt3)' }}>
+                      <strong style={{ color: 'var(--xp-txt)' }}>Send Selected to AI Coach</strong> — sends only the selected content to AI Coach. (V2)
+                    </p>
+                    <p className="text-[11.5px] leading-relaxed" style={{ color: 'var(--xp-txt3)' }}>
+                      <strong style={{ color: 'var(--xp-txt)' }}>Send All to AI Coach</strong> — sends the entire section to AI Coach. (V2)
+                    </p>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: isDark ? '#c4b5fd' : '#7c3aed' }}>Step 3 · Select Task Manager Date</p>
+                  <p className="text-[11.5px] leading-relaxed mt-1" style={{ color: 'var(--xp-txt)' }}>
+                    Use <strong>Select Task Manager Date</strong> to choose which Task Manager date should receive the tasks.
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: isDark ? '#c4b5fd' : '#7c3aed' }}>Step 4 · Send</p>
+                  <p className="text-[11.5px] leading-relaxed mt-1" style={{ color: 'var(--xp-txt)' }}>
+                    After choosing the destination date, click the appropriate Task Manager send option above. <strong>Selecting a date by itself does not send the tasks.</strong>
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </div>

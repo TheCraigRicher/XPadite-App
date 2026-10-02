@@ -1000,7 +1000,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const [selIds,      setSelIds]      = useState<string[]>([])
   const [textInput,   setTextInput]   = useState<{ x:number; y:number; w?:number; value:string; targetId?:string; noteValue?:string; activeField?:EditField; titleFontSize?:number; noteFontSizeLive?:number; titleOnly?:boolean } | null>(null)
   const [openPopover, setOpenPopover] = useState<PopoverId | null>(null)
-  const [popAnchor,   setPopAnchor]   = useState<{ top:number; left:number } | null>(null)
+  const [popAnchor,   setPopAnchor]   = useState<{ left:number; top?:number; bottom?:number } | null>(null)
   const [arrowConnDefault, setArrowConnDefault] = useState<ConnType>('elbow')
   const [doubleEndedDefault, setDoubleEndedDefault] = useState(false) // default for NEW arrows; editing a selected arrow uses toggleDoubleEnded instead
   const [showCustomFill, setShowCustomFill] = useState(false)
@@ -1875,13 +1875,17 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   // that axis, snapped to share it exactly, and evenly re-spaced using their
   // OWN median gap (never a hardcoded grid) centered on their original span —
   // so overall position/composition is preserved, not redesigned. A shape
-  // that isn't close to any other selected shape on either axis is a
-  // deliberate outlier (e.g. a root node clearly off to one side) and is left
-  // completely untouched, exactly as the user positioned it. Afterward,
-  // resolveAttachments (the same mechanism every move/resize/rotate already
-  // relies on) re-derives every connector's actual path from the shapes' new
-  // positions — straight/elbow geometry and 90° corners fall out of that for
-  // free, exactly as they do after any ordinary move.
+  // that isn't close enough to any other selected shape to form its own group
+  // (e.g. a root node clearly off to one side) is then related to whichever
+  // cleaned-up group it's nearest to: it keeps its own position on the axis
+  // that group already shares, and only its OTHER coordinate snaps to that
+  // group's center (see the lone-shape pass below) — e.g. a single object
+  // facing a vertical stack lines up with the stack's center, without being
+  // pulled into the stack itself. Afterward, resolveAttachments (the same
+  // mechanism every move/resize/rotate already relies on) re-derives every
+  // connector's actual path from the shapes' new positions — straight/elbow
+  // geometry and 90° corners fall out of that for free, exactly as they do
+  // after any ordinary move.
   const ALIGN_CLUSTER_TOL = 70 // px — "roughly aligned already" tolerance for clustering by center proximity
 
   function alignSelected() {
@@ -1913,6 +1917,10 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
 
     const deltas = new Map<string, { dx: number; dy: number }>()
     const used = new Set<string>()
+    // One entry per cleaned-up group, used afterward to relate any leftover
+    // lone shape to whichever group it's actually closest to (see below) —
+    // 'vertical' = members share an X, spread along Y; 'horizontal' = the mirror.
+    const groups: Array<{ orientation: 'vertical' | 'horizontal'; center: Pt }> = []
 
     function applyVerticalCluster(cluster: typeof items) {
       const sharedX = median(cluster.map(c=>c.pos.x))
@@ -1923,6 +1931,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       const centerY = (sorted[0].pos.y + sorted[sorted.length-1].pos.y) / 2
       let y = centerY - span / 2
       for (const c of sorted) { deltas.set(c.id, { dx: sharedX - c.pos.x, dy: y - c.pos.y }); used.add(c.id); y += gap }
+      groups.push({ orientation: 'vertical', center: { x: sharedX, y: centerY } })
     }
     function applyHorizontalCluster(cluster: typeof items) {
       const sharedY = median(cluster.map(c=>c.pos.y))
@@ -1933,6 +1942,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       const centerX = (sorted[0].pos.x + sorted[sorted.length-1].pos.x) / 2
       let x = centerX - span / 2
       for (const c of sorted) { deltas.set(c.id, { dx: x - c.pos.x, dy: sharedY - c.pos.y }); used.add(c.id); x += gap }
+      groups.push({ orientation: 'horizontal', center: { x: centerX, y: sharedY } })
     }
 
     // Vertical groups (shared X) take priority — a shape already claimed by
@@ -1941,6 +1951,26 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     for (const cluster of clusterByAxis(items, 'x')) applyVerticalCluster(cluster)
     const remaining = items.filter(it => !used.has(it.id))
     for (const cluster of clusterByAxis(remaining, 'y')) applyHorizontalCluster(cluster)
+
+    // Relate each leftover lone shape (not close enough to anything to form
+    // its own group) to whichever cleaned-up group it's nearest to — e.g. a
+    // single object facing a 3-object vertical stack naturally lines up with
+    // that stack's center. Only the axis the group DOESN'T already share gets
+    // touched, so the lone shape keeps its own general left/right (or
+    // up/down) position — composition is preserved, not redesigned.
+    if (groups.length > 0) {
+      for (const item of items) {
+        if (used.has(item.id)) continue
+        let best = groups[0], bestDist = Math.hypot(item.pos.x-groups[0].center.x, item.pos.y-groups[0].center.y)
+        for (const g of groups.slice(1)) {
+          const d = Math.hypot(item.pos.x-g.center.x, item.pos.y-g.center.y)
+          if (d < bestDist) { bestDist = d; best = g }
+        }
+        deltas.set(item.id, best.orientation === 'vertical'
+          ? { dx: 0, dy: best.center.y - item.pos.y }
+          : { dx: best.center.x - item.pos.x, dy: 0 })
+      }
+    }
 
     if (deltas.size === 0) { setToast('Nothing roughly aligned enough to clean up'); return }
 
@@ -2288,22 +2318,30 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   // this escapes the toolbar's own overflowX:'auto' scroll/clip ancestor entirely (unlike
   // position:absolute, which resolves its containing block inside that scrolling ancestor
   // and gets clipped/scrolled along with it).
-  function openPop(id: PopoverId, e: React.MouseEvent<HTMLElement>) {
+  // `direction` controls which edge of the trigger the popover grows from —
+  // 'down' (the default, used by every top-toolbar trigger) anchors via `top`
+  // just below the button; 'up' (bottom-toolbar triggers — Rotate/Fill/Flip)
+  // anchors via `bottom` just above it instead, so a popover launched from the
+  // bottom dock always opens into the canvas rather than off the bottom of
+  // the viewport/modal.
+  function openPop(id: PopoverId, e: React.MouseEvent<HTMLElement>, direction: 'down' | 'up' = 'down') {
     const r = e.currentTarget.getBoundingClientRect()
-    setPopAnchor({ top: r.bottom + 4, left: r.left })
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 0
+    setPopAnchor(direction === 'up'
+      ? { left: r.left, bottom: vh - r.top + 4 }
+      : { left: r.left, top: r.bottom + 4 })
     setOpenPopover(op => op === id ? null : id)
   }
 
   function fixedPopStyle(extra?: React.CSSProperties): React.CSSProperties {
     const width = 150
     let left = popAnchor?.left ?? 0
-    let top  = popAnchor?.top ?? 0
-    if (typeof window !== 'undefined') {
-      left = Math.min(Math.max(8, left), window.innerWidth - width - 8)
-      top  = Math.min(top, window.innerHeight - 60)
-    }
+    if (typeof window !== 'undefined') left = Math.min(Math.max(8, left), window.innerWidth - width - 8)
+    const vertical: React.CSSProperties = popAnchor?.bottom !== undefined
+      ? { bottom: popAnchor.bottom }
+      : { top: typeof window !== 'undefined' ? Math.min(popAnchor?.top ?? 0, window.innerHeight - 60) : (popAnchor?.top ?? 0) }
     return {
-      position:'fixed', top, left, zIndex:300,
+      position:'fixed', left, zIndex:300, ...vertical,
       background:isDark?'#1e1033':'#ffffff', border:`0.5px solid ${dockBdr}`,
       borderRadius:10, padding:'6px', display:'flex', flexDirection:'column', gap:2,
       boxShadow:isDark?'0 8px 24px rgba(0,0,0,0.55)':'0 4px 16px rgba(0,0,0,0.14)', minWidth:130,
@@ -2616,7 +2654,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
 
         {/* Rotate — quick ±90°, works on the current selection */}
         <div style={{flexShrink:0}} data-pop-trigger="">
-          <button title="Rotate" disabled={!selHasRotatable} onClick={(e)=>{if(!selHasRotatable)return;openPop('rotate',e)}}
+          <button title="Rotate" disabled={!selHasRotatable} onClick={(e)=>{if(!selHasRotatable)return;openPop('rotate',e,'up')}}
             style={{...navyBtn(false,false,!selHasRotatable),display:'flex',alignItems:'center',padding:'4px 8px',fontSize:13}}>↻</button>
           {openPopover==='rotate' && (
             <div data-popover="" style={fixedPopStyle({flexDirection:'row',gap:4,minWidth:'auto',padding:'6px 8px'})}>
@@ -2643,7 +2681,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
             not the native browser picker. Stays in its normal toolbar position even
             with nothing selected — disabled rather than removed. */}
         <div style={{flexShrink:0}} data-pop-trigger="">
-          <button title="Fill Color" disabled={!showFill} onClick={(e)=>{if(!showFill)return;if(textInput)commitText();openPop('fill',e)}}
+          <button title="Fill Color" disabled={!showFill} onClick={(e)=>{if(!showFill)return;if(textInput)commitText();openPop('fill',e,'up')}}
             style={{...navyBtn(false,false,!showFill),display:'flex',alignItems:'center',gap:5,padding:'4px 8px'}}>
             <span style={{width:16,height:16,borderRadius:4,background:fillColor,border:'1.5px solid rgba(255,255,255,0.35)',display:'inline-block',flexShrink:0,opacity:showFill?1:0.4}}/>
             Fill
@@ -2686,7 +2724,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
 
         {/* Flip popover */}
         <div style={{flexShrink:0}} data-pop-trigger="">
-          <button title="Flip" disabled={!selHasFlippable} onClick={(e)=>{if(!selHasFlippable)return;openPop('flip',e)}}
+          <button title="Flip" disabled={!selHasFlippable} onClick={(e)=>{if(!selHasFlippable)return;openPop('flip',e,'up')}}
             style={{...navyBtn(false,false,!selHasFlippable),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>⇆ Flip▾</button>
           {openPopover==='flip' && (
             <div data-popover="" style={fixedPopStyle()}>

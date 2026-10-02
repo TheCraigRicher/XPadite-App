@@ -299,8 +299,18 @@ function CompactDropdown({ value, options, onChange, isDark, width, ariaLabel, i
 
 // ─── TimeRow — module-level so React never remounts CompactDropdown on state change ──
 
+// Keeps a 2-digit manual time field zero-filled and overwrite-friendly: once
+// the field is at its 2-digit cap, a further keystroke shifts the new digit
+// in and drops the oldest one, instead of the browser's native maxLength
+// silently blocking the keystroke (which previously forced the user to
+// delete the existing "00" before typing a replacement).
+function shiftDigits(raw: string, maxLen = 2): string {
+  const digits = raw.replace(/\D/g, '')
+  return digits.length > maxLen ? digits.slice(digits.length - maxLen) : digits
+}
+
 function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setActivePicker, prefix,
-  manualMode, rawH, rawM, onRawH, onRawM, hInvalid, mInvalid, onFirstFocus }: {
+  manualMode, rawH, rawM, onRawH, onRawM, hInvalid, mInvalid, onFirstFocus, pulse }: {
   label: string; h: string; m: string; ap: string
   onH: (v: string) => void; onM: (v: string) => void; onAP: (v: string) => void
   isDark: boolean
@@ -312,6 +322,9 @@ function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setAct
   onRawH?: (v: string) => void; onRawM?: (v: string) => void
   hInvalid?: boolean; mInvalid?: boolean
   onFirstFocus?: () => void
+  // Briefly true right after "Set Current Time" fills this row, for a subtle
+  // purple acknowledgement that fades back out — see handleSetCurrentStart/End.
+  pulse?: boolean
 }) {
   const inputBase: React.CSSProperties = {
     borderRadius: 8, textAlign: 'center', fontSize: 12, fontWeight: 500,
@@ -322,10 +335,16 @@ function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setAct
     <div style={{ display: 'flex', justifyContent: 'center' }}>
       <div>
       <label style={{ display: 'block', fontSize: 10, fontWeight: 500, marginBottom: 5, color: 'var(--xp-txt3)' }}>{label}</label>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <div style={{
+        display: 'flex', gap: 6, alignItems: 'center',
+        padding: 4, margin: -4, borderRadius: 10,
+        boxShadow: pulse ? '0 0 0 2px rgba(124,58,237,0.45)' : '0 0 0 0 rgba(124,58,237,0)',
+        background: pulse ? 'rgba(124,58,237,0.07)' : 'transparent',
+        transition: 'box-shadow 350ms ease, background 350ms ease',
+      }}>
         {manualMode ? (
-          <input type="text" inputMode="numeric" value={rawH ?? h} onChange={e => onRawH?.(e.target.value)}
-            onFocus={onFirstFocus} placeholder="00" maxLength={2}
+          <input type="text" inputMode="numeric" value={rawH ?? h} onChange={e => onRawH?.(shiftDigits(e.target.value))}
+            onFocus={onFirstFocus} placeholder="00"
             style={{ ...inputBase, width: 56, border: `1px solid ${hInvalid ? '#ef4444' : 'var(--xp-bdr2)'}` }} />
         ) : (
           <CompactDropdown value={h} options={ADJUST_HOURS} onChange={onH} isDark={isDark} width={56}
@@ -333,8 +352,8 @@ function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setAct
         )}
         <span style={{ color: 'var(--xp-txt3)', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>:</span>
         {manualMode ? (
-          <input type="text" inputMode="numeric" value={rawM ?? m} onChange={e => onRawM?.(e.target.value)}
-            onFocus={onFirstFocus} placeholder="00" maxLength={2}
+          <input type="text" inputMode="numeric" value={rawM ?? m} onChange={e => onRawM?.(shiftDigits(e.target.value))}
+            onFocus={onFirstFocus} placeholder="00"
             style={{ ...inputBase, width: 62, border: `1px solid ${mInvalid ? '#ef4444' : 'var(--xp-bdr2)'}` }} />
         ) : (
           <CompactDropdown value={m} options={ADJUST_MINUTES} onChange={onM} isDark={isDark} width={62}
@@ -392,29 +411,54 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   const [endH,    setEndH]    = useState(endInit.h)
   const [endM,    setEndM]    = useState(endInit.m)
   const [endAP,   setEndAP]   = useState(endInit.ap)
-  const [noteVal, setNoteVal] = useState('')
   const [activePicker, setActivePicker] = useState<string | null>(null)
+
+  // Brief purple acknowledgement on the "Set Current Time" button + its
+  // corresponding Start/End field group after a click — a one-shot
+  // confirmation, not a persistent selected state, so it auto-reverts.
+  const [startPulse, setStartPulse] = useState(false)
+  const [endPulse,   setEndPulse]   = useState(false)
+  const startPulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const endPulseTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (startPulseTimerRef.current) clearTimeout(startPulseTimerRef.current)
+    if (endPulseTimerRef.current) clearTimeout(endPulseTimerRef.current)
+  }, [])
 
   function validH(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 1 && n <= 12 }
   function validM(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 0 && n <= 59 }
 
-  // Auto-populate Start/End Time with the current time (in the user's
-  // configured XPadite timezone) the first time each is focused while still
-  // empty — mirrors the previous behavior. Guarded by emptiness so it never
-  // overwrites a value the user has already set or edited.
+  // Clicking into an unset (dimmed) Start/End field just activates the
+  // zero-filled "00 : 00" baseline for manual editing — it must NOT insert
+  // the current clock time (that only happens via the explicit "Set Current
+  // Time" buttons below). Guarded by emptiness so it never overwrites a
+  // value the user has already set or edited.
   function handleStartFirstFocus() {
     if (startH !== '' || startM !== '') return
-    const now = nowH12InTz(effectiveTimezone)
-    setStartH(now.h)
-    setStartM(now.m)
-    setStartAP(now.ap)
+    setStartH('00')
+    setStartM('00')
   }
   function handleEndFirstFocus() {
     if (endH !== '' || endM !== '') return
+    setEndH('00')
+    setEndM('00')
+  }
+
+  // Explicit current-time shortcuts — the only place this modal reads the
+  // live clock. Each affects only its own side.
+  function handleSetCurrentStart() {
     const now = nowH12InTz(effectiveTimezone)
-    setEndH(now.h)
-    setEndM(now.m)
-    setEndAP(now.ap)
+    setStartH(now.h); setStartM(now.m); setStartAP(now.ap)
+    if (startPulseTimerRef.current) clearTimeout(startPulseTimerRef.current)
+    setStartPulse(true)
+    startPulseTimerRef.current = setTimeout(() => setStartPulse(false), 750)
+  }
+  function handleSetCurrentEnd() {
+    const now = nowH12InTz(effectiveTimezone)
+    setEndH(now.h); setEndM(now.m); setEndAP(now.ap)
+    if (endPulseTimerRef.current) clearTimeout(endPulseTimerRef.current)
+    setEndPulse(true)
+    endPulseTimerRef.current = setTimeout(() => setEndPulse(false), 750)
   }
 
   // Resets only affect the fields currently being edited in this modal — they
@@ -455,8 +499,9 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
                 isDark={isDark} activePicker={activePicker} setActivePicker={setActivePicker} prefix="start"
                 manualMode={true} rawH={startH} rawM={startM}
                 onRawH={setStartH} onRawM={setStartM}
-                hInvalid={startH !== '' && !validH(startH)} mInvalid={startM !== '' && !validM(startM)}
+                hInvalid={startH !== '' && startH !== '00' && !validH(startH)} mInvalid={startM !== '' && !validM(startM)}
                 onFirstFocus={handleStartFirstFocus}
+                pulse={startPulse}
               />
               <button type="button" onClick={handleResetStart}
                 className="text-xs font-bold px-4 py-2 rounded-full text-white flex-shrink-0"
@@ -471,8 +516,9 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
                 isDark={isDark} activePicker={activePicker} setActivePicker={setActivePicker} prefix="end"
                 manualMode={true} rawH={endH} rawM={endM}
                 onRawH={setEndH} onRawM={setEndM}
-                hInvalid={endH !== '' && !validH(endH)} mInvalid={endM !== '' && !validM(endM)}
+                hInvalid={endH !== '' && endH !== '00' && !validH(endH)} mInvalid={endM !== '' && !validM(endM)}
                 onFirstFocus={handleEndFirstFocus}
+                pulse={endPulse}
               />
               <button type="button" onClick={handleResetEnd}
                 className="text-xs font-bold px-4 py-2 rounded-full text-white flex-shrink-0"
@@ -492,19 +538,40 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
             </span>
           </div>
 
-          {/* Reason */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: 'block', fontSize: 10, fontWeight: 500, marginBottom: 5, color: 'var(--xp-txt3)' }}>Reason (optional)</label>
-            <input type="text" value={noteVal} onChange={e => setNoteVal(e.target.value)}
-              placeholder="Why are you adjusting this time?"
-              className="w-full text-xs px-3 py-2 rounded-lg outline-none"
-              style={{ border: '1px solid var(--xp-bdr2)', background: 'var(--xp-bg3)', color: 'var(--xp-txt)' }} />
+          {/* Set Current Time — the only explicit current-time shortcut in this modal.
+              A brief purple pulse on the clicked button + its matching time row
+              (startPulse/endPulse) acknowledges the action; it's a one-shot
+              confirmation, not a persistent selected state. */}
+          <div style={{ padding: '10px 14px', borderRadius: 12, marginBottom: 16, border: '1px solid var(--xp-bdr2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--xp-txt2)', whiteSpace: 'nowrap' }}>Set Current Time:</span>
+            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+              <button type="button" onClick={handleSetCurrentStart}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors hover:bg-black/5 active:scale-95"
+                style={{
+                  border: `1px solid ${startPulse ? '#7c3aed' : 'var(--xp-bdr2)'}`,
+                  color: startPulse ? '#7c3aed' : 'var(--xp-txt)',
+                  background: startPulse ? 'rgba(124,58,237,0.08)' : 'transparent',
+                  transition: 'border-color 350ms ease, color 350ms ease, background 350ms ease, transform 100ms ease',
+                }}>
+                Start Time
+              </button>
+              <button type="button" onClick={handleSetCurrentEnd}
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors hover:bg-black/5 active:scale-95"
+                style={{
+                  border: `1px solid ${endPulse ? '#7c3aed' : 'var(--xp-bdr2)'}`,
+                  color: endPulse ? '#7c3aed' : 'var(--xp-txt)',
+                  background: endPulse ? 'rgba(124,58,237,0.08)' : 'transparent',
+                  transition: 'border-color 350ms ease, color 350ms ease, background 350ms ease, transform 100ms ease',
+                }}>
+                End Time
+              </button>
+            </div>
           </div>
 
           {/* Actions */}
           <div className="flex gap-2 justify-end">
             <button type="button" onClick={onClose} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
-            <button type="button" disabled={!isValid} onClick={() => { onSave(sessionId, startTs, endTs, noteVal); onClose() }}
+            <button type="button" disabled={!isValid} onClick={() => { onSave(sessionId, startTs, endTs, ''); onClose() }}
               className="text-xs px-5 py-1.5 rounded-full text-white"
               style={{ background: isValid ? '#7c3aed' : 'rgba(124,58,237,0.38)', cursor: isValid ? 'pointer' : 'not-allowed', transition: 'opacity 150ms ease' }}>
               Save

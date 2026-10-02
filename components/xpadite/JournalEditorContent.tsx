@@ -3041,7 +3041,11 @@ export function JournalEditorContent({
     setBlocks(next)
     setDrawState(prev => prev ? { ...prev, editingBlock: savedBlock } : prev)
     onContentChange(buildDocStr())
-    scheduleSave()
+    // Persist immediately rather than the debounced autosave — the MMC's own
+    // Save button/Ctrl+S must guarantee reopening the Mind Map restores what
+    // was just saved, not whatever was on disk up to 1500ms ago. Reuses the
+    // same immediate-persist path "Save Notes" already uses.
+    handleManualSave()
   }
 
   // Emoji
@@ -4245,8 +4249,19 @@ export function JournalEditorContent({
                     className="xp-jd-btn"
                     style={{ ...dockBtn(), padding: '5px 9px' }}
                     onClick={() => {
-                      if (typeof window !== 'undefined' && window.innerWidth < 641) customUndo()
-                      else focusedEditor.current?.chain().focus().undo().run()
+                      if (typeof window !== 'undefined' && window.innerWidth < 641) {
+                        customUndo()
+                      } else {
+                        // Fall back to the Planner-level undo stack whenever the
+                        // focused Tiptap editor is gone (e.g. destroyed by Merge
+                        // Section unmounting its pane) or has nothing left in its
+                        // own local history — never call .chain() on a stale/
+                        // destroyed editor. Structural ops like Merge/Split live
+                        // only in the Planner history, not in any one editor's.
+                        const ed = focusedEditor.current
+                        if (ed && !ed.isDestroyed && ed.can().undo()) ed.chain().focus().undo().run()
+                        else customUndo()
+                      }
                       showUndoRedoTip('undo')
                     }}
                     title="Undo"
@@ -4265,8 +4280,13 @@ export function JournalEditorContent({
                     className="xp-jd-btn"
                     style={{ ...dockBtn(), padding: '5px 9px' }}
                     onClick={() => {
-                      if (typeof window !== 'undefined' && window.innerWidth < 641) customRedo()
-                      else focusedEditor.current?.chain().focus().redo().run()
+                      if (typeof window !== 'undefined' && window.innerWidth < 641) {
+                        customRedo()
+                      } else {
+                        const ed = focusedEditor.current
+                        if (ed && !ed.isDestroyed && ed.can().redo()) ed.chain().focus().redo().run()
+                        else customRedo()
+                      }
                       showUndoRedoTip('redo')
                     }}
                     title="Redo"

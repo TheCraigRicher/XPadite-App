@@ -922,6 +922,11 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const textInputRef = useRef<HTMLInputElement>(null)
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map())
   const lastTapRef  = useRef<{ id: string; ts: number } | null>(null)
+  // Snapshot of objectsRef at the last successful save (or at initial load, so
+  // a freshly-opened canvas with no edits yet isn't flagged dirty) — compared
+  // on demand when Cancel/Close is requested, rather than threading a "dirty"
+  // flag through every one of the many mutation call sites below.
+  const lastSavedJsonRef = useRef<string>('[]')
 
   const [tool,        setTool]        = useState<DrawTool>('pen')
   const [penIdx,      setPenIdx]      = useState(1)
@@ -940,6 +945,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const [arrowConnDefault, setArrowConnDefault] = useState<ConnType>('elbow')
   const [doubleEndedDefault, setDoubleEndedDefault] = useState(false) // default for NEW arrows; editing a selected arrow uses toggleDoubleEnded instead
   const [showCustomFill, setShowCustomFill] = useState(false)
+  const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
   const [lineThickIdx,  setLineThickIdx]  = useState(1) // index into THICKNESS_LEVELS — default new-line thickness
   const [arrowThickIdx, setArrowThickIdx] = useState(1) // same, for new arrows
 
@@ -976,14 +982,16 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         const resolved = resolveAttachments(restored)
         syncObjs(resolved)
         historyRef.current = [JSON.stringify(resolved)]; setCanUndo(false); setCanRedo(false)
+        lastSavedJsonRef.current = JSON.stringify(resolved)
       } else if (initialSrc) {
         // No object data (a drawing saved before canvasData existed) — load
         // the old flattened PNG as a background, exactly as before.
         const img = new Image()
-        img.onload = () => { bgImgRef.current = img; c.drawImage(img,0,0,w,h); historyRef.current = ['[]']; setCanUndo(false); setCanRedo(false) }
+        img.onload = () => { bgImgRef.current = img; c.drawImage(img,0,0,w,h); historyRef.current = ['[]']; setCanUndo(false); setCanRedo(false); lastSavedJsonRef.current = '[]' }
         img.src = initialSrc
       } else {
         historyRef.current = ['[]']; setCanUndo(false); setCanRedo(false)
+        lastSavedJsonRef.current = '[]'
       }
     })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1626,8 +1634,19 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     // PNG stays the thumbnail/preview shown everywhere else; the object list
     // is what makes reopening the canvas resume as a REAL editable Mind Map
     // instead of a flattened picture — see JournalBlock.canvasData.
-    onSave(off.toDataURL('image/png'), JSON.stringify(objectsRef.current))
+    const objectsJson = JSON.stringify(objectsRef.current)
+    onSave(off.toDataURL('image/png'), objectsJson)
+    lastSavedJsonRef.current = objectsJson
     setToast('Mind Map saved ✓')
+  }
+
+  // ── Unsaved-changes guard (Cancel/Close) ────────────────────────────────────
+  function hasUnsavedChanges(): boolean {
+    return JSON.stringify(objectsRef.current) !== lastSavedJsonRef.current
+  }
+  function requestClose() {
+    if (hasUnsavedChanges()) setShowUnsavedDialog(true)
+    else onClose()
   }
 
   // ── Text ───────────────────────────────────────────────────────────────────
@@ -1922,13 +1941,17 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   // command — only once no text field is focused do these become canvas shortcuts.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // Ctrl/Cmd+S must always save the Mind Map and never fall through to the
+      // browser's native "Save Page" dialog — checked before the text-input
+      // guard below so it still fires while a shape's title/note field (or any
+      // other input) has focus.
+      if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s') { e.preventDefault(); handleSave(); return }
       const t = e.target as HTMLElement
       // The shape-text-edit/free-text <input> has its own onKeyDown (Enter
       // commits, Escape discards and keeps the shape selected) — leave it alone.
       if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t?.isContentEditable) return
       if (e.key==='Escape' && openPopover) { e.preventDefault(); setOpenPopover(null); return }
       if (e.key==='Escape' && selIdsRef.current.length>0) { e.preventDefault(); syncSel([]); renderAll(); return }
-      if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s') { e.preventDefault(); handleSave(); return }
       if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return }
       if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y') { e.preventDefault(); redo(); return }
       if ((e.key==='Delete'||e.key==='Backspace')&&selIdsRef.current.length>0) { e.preventDefault(); deleteSelected(); return }
@@ -2462,7 +2485,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
 
       {/* ── Fixed Cancel + Save ────────────────────────────────────────────── */}
       <div style={{display:'flex',alignItems:'center',gap:5,padding:'9px 12px',flexShrink:0,borderLeft:`0.5px solid ${navyBdr}`,background:navyBg}}>
-        <button onClick={onClose} className="xp-dm-cancel-btn" style={navyBtn(false,true)}>Cancel</button>
+        <button onClick={requestClose} className="xp-dm-cancel-btn" style={navyBtn(false,true)}>Cancel</button>
         <button onClick={handleSave} style={{padding:'5px 16px',borderRadius:7,border:'none',cursor:'pointer',background:'linear-gradient(135deg,#7c3aed,#6d28d9)',color:'#fff',fontSize:12,fontWeight:600,flexShrink:0,boxShadow:'0 2px 8px rgba(124,58,237,0.35)'}}>Save</button>
       </div>
 
@@ -2591,13 +2614,64 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     />
   )
 
+  // ── Unsaved-changes guard dialog (Cancel/Close with pending edits) ─────────
+  const unsavedDialog = showUnsavedDialog && (
+    <div style={{
+      position:'fixed', inset:0, zIndex:99999,
+      background:'rgba(0,0,0,0.72)', backdropFilter:'blur(4px)',
+      display:'flex', alignItems:'center', justifyContent:'center',
+    }}>
+      <div style={{
+        background:'#0f0a1e', border:'0.5px solid rgba(124,58,237,0.30)', borderRadius:16,
+        boxShadow:'0 24px 80px rgba(0,0,0,0.80), 0 0 0 1px rgba(124,58,237,0.08)',
+        padding:'28px 32px', maxWidth:380, width:'100%',
+        display:'flex', flexDirection:'column', gap:20,
+      }}>
+        <div>
+          <div style={{fontSize:16,fontWeight:700,color:'#f1f5f9',marginBottom:8,letterSpacing:'-0.01em'}}>Unsaved changes</div>
+          <div style={{fontSize:13,color:'rgba(255,255,255,0.58)',lineHeight:1.65}}>
+            You have changes in this Mind Map that haven&apos;t been saved yet.
+          </div>
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:8}}>
+          <button
+            onClick={() => { handleSave(); setShowUnsavedDialog(false); onClose() }}
+            style={{
+              padding:'10px 16px',borderRadius:9,border:'none',
+              background:'linear-gradient(135deg,#5b21b6,#7c3aed)',
+              color:'#fff',fontSize:13,fontWeight:600,cursor:'pointer',
+            }}
+          >Save</button>
+          <button
+            onClick={() => { setShowUnsavedDialog(false); onClose() }}
+            style={{
+              padding:'10px 16px',borderRadius:9,
+              border:'0.5px solid rgba(239,68,68,0.32)',
+              background:'rgba(239,68,68,0.10)',color:'#fca5a5',
+              fontSize:13,fontWeight:500,cursor:'pointer',
+            }}
+          >Discard</button>
+          <button
+            onClick={() => setShowUnsavedDialog(false)}
+            style={{
+              padding:'10px 16px',borderRadius:9,
+              border:'0.5px solid rgba(255,255,255,0.10)',
+              background:'transparent',color:'rgba(255,255,255,0.55)',
+              fontSize:13,fontWeight:500,cursor:'pointer',
+            }}
+          >Keep Working</button>
+        </div>
+      </div>
+    </div>
+  )
+
   // ── Render ─────────────────────────────────────────────────────────────────
   // Full-screen immersive ("Fit") mode is sized/positioned entirely by the
   // PARENT (via a document.body portal — see JournalDrawModalProps.fitScreen);
   // this component always renders the same embedded layout either way.
   return (
     <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minHeight:0,background:isDarkApp?'#10071e':'#ffffff'}}>
-      {popoverStyleTag}{topToolbar}{canvasArea}{bottomToolbar}{customFillPicker}
+      {popoverStyleTag}{topToolbar}{canvasArea}{bottomToolbar}{customFillPicker}{unsavedDialog}
     </div>
   )
 }

@@ -881,6 +881,15 @@ const RestoreIcon = ({ size = 14 }: { size?: number }) => (
   </svg>
 )
 
+const AlignIcon = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ display:'block' }}>
+    <path d="M3 2v12M13 2v12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+    <rect x="3" y="4" width="5" height="3" rx="0.8" fill="currentColor"/>
+    <rect x="3" y="9.5" width="7" height="3" rx="0.8" fill="currentColor"/>
+    <rect x="8.5" y="4" width="4.5" height="3" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.1"/>
+  </svg>
+)
+
 // ─── ElbowArrowIcon ───────────────────────────────────────────────────────────
 // Two visual variants of the same connector: identical L-shaped route and arrowhead,
 // differing only in whether the corner is a hard 90° or a smoothly rounded turn.
@@ -1783,6 +1792,146 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     syncObjs(n); snapshot(n); renderAll()
   }
 
+  // ── Align — intelligent cleanup, not a grid/auto-layout redesign ───────────
+  // Reads the SELECTED connectors' existing attachStartId/attachEndId to find
+  // which selected shapes are already meant to relate to each other (topology
+  // is only ever read here, never changed), then straightens exactly that:
+  // - a hub shape with several "spoke" shapes attached to it (whichever side
+  //   of each edge touches the most connections in the selection is the hub —
+  //   handles a one-parent/many-children fan-out OR a many/one fan-in the
+  //   same way) gets its spokes snapped to one shared axis and evenly spaced
+  //   using their own median gap (never a hardcoded grid), with the hub
+  //   re-centered on that axis — its OTHER coordinate (general position)
+  //   never moves.
+  // - a simple two-shape edge snaps to whichever of horizontal/vertical it
+  //   already predominantly was.
+  // Disconnected shapes in the selection are left untouched. Afterward,
+  // resolveAttachments (the same mechanism every move/resize/rotate already
+  // relies on) re-derives every connector's actual path from the shapes' new
+  // positions — straight/elbow geometry and 90° corners fall out of that for
+  // free, exactly as they do after any ordinary move.
+  function alignSelected() {
+    if (textInput) commitText()
+    const selSet = new Set(selIdsRef.current)
+    const all = objectsRef.current
+    const shapes = all.filter(o => selSet.has(o.id) && o.type !== 'line' && o.type !== 'arrow')
+    if (shapes.length < 2) { setToast('Select at least 2 connected shapes to align'); return }
+
+    const centerOf = (o: DrawObj) => { const bb = getObjBB(o); return { x: (bb.minX+bb.maxX)/2, y: (bb.minY+bb.maxY)/2 } }
+    const posMap = new Map(shapes.map(o => [o.id, centerOf(o)]))
+
+    type Edge = { parentId: string; childId: string }
+    const edges: Edge[] = []
+    for (const o of all) {
+      if (o.type !== 'line' && o.type !== 'arrow') continue
+      if (!selSet.has(o.id)) continue
+      if (o.attachStartId && o.attachEndId && posMap.has(o.attachStartId) && posMap.has(o.attachEndId)) {
+        edges.push({ parentId: o.attachStartId, childId: o.attachEndId })
+      }
+    }
+    if (edges.length === 0) { setToast('No connected shapes to align — connect them with a line/arrow first'); return }
+
+    // Whichever end of each edge touches more selected connections is the hub
+    // for that edge — correctly groups a one-to-many fan-out (hub = the one)
+    // and a many-to-one fan-in (hub = the shared target) the same way.
+    const degree = new Map<string, number>()
+    for (const e of edges) {
+      degree.set(e.parentId, (degree.get(e.parentId) ?? 0) + 1)
+      degree.set(e.childId,  (degree.get(e.childId)  ?? 0) + 1)
+    }
+    const hubGroups = new Map<string, string[]>()
+    for (const e of edges) {
+      const dp = degree.get(e.parentId) ?? 0, dc = degree.get(e.childId) ?? 0
+      const hub   = dp >= dc ? e.parentId : e.childId
+      const spoke = dp >= dc ? e.childId  : e.parentId
+      if (!hubGroups.has(hub)) hubGroups.set(hub, [])
+      hubGroups.get(hub)!.push(spoke)
+    }
+
+    const deltas = new Map<string, { dx: number; dy: number }>()
+    const getDelta = (id: string) => deltas.get(id) ?? { dx: 0, dy: 0 }
+    const median = (nums: number[]) => [...nums].sort((a,b)=>a-b)[Math.floor(nums.length/2)]
+
+    for (const [hubId, spokeIds] of hubGroups) {
+      const hubPos = posMap.get(hubId)
+      if (!hubPos) continue
+      const spokes = spokeIds.map(id => ({ id, pos: posMap.get(id) })).filter((s): s is { id: string; pos: Pt } => !!s.pos)
+      if (spokes.length === 0) continue
+
+      if (spokes.length === 1) {
+        const s = spokes[0]
+        const dx = s.pos.x - hubPos.x, dy = s.pos.y - hubPos.y
+        if (Math.abs(dx) >= Math.abs(dy)) deltas.set(s.id, { dx: 0, dy: hubPos.y - s.pos.y })
+        else deltas.set(s.id, { dx: hubPos.x - s.pos.x, dy: 0 })
+        continue
+      }
+
+      const avgDx = spokes.reduce((sum,s)=>sum+(s.pos.x-hubPos.x),0) / spokes.length
+      const avgDy = spokes.reduce((sum,s)=>sum+(s.pos.y-hubPos.y),0) / spokes.length
+      const vertical = Math.abs(avgDx) >= Math.abs(avgDy) // spokes stacked vertically -> share an X, space along Y
+
+      if (vertical) {
+        const sharedX = median(spokes.map(s => s.pos.x))
+        const sorted = [...spokes].sort((a,b)=>a.pos.y-b.pos.y)
+        const gaps = sorted.slice(1).map((s,i)=>s.pos.y - sorted[i].pos.y)
+        const gap = gaps.length ? median(gaps) : 0
+        const span = gap * (sorted.length - 1)
+        const centerY = (sorted[0].pos.y + sorted[sorted.length-1].pos.y) / 2
+        let y = centerY - span / 2
+        for (const s of sorted) { deltas.set(s.id, { dx: sharedX - s.pos.x, dy: y - s.pos.y }); y += gap }
+        const newYs = sorted.map(s => s.pos.y + getDelta(s.id).dy)
+        const hd = getDelta(hubId)
+        deltas.set(hubId, { dx: hd.dx, dy: hd.dy + (median(newYs) - (hubPos.y + hd.dy)) })
+      } else {
+        const sharedY = median(spokes.map(s => s.pos.y))
+        const sorted = [...spokes].sort((a,b)=>a.pos.x-b.pos.x)
+        const gaps = sorted.slice(1).map((s,i)=>s.pos.x - sorted[i].pos.x)
+        const gap = gaps.length ? median(gaps) : 0
+        const span = gap * (sorted.length - 1)
+        const centerX = (sorted[0].pos.x + sorted[sorted.length-1].pos.x) / 2
+        let x = centerX - span / 2
+        for (const s of sorted) { deltas.set(s.id, { dx: x - s.pos.x, dy: sharedY - s.pos.y }); x += gap }
+        const newXs = sorted.map(s => s.pos.x + getDelta(s.id).dx)
+        const hd = getDelta(hubId)
+        deltas.set(hubId, { dx: hd.dx + (median(newXs) - (hubPos.x + hd.dx)), dy: hd.dy })
+      }
+    }
+
+    let next = all.map(o => {
+      const d = deltas.get(o.id)
+      if (!d || (d.dx === 0 && d.dy === 0)) return o
+      return {
+        ...o,
+        x: o.x+d.dx, y: o.y+d.dy,
+        x1: o.x1+d.dx, y1: o.y1+d.dy, x2: o.x2+d.dx, y2: o.y2+d.dy,
+        pts: o.pts.map(p => ({ x: p.x+d.dx, y: p.y+d.dy })),
+      }
+    })
+
+    // Straighten: recompute each aligned edge's attach angle from the shapes'
+    // NEW centers (the same angle math/cardinal snap findAttachTarget already
+    // uses when an endpoint is freshly attached), so a now-straight edge
+    // actually emits from the matching cardinal point instead of keeping
+    // whatever angle it had before the shapes moved.
+    const newById = new Map(next.map(o => [o.id, o]))
+    next = next.map(o => {
+      if (o.type !== 'line' && o.type !== 'arrow') return o
+      if (!selSet.has(o.id) || !o.attachStartId || !o.attachEndId) return o
+      const a = newById.get(o.attachStartId), b = newById.get(o.attachEndId)
+      if (!a || !b) return o
+      const ca = centerOf(a), cb = centerOf(b)
+      return {
+        ...o,
+        attachStartAngle: snapAnchorAngle(Math.atan2(cb.y-ca.y, cb.x-ca.x)),
+        attachEndAngle:   snapAnchorAngle(Math.atan2(ca.y-cb.y, ca.x-cb.x)),
+      }
+    })
+
+    const resolved = resolveAttachments(next)
+    syncObjs(resolved); snapshot(resolved); renderAll()
+    setToast('Aligned ✓')
+  }
+
   function flipSelected(axis: 'x'|'y') {
     if (selIdsRef.current.length===0) return
     const ids=selIdsRef.current
@@ -2062,10 +2211,13 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   function navyBtn(active=false, danger=false, disabled=false): React.CSSProperties {
     return {
       padding:'4px 10px', borderRadius:7, cursor:disabled?'default':'pointer',
-      border:`0.5px solid ${active?'rgba(124,58,237,0.65)':disabled?'rgba(255,255,255,0.06)':danger?'rgba(239,68,68,0.35)':'rgba(255,255,255,0.09)'}`,
-      background:active?'rgba(124,58,237,0.28)':disabled?'rgba(255,255,255,0.02)':danger?'rgba(239,68,68,0.10)':'rgba(255,255,255,0.04)',
-      color:active?'#c4b5fd':disabled?'rgba(255,255,255,0.22)':danger?'#fca5a5':'rgba(255,255,255,0.60)',
-      fontSize:12, fontWeight:active?600:400, transition:'all 120ms', flexShrink:0, whiteSpace:'nowrap' as const, lineHeight:'1.4',
+      // Default (not active, not disabled) is now a clearly "live" control —
+      // only a genuinely inapplicable action (disabled=true) reads as muted;
+      // a tool merely not currently selected must not also look disabled.
+      border:`0.5px solid ${active?'rgba(124,58,237,0.65)':disabled?'rgba(255,255,255,0.06)':danger?'rgba(239,68,68,0.35)':'rgba(255,255,255,0.20)'}`,
+      background:active?'rgba(124,58,237,0.28)':disabled?'rgba(255,255,255,0.02)':danger?'rgba(239,68,68,0.10)':'rgba(255,255,255,0.09)',
+      color:active?'#c4b5fd':disabled?'rgba(255,255,255,0.22)':danger?'#fca5a5':'rgba(255,255,255,0.88)',
+      fontSize:12, fontWeight:active?600:500, transition:'all 120ms', flexShrink:0, whiteSpace:'nowrap' as const, lineHeight:'1.4',
     }
   }
 
@@ -2075,11 +2227,14 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     // visible instead of hidden — actually reads as disabled, not as a live
     // warning. `danger` is never combined with `active=true` by any caller,
     // so giving `active` top priority is unaffected.
+    // Same reasoning as navyBtn above: the default/non-active state is a
+    // fully usable control and must look like one — only disabled=true (a
+    // genuinely inapplicable action) gets the muted treatment.
     return {
       padding:'4px 10px', borderRadius:7, cursor:disabled?'default':'pointer',
-      border:`0.5px solid ${active?'rgba(124,58,237,0.55)':disabled?(isDark?'rgba(255,255,255,0.10)':'rgba(0,0,0,0.08)'):danger?'rgba(239,68,68,0.28)':isDark?'rgba(255,255,255,0.14)':'rgba(0,0,0,0.15)'}`,
-      background:active?'rgba(124,58,237,0.20)':disabled?(isDark?'rgba(255,255,255,0.03)':'rgba(0,0,0,0.02)'):danger?'rgba(239,68,68,0.08)':isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.04)',
-      color:active?'#a78bfa':disabled?(isDark?'rgba(255,255,255,0.22)':'rgba(0,0,0,0.22)'):danger?(isDark?'rgba(252,165,165,0.85)':'#dc2626'):isDark?'rgba(255,255,255,0.78)':'rgba(0,0,0,0.68)',
+      border:`0.5px solid ${active?'rgba(124,58,237,0.55)':disabled?(isDark?'rgba(255,255,255,0.10)':'rgba(0,0,0,0.08)'):danger?'rgba(239,68,68,0.28)':isDark?'rgba(255,255,255,0.22)':'rgba(0,0,0,0.24)'}`,
+      background:active?'rgba(124,58,237,0.20)':disabled?(isDark?'rgba(255,255,255,0.03)':'rgba(0,0,0,0.02)'):danger?'rgba(239,68,68,0.08)':isDark?'rgba(255,255,255,0.09)':'rgba(0,0,0,0.055)',
+      color:active?'#a78bfa':disabled?(isDark?'rgba(255,255,255,0.22)':'rgba(0,0,0,0.22)'):danger?(isDark?'rgba(252,165,165,0.85)':'#dc2626'):isDark?'rgba(255,255,255,0.92)':'rgba(0,0,0,0.85)',
       fontSize:12, fontWeight:active?600:500, transition:'all 120ms', flexShrink:0, whiteSpace:'nowrap' as const, lineHeight:'1.4',
     }
   }
@@ -2354,6 +2509,16 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
           )}
         </div>
         <button disabled={selIds.length===0} onClick={duplicateSelected} style={dkBtn(false,false,selIds.length===0)}>Dup</button>
+
+        {dvdr}
+
+        {/* Align — intelligent cleanup of the selection's existing connections
+            (see alignSelected): needs at least 2 shapes to do anything, same
+            "genuinely requires a selection" exemption Group/Dup/Delete use. */}
+        <button title="Align selected shapes along their existing connections" disabled={selIds.length<2}
+          onClick={alignSelected} style={{...dkBtn(false,false,selIds.length<2),display:'flex',alignItems:'center',gap:3,padding:'4px 8px'}}>
+          <AlignIcon/> Align
+        </button>
 
         {dvdr}
 

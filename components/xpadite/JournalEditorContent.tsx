@@ -470,18 +470,37 @@ function useProseEditor({
 // and "Swap sides" exist for repositioning. Resize reuses the same generic
 // ResizeHandles component top-level image/drawing blocks already use.
 
-function SectionImageCell({ blockId, which, cell, selected, onSelect, onResizeStart }: {
+function SectionImageCell({ blockId, which, cell, isDark, selected, onSelect, onResizeStart, onEditMindMap, onDeleteImage }: {
   blockId: string
   which: 'single' | 'p0' | 'p1'
   cell: SectionCell
+  isDark: boolean
   selected: boolean
   onSelect: () => void
   onResizeStart: (dir: ResizeDir, e: React.MouseEvent) => void
+  onEditMindMap?: () => void
+  onDeleteImage?: () => void
 }) {
   // Neutral by default — no cursor affordance, no resize box — until selected
   // by a single click/tap. Double-click/tap opens the full image instead of
   // the old click-to-zoom behavior.
+  const { setToast } = useApp()
   const [lightbox, setLightbox] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [sendToOpen, setSendToOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const isMmc = !!cell.canvasData
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function outside(e: MouseEvent) {
+      if (menuRef.current?.contains(e.target as Node)) return
+      setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', outside)
+    return () => document.removeEventListener('mousedown', outside)
+  }, [menuOpen])
+
   return (
     <div
       data-cell-id={`${blockId}:${which}`}
@@ -500,8 +519,61 @@ function SectionImageCell({ blockId, which, cell, selected, onSelect, onResizeSt
         }}
       />
       {selected && <ResizeHandles onResizeStart={onResizeStart} />}
+
+      {/* ⋮ menu — same top-right control an MMC-originated image had as a
+          top-level block; Resize reuses this component's own selection state,
+          Edit Mind Map only appears when this image still carries its
+          underlying canvasData (never shown for a plain pasted/uploaded
+          image), Delete reuses the same path the Delete key already uses. */}
+      <div ref={menuRef} style={{ position: 'absolute', top: 6, right: 6 }} onClick={e => e.stopPropagation()}>
+        <button
+          onClick={() => setMenuOpen(v => !v)}
+          style={{
+            width: 24, height: 24, borderRadius: 6, border: 'none', cursor: 'pointer',
+            background: menuOpen ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.45)',
+            color: '#fff', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backdropFilter: 'blur(4px)',
+          }}
+        >⋮</button>
+        {menuOpen && (
+          <div style={{
+            position: 'absolute', top: 28, right: 0, zIndex: 40, minWidth: 148,
+            background: isDark ? '#1e1130' : '#fff',
+            border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.12)'}`,
+            borderRadius: 10,
+            boxShadow: isDark ? '0 8px 32px rgba(0,0,0,0.55)' : '0 4px 20px rgba(0,0,0,0.12)',
+            padding: '4px 0', overflow: 'hidden',
+          }}>
+            <button onClick={() => { onSelect(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+              ⤡ Resize
+            </button>
+            {isMmc && (
+              <button onClick={() => { onEditMindMap?.(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                🧠 Edit Mind Map
+              </button>
+            )}
+            <button onClick={() => { setSendToOpen(true); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+              📤 Send to →
+            </button>
+            <button onClick={() => { onDeleteImage?.(); setMenuOpen(false) }} style={{ ...menuItemStyle(isDark), color: '#f87171' }}>
+              🗑 Delete
+            </button>
+          </div>
+        )}
+      </div>
+
       {lightbox && cell.src && (
         <ImageLightbox src={cell.src} alt={cell.name ?? 'Image'} onClose={() => setLightbox(false)} />
+      )}
+      {sendToOpen && (
+        <SendToOptionsModal
+          isDark={isDark}
+          context="image"
+          taskTree={[]}
+          onClose={() => setSendToOpen(false)}
+          onCreateTasks={() => 0}
+          onAICoachComingSoon={() => setToast('Send to AI Coach — coming soon in Premium V2 🔒')}
+        />
       )}
     </div>
   )
@@ -560,6 +632,7 @@ interface JournalTextBlockProps {
   onUpdateBlock?: (updates: Partial<JournalBlock>) => void
   onCellResizeStart?: (which: 'single' | 'p0' | 'p1', dir: ResizeDir, e: React.MouseEvent) => void
   onDeleteImageCell?: (which: 'single' | 'p0' | 'p1') => void
+  onEditMindMapCell?: (which: 'single' | 'p0' | 'p1') => void
   canMoveUp: boolean
   canMoveDown: boolean
   onMoveUp: () => void
@@ -571,7 +644,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
   onContentChange, onFocus, onSelectionUpdate,
   onDelete, onDuplicate, onTransferSection,
   onMoveActivate, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
-  onPasteImage, onSplitSection, onMergeSection, onUpdateBlock, onCellResizeStart, onDeleteImageCell,
+  onPasteImage, onSplitSection, onMergeSection, onUpdateBlock, onCellResizeStart, onDeleteImageCell, onEditMindMapCell,
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
 }: JournalTextBlockProps) {
   const { updateDay, setToast } = useApp()
@@ -879,10 +952,12 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
             <div style={{ flex: `0 0 ${liveSplit ?? block.partitionSplit ?? 50}%`, minWidth: 0 }}>
               {block.partitions[0].kind === 'image' ? (
                 <SectionImageCell
-                  blockId={block.id} which="p0" cell={block.partitions[0]}
+                  blockId={block.id} which="p0" cell={block.partitions[0]} isDark={isDark}
                   selected={selectedCell === 'p0'}
                   onSelect={() => setSelectedCell('p0')}
                   onResizeStart={(dir, e) => onCellResizeStart?.('p0', dir, e)}
+                  onEditMindMap={() => onEditMindMapCell?.('p0')}
+                  onDeleteImage={() => onDeleteImageCell?.('p0')}
                 />
               ) : (
                 <SectionPartitionPane
@@ -912,10 +987,12 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
             <div style={{ flex: '1 1 0%', minWidth: 0 }}>
               {block.partitions[1].kind === 'image' ? (
                 <SectionImageCell
-                  blockId={block.id} which="p1" cell={block.partitions[1]}
+                  blockId={block.id} which="p1" cell={block.partitions[1]} isDark={isDark}
                   selected={selectedCell === 'p1'}
                   onSelect={() => setSelectedCell('p1')}
                   onResizeStart={(dir, e) => onCellResizeStart?.('p1', dir, e)}
+                  onEditMindMap={() => onEditMindMapCell?.('p1')}
+                  onDeleteImage={() => onDeleteImageCell?.('p1')}
                 />
               ) : (
                 <SectionPartitionPane
@@ -945,10 +1022,12 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
           </div>
         ) : block.sectionImage ? (
           <SectionImageCell
-            blockId={block.id} which="single" cell={block.sectionImage}
+            blockId={block.id} which="single" cell={block.sectionImage} isDark={isDark}
             selected={selectedCell === 'single'}
             onSelect={() => setSelectedCell('single')}
             onResizeStart={(dir, e) => onCellResizeStart?.('single', dir, e)}
+            onEditMindMap={() => onEditMindMapCell?.('single')}
+            onDeleteImage={() => onDeleteImageCell?.('single')}
           />
         ) : (
           <div onClick={() => editor?.commands.focus()} style={{ cursor: 'text' }}>
@@ -2008,6 +2087,11 @@ export function JournalEditorContent({
   const [drawState, setDrawState]       = useState<{
     insertAt: number
     editingBlock: JournalBlock | null
+    // Set instead of editingBlock when "Edit Mind Map" is opened from an
+    // MMC-originated image living inside a section (sectionImage or one of
+    // its partitions) rather than a top-level drawing block — saving must
+    // write back into that same cell, never create/duplicate a top-level block.
+    editingCell?: { blockId: string; which: 'single' | 'p0' | 'p1' }
   } | null>(null)
   // Mind Mapping Canvas immersive "Fit" mode — owned here (not inside
   // JournalDrawModal) because only the PARENT can portal {header + canvas}
@@ -2768,6 +2852,27 @@ export function JournalEditorContent({
     }
   }
 
+  // Reads one section's image cell by its {blockId, which} address — shared by
+  // the "Edit Mind Map" menu action below and the JournalDrawModal props that
+  // need to show/save into it.
+  function getSectionImageCell(blockId: string, which: 'single' | 'p0' | 'p1'): SectionCell | undefined {
+    const block = blocksRef.current.find(b => b.id === blockId)
+    if (!block) return undefined
+    if (which === 'single') return block.sectionImage
+    return which === 'p0' ? block.partitions?.[0] : block.partitions?.[1]
+  }
+
+  // Opens the Mind Mapping Canvas against the ACTUAL underlying drawing an
+  // MMC-originated section/partition image still carries (cell.canvasData) —
+  // never a fresh canvas from the flattened thumbnail. Only ever reachable
+  // from the cell's own ⋮ menu, which only shows "Edit Mind Map" when
+  // cell.canvasData is present (see SectionImageCell).
+  function openEditMindMapForCell(blockId: string, which: 'single' | 'p0' | 'p1') {
+    const idx = blocksRef.current.findIndex(b => b.id === blockId)
+    if (idx < 0) return
+    setDrawState({ insertAt: idx, editingBlock: null, editingCell: { blockId, which } })
+  }
+
   // Never deletes content: text sides concatenate, image sides get ejected as
   // new adjacent top-level blocks (reusing createImageBlock/createDrawingBlock)
   // rather than being discarded.
@@ -3109,6 +3214,26 @@ export function JournalEditorContent({
   // next Ctrl+S) updates that same block instead of inserting another one.
   function handleDrawSave(dataUrl: string, objectsJson: string) {
     if (!drawState) return
+    if (drawState.editingCell) {
+      // Writes back into the SAME section cell the drawing was opened from —
+      // never creates/ejects a top-level block, so the image's Planner
+      // location (unsplit sectionImage, or whichever partition) is untouched;
+      // only its src/thumbnail/canvasData update, same as any other re-save.
+      const { blockId, which } = drawState.editingCell
+      const cell = getSectionImageCell(blockId, which)
+      if (!cell) { setDrawState(null); setMmcFit(false); return }
+      const updatedCell: SectionCell = { ...cell, src: dataUrl, thumbnail: dataUrl, canvasData: objectsJson }
+      const block = blocksRef.current.find(b => b.id === blockId)
+      if (which === 'single') {
+        updateBlock(blockId, { sectionImage: updatedCell })
+      } else if (block?.partitions) {
+        const parts = [...block.partitions] as [SectionCell, SectionCell]
+        parts[which === 'p0' ? 0 : 1] = updatedCell
+        updateBlock(blockId, { partitions: parts })
+      }
+      handleManualSave()
+      return
+    }
     let next: JournalBlock[]
     let savedBlock: JournalBlock
     if (drawState.editingBlock) {
@@ -3592,12 +3717,13 @@ export function JournalEditorContent({
               position: 'relative', zIndex: 1, width: 40, height: 40, flexShrink: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: 'transparent', border: 'none',
-              color: '#fff', cursor: 'pointer', padding: 0, fontSize: 24,
+              color: 'rgba(255,255,255,0.85)', cursor: 'pointer', padding: 0,
+              fontSize: 18, fontWeight: 300, lineHeight: 1,
               transition: 'opacity 120ms, transform 80ms',
             }}
             onMouseDown={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(0.88)' }}
             onMouseUp={e => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
-          >‹</button>
+          >←</button>
           <span style={{
             position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
             textAlign: 'center', pointerEvents: 'none',
@@ -3710,11 +3836,21 @@ export function JournalEditorContent({
     </div>
   )
 
+  // Reads from `blocks` (render state), not blocksRef, since this runs during
+  // render itself — getSectionImageCell's ref read is for event handlers only.
+  const editingCellData = drawState?.editingCell
+    ? (() => {
+        const { blockId, which } = drawState.editingCell!
+        const b = blocks.find(bb => bb.id === blockId)
+        if (!b) return undefined
+        return which === 'single' ? b.sectionImage : which === 'p0' ? b.partitions?.[0] : b.partitions?.[1]
+      })()
+    : undefined
   const journalDrawModalEl = drawState && (
     <JournalDrawModal
       isDark={isDark}
-      initialSrc={drawState.editingBlock?.src}
-      initialObjects={drawState.editingBlock?.canvasData}
+      initialSrc={drawState.editingCell ? editingCellData?.src : drawState.editingBlock?.src}
+      initialObjects={drawState.editingCell ? editingCellData?.canvasData : drawState.editingBlock?.canvasData}
       onSave={handleDrawSave}
       onClose={() => { setDrawState(null); setMmcFit(false) }}
       fitScreen={mmcFit}
@@ -4184,6 +4320,9 @@ export function JournalEditorContent({
                               : undefined}
                             onDeleteImageCell={block.type === 'section'
                               ? (which) => handleDeleteImageCell(block.id, which)
+                              : undefined}
+                            onEditMindMapCell={block.type === 'section'
+                              ? (which) => openEditMindMapForCell(block.id, which)
                               : undefined}
                             canMoveUp={idx > 0}
                             canMoveDown={idx < blocks.length - 1}

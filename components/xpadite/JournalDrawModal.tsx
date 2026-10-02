@@ -1,14 +1,14 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { useApp } from './AppContext'
 import { ColorPickerModal } from './ColorPickerModal'
 import { COLOR_PALETTE, normalizeHexColor } from './utils'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type DrawTool = 'select' | 'pen' | 'eraser' | 'text' | 'line' | 'arrow' | 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starburst' | 'capsule' | 'hexagon'
-type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starburst' | 'capsule' | 'hexagon' | 'line' | 'arrow' | 'text' | 'stroke' | 'image'
+type DrawTool = 'select' | 'pen' | 'eraser' | 'text' | 'line' | 'arrow' | 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starburst' | 'capsule' | 'hexagon' | 'cloud' | 'star'
+type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starburst' | 'capsule' | 'hexagon' | 'cloud' | 'star' | 'line' | 'arrow' | 'text' | 'stroke' | 'image'
 // 'elbow' = sharp 90° two-segment connector; 'elbow-curved' = the same two-segment
 // route with a smoothly rounded corner. Both are distinct from the older 'curved'
 // (a single free-form quadratic bezier from start to end, unrelated to the elbow tool).
@@ -17,7 +17,7 @@ type ObjType  = 'rect' | 'rect-r' | 'circle' | 'triangle' | 'diamond' | 'starbur
 // vertex. This guarantees a clean, deliberate default and keeps move/resize/flip trivial.
 type ConnType = 'straight' | 'curved' | 'elbow' | 'elbow-curved'
 type HPos     = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w'
-type PopoverId = 'pen-size' | 'eraser-size' | 'shapes' | 'flip' | 'text-size' | 'arrow-type' | 'fill' | 'stroke' | 'rotate' | 'line-thickness' | 'arrow-thickness' | 'list-type' | 'group' | 'order'
+type PopoverId = 'pen-size' | 'eraser-size' | 'shapes' | 'flip' | 'text-size' | 'arrow-type' | 'fill' | 'stroke' | 'rotate' | 'line-thickness' | 'arrow-thickness' | 'list-type' | 'group' | 'order' | 'branch'
 type NoteListType = 'none' | 'bullet' | 'numbered' | 'lettered' | 'checkbox'
 type EditField = 'title' | 'note'
 
@@ -29,8 +29,8 @@ interface Pt { x: number; y: number }
 // starburst) are Title-only so the label stays readable inside their silhouette;
 // rect/rect-r/capsule have the full Title+Note area. Both wrap/auto-grow the
 // shape — see wrapTextLines/computeRequiredHeight.
-const TITLE_NOTE_TYPES: ObjType[] = ['rect', 'rect-r', 'capsule']
-const TITLE_ONLY_TYPES: ObjType[] = ['circle', 'triangle', 'diamond', 'starburst', 'hexagon']
+const TITLE_NOTE_TYPES: ObjType[] = ['rect', 'rect-r', 'capsule', 'cloud']
+const TITLE_ONLY_TYPES: ObjType[] = ['circle', 'triangle', 'diamond', 'starburst', 'hexagon', 'star']
 const TEXT_CAPABLE_TYPES: ObjType[] = [...TITLE_NOTE_TYPES, ...TITLE_ONLY_TYPES]
 const SHAPE_TEXT_PAD = 10
 // Approximate inscribed-rectangle ratios (fraction of the shape's own bbox
@@ -43,6 +43,7 @@ const TITLE_SAFE_RATIO: Partial<Record<ObjType, { w: number; h: number }>> = {
   triangle:  { w: 0.55, h: 0.32 }, // weighted toward the triangle's wider base
   starburst: { w: 0.46, h: 0.46 },
   hexagon:   { w: 0.72, h: 0.72 }, // flat top/bottom edges leave more usable room than the pointed shapes above
+  star:      { w: 0.40, h: 0.40 }, // classic 5-point star's inner pentagon is the safe inscribed area
 }
 
 interface DrawObj {
@@ -137,18 +138,26 @@ interface JournalDrawModalProps {
   fitScreen: boolean; onToggleFitScreen: () => void
 }
 
+// Exposed so the PARENT's own mobile-only header back arrow (rendered outside
+// this component, for Fit-mode portal reasons — see fitScreen above) can
+// trigger the SAME unsaved-changes guard desktop's in-component Cancel button
+// already uses, instead of unconditionally closing and silently discarding.
+export interface JournalDrawModalHandle {
+  requestClose: () => void
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PEN_SIZES    = [2, 4, 8, 14] as const
 const ERASER_SIZES = [8, 16, 28, 44] as const
 const TEXT_SIZES   = [12, 18, 26, 36] as const
 const THICKNESS_LEVELS = [1, 2, 3, 5, 8] as const
-const SHAPE_TOOLS: DrawTool[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule', 'hexagon']
+const SHAPE_TOOLS: DrawTool[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule', 'hexagon', 'cloud', 'star']
 // 'stroke' (freehand) rotates via the SAME render-time-transform architecture
 // as the shapes below it — pts stay in local/unrotated space (see renderObj,
 // hitObj, getHandlePositions), not rotated-in-place, so selection bounds,
 // resize handles and hit-testing all stay correctly aligned post-rotation.
-const ROTATABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule', 'hexagon', 'stroke']
+const ROTATABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule', 'hexagon', 'cloud', 'star', 'stroke']
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -281,7 +290,7 @@ function rotatePt(p: Pt, center: Pt, rad: number): Pt {
 // clockwise in screen space (atan2 convention) — matches Math.atan2(dy,dx).
 // 'stroke' (freehand) participates too — connectors attach to its bbox via the
 // same rayBoxIntersection approximation already used for the custom shapes.
-const CONNECTABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule', 'hexagon', 'image', 'stroke']
+const CONNECTABLE_TYPES: ObjType[] = ['rect', 'rect-r', 'circle', 'triangle', 'diamond', 'starburst', 'capsule', 'hexagon', 'cloud', 'star', 'image', 'stroke']
 
 // Ray-box intersection in the box's own LOCAL frame (center at origin) — used
 // directly for rect/rect-r, and as a reasonable approximation of the true
@@ -615,6 +624,58 @@ function drawHexagonPath(c: CanvasRenderingContext2D, x: number, y: number, w: n
   c.closePath()
 }
 
+// Classic 5-point star — same alternating outer/inner-radius technique as
+// drawStarburstPath, just 5 points and a deeper inner ratio for the familiar
+// star silhouette instead of a spiky burst.
+function drawStarPath(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+  const cx = x + w/2, cy = y + h/2
+  const rx = Math.abs(w)/2, ry = Math.abs(h)/2
+  const points = 5
+  c.beginPath()
+  for (let i = 0; i < points*2; i++) {
+    const frac = i % 2 === 0 ? 1 : 0.5
+    const angle = (Math.PI * i) / points - Math.PI/2
+    const px = cx + Math.cos(angle) * rx * frac
+    const py = cy + Math.sin(angle) * ry * frac
+    if (i === 0) c.moveTo(px, py); else c.lineTo(px, py)
+  }
+  c.closePath()
+}
+
+// Smooths a closed polygon into a soft blobby outline by curving through the
+// MIDPOINT of each edge (each original point becomes a quadratic control
+// point rather than an on-path vertex) — a simple, reliable way to get one
+// continuous bumpy path (clean single-pass stroke, no overlapping-circle
+// seams) from a short list of coordinates.
+function smoothClosedPath(c: CanvasRenderingContext2D, pts: Pt[]) {
+  const n = pts.length
+  const mid = (a: Pt, b: Pt): Pt => ({ x: (a.x+b.x)/2, y: (a.y+b.y)/2 })
+  const start = mid(pts[n-1], pts[0])
+  c.moveTo(start.x, start.y)
+  for (let i = 0; i < n; i++) {
+    const next = pts[(i+1) % n]
+    const m = mid(pts[i], next)
+    c.quadraticCurveTo(pts[i].x, pts[i].y, m.x, m.y)
+  }
+}
+
+// Cloud / thought-bubble — a bumpy closed outline built from a fixed set of
+// normalized points (see smoothClosedPath), scaled into the shape's own box.
+function drawCloudPath(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+  const W = Math.abs(w), H = Math.abs(h)
+  const P = (px: number, py: number): Pt => ({ x: x + px*W, y: y + py*H })
+  const pts: Pt[] = [
+    P(0.08,0.72), P(0.00,0.55), P(0.06,0.35), P(0.20,0.28),
+    P(0.24,0.12), P(0.42,0.02), P(0.58,0.08), P(0.68,0.00),
+    P(0.86,0.08), P(0.92,0.26), P(1.00,0.40), P(0.98,0.60),
+    P(0.86,0.70), P(0.80,0.85), P(0.60,0.92), P(0.46,0.86),
+    P(0.30,0.92), P(0.14,0.86),
+  ]
+  c.beginPath()
+  smoothClosedPath(c, pts)
+  c.closePath()
+}
+
 // Centered mind-map-node label — drawn after any flip transform is restored so
 // the text itself is never mirrored (a shape's bbox center is unaffected by a
 // flip around its own center, so this still lands in the visually-correct spot).
@@ -900,6 +961,8 @@ function renderObj(c: CanvasRenderingContext2D, obj: DrawObj, imgCache?: Map<str
   else if (obj.type === 'diamond') { c.beginPath(); c.moveTo(obj.x+obj.w/2,obj.y); c.lineTo(obj.x+obj.w,obj.y+obj.h/2); c.lineTo(obj.x+obj.w/2,obj.y+obj.h); c.lineTo(obj.x,obj.y+obj.h/2); c.closePath(); if (obj.filled) c.fill(); c.stroke() }
   else if (obj.type === 'starburst') { drawStarburstPath(c,obj.x,obj.y,obj.w,obj.h); if (obj.filled) c.fill(); c.stroke() }
   else if (obj.type === 'hexagon') { drawHexagonPath(c,obj.x,obj.y,obj.w,obj.h); if (obj.filled) c.fill(); c.stroke() }
+  else if (obj.type === 'cloud') { drawCloudPath(c,obj.x,obj.y,obj.w,obj.h); if (obj.filled) c.fill(); c.stroke() }
+  else if (obj.type === 'star') { drawStarPath(c,obj.x,obj.y,obj.w,obj.h); if (obj.filled) c.fill(); c.stroke() }
   c.restore() // undo flip only — label below rotates with the shape but is never mirrored
 
   if (TEXT_CAPABLE_TYPES.includes(obj.type)) drawShapeText(c, obj, bb)
@@ -1023,6 +1086,16 @@ function NoFillSwatch({ active, isDark, title, onClick }: { active: boolean; isD
   )
 }
 
+// A vertical spine with horizontal arrows branching right — mirrors the
+// Multi-Arrow Branch tool's own generated structure.
+const BranchIcon = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ display:'block' }}>
+    <path d="M3 2v12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+    <path d="M3 2H11M3 8H11M3 14H11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+    <path d="M9.5 0.5L12 2L9.5 3.5M9.5 6.5L12 8L9.5 9.5M9.5 12.5L12 14L9.5 15.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+)
+
 const AlignIcon = ({ size = 14 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none" style={{ display:'block' }}>
     <circle cx="2.2" cy="8" r="1.6" fill="currentColor"/>
@@ -1048,7 +1121,7 @@ const ElbowArrowIcon = ({ curved = false, size = 15 }: { curved?: boolean; size?
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects, onSave, onClose, fitScreen, onToggleFitScreen }: JournalDrawModalProps) {
+export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawModalProps>(function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects, onSave, onClose, fitScreen, onToggleFitScreen }, ref) {
   // The toolbar always uses a subtle light-gray chrome regardless of app theme
   // (per XPadite spec — the toolbar must never go dark/heavy), so every
   // existing `isDark`-branched style below the toolbar now resolves to its
@@ -1088,7 +1161,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   // flag through every one of the many mutation call sites below.
   const lastSavedJsonRef = useRef<string>('[]')
 
-  const [tool,        setTool]        = useState<DrawTool>('pen')
+  const [tool,        setTool]        = useState<DrawTool>('select')
   const [penIdx,      setPenIdx]      = useState(1)
   const [eraserIdx,   setEraserIdx]   = useState(1)
   const [textSzIdx,   setTextSzIdx]   = useState(1)
@@ -1106,6 +1179,8 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   const [doubleEndedDefault, setDoubleEndedDefault] = useState(false) // default for NEW arrows; editing a selected arrow uses toggleDoubleEnded instead
   const [showCustomFill, setShowCustomFill] = useState(false)
   const [showCustomStroke, setShowCustomStroke] = useState(false)
+  const [branchCount, setBranchCount] = useState(3)
+  const [branchCorner, setBranchCorner] = useState<'sharp' | 'rounded'>('sharp')
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false)
   const [lineThickIdx,  setLineThickIdx]  = useState(1) // index into THICKNESS_LEVELS — default new-line thickness
   const [arrowThickIdx, setArrowThickIdx] = useState(1) // same, for new arrows
@@ -1657,8 +1732,13 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       // curved there is NO free point to move — dragging instead picks
       // whichever of the two orthogonal corners (see getElbowCorner) the
       // pointer is currently closer to, so the bend always stays a clean 90°
-      // and neither leg can ever go diagonal.
-      objectsRef.current = objectsRef.current.map(o => {
+      // and neither leg can ever go diagonal. Wrapped in resolveAttachments
+      // (every other geometry-changing drag already is) so any OTHER
+      // connector joined to this one's bend via attachStartConnId/
+      // attachEndConnId gets re-derived from the bend's new position instead
+      // of being left stranded at its old one — the exact "attached arrow
+      // breaks when its joint moves" bug.
+      objectsRef.current = resolveAttachments(objectsRef.current.map(o => {
         if (o.id !== dm.id) return o
         if (o.type === 'arrow' && (o.connType === 'elbow' || o.connType === 'elbow-curved')) {
           const cornerV = { x:o.x1, y:o.y2 }, cornerH = { x:o.x2, y:o.y1 }
@@ -1667,7 +1747,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         }
         if (o.type === 'arrow' && o.connType === 'straight') return {...o,mx:pos.x,my:pos.y,connType:'curved' as ConnType}
         return {...o,mx:pos.x,my:pos.y}
-      })
+      }))
       renderAll(); return
     }
 
@@ -1852,6 +1932,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
               doubleEnded: doubleEndedDefault,
             }
             const n=[...objectsRef.current,obj]; syncObjs(n); snapshot(n); syncSel([obj.id])
+            setTool('select') // done creating — Select/Pointer is the neutral default (never mid-draw)
           }
         }
         elbowLockedPtsRef.current = []; elbowDirRef.current = null
@@ -1863,12 +1944,14 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         // here; mx/my only matters for 'curved' and defaults to the chord midpoint.
         const obj={...active,x1,y1,x2,y2,connType:finalConnType,doubleEnded: active.type==='arrow' && doubleEndedDefault,mx:(x1+x2)/2,my:(y1+y2)/2}
         const n=[...objectsRef.current,obj]; syncObjs(n); snapshot(n); syncSel([obj.id])
+        setTool('select') // done creating — Select/Pointer is the neutral default (never mid-draw)
       }
     } else {
       if (!pos||!shapeStart.current){renderAll();return}
       if (Math.abs(pos.x-shapeStart.current.x)>4&&Math.abs(pos.y-shapeStart.current.y)>4) {
         const obj={...active,x:shapeStart.current.x,y:shapeStart.current.y,w:pos.x-shapeStart.current.x,h:pos.y-shapeStart.current.y}
         const n=[...objectsRef.current,obj]; syncObjs(n); snapshot(n)
+        setTool('select') // done creating — Select/Pointer is the neutral default (never mid-draw)
         // A newly placed shape's Title/Note fields are available immediately —
         // no double-click/second-tap needed to discover them (startShapeTextEdit
         // also handles the Title-only vs Title+Note split per shape type).
@@ -1929,6 +2012,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     if (hasUnsavedChanges()) setShowUnsavedDialog(true)
     else onClose()
   }
+  useImperativeHandle(ref, () => ({ requestClose }))
 
   // ── Text ───────────────────────────────────────────────────────────────────
   // Opens a floating Title+Note panel over the shape's own bounding box, tagged
@@ -1992,10 +2076,22 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
   }
 
   // ── Actions ────────────────────────────────────────────────────────────────
+  // Places the duplicate directly below the original selection's own combined
+  // bbox (zero horizontal shift keeps it centered exactly where the original
+  // was) with a fixed visual gap underneath — never overlapping. Selecting
+  // the new copy afterward (as already happened before) is what makes
+  // repeated Duplicate clicks keep stacking further down: each click
+  // duplicates whatever is CURRENTLY selected, which is now the previous copy.
   function duplicateSelected() {
-    if (selIdsRef.current.length===0) return
-    const OFF=18
-    const copies=objectsRef.current.filter(o=>selIdsRef.current.includes(o.id)).map(o=>({...o,id:uid(),gid:'',x:o.x+OFF,y:o.y+OFF,x1:o.x1+OFF,y1:o.y1+OFF,x2:o.x2+OFF,y2:o.y2+OFF,mx:o.mx+OFF,my:o.my+OFF,pts:o.pts.map(p=>({x:p.x+OFF,y:p.y+OFF}))}))
+    const ids = selIdsRef.current
+    if (ids.length===0) return
+    const objs = objectsRef.current.filter(o=>ids.includes(o.id))
+    if (objs.length===0) return
+    const bbs = objs.map(getObjBB)
+    const minY = Math.min(...bbs.map(b=>b.minY)), maxY = Math.max(...bbs.map(b=>b.maxY))
+    const GAP = 24
+    const dy = (maxY-minY) + GAP
+    const copies=objs.map(o=>({...o,id:uid(),gid:'',y:o.y+dy,y1:o.y1+dy,y2:o.y2+dy,my:o.my+dy,pts:o.pts.map(p=>({x:p.x,y:p.y+dy}))}))
     const n=[...objectsRef.current,...copies]; syncObjs(n); syncSel(copies.map(c=>c.id)); snapshot(n); renderAll()
   }
 
@@ -2085,6 +2181,35 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       }
     }
     syncObjs(arr); snapshot(arr); renderAll()
+  }
+
+  // ── Multi-Arrow Branch — a vertical spine with N horizontal arrows ─────────
+  // Each branch is its own ordinary elbow arrow sharing the SAME start point
+  // (spineX, topY) — exactly the existing "several elbow connectors from one
+  // shared point overlap into what looks like one trunk" technique already
+  // used elsewhere, just without a shape at that shared point. Every arrow is
+  // independent afterward (reuses the existing endpoint-drag/attach system
+  // unmodified), so each stays its own usable, attachable joint.
+  function createMultiArrowBranch(count: number, corner: 'sharp' | 'rounded') {
+    const canvas = canvasRef.current
+    const w = canvas?.offsetWidth ?? 720, h = canvas?.offsetHeight ?? 480
+    const n = Math.max(2, Math.min(20, Math.round(count)))
+    const spineX = w*0.35, endX = Math.min(w*0.65, spineX+160)
+    const topY = h*0.5 - Math.min(180, (n-1)*22), bottomY = h*0.5 + Math.min(180, (n-1)*22)
+    const step = n > 1 ? (bottomY-topY)/(n-1) : 0
+    const connType: ConnType = corner === 'rounded' ? 'elbow-curved' : 'elbow'
+    const sw = THICKNESS_LEVELS[arrowThickIdx]
+    const branches: DrawObj[] = []
+    for (let i = 0; i < n; i++) {
+      const branchY = topY + step*i
+      branches.push(mkObj({
+        id: uid(), type:'arrow', color:drawColor, sw, connType, elbowBend:'v',
+        x1:spineX, y1:topY, x2:endX, y2:branchY, mx:(spineX+endX)/2, my:(topY+branchY)/2,
+      }))
+    }
+    const n2 = [...objectsRef.current, ...branches]
+    syncObjs(n2); syncSel(branches.map(o=>o.id)); snapshot(n2); renderAll()
+    setTool('select')
   }
 
   // ── Align — intelligent cleanup, not a grid/auto-layout redesign ───────────
@@ -2397,6 +2522,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     if(selIdsRef.current.length===0) return
     const ids=selIdsRef.current; const n=objectsRef.current.map(o=>ids.includes(o.id)?{...o,color,noOutline:false}:o)
     syncObjs(n); renderAll()
+    setTool('select') // applied to a selection — done, Select/Pointer is the neutral default
   }
 
   // "No Outline" — mirrors clearSelFill: a dedicated flag rather than
@@ -2407,6 +2533,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     if (ids.length === 0) return
     const n = objectsRef.current.map(o => ids.includes(o.id) ? {...o, noOutline:true} : o)
     syncObjs(n); renderAll()
+    setTool('select')
   }
 
   function updateSelFillColor(color: string) {
@@ -2414,6 +2541,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     if(selIdsRef.current.length===0) return
     const ids=selIdsRef.current; const n=objectsRef.current.map(o=>ids.includes(o.id)?{...o,fillColor:color}:o)
     syncObjs(n); renderAll()
+    setTool('select') // applied to a selection — done, Select/Pointer is the neutral default
   }
 
   function toggleFilled() {
@@ -2435,6 +2563,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
     if (ids.length === 0) return
     const n = objectsRef.current.map(o => ids.includes(o.id) ? {...o, filled:false} : o)
     syncObjs(n); renderAll()
+    setTool('select')
   }
 
   // ── Keyboard ───────────────────────────────────────────────────────────────
@@ -2740,7 +2869,7 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
         <div style={{flexShrink:0}} data-pop-trigger="">
           <button title="Shapes" onClick={(e)=>{if(textInput)commitText();openPop('shapes',e)}}
             style={{...dkBtn(SHAPE_TOOLS.includes(tool)),display:'flex',alignItems:'center',gap:3,padding:'4px 8px',fontSize:12}}>
-            {tool==='rect'?'□':tool==='rect-r'?'⊡':tool==='circle'?'○':tool==='triangle'?'△':tool==='diamond'?'◇':tool==='starburst'?'✦':tool==='capsule'?'⬭':tool==='hexagon'?'⬡':'□'} Shapes▾
+            {tool==='rect'?'□':tool==='rect-r'?'⊡':tool==='circle'?'○':tool==='triangle'?'△':tool==='diamond'?'◇':tool==='starburst'?'✦':tool==='capsule'?'⬭':tool==='hexagon'?'⬡':tool==='cloud'?'☁':tool==='star'?'★':'□'} Shapes▾
           </button>
           {openPopover==='shapes' && (
             <div data-popover="" style={fixedPopStyle()}>
@@ -2752,6 +2881,8 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
               {pbtn('△  Triangle',  ()=>{setTool('triangle');  setOpenPopover(null)}, tool==='triangle')}
               {pbtn('◇  Diamond',   ()=>{setTool('diamond');   setOpenPopover(null)}, tool==='diamond')}
               {pbtn('✦  Starburst', ()=>{setTool('starburst'); setOpenPopover(null)}, tool==='starburst')}
+              {pbtn('☁  Cloud',     ()=>{setTool('cloud');     setOpenPopover(null)}, tool==='cloud')}
+              {pbtn('★  Star',      ()=>{setTool('star');      setOpenPopover(null)}, tool==='star')}
             </div>
           )}
         </div>
@@ -2815,6 +2946,36 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
                   <ElbowArrowIcon curved={curved} size={17}/>
                 </button>
               ))}
+            </div>
+          )}
+        </div>
+
+        {/* Multi-Arrow Branch — opens a small config popup (count + corner
+            style) rather than entering a draw tool; OK generates the whole
+            structure at once (see createMultiArrowBranch). */}
+        <div style={{flexShrink:0}} data-pop-trigger="">
+          <button title="Multi-Arrow Branch" onClick={(e)=>{if(textInput)commitText();openPop('branch',e)}}
+            style={{...dkBtn(openPopover==='branch'),display:'flex',alignItems:'center',padding:'4px 8px'}}>
+            <BranchIcon size={15}/>
+          </button>
+          {openPopover==='branch' && (
+            <div data-popover="" style={fixedPopStyle({minWidth:200,gap:10,padding:'12px'})}>
+              <div style={{fontSize:11,fontWeight:600,color:isDark?'rgba(255,255,255,0.70)':'rgba(0,0,0,0.60)'}}>Amount of arrows</div>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <button onClick={()=>setBranchCount(v=>Math.max(2,v-1))} style={{...dkBtn(),width:26,height:26,padding:0}}>−</button>
+                <span style={{flex:1,textAlign:'center',fontSize:14,fontWeight:600}}>{branchCount}</span>
+                <button onClick={()=>setBranchCount(v=>Math.min(20,v+1))} style={{...dkBtn(),width:26,height:26,padding:0}}>+</button>
+              </div>
+              <div style={{fontSize:11,fontWeight:600,color:isDark?'rgba(255,255,255,0.70)':'rgba(0,0,0,0.60)',marginTop:4}}>Corner style</div>
+              <div style={{display:'flex',gap:6}}>
+                <button onClick={()=>setBranchCorner('sharp')} style={{...dkBtn(branchCorner==='sharp'),flex:1,padding:'5px 0'}}>Sharp</button>
+                <button onClick={()=>setBranchCorner('rounded')} style={{...dkBtn(branchCorner==='rounded'),flex:1,padding:'5px 0'}}>Rounded</button>
+              </div>
+              <div style={{display:'flex',gap:6,marginTop:6}}>
+                <button onClick={()=>setOpenPopover(null)} style={{...dkBtn(),flex:1,padding:'6px 0'}}>Cancel</button>
+                <button onClick={()=>{createMultiArrowBranch(branchCount,branchCorner);setOpenPopover(null)}}
+                  style={{flex:1,padding:'6px 0',borderRadius:7,border:'none',cursor:'pointer',background:'linear-gradient(135deg,#7c3aed,#6d28d9)',color:'#fff',fontSize:12,fontWeight:600}}>OK</button>
+              </div>
             </div>
           )}
         </div>
@@ -3261,4 +3422,4 @@ export function JournalDrawModal({ isDark: isDarkApp, initialSrc, initialObjects
       {popoverStyleTag}{topToolbar}{canvasArea}{bottomToolbar}{customFillPicker}{customStrokePicker}{unsavedDialog}
     </div>
   )
-}
+})

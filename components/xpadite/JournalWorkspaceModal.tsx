@@ -1725,14 +1725,18 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
               onClick={item.action}
               className={`xp-jws-nav-btn${active ? ' xp-jws-nav-active' : ''}`}
               style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '5px 11px', borderRadius: 8,
+                // Matches the Planner Editor's own nav row exactly (dockBtn()
+                // in JournalEditorContent.tsx) — no display:flex/gap box model
+                // on the button itself (that was the actual height mismatch;
+                // the Editor's buttons just lay out their text content
+                // directly), plus the same radius/whiteSpace/flexShrink.
+                padding: '5px 11px', borderRadius: 7,
                 fontSize: 12, fontWeight: active ? 600 : 400,
                 cursor: 'pointer',
                 background: active ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.06)',
                 border: `0.5px solid ${active ? 'rgba(124,58,237,0.40)' : 'rgba(124,58,237,0.16)'}`,
                 color: active ? '#a78bfa' : 'rgba(255,255,255,0.55)',
-                transition: 'background 120ms',
+                transition: 'all 120ms', flexShrink: 0, whiteSpace: 'nowrap',
               }}
             >
               {item.icon} {item.label}
@@ -1744,14 +1748,13 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           className="xp-jws-mic-nav xp-jws-nav-btn"
           disabled
           style={{
-            alignItems: 'center', gap: 6,
-            padding: '5px 11px', borderRadius: 8,
+            padding: '5px 11px', borderRadius: 7,
             fontSize: 12, fontWeight: 400,
             cursor: 'not-allowed',
             background: 'rgba(124,58,237,0.06)',
             border: '0.5px solid rgba(124,58,237,0.16)',
             color: 'rgba(255,255,255,0.55)',
-            opacity: 0.35,
+            opacity: 0.35, flexShrink: 0, whiteSpace: 'nowrap',
           }}
           title="Microphone (available in Editor)"
         >🎙 Mic</button>
@@ -2768,14 +2771,18 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
               onClick={item.action}
               className={`xp-jws-nav-btn${active ? ' xp-jws-nav-active' : ''}`}
               style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '5px 11px', borderRadius: 8,
+                // Matches the Planner Editor's own nav row exactly (dockBtn()
+                // in JournalEditorContent.tsx) — no display:flex/gap box model
+                // on the button itself (that was the actual height mismatch;
+                // the Editor's buttons just lay out their text content
+                // directly), plus the same radius/whiteSpace/flexShrink.
+                padding: '5px 11px', borderRadius: 7,
                 fontSize: 12, fontWeight: active ? 600 : 400,
                 cursor: 'pointer',
                 background: active ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.06)',
                 border: `0.5px solid ${active ? 'rgba(124,58,237,0.40)' : 'rgba(124,58,237,0.16)'}`,
                 color: active ? '#a78bfa' : 'rgba(255,255,255,0.55)',
-                transition: 'background 120ms',
+                transition: 'all 120ms', flexShrink: 0, whiteSpace: 'nowrap',
               }}
             >
               {item.icon} {item.label}
@@ -2787,14 +2794,13 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           className="xp-jws-mic-nav xp-jws-nav-btn"
           disabled
           style={{
-            alignItems: 'center', gap: 6,
-            padding: '5px 11px', borderRadius: 8,
+            padding: '5px 11px', borderRadius: 7,
             fontSize: 12, fontWeight: 400,
             cursor: 'not-allowed',
             background: 'rgba(124,58,237,0.06)',
             border: '0.5px solid rgba(124,58,237,0.16)',
             color: 'rgba(255,255,255,0.55)',
-            opacity: 0.35,
+            opacity: 0.35, flexShrink: 0, whiteSpace: 'nowrap',
           }}
           title="Microphone (available in Editor)"
         >🎙 Mic</button>

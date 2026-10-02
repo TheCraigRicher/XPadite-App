@@ -22,6 +22,7 @@ import { buildAttachment, buildAttachments, ATTACHMENT_ACCEPT, CameraModal, Imag
 import type { JournalBlock, JournalTimerSession, TaskAttachment, Task, TaskSession, SectionCell } from './types'
 import { useApp } from './AppContext'
 import { JournalDrawModal } from './JournalDrawModal'
+import type { JournalDrawModalHandle } from './JournalDrawModal'
 import {
   parseJournalDoc, parseJournalContent, serializeJournalContent, serializeJournalDoc,
   getSectionStyle, SECTION_COLORS, createTextBlock, createSectionBlock,
@@ -2147,6 +2148,11 @@ export function JournalEditorContent({
   }, [closeIntent])
   const showExitDialogRef = useRef(false)  // for ESC handler stable closure
   const drawStateRef = useRef<typeof drawState>(null)  // lets the capture-phase ESC/Ctrl+S handler know the Mind Mapping Canvas owns the key right now
+  // Lets the mobile-only header back arrow (rendered here, outside
+  // JournalDrawModal, for Fit-mode portal reasons) trigger that component's
+  // OWN unsaved-changes guard instead of unconditionally closing — the exact
+  // gap desktop's in-component Cancel button never had.
+  const drawModalRef = useRef<JournalDrawModalHandle>(null)
 
   // ── Journal session timer ────────────────────────────────────────────────────
   const [timerSessions,    setTimerSessions]    = useState<JournalTimerSession[]>([])
@@ -2398,6 +2404,30 @@ export function JournalEditorContent({
       document.removeEventListener('visibilitychange', onVis)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ── Mobile/tablet-only: tapping a task checkbox must not jump the viewport ──
+  // The checkbox lives inside a contentEditable region; on touch-primary
+  // browsers, the mousedown a tap synthesizes can make the browser try to
+  // focus/place a text cursor at that point BEFORE the checkbox's own toggle
+  // runs, and scroll to "reveal" that cursor elsewhere in a long document —
+  // desktop never shows this because a real mouse click doesn't trigger that
+  // same focus-seeking scroll behavior. preventDefault on the checkbox's own
+  // mousedown blocks only that focus/selection side effect — a checkbox still
+  // toggles via its `click`/`change` event regardless of mousedown being
+  // prevented, so the existing check/uncheck behavior is unaffected. Gated
+  // entirely behind a (pointer: coarse) match (true only for touch-primary
+  // devices), so this listener is never even attached on desktop.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia('(pointer: coarse)').matches) return
+    function onMouseDown(e: MouseEvent) {
+      const t = e.target as HTMLElement | null
+      if (t?.tagName === 'INPUT' && t.getAttribute('type') === 'checkbox' && t.closest('.xp-j-prose')) {
+        e.preventDefault()
+      }
+    }
+    document.addEventListener('mousedown', onMouseDown, true)
+    return () => document.removeEventListener('mousedown', onMouseDown, true)
   }, [])
 
   // ── Block content change ────────────────────────────────────────────────────
@@ -3710,7 +3740,7 @@ export function JournalEditorContent({
           height: 52, padding: '0 14px',
         }}>
           <button
-            onClick={() => { setDrawState(null); setMmcFit(false) }}
+            onClick={() => drawModalRef.current?.requestClose()}
             title="Back"
             aria-label="Back"
             style={{
@@ -3848,6 +3878,7 @@ export function JournalEditorContent({
     : undefined
   const journalDrawModalEl = drawState && (
     <JournalDrawModal
+      ref={drawModalRef}
       isDark={isDark}
       initialSrc={drawState.editingCell ? editingCellData?.src : drawState.editingBlock?.src}
       initialObjects={drawState.editingCell ? editingCellData?.canvasData : drawState.editingBlock?.canvasData}

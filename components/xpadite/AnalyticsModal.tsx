@@ -1,27 +1,41 @@
 'use client'
 
-// ── Analytics modal — front-end only ──────────────────────────────────────────
-// Matches the finalized "Main Analytics Dashboard Modal" reference. This is
-// intentionally presentational for now: the 4 timeframe cards only toggle a
-// local selected state (no navigation into the deeper Today/Weekly/Monthly/
-// Yearly dashboards yet — see AnalyticsPage.tsx for those, to be wired up in
-// a follow-up task), and the overview stats / donut / hourly chart below use
-// static placeholder values rather than real session data.
+// ── Analytics modal — front-end + real data wiring ────────────────────────────
+// The 4 timeframe cards still only toggle a local selected state (no
+// navigation into the deeper Today/Weekly/Monthly/Yearly dashboards yet —
+// see AnalyticsPage.tsx for those). The Overview section below them is now
+// driven by real XPadite data via the SAME range-stats engine AnalyticsPage.tsx
+// already uses (computeRangeStats, exported from there) and the streak
+// functions from productivityEngine.ts (also used by StatsRow) — no parallel
+// calculation system.
 //
-// Reuses established XPadite patterns: useLockBodyScroll (same freeze used by
-// every other modal here), the signature purple/lavender gradient header, the
-// same solid-triangle date-nav glyphs used in DayModal/SendToOptionsModal, and
-// PremiumUpgradeModal for the "AI Insight" entry point.
+// Reuses established XPadite patterns: useLockBodyScroll, the signature
+// purple/lavender gradient header, the same solid-triangle date-nav glyphs
+// used in DayModal/SendToOptionsModal, PremiumUpgradeModal for "AI Insight",
+// and DayDashboardModal's exact responsive modal-sizing classes (mobile
+// full-bleed → sm:max-w-[640px] → lg:max-w-[1296px]) so this modal matches
+// the rest of the analytics/dashboard family.
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from './AppContext'
 import { useLockBodyScroll } from './useLockBodyScroll'
 import { PremiumUpgradeModal } from './PremiumUpgradeModal'
-import { MONTHS } from './utils'
+import { MONTHS, formatMs, dateKey as buildDateKey } from './utils'
+import { computeRangeStats, getCurrentWeekRange, getCurrentMonthRange } from './AnalyticsPage'
+import { calculateBestStreak } from './productivityEngine'
+import type { CalendarData } from './types'
 
 type Timeframe = 'today' | 'weekly' | 'monthly' | 'yearly'
+type Scope = 'today' | 'week' | 'month' | 'year'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const SCOPES: Scope[] = ['today', 'week', 'month', 'year']
+const SCOPE_META: Record<Scope, { dropdownLabel: string; heading: string }> = {
+  today: { dropdownLabel: 'Today',      heading: "Today's Overview" },
+  week:  { dropdownLabel: 'This Week',  heading: "This Week's Overview" },
+  month: { dropdownLabel: 'This Month', heading: "This Month's Overview" },
+  year:  { dropdownLabel: 'This Year',  heading: "This Year's Overview" },
+}
 
 // Same solid-triangle glyphs used for day-nav arrows elsewhere (DayModal's
 // header, SendToOptionsModal's month nav) — duplicated locally per the
@@ -32,17 +46,75 @@ const PrevTriangle = () => (
 const NextTriangle = () => (
   <svg width="7" height="10" viewBox="0 0 9 12" fill="currentColor" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
 )
+const ChevronGlyph = ({ open }: { open: boolean }) => (
+  <svg viewBox="0 0 16 16" fill="none" width="8" height="8" aria-hidden="true" style={{ flexShrink: 0, transition: 'transform 150ms ease', transform: open ? 'rotate(180deg)' : 'none' }}>
+    <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
+// ─── Key-list / duration helpers (mirror the exact conventions already
+// established in AnalyticsPage.tsx / DayDashboardModal.tsx) ───────────────────
+
+function keysInRange(start: Date, end: Date): string[] {
+  const keys: string[] = []
+  const cur = new Date(start); cur.setHours(0, 0, 0, 0)
+  const e = new Date(end); e.setHours(0, 0, 0, 0)
+  while (cur <= e) { keys.push(buildDateKey(cur.getFullYear(), cur.getMonth(), cur.getDate())); cur.setDate(cur.getDate() + 1) }
+  return keys
+}
+
+function getSessionDurationMs(startTs: number, endTs: number): number {
+  let d = endTs - startTs
+  if (d < 0) d += 86_400_000
+  return Math.max(d, 0)
+}
+
+// Hour-of-day histogram (ms per hour, 0–23) across every session in range —
+// no existing source aggregates by hour-of-day (computeRangeStats aggregates
+// per-day), so this is a genuinely new view, built with the identical
+// session-iteration/duration-clamping pattern computeRangeStats already uses.
+function computeHourlyBreakdown(calData: CalendarData, start: Date, end: Date): number[] {
+  const buckets = new Array(24).fill(0) as number[]
+  const cursor = new Date(start); cursor.setHours(0, 0, 0, 0)
+  const e = new Date(end); e.setHours(23, 59, 59, 999)
+  while (cursor <= e) {
+    const k = buildDateKey(cursor.getFullYear(), cursor.getMonth(), cursor.getDate())
+    calData[k]?.tasks?.forEach(t => {
+      ;(t.sessions ?? []).forEach(s => {
+        if (s.endTs !== null) {
+          const dur = getSessionDurationMs(s.startTs, s.endTs)
+          if (dur > 0 && dur < 86_400_000) buckets[new Date(s.startTs).getHours()] += dur
+        }
+      })
+    })
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return buckets
+}
+
+function getScopeRange(scope: Scope, todayScopeDate: Date, today: Date): { start: Date; end: Date } {
+  if (scope === 'today') { const d = new Date(todayScopeDate); d.setHours(0, 0, 0, 0); return { start: d, end: d } }
+  if (scope === 'week') { const { start, end } = getCurrentWeekRange(); return { start, end } }
+  if (scope === 'month') { const { start, end } = getCurrentMonthRange(); return { start, end } }
+  return { start: new Date(today.getFullYear(), 0, 1), end: new Date(today.getFullYear(), 11, 31) }
+}
+
+function fmtShort(d: Date): string { return `${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}` }
+
+function scopePeriodLabel(scope: Scope, todayScopeDate: Date, today: Date): string {
+  if (scope === 'today') return `${DAY_NAMES[todayScopeDate.getDay()]}, ${MONTHS[todayScopeDate.getMonth()].slice(0, 3)} ${todayScopeDate.getDate()}, ${todayScopeDate.getFullYear()}`
+  if (scope === 'week') { const { start, end } = getCurrentWeekRange(); return `${fmtShort(start)} – ${fmtShort(end)}, ${start.getFullYear()}` }
+  if (scope === 'month') return `${MONTHS[today.getMonth()]} ${today.getFullYear()}`
+  return String(today.getFullYear())
+}
 
 // ─── Timeframe cards ───────────────────────────────────────────────────────────
 
-const TIMEFRAMES: {
-  id: Timeframe; icon: string; title: string; desc: string
-  bgL: string; bgD: string; badge: string
-}[] = [
-  { id: 'today',   icon: '☀️', title: 'Today',   desc: "View today's productivity", bgL: '#f1edfe', bgD: 'rgba(124,58,237,0.14)', badge: '#7c3aed' },
-  { id: 'weekly',  icon: '📅', title: 'Weekly',  desc: "See this week's progress",  bgL: '#eafaf2', bgD: 'rgba(16,185,129,0.14)', badge: '#10b981' },
-  { id: 'monthly', icon: '🗓️', title: 'Monthly', desc: 'Track monthly trends',      bgL: '#fdedf0', bgD: 'rgba(244,63,94,0.14)',  badge: '#f43f5e' },
-  { id: 'yearly',  icon: '📊', title: 'Yearly',  desc: 'View long-term growth',     bgL: '#f2effc', bgD: 'rgba(99,102,241,0.16)', badge: '#6366f1' },
+const TIMEFRAMES: { id: Timeframe; icon: string; title: string; desc: string; bgL: string; bgD: string }[] = [
+  { id: 'today',   icon: '🚀', title: 'Today',   desc: "View today's productivity", bgL: '#f1edfe', bgD: 'rgba(124,58,237,0.14)' },
+  { id: 'weekly',  icon: '🗓', title: 'Weekly',  desc: "See this week's progress",  bgL: '#eafaf2', bgD: 'rgba(16,185,129,0.14)' },
+  { id: 'monthly', icon: '📈', title: 'Monthly', desc: 'Track monthly trends',      bgL: '#fdedf0', bgD: 'rgba(244,63,94,0.14)' },
+  { id: 'yearly',  icon: '📶', title: 'Yearly',  desc: 'View long-term growth',     bgL: '#f2effc', bgD: 'rgba(99,102,241,0.16)' },
 ]
 
 function TimeframeCard({ def, selected, isDark, onSelect }: {
@@ -54,100 +126,148 @@ function TimeframeCard({ def, selected, isDark, onSelect }: {
       className="text-left rounded-2xl p-4 transition-all duration-150"
       style={{
         background: isDark ? def.bgD : def.bgL,
-        border: selected ? `2px solid ${def.badge}` : '2px solid transparent',
-        boxShadow: selected ? `0 0 0 3px ${def.badge}22` : 'none',
+        border: selected ? '2px solid #7c3aed' : '2px solid transparent',
+        boxShadow: selected ? '0 0 0 3px rgba(124,58,237,0.13)' : 'none',
       }}
     >
-      <div
-        className="flex items-center justify-center rounded-xl mb-3"
-        style={{ width: 40, height: 40, background: def.badge, fontSize: 18 }}
-      >
-        {def.icon}
-      </div>
+      <div className="mb-2" style={{ fontSize: 26, lineHeight: 1 }}>{def.icon}</div>
       <p className="text-[13px] font-bold" style={{ color: 'var(--xp-txt)' }}>{def.title}</p>
       <p className="text-[10.5px] mt-0.5 leading-snug" style={{ color: 'var(--xp-txt3)' }}>{def.desc}</p>
     </button>
   )
 }
 
+// ─── Overview scope dropdown (replaces the old static "Today" pill) ──────────
+// Mirrors StatsRow.tsx's ScopePill/DropdownOption visual language (pill
+// trigger + chevron, absolute dropdown panel, checkmark on the selection) —
+// simplified to 4 flat options since this picker has no date drilldown.
+
+function OverviewScopeDropdown({ scope, onChange }: { scope: Scope; onChange: (s: Scope) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    function onDown(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative flex-shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1 rounded-full transition-opacity hover:opacity-90"
+        style={{ background: '#7c3aed', color: '#ffffff', border: 'none', cursor: 'pointer' }}
+      >
+        {SCOPE_META[scope].dropdownLabel}
+        <ChevronGlyph open={open} />
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-full mt-1.5 z-50 rounded-xl overflow-hidden py-1"
+          style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr)', minWidth: 148, boxShadow: '0 8px 32px rgba(0,0,0,0.16), 0 2px 8px rgba(0,0,0,0.10)' }}
+        >
+          {SCOPES.map(s => (
+            <button
+              key={s}
+              onClick={() => { onChange(s); setOpen(false) }}
+              className="w-full text-left px-3 py-1.5 text-[11px] flex items-center justify-between"
+              style={{
+                color: scope === s ? '#7c3aed' : 'var(--xp-txt)',
+                background: scope === s ? 'rgba(124,58,237,0.08)' : 'transparent',
+                fontWeight: scope === s ? 600 : 400,
+              }}
+            >
+              {SCOPE_META[s].dropdownLabel}
+              {scope === s && <span style={{ color: '#7c3aed', fontSize: 11 }}>✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Overview stat cards ───────────────────────────────────────────────────────
 
-const OVERVIEW_STATS = [
-  { icon: '⏱', label: 'Productive Time',      value: '6h 24m', color: '#7c3aed', tint: 'rgba(124,58,237,0.10)' },
-  { icon: '🔥', label: 'Current Streak days',  value: '12',     color: '#f97316', tint: 'rgba(249,115,22,0.10)' },
-  { icon: '🏆', label: 'Milestones Achieved',  value: '3',      color: '#eab308', tint: 'rgba(234,179,8,0.12)' },
-  { icon: '🎯', label: 'Goals Accomplished',   value: '8',      color: '#14b8a6', tint: 'rgba(20,184,166,0.10)' },
-]
+function OverviewStat({ icon, tint, value, label }: { icon: string; tint: string; value: string; label: string }) {
+  return (
+    <div className="rounded-2xl p-3.5 flex items-center gap-3" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr)', boxShadow: '0 1px 8px rgba(0,0,0,0.05)' }}>
+      <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 36, height: 36, background: tint, fontSize: 16 }}>
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <p className="text-[15px] font-extrabold leading-none" style={{ color: 'var(--xp-txt)' }}>{value}</p>
+        <p className="text-[9.5px] mt-1 leading-snug" style={{ color: 'var(--xp-txt3)' }}>{label}</p>
+      </div>
+    </div>
+  )
+}
 
-// ─── Donut chart (Productive vs Non-Productive) ───────────────────────────────
+// ─── Donut chart (Productive vs Non-Productive, built from real actBreakdown) ─
 
-const DONUT_SEGMENTS = [
-  { label: 'Deep Work',    pct: 62, color: '#7c3aed' },
-  { label: 'Creative',     pct: 18, color: '#a78bfa' },
-  { label: 'Study',        pct: 10, color: '#60a5fa' },
-  { label: 'Meetings',     pct: 6,  color: '#fb923c' },
-  { label: 'Break / Meal', pct: 4,  color: '#9ca3af' },
-]
-
-function Donut({ size = 128, strokeWidth = 20 }: { size?: number; strokeWidth?: number }) {
+function Donut({ segments, size = 128, strokeWidth = 20 }: { segments: { color: string; pct: number }[]; size?: number; strokeWidth?: number }) {
   const r = (size - strokeWidth) / 2
   const c = 2 * Math.PI * r
-  // Precompute each segment's arc length + cumulative start offset as a pure
-  // derivation (no mutation during the render-producing .map below).
-  const arcs = DONUT_SEGMENTS.reduce<{ seg: (typeof DONUT_SEGMENTS)[number]; len: number; offset: number }[]>((acc, seg) => {
-    const len = (seg.pct / 100) * c
+  const arcs = segments.reduce<{ color: string; len: number; offset: number }[]>((acc, seg) => {
+    const len = (seg.pct) * c
     const offset = acc.length > 0 ? acc[acc.length - 1].offset + acc[acc.length - 1].len : 0
-    return [...acc, { seg, len, offset }]
+    return [...acc, { color: seg.color, len, offset }]
   }, [])
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--xp-bdr2)" strokeWidth={strokeWidth} opacity={0.35} />
       <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
-        {arcs.map(({ seg, len, offset }) => (
-          <circle
-            key={seg.label}
-            cx={size / 2} cy={size / 2} r={r} fill="none"
-            stroke={seg.color} strokeWidth={strokeWidth}
-            strokeDasharray={`${len} ${c - len}`}
-            strokeDashoffset={-offset}
-          />
+        {arcs.map((a, i) => (
+          <circle key={i} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={a.color} strokeWidth={strokeWidth} strokeDasharray={`${a.len} ${c - a.len}`} strokeDashoffset={-a.offset} />
         ))}
       </g>
     </svg>
   )
 }
 
-// ─── Hourly breakdown bar chart (placeholder data) ────────────────────────────
+// ─── Hourly breakdown bar chart (real per-hour totals for the selected scope) ─
 
-const HOURLY_PLACEHOLDER = [12, 18, 10, 22, 35, 48, 62, 75, 88, 80, 65, 50, 58, 42, 30, 18]
-const HOUR_LABELS = ['6AM', '9AM', '12PM', '3PM', '6PM', '9PM']
+const HOURLY_WINDOW = Array.from({ length: 16 }, (_, i) => i + 6) // 6am–9pm
+const HOUR_TICK_LABELS = ['6AM', '9AM', '12PM', '3PM', '6PM', '9PM']
 
-function HourlyBarChart({ isDark }: { isDark: boolean }) {
-  const max = 90
-  const W = 600, H = 170, padL = 26, padB = 20, padT = 8, padR = 6
+function HourlyBarChart({ buckets, isDark }: { buckets: number[]; isDark: boolean }) {
+  const windowed = HOURLY_WINDOW.map(h => buckets[h])
+  const peakMs = Math.max(...windowed, 0)
+  const maxMs = peakMs > 0 ? peakMs * 1.15 : 3_600_000
+  const W = 600, H = 170, padL = 30, padB = 20, padT = 8, padR = 6
   const plotW = W - padL - padR, plotH = H - padT - padB
-  const slotW = plotW / HOURLY_PLACEHOLDER.length
+  const slotW = plotW / windowed.length
   const barW = Math.max(6, slotW * 0.55)
   const gridLine = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'
+  const ticks = [0, maxMs / 2, maxMs]
+
+  if (peakMs === 0) {
+    return <p className="text-[11px] py-6 text-center" style={{ color: 'var(--xp-txt3)' }}>No sessions recorded</p>
+  }
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ height: H, display: 'block' }}>
-      {[0, 30, 60, 90].map(v => {
-        const y = padT + plotH - (v / max) * plotH
+      {ticks.map((v, i) => {
+        const y = padT + plotH - (v / maxMs) * plotH
         return (
-          <g key={v}>
+          <g key={i}>
             <line x1={padL} x2={W - padR} y1={y} y2={y} stroke={gridLine} strokeWidth={1} />
-            <text x={padL - 6} y={y + 3} textAnchor="end" fontSize="9" fill="var(--xp-txt3)">{v}</text>
+            <text x={padL - 6} y={y + 3} textAnchor="end" fontSize="9" fill="var(--xp-txt3)">{v === 0 ? '0' : formatMs(v)}</text>
           </g>
         )
       })}
-      {HOURLY_PLACEHOLDER.map((v, i) => {
+      {windowed.map((v, i) => {
         const x = padL + slotW * i + (slotW - barW) / 2
-        const h = (v / max) * plotH
+        const h = (v / maxMs) * plotH
         const y = padT + plotH - h
-        return <rect key={i} x={x} y={y} width={barW} height={h} rx={3} fill="#7c3aed" opacity={0.85} />
+        return <rect key={i} x={x} y={y} width={barW} height={h} rx={3} fill="#7c3aed" opacity={v > 0 ? 0.85 : 0.12} />
       })}
-      {HOUR_LABELS.map((lbl, idx) => {
-        const pos = idx / (HOUR_LABELS.length - 1)
+      {HOUR_TICK_LABELS.map((lbl, idx) => {
+        const pos = idx / (HOUR_TICK_LABELS.length - 1)
         const x = padL + pos * plotW
         return <text key={lbl} x={x} y={H - 4} textAnchor="middle" fontSize="9" fill="var(--xp-txt3)">{lbl}</text>
       })}
@@ -181,7 +301,7 @@ function SummaryCard({ icon, iconBg, title, value, sub }: {
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-[10.5px] font-medium" style={{ color: 'var(--xp-txt3)' }}>{title}</p>
-        <p className="text-[14px] font-bold" style={{ color: 'var(--xp-txt)' }}>{value}</p>
+        <p className="text-[14px] font-bold truncate" style={{ color: 'var(--xp-txt)' }}>{value}</p>
         <p className="text-[10.5px]" style={{ color: 'var(--xp-txt3)' }}>{sub}</p>
       </div>
       <span style={{ color: 'var(--xp-txt3)', fontSize: 18, flexShrink: 0 }}>›</span>
@@ -189,14 +309,38 @@ function SummaryCard({ icon, iconBg, title, value, sub }: {
   )
 }
 
+// ─── Legend ─────────────────────────────────────────────────────────────────
+
+const LEGEND_ITEMS = [
+  { icon: '🟣', label: 'Productive' },
+  { icon: '🔥', label: 'Hyper productive' },
+  { icon: '🔗', label: 'Streak' },
+  { icon: '🏆', label: 'Milestone' },
+  { icon: '🎯', label: 'Goals Accomplished' },
+]
+
+function AnalyticsLegend() {
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 pt-1 pb-2">
+      {LEGEND_ITEMS.map(item => (
+        <span key={item.label} className="flex items-center gap-1.5 text-[10.5px]" style={{ color: 'var(--xp-txt3)' }}>
+          <span style={{ fontSize: 11 }}>{item.icon}</span>
+          {item.label}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 // ─── AnalyticsModal (main export) ──────────────────────────────────────────────
 
 export function AnalyticsModal({ onClose }: { onClose: () => void }) {
-  const { isDark } = useApp()
+  const { isDark, calData, activities } = useApp()
   useLockBodyScroll()
 
-  const [selected, setSelected] = useState<Timeframe>('today')
-  const [overviewDate, setOverviewDate] = useState(() => new Date())
+  const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('today')
+  const [scope, setScope] = useState<Scope>('today')
+  const [todayScopeDate, setTodayScopeDate] = useState(() => new Date())
   const [showPremium, setShowPremium] = useState(false)
 
   useEffect(() => {
@@ -209,23 +353,45 @@ export function AnalyticsModal({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose, showPremium])
 
-  function shiftDay(delta: number) {
-    setOverviewDate(d => { const n = new Date(d); n.setDate(n.getDate() + delta); return n })
+  const today = useMemo(() => new Date(), [])
+  function shiftTodayScopeDay(delta: number) {
+    setTodayScopeDate(d => { const n = new Date(d); n.setDate(n.getDate() + delta); return n })
   }
-  const today = new Date()
-  const isOverviewToday = overviewDate.toDateString() === today.toDateString()
-  const overviewDateLabel = `${DAY_NAMES[overviewDate.getDay()]}, ${MONTHS[overviewDate.getMonth()].slice(0, 3)} ${overviewDate.getDate()}, ${overviewDate.getFullYear()}`
+
+  const range = useMemo(() => getScopeRange(scope, todayScopeDate, today), [scope, todayScopeDate, today])
+  const periodLabel = useMemo(() => scopePeriodLabel(scope, todayScopeDate, today), [scope, todayScopeDate, today])
+
+  const stats = useMemo(() => computeRangeStats(calData, activities, range.start, range.end), [calData, activities, range])
+  const bestStreak = useMemo(() => calculateBestStreak(calData, keysInRange(range.start, range.end)), [calData, range])
+  const hourlyBuckets = useMemo(() => computeHourlyBreakdown(calData, range.start, range.end), [calData, range])
+
+  // Top 5 activities + an "Other" bucket for the rest, mirroring the same
+  // cap AnalyticsPage.tsx's ActivityBars already uses (.slice(0, 6)).
+  const donutSegments = useMemo(() => {
+    const top = stats.actBreakdown.slice(0, 5)
+    const restMs = stats.actBreakdown.slice(5).reduce((s, a) => s + a.ms, 0)
+    const withOther = restMs > 0
+      ? [...top, { actId: '__other', name: 'Other', color: '#9ca3af', ms: restMs, pct: stats.totalMs > 0 ? restMs / stats.totalMs : 0 }]
+      : top
+    return withOther
+  }, [stats])
+
+  const topActivity = stats.actBreakdown[0] ?? null
 
   return (
     <>
       <div
-        className="fixed inset-0 z-[150] flex items-center justify-center p-3 sm:p-5"
-        style={{ background: 'rgba(0,0,0,0.55)' }}
+        className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-50 flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-3 sm:pt-4"
+        style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
         onClick={onClose}
       >
         <div
-          className="w-full max-w-[880px] rounded-[22px] overflow-hidden flex flex-col"
-          style={{ background: 'var(--xp-bg)', maxHeight: '92vh', boxShadow: '0 24px 70px rgba(0,0,0,0.35)' }}
+          className="flex flex-col w-full h-full sm:h-auto sm:rounded-2xl sm:shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] sm:mb-6"
+          style={{
+            background: 'var(--xp-bg)',
+            border: isDark ? '0.5px solid rgba(124,58,237,0.22)' : '0.5px solid var(--xp-bdr2)',
+            boxShadow: isDark ? '0 30px 70px rgba(0,0,0,0.75)' : '0 20px 50px rgba(0,0,0,0.12)',
+          }}
           onClick={e => e.stopPropagation()}
         >
           {/* XPadite signature purple header */}
@@ -234,12 +400,7 @@ export function AnalyticsModal({ onClose }: { onClose: () => void }) {
             style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)' }}
           >
             <div className="flex items-center gap-3 min-w-0">
-              <div
-                className="flex items-center justify-center rounded-2xl flex-shrink-0"
-                style={{ width: 42, height: 42, background: 'rgba(255,255,255,0.18)', fontSize: 19 }}
-              >
-                📊
-              </div>
+              <span style={{ fontSize: 24, lineHeight: 1, flexShrink: 0 }}>📊</span>
               <div className="min-w-0">
                 <h2 className="text-[17px] sm:text-[20px] font-extrabold leading-tight" style={{ color: '#ffffff' }}>Analytics</h2>
                 <p className="text-[10.5px] sm:text-[12px] mt-0.5 truncate" style={{ color: 'rgba(255,255,255,0.78)' }}>
@@ -253,7 +414,7 @@ export function AnalyticsModal({ onClose }: { onClose: () => void }) {
                 className="hidden sm:flex items-center gap-1.5 text-[11.5px] font-bold px-3.5 py-2 rounded-full transition-opacity hover:opacity-85"
                 style={{ background: '#ffffff', color: '#7c3aed', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
               >
-                ✨ AI Insight 👑
+                ✨ AI Insight
               </button>
               <button
                 onClick={() => setShowPremium(true)}
@@ -280,94 +441,103 @@ export function AnalyticsModal({ onClose }: { onClose: () => void }) {
             {/* Timeframe cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {TIMEFRAMES.map(def => (
-                <TimeframeCard key={def.id} def={def} selected={selected === def.id} isDark={isDark} onSelect={() => setSelected(def.id)} />
+                <TimeframeCard key={def.id} def={def} selected={selectedTimeframe === def.id} isDark={isDark} onSelect={() => setSelectedTimeframe(def.id)} />
               ))}
             </div>
 
-            {/* Today's Overview heading + date nav */}
+            {/* Overview heading + scope dropdown + date nav */}
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <h3 className="text-[14px] font-bold" style={{ color: 'var(--xp-txt)' }}>Today&apos;s Overview</h3>
+              <h3 className="text-[14px] font-bold" style={{ color: 'var(--xp-txt)' }}>{SCOPE_META[scope].heading}</h3>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => shiftDay(-1)}
-                  aria-label="Previous day"
-                  className="flex items-center justify-center rounded-full transition-colors hover:bg-black/5"
-                  style={{ width: 24, height: 24, color: 'var(--xp-txt3)', background: 'var(--xp-bg3)', border: 'none', cursor: 'pointer' }}
-                >
-                  <PrevTriangle />
-                </button>
-                <span className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt)' }}>{overviewDateLabel}</span>
-                <button
-                  onClick={() => shiftDay(1)}
-                  aria-label="Next day"
-                  className="flex items-center justify-center rounded-full transition-colors hover:bg-black/5"
-                  style={{ width: 24, height: 24, color: 'var(--xp-txt3)', background: 'var(--xp-bg3)', border: 'none', cursor: 'pointer' }}
-                >
-                  <NextTriangle />
-                </button>
-                <button
-                  onClick={() => setOverviewDate(new Date())}
-                  disabled={isOverviewToday}
-                  className="text-[11px] font-semibold px-3 py-1 rounded-full transition-opacity"
-                  style={{
-                    background: isOverviewToday ? 'rgba(124,58,237,0.12)' : '#7c3aed',
-                    color: isOverviewToday ? '#7c3aed' : '#ffffff',
-                    border: 'none', cursor: isOverviewToday ? 'default' : 'pointer', opacity: isOverviewToday ? 0.7 : 1,
-                  }}
-                >
-                  Today
-                </button>
+                {scope === 'today' && (
+                  <>
+                    <button
+                      onClick={() => shiftTodayScopeDay(-1)}
+                      aria-label="Previous day"
+                      className="flex items-center justify-center rounded-full transition-colors hover:bg-black/5"
+                      style={{ width: 24, height: 24, color: 'var(--xp-txt3)', background: 'var(--xp-bg3)', border: 'none', cursor: 'pointer' }}
+                    >
+                      <PrevTriangle />
+                    </button>
+                    <span className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt)' }}>{periodLabel}</span>
+                    <button
+                      onClick={() => shiftTodayScopeDay(1)}
+                      aria-label="Next day"
+                      className="flex items-center justify-center rounded-full transition-colors hover:bg-black/5"
+                      style={{ width: 24, height: 24, color: 'var(--xp-txt3)', background: 'var(--xp-bg3)', border: 'none', cursor: 'pointer' }}
+                    >
+                      <NextTriangle />
+                    </button>
+                  </>
+                )}
+                {scope !== 'today' && (
+                  <span className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt)' }}>{periodLabel}</span>
+                )}
+                <OverviewScopeDropdown scope={scope} onChange={setScope} />
               </div>
             </div>
 
-            {/* Overview stat cards */}
+            {/* Overview stat cards — real data for the selected scope */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {OVERVIEW_STATS.map(s => (
-                <div key={s.label} className="rounded-2xl p-3.5 flex items-center gap-3" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr)', boxShadow: '0 1px 8px rgba(0,0,0,0.05)' }}>
-                  <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 36, height: 36, background: s.tint, fontSize: 16 }}>
-                    {s.icon}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[15px] font-extrabold leading-none" style={{ color: 'var(--xp-txt)' }}>{s.value}</p>
-                    <p className="text-[9.5px] mt-1 leading-snug" style={{ color: 'var(--xp-txt3)' }}>{s.label}</p>
-                  </div>
-                </div>
-              ))}
+              <OverviewStat icon="🟣" tint="rgba(124,58,237,0.10)" value={String(stats.productiveDays)} label="Productive Days" />
+              <OverviewStat icon="🔥" tint="rgba(249,115,22,0.10)" value={String(stats.hyperDays)} label="Hyper Productive Days" />
+              <OverviewStat icon="🔗" tint="rgba(124,58,237,0.10)" value={`${bestStreak} day${bestStreak === 1 ? '' : 's'}`} label="Longest Streak" />
+              <OverviewStat icon="⏱" tint="rgba(59,130,246,0.10)" value={formatMs(stats.totalMs)} label="Total Tracked Time" />
+              <OverviewStat icon="✅" tint="rgba(34,197,94,0.10)" value={String(stats.completedTasks)} label="Tasks Completed" />
+              <OverviewStat icon="🏆" tint="rgba(234,179,8,0.12)" value={String(stats.milestoneDays)} label="Milestones Achieved" />
+              <OverviewStat icon="🎯" tint="rgba(20,184,166,0.10)" value={String(stats.goalDays)} label="Goals Accomplished" />
             </div>
 
-            {/* Analytics visuals — donut + hourly breakdown */}
+            {/* Analytics visuals — donut + hourly breakdown, real data */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Panel title="Productive vs Non-Productive">
-                <div className="flex items-center gap-4">
-                  <div className="relative flex-shrink-0" style={{ width: 128, height: 128 }}>
-                    <Donut />
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-[16px] font-extrabold" style={{ color: 'var(--xp-txt)' }}>6h 24m</span>
-                      <span className="text-[9px]" style={{ color: 'var(--xp-txt3)' }}>Total Time</span>
+                {stats.totalMs === 0 ? (
+                  <p className="text-[11px] py-6 text-center" style={{ color: 'var(--xp-txt3)' }}>No sessions recorded</p>
+                ) : (
+                  <div className="flex items-center gap-4">
+                    <div className="relative flex-shrink-0" style={{ width: 128, height: 128 }}>
+                      <Donut segments={donutSegments.map(s => ({ color: s.color, pct: s.pct }))} />
+                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                        <span className="text-[16px] font-extrabold" style={{ color: 'var(--xp-txt)' }}>{formatMs(stats.totalMs)}</span>
+                        <span className="text-[9px]" style={{ color: 'var(--xp-txt3)' }}>Total Time</span>
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                      {donutSegments.map(seg => (
+                        <div key={seg.actId} className="flex items-center gap-2">
+                          <span className="rounded-full flex-shrink-0" style={{ width: 8, height: 8, background: seg.color }} />
+                          <span className="text-[11px] flex-1 min-w-0 truncate" style={{ color: 'var(--xp-txt2)' }}>{seg.name}</span>
+                          <span className="text-[11px] font-semibold" style={{ color: 'var(--xp-txt)' }}>{Math.round(seg.pct * 100)}%</span>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                  <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-                    {DONUT_SEGMENTS.map(seg => (
-                      <div key={seg.label} className="flex items-center gap-2">
-                        <span className="rounded-full flex-shrink-0" style={{ width: 8, height: 8, background: seg.color }} />
-                        <span className="text-[11px] flex-1 min-w-0 truncate" style={{ color: 'var(--xp-txt2)' }}>{seg.label}</span>
-                        <span className="text-[11px] font-semibold" style={{ color: 'var(--xp-txt)' }}>{seg.pct}%</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                )}
               </Panel>
 
               <Panel title="Hourly Breakdown">
-                <HourlyBarChart isDark={isDark} />
+                <HourlyBarChart buckets={hourlyBuckets} isDark={isDark} />
               </Panel>
             </div>
 
             {/* Bottom summary cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-1">
-              <SummaryCard icon="🚀" iconBg="rgba(16,185,129,0.14)" title="Most Productive Activity" value="Deep Work" sub="28% of total time" />
-              <SummaryCard icon="✅" iconBg="rgba(59,130,246,0.14)" title="Tasks Completed" value="1,284" sub="Tasks Completed" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <SummaryCard
+                icon="🚀" iconBg="rgba(16,185,129,0.14)"
+                title="Most Productive Activity"
+                value={topActivity ? topActivity.name : '—'}
+                sub={topActivity ? `${Math.round(topActivity.pct * 100)}% of total time` : 'No activity data yet'}
+              />
+              <SummaryCard
+                icon="✅" iconBg="rgba(59,130,246,0.14)"
+                title="Tasks Completed"
+                value={stats.completedTasks.toLocaleString()}
+                sub="Tasks Completed"
+              />
             </div>
+
+            {/* Legend / key */}
+            <AnalyticsLegend />
           </div>
         </div>
       </div>

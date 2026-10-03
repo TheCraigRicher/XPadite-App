@@ -19,7 +19,9 @@ function getSessionDurationMs(startTs: number, endTs: number): number {
 
 // ─── Range stats ──────────────────────────────────────────────────────────────
 
-interface DayPoint {
+// Exported so other analytics surfaces (e.g. AnalyticsModal) can reuse this
+// exact range-stats computation instead of building a parallel one.
+export interface DayPoint {
   key: string
   date: Date
   label: string
@@ -31,7 +33,7 @@ interface DayPoint {
   isFuture: boolean
 }
 
-interface RangeStats {
+export interface RangeStats {
   totalMs: number       // all tracked time (for activity distribution charts)
   productiveMs: number  // productive activities only (for focus/worked KPIs)
   sessionCount: number
@@ -40,6 +42,7 @@ interface RangeStats {
   productiveDays: number
   hyperDays: number
   milestoneDays: number
+  goalDays: number
   actBreakdown: { actId: string; name: string; color: string; ms: number; pct: number }[]
   dayPoints: DayPoint[]
   strongestDay: DayPoint | null
@@ -48,7 +51,7 @@ interface RangeStats {
   daysInRange: number
 }
 
-function computeRangeStats(
+export function computeRangeStats(
   calData: CalendarData,
   activities: Activity[],
   startDate: Date,
@@ -62,7 +65,7 @@ function computeRangeStats(
   end.setHours(23, 59, 59, 999)
 
   let totalMs = 0, productiveMs = 0, sessionCount = 0, completedTasks = 0, totalTasks = 0
-  let productiveDays = 0, hyperDays = 0, milestoneDays = 0, daysElapsed = 0, daysInRange = 0
+  let productiveDays = 0, hyperDays = 0, milestoneDays = 0, goalDays = 0, daysElapsed = 0, daysInRange = 0
   const actMs = new Map<string, number>()
   const dayPoints: DayPoint[] = []
   let strongestDay: DayPoint | null = null
@@ -85,6 +88,7 @@ function computeRangeStats(
       if (day.productive || day.hyper) productiveDays++
       if (day.hyper) hyperDays++
       if (day.milestone) milestoneDays++
+      if (day.goal) goalDays++
       totalTasks += day.tasks?.length ?? 0
       completedTasks += day.tasks?.filter(t => t.done).length ?? 0
       day.tasks?.forEach(t => {
@@ -134,12 +138,12 @@ function computeRangeStats(
   if (totalTasks > 0) score += Math.round((completedTasks / totalTasks) * 25)
   score = Math.min(100, score)
 
-  return { totalMs, productiveMs, sessionCount, completedTasks, totalTasks, productiveDays, hyperDays, milestoneDays, actBreakdown, dayPoints, strongestDay, score, daysElapsed, daysInRange }
+  return { totalMs, productiveMs, sessionCount, completedTasks, totalTasks, productiveDays, hyperDays, milestoneDays, goalDays, actBreakdown, dayPoints, strongestDay, score, daysElapsed, daysInRange }
 }
 
 // ─── Week/month date ranges ───────────────────────────────────────────────────
 
-function getCurrentWeekRange(): { start: Date; end: Date; labels: string[] } {
+export function getCurrentWeekRange(): { start: Date; end: Date; labels: string[] } {
   const now = new Date()
   const offset = now.getDay() === 0 ? 6 : now.getDay() - 1
   const start = new Date(now); start.setDate(now.getDate() - offset); start.setHours(0, 0, 0, 0)
@@ -148,7 +152,7 @@ function getCurrentWeekRange(): { start: Date; end: Date; labels: string[] } {
   return { start, end, labels }
 }
 
-function getCurrentMonthRange(): { start: Date; end: Date } {
+export function getCurrentMonthRange(): { start: Date; end: Date } {
   const now = new Date()
   const start = new Date(now.getFullYear(), now.getMonth(), 1)
   const end = new Date(now.getFullYear(), now.getMonth() + 1, 0)

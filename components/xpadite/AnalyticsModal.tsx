@@ -21,7 +21,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from './AppContext'
 import { useLockBodyScroll } from './useLockBodyScroll'
 import { PremiumUpgradeModal } from './PremiumUpgradeModal'
-import { MONTHS, formatMs, dateKey as buildDateKey } from './utils'
+import { MONTHS, formatMs, dateKey as buildDateKey, hexToRgba, resolveProgressColor } from './utils'
 import { computeRangeStats, getCurrentWeekRange, getCurrentMonthRange, MonthlyDashboardView } from './AnalyticsPage'
 import { calculateBestStreak } from './productivityEngine'
 import { DayDashboardModal } from './DayDashboardModal'
@@ -94,6 +94,31 @@ function computeHourlyBreakdown(calData: CalendarData, start: Date, end: Date): 
   return buckets
 }
 
+// Deep Work Hours: the single task with the highest cumulative tracked time
+// within the selected period. Each calendar day stores its own independent
+// Task objects (own id, own sessions) — there's no cross-day recurring-task
+// id in the data model — so "the same task across multiple days" is grouped
+// by its trimmed/lower-cased text, the only stable identity available, before
+// summing that group's session durations (same clamping as computeRangeStats).
+function computeDeepWorkMs(calData: CalendarData, start: Date, end: Date): number {
+  const totals = new Map<string, number>()
+  const cursor = new Date(start); cursor.setHours(0, 0, 0, 0)
+  const e = new Date(end); e.setHours(23, 59, 59, 999)
+  while (cursor <= e) {
+    const k = buildDateKey(cursor.getFullYear(), cursor.getMonth(), cursor.getDate())
+    calData[k]?.tasks?.forEach(t => {
+      const key = t.text.trim().toLowerCase()
+      if (!key) return
+      const ms = (t.sessions ?? [])
+        .filter(s => s.endTs !== null)
+        .reduce((sum, s) => sum + getSessionDurationMs(s.startTs, s.endTs!), 0)
+      if (ms > 0) totals.set(key, (totals.get(key) ?? 0) + ms)
+    })
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return totals.size > 0 ? Math.max(...totals.values()) : 0
+}
+
 function getScopeRange(scope: Scope, todayScopeDate: Date, today: Date): { start: Date; end: Date } {
   if (scope === 'today') { const d = new Date(todayScopeDate); d.setHours(0, 0, 0, 0); return { start: d, end: d } }
   if (scope === 'week') { const { start, end } = getCurrentWeekRange(); return { start, end } }
@@ -115,20 +140,25 @@ function scopePeriodLabel(scope: Scope, todayScopeDate: Date, today: Date): stri
 // Reuses the EXACT gradients/shadows already implemented for the Settings →
 // "Your Subscription Plan" cards (SettingsModal.tsx) — not an approximation.
 // Today←Premium Yearly's orange/amber gradient, Weekly←Premium Monthly's
-// green, Monthly←Lifetime Pro's cyan, Yearly←Pro Yearly's signature purple.
-// hoverShadow reuses each color's own `.xp-plan-*:hover` box-shadow constant
-// (xp-plan-orange's rule exists in SettingsModal.tsx but isn't currently
-// attached to any card there — it's exactly the "orange hover" value this
-// Today card needs).
-const TIMEFRAMES: { id: Timeframe; icon: string; title: string; desc: string; bg: string; shadow: string; hoverShadow: string }[] = [
+// green, Monthly←Lifetime Pro's cyan. hoverShadow reuses each color's own
+// `.xp-plan-*:hover` box-shadow constant (xp-plan-orange's rule exists in
+// SettingsModal.tsx but isn't currently attached to any card there — it's
+// exactly the "orange hover" value this Today card needs). ringRgb drives
+// the selected-state outline, matched to each card's own color family
+// (Yearly keeps purple since purple IS its own color).
+const TIMEFRAMES: { id: Timeframe; icon: string; title: string; desc: string; bg: string; shadow: string; hoverShadow: string; ringRgb: string }[] = [
   { id: 'today',   icon: '🚀', title: "Today's Dashboard", desc: "View today's productivity",
-    bg: 'linear-gradient(135deg, #92400e 0%, #d97706 50%, #fbbf24 100%)', shadow: '0 4px 18px rgba(217,119,6,0.42)', hoverShadow: '0 8px 28px rgba(234,88,12,0.38)' },
+    bg: 'linear-gradient(135deg, #92400e 0%, #d97706 50%, #fbbf24 100%)', shadow: '0 4px 18px rgba(217,119,6,0.42)', hoverShadow: '0 8px 28px rgba(234,88,12,0.38)', ringRgb: '234,88,12' },
   { id: 'weekly',  icon: '📆', title: 'Weekly Dashboard',  desc: "See this week's progress",
-    bg: 'linear-gradient(135deg, #22c55e 0%, #15803d 100%)', shadow: '0 4px 18px rgba(22,163,74,0.30)', hoverShadow: '0 8px 28px rgba(22,163,74,0.38)' },
+    bg: 'linear-gradient(135deg, #22c55e 0%, #15803d 100%)', shadow: '0 4px 18px rgba(22,163,74,0.30)', hoverShadow: '0 8px 28px rgba(22,163,74,0.38)', ringRgb: '34,197,94' },
   { id: 'monthly', icon: '📈', title: 'Monthly Dashboard', desc: 'Track monthly trends',
-    bg: 'linear-gradient(135deg, #0891b2 0%, #22d3ee 100%)', shadow: '0 4px 18px rgba(6,182,212,0.28)', hoverShadow: '0 8px 28px rgba(6,182,212,0.38)' },
+    bg: 'linear-gradient(135deg, #0891b2 0%, #22d3ee 100%)', shadow: '0 4px 18px rgba(6,182,212,0.28)', hoverShadow: '0 8px 28px rgba(6,182,212,0.38)', ringRgb: '6,182,212' },
+  // Light side reuses #a78bfa — XPadite's established lighter lavender accent
+  // (used elsewhere for "today" highlights, V2 badges, etc.) — transitioning
+  // through the signature header's own #7c3aed → #5b21b6, so no new purple
+  // is introduced.
   { id: 'yearly',  icon: '💎', title: 'Yearly Dashboard',  desc: 'View long-term growth',
-    bg: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)', shadow: '0 4px 18px rgba(124,58,237,0.32)', hoverShadow: '0 8px 28px rgba(124,58,237,0.42)' },
+    bg: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 55%, #5b21b6 100%)', shadow: '0 4px 18px rgba(124,58,237,0.32)', hoverShadow: '0 8px 28px rgba(124,58,237,0.42)', ringRgb: '124,58,237' },
 ]
 
 function TimeframeCard({ def, selected, onSelect }: {
@@ -147,11 +177,11 @@ function TimeframeCard({ def, selected, onSelect }: {
         background: def.bg,
         filter: hovered ? 'brightness(1.07)' : 'none',
         // Selected uses a white ring (visible against any of the 4 base
-        // colors, including the purple card itself) plus a purple accent
-        // ring outside it — never a fill/overlay that would wash out the
-        // card's own color.
+        // colors, including the purple card itself) plus an accent ring in
+        // the card's OWN color family — never a fill/overlay that would
+        // wash out the card's own color.
         boxShadow: selected
-          ? `0 0 0 2px rgba(255,255,255,0.92), 0 0 0 4px rgba(124,58,237,0.55), ${def.shadow}`
+          ? `0 0 0 2px rgba(255,255,255,0.92), 0 0 0 4px rgba(${def.ringRgb},0.65), ${def.shadow}`
           : hovered ? def.hoverShadow : def.shadow,
         transform: hovered ? 'translateY(-2px)' : 'none',
         transition: 'transform 160ms ease, box-shadow 160ms ease, filter 160ms ease',
@@ -219,17 +249,46 @@ function OverviewScopeDropdown({ scope, onChange }: { scope: Scope; onChange: (s
 }
 
 // ─── Overview stat cards ───────────────────────────────────────────────────────
+// Icon sits in a boxed tinted container on desktop (lg+, unchanged); on
+// tablet/mobile the same icon renders bare, no container — item 8.
 
-function OverviewStat({ icon, tint, value, label }: { icon: string; tint: string; value: string; label: string }) {
+function OverviewStat({ icon, tint, value, label }: { icon: React.ReactNode; tint: string; value: string; label: string }) {
   return (
     <div className="rounded-2xl p-3.5 flex items-center gap-3" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr)', boxShadow: '0 1px 8px rgba(0,0,0,0.05)' }}>
-      <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 36, height: 36, background: tint, fontSize: 16 }}>
+      <div className="hidden lg:flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 36, height: 36, background: tint, fontSize: 16 }}>
+        {icon}
+      </div>
+      <div className="flex lg:hidden items-center justify-center flex-shrink-0" style={{ width: 36, height: 36, fontSize: 18 }}>
         {icon}
       </div>
       <div className="min-w-0">
         <p className="text-[15px] font-extrabold leading-none" style={{ color: 'var(--xp-txt)' }}>{value}</p>
         <p className="text-[9.5px] mt-1 leading-snug" style={{ color: 'var(--xp-txt3)' }}>{label}</p>
       </div>
+    </div>
+  )
+}
+
+// ─── XPadite productive/streak markers ─────────────────────────────────────
+// Reused verbatim from LegendRow.tsx's existing implementation (same dot +
+// ring boxShadow technique, same streak dot-bar-dot-bar-dot layout) rather
+// than approximating it with emoji.
+
+function ProductiveDot({ color, size = 16 }: { color: string; size?: number }) {
+  return (
+    <div
+      className="rounded-full flex-shrink-0"
+      style={{ width: size, height: size, background: color, boxShadow: `0 0 0 2px ${hexToRgba(color, 0.25)}` }}
+    />
+  )
+}
+
+function StreakMarker({ color }: { color: string }) {
+  const dot = { width: 9, height: 9, borderRadius: '50%', background: color, boxShadow: `0 0 0 1.5px ${hexToRgba(color, 0.3)}` } as const
+  const bar = { width: 9, height: 2, background: color } as const
+  return (
+    <div className="flex items-center flex-shrink-0">
+      <div style={dot} /><div style={bar} /><div style={dot} /><div style={bar} /><div style={dot} />
     </div>
   )
 }
@@ -338,20 +397,19 @@ function SummaryCard({ icon, iconBg, title, value, sub }: {
 
 // ─── Legend ─────────────────────────────────────────────────────────────────
 
-const LEGEND_ITEMS = [
-  { icon: '🟣', label: 'Productive' },
-  { icon: '🔥', label: 'Hyper productive' },
-  { icon: '🔗', label: 'Streak' },
-  { icon: '🏆', label: 'Milestone' },
-  { icon: '🎯', label: 'Goals Accomplished' },
-]
-
-function AnalyticsLegend() {
+function AnalyticsLegend({ progressColor }: { progressColor: string }) {
+  const items: { icon: React.ReactNode; label: string }[] = [
+    { icon: <ProductiveDot color={progressColor} size={13} />, label: 'Productive' },
+    { icon: <span style={{ fontSize: 11 }}>🔥</span>, label: 'Hyper productive' },
+    { icon: <StreakMarker color={progressColor} />, label: 'Streak' },
+    { icon: <span style={{ fontSize: 11 }}>🏆</span>, label: 'Milestone' },
+    { icon: <span style={{ fontSize: 11 }}>🎯</span>, label: 'Goals Accomplished' },
+  ]
   return (
     <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 pt-1 pb-2">
-      {LEGEND_ITEMS.map(item => (
+      {items.map(item => (
         <span key={item.label} className="flex items-center gap-1.5 text-[10.5px]" style={{ color: 'var(--xp-txt3)' }}>
-          <span style={{ fontSize: 11 }}>{item.icon}</span>
+          {item.icon}
           {item.label}
         </span>
       ))}
@@ -403,7 +461,8 @@ function MonthlyDashboardOverlay({ onClose, isDark }: { onClose: () => void; isD
 // ─── AnalyticsModal (main export) ──────────────────────────────────────────────
 
 export function AnalyticsModal({ onClose }: { onClose: () => void }) {
-  const { isDark, calData, activities } = useApp()
+  const { isDark, calData, activities, progressColor: rawProgressColor } = useApp()
+  const progressColor = resolveProgressColor(rawProgressColor, isDark)
   useLockBodyScroll()
 
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('today')
@@ -440,6 +499,7 @@ export function AnalyticsModal({ onClose }: { onClose: () => void }) {
   const stats = useMemo(() => computeRangeStats(calData, activities, range.start, range.end), [calData, activities, range])
   const bestStreak = useMemo(() => calculateBestStreak(calData, keysInRange(range.start, range.end)), [calData, range])
   const hourlyBuckets = useMemo(() => computeHourlyBreakdown(calData, range.start, range.end), [calData, range])
+  const deepWorkMs = useMemo(() => computeDeepWorkMs(calData, range.start, range.end), [calData, range])
 
   // Top 5 activities + an "Other" bucket for the rest, mirroring the same
   // cap AnalyticsPage.tsx's ActivityBars already uses (.slice(0, 6)).
@@ -472,7 +532,7 @@ export function AnalyticsModal({ onClose }: { onClose: () => void }) {
         >
           {/* XPadite signature purple header */}
           <div
-            className="flex-shrink-0 flex items-start justify-between gap-3 px-4 sm:px-6 py-4 sm:py-5"
+            className="flex-shrink-0 flex items-start justify-between gap-3 px-4 sm:px-6 py-3.5 sm:py-4"
             style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)' }}
           >
             <div className="flex items-center gap-3 min-w-0">
@@ -555,13 +615,14 @@ export function AnalyticsModal({ onClose }: { onClose: () => void }) {
 
             {/* Overview stat cards — real data for the selected scope */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <OverviewStat icon="🟣" tint="rgba(124,58,237,0.10)" value={String(stats.productiveDays)} label="Productive Days" />
+              <OverviewStat icon={<ProductiveDot color={progressColor} />} tint={hexToRgba(progressColor, 0.10)} value={String(stats.productiveDays)} label="Productive Days" />
               <OverviewStat icon="🔥" tint="rgba(249,115,22,0.10)" value={String(stats.hyperDays)} label="Hyper Productive Days" />
-              <OverviewStat icon="🔗" tint="rgba(124,58,237,0.10)" value={`${bestStreak} day${bestStreak === 1 ? '' : 's'}`} label="Longest Streak" />
+              <OverviewStat icon={<StreakMarker color={progressColor} />} tint={hexToRgba(progressColor, 0.10)} value={`${bestStreak} day${bestStreak === 1 ? '' : 's'}`} label="Longest Streak" />
               <OverviewStat icon="⏱" tint="rgba(59,130,246,0.10)" value={formatMs(stats.totalMs)} label="Total Tracked Time" />
               <OverviewStat icon="✅" tint="rgba(34,197,94,0.10)" value={String(stats.completedTasks)} label="Tasks Completed" />
               <OverviewStat icon="🏆" tint="rgba(234,179,8,0.12)" value={String(stats.milestoneDays)} label="Milestones Achieved" />
               <OverviewStat icon="🎯" tint="rgba(20,184,166,0.10)" value={String(stats.goalDays)} label="Goals Accomplished" />
+              <OverviewStat icon="🧠" tint="rgba(124,58,237,0.10)" value={deepWorkMs > 0 ? formatMs(deepWorkMs) : '—'} label="Deep Work Hours" />
             </div>
 
             {/* Analytics visuals — donut + hourly breakdown, real data */}
@@ -613,7 +674,7 @@ export function AnalyticsModal({ onClose }: { onClose: () => void }) {
             </div>
 
             {/* Legend / key */}
-            <AnalyticsLegend />
+            <AnalyticsLegend progressColor={progressColor} />
           </div>
         </div>
       </div>

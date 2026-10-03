@@ -1605,7 +1605,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
         <div
           ref={headerRef}
           className="flex items-center px-4 sm:px-6 py-3.5 sm:py-4 flex-shrink-0 relative"
-          style={{ background: 'linear-gradient(135deg, #0f052e 0%, #2d1b69 55%, #18355a 100%)', borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}
+          style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)', borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}
         >
           {/* Mobile: plain arrow only */}
           {onBack && (

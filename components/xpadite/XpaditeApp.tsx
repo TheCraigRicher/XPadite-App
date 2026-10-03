@@ -13,6 +13,7 @@ import { MonthZoomModal } from './MonthZoomModal'
 import { MonthFullPage } from './MonthFullPage'
 import { DayDashboardModal } from './DayDashboardModal'
 import { AnalyticsPage } from './AnalyticsPage'
+import { AnalyticsModal } from './AnalyticsModal'
 import { AICoachPage } from './AICoachPage'
 import { JournalWorkspaceModal } from './JournalWorkspaceModal'
 import { NotificationsModal } from './NotificationsModal'
@@ -1239,7 +1240,11 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
         />
       )}
 
-      {analyticsOpen && <AnalyticsPage onClose={handleAnalyticsClose} />}
+      {/* New front-end-only Analytics modal (burger-menu entry point). The
+          mobile bottom-nav "Analytics" tab below still uses the older
+          AnalyticsPage inline view — left untouched per "preserve existing
+          mobile bottom-nav/modal behavior" until that integration is revisited. */}
+      {analyticsOpen && <AnalyticsModal onClose={handleAnalyticsClose} />}
 
       {aiCoachOpen && <AICoachPage onClose={handleAICoachClose} startWithMotivate={aiCoachMotivate} />}
 

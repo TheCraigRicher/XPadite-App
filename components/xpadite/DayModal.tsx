@@ -432,6 +432,33 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
     if (endPulseTimerRef.current) clearTimeout(endPulseTimerRef.current)
   }, [])
 
+  // Save confirmation — required visible sequence is purple "Save" → green
+  // "✓ Saved" → back to purple → THEN close. `saving` drives the green
+  // color/label; `sequenceActive` stays true for the whole click-to-close
+  // window (including the brief purple-again phase) so the button can't be
+  // clicked again mid-sequence and the modal can't close before the purple
+  // state has actually been painted.
+  const [saving, setSaving] = useState(false)
+  const [sequenceActive, setSequenceActive] = useState(false)
+  const savingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const revertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (savingTimerRef.current) clearTimeout(savingTimerRef.current)
+    if (revertTimerRef.current) clearTimeout(revertTimerRef.current)
+  }, [])
+  function handleSaveClick() {
+    if (sequenceActive || !isValid) return
+    onSave(sessionId, startTs, endTs, '')
+    setSequenceActive(true)
+    setSaving(true) // → green "✓ Saved"
+    savingTimerRef.current = setTimeout(() => {
+      setSaving(false) // → visibly back to purple
+      revertTimerRef.current = setTimeout(() => {
+        onClose() // only now, after purple has been visible again
+      }, 350)
+    }, 900)
+  }
+
   function validH(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 1 && n <= 12 }
   function validM(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 0 && n <= 59 }
 
@@ -582,10 +609,14 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
           {/* Actions */}
           <div className="flex gap-2 justify-end">
             <button type="button" onClick={onClose} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
-            <button type="button" disabled={!isValid} onClick={() => { onSave(sessionId, startTs, endTs, ''); onClose() }}
+            <button type="button" disabled={!isValid || sequenceActive} onClick={handleSaveClick}
               className="text-xs px-5 py-1.5 rounded-full text-white"
-              style={{ background: isValid ? '#7c3aed' : 'rgba(124,58,237,0.38)', cursor: isValid ? 'pointer' : 'not-allowed', transition: 'opacity 150ms ease' }}>
-              Save
+              style={{
+                background: saving ? '#16a34a' : isValid ? '#7c3aed' : 'rgba(124,58,237,0.38)',
+                cursor: isValid && !sequenceActive ? 'pointer' : 'not-allowed',
+                transition: 'background 200ms ease, opacity 150ms ease',
+              }}>
+              {saving ? '✓ Saved' : 'Save'}
             </button>
           </div>
         </div>
@@ -1802,7 +1833,11 @@ function TaskRow({
       )}
 
       {adjustOpen && (
-        <AdjustTimeModal task={task} dateKey={dateKey} onClose={() => setAdjustOpen(false)} onSave={(sid, s, e, n) => { onAdjustTime(sid, s, e, n); setAdjustOpen(false) }} />
+        // onSave only persists the data — it must NOT close the modal itself.
+        // AdjustTimeModal owns its own close timing (via onClose) so the full
+        // purple→green→purple confirmation sequence can actually finish
+        // on screen before the modal unmounts.
+        <AdjustTimeModal task={task} dateKey={dateKey} onClose={() => setAdjustOpen(false)} onSave={(sid, s, e, n) => onAdjustTime(sid, s, e, n)} />
       )}
 
       {/* Desktop hover tooltip — fixed position, 300ms delay */}

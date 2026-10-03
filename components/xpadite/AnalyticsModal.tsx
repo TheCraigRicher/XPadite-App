@@ -110,27 +110,45 @@ function scopePeriodLabel(scope: Scope, todayScopeDate: Date, today: Date): stri
 
 // ─── Timeframe cards ───────────────────────────────────────────────────────────
 
-const TIMEFRAMES: { id: Timeframe; icon: string; title: string; desc: string; bgL: string; bgD: string }[] = [
-  { id: 'today',   icon: '🚀', title: 'Today',   desc: "View today's productivity", bgL: '#f1edfe', bgD: 'rgba(124,58,237,0.14)' },
-  { id: 'weekly',  icon: '🗓', title: 'Weekly',  desc: "See this week's progress",  bgL: '#eafaf2', bgD: 'rgba(16,185,129,0.14)' },
-  { id: 'monthly', icon: '📈', title: 'Monthly', desc: 'Track monthly trends',      bgL: '#fdedf0', bgD: 'rgba(244,63,94,0.14)' },
-  { id: 'yearly',  icon: '📶', title: 'Yearly',  desc: 'View long-term growth',     bgL: '#f2effc', bgD: 'rgba(99,102,241,0.16)' },
+// Reuses the exact 4 accent colors already established for the desktop
+// stat-pills (StatsRow.tsx's STAT_ACCENTS / scopeColor) — gold, green, cyan,
+// and XPadite signature purple — rather than introducing a new palette.
+const TIMEFRAMES: { id: Timeframe; icon: string; title: string; desc: string; hex: string; rgb: string }[] = [
+  { id: 'today',   icon: '🚀', title: "Today's Dashboard", desc: "View today's productivity", hex: '#f59e0b', rgb: '245,158,11' },
+  { id: 'weekly',  icon: '📆', title: 'Weekly Dashboard',  desc: "See this week's progress",  hex: '#22c55e', rgb: '34,197,94' },
+  { id: 'monthly', icon: '📈', title: 'Monthly Dashboard', desc: 'Track monthly trends',      hex: '#06b6d4', rgb: '6,182,212' },
+  { id: 'yearly',  icon: '💎', title: 'Yearly Dashboard',  desc: 'View long-term growth',     hex: '#7c3aed', rgb: '124,58,237' },
 ]
 
 function TimeframeCard({ def, selected, isDark, onSelect }: {
   def: (typeof TIMEFRAMES)[number]; selected: boolean; isDark: boolean; onSelect: () => void
 }) {
+  const [hovered, setHovered] = useState(false)
+  const topAlpha = isDark ? 0.26 : 0.16
+  const botAlpha = isDark ? 0.12 : 0.055
+  const borderAlpha = (isDark ? 0.42 : 0.26) + (hovered && !selected ? 0.1 : 0)
+
   return (
     <button
       onClick={onSelect}
-      className="text-left rounded-2xl p-4 transition-all duration-150"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="text-left rounded-2xl p-4"
       style={{
-        background: isDark ? def.bgD : def.bgL,
-        border: selected ? '2px solid #7c3aed' : '2px solid transparent',
-        boxShadow: selected ? '0 0 0 3px rgba(124,58,237,0.13)' : 'none',
+        // Permanent premium-tinted gradient — always visible, not a hover
+        // effect. Hover/selected only adjust border/shadow/elevation below.
+        background: `linear-gradient(135deg, rgba(${def.rgb},${topAlpha}) 0%, rgba(${def.rgb},${botAlpha}) 100%)`,
+        border: selected ? '2px solid #7c3aed' : `1.5px solid rgba(${def.rgb},${borderAlpha})`,
+        boxShadow: selected
+          ? '0 0 0 3px rgba(124,58,237,0.22), 0 6px 16px rgba(124,58,237,0.16)'
+          : hovered
+            ? '0 6px 16px rgba(0,0,0,0.08)'
+            : '0 1px 4px rgba(0,0,0,0.04)',
+        transform: hovered && !selected ? 'translateY(-2px)' : 'none',
+        transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease',
       }}
     >
-      <div className="mb-2" style={{ fontSize: 26, lineHeight: 1 }}>{def.icon}</div>
+      <div className="mb-2" style={{ fontSize: 30, lineHeight: 1 }}>{def.icon}</div>
       <p className="text-[13px] font-bold" style={{ color: 'var(--xp-txt)' }}>{def.title}</p>
       <p className="text-[10.5px] mt-0.5 leading-snug" style={{ color: 'var(--xp-txt3)' }}>{def.desc}</p>
     </button>
@@ -439,7 +457,7 @@ export function AnalyticsModal({ onClose }: { onClose: () => void }) {
           <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 flex flex-col gap-5">
 
             {/* Timeframe cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-5">
               {TIMEFRAMES.map(def => (
                 <TimeframeCard key={def.id} def={def} selected={selectedTimeframe === def.id} isDark={isDark} onSelect={() => setSelectedTimeframe(def.id)} />
               ))}

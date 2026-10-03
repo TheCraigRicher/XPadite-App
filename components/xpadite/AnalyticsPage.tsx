@@ -695,8 +695,10 @@ function WeeklyDashboardView({ isDark }: { isDark: boolean }) {
 }
 
 // ─── MonthlyDashboardView ─────────────────────────────────────────────────────
+// Exported so AnalyticsModal's "Monthly Dashboard" card can invoke this exact
+// existing view instead of rebuilding monthly analytics logic/UI.
 
-function MonthlyDashboardView({ isDark }: { isDark: boolean }) {
+export function MonthlyDashboardView({ isDark }: { isDark: boolean }) {
   const { calData, activities } = useApp()
   const now = new Date()
   const { start, end } = useMemo(() => getCurrentMonthRange(), [])

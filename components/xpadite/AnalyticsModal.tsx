@@ -1,13 +1,14 @@
 'use client'
 
 // ── Analytics modal — front-end + real data wiring ────────────────────────────
-// The 4 timeframe cards still only toggle a local selected state (no
-// navigation into the deeper Today/Weekly/Monthly/Yearly dashboards yet —
-// see AnalyticsPage.tsx for those). The Overview section below them is now
-// driven by real XPadite data via the SAME range-stats engine AnalyticsPage.tsx
-// already uses (computeRangeStats, exported from there) and the streak
-// functions from productivityEngine.ts (also used by StatsRow) — no parallel
-// calculation system.
+// The 4 timeframe cards are the dashboard hub: Today and Monthly open the
+// existing DayDashboardModal / MonthlyDashboardView (from DayDashboardModal.tsx
+// / AnalyticsPage.tsx, both reused unmodified) — Weekly and Yearly still only
+// toggle a local selected state since those dashboards aren't built yet. The
+// Overview section below is driven by real XPadite data via the SAME
+// range-stats engine AnalyticsPage.tsx already uses (computeRangeStats,
+// exported from there) and the streak functions from productivityEngine.ts
+// (also used by StatsRow) — no parallel calculation system.
 //
 // Reuses established XPadite patterns: useLockBodyScroll, the signature
 // purple/lavender gradient header, the same solid-triangle date-nav glyphs
@@ -21,8 +22,9 @@ import { useApp } from './AppContext'
 import { useLockBodyScroll } from './useLockBodyScroll'
 import { PremiumUpgradeModal } from './PremiumUpgradeModal'
 import { MONTHS, formatMs, dateKey as buildDateKey } from './utils'
-import { computeRangeStats, getCurrentWeekRange, getCurrentMonthRange } from './AnalyticsPage'
+import { computeRangeStats, getCurrentWeekRange, getCurrentMonthRange, MonthlyDashboardView } from './AnalyticsPage'
 import { calculateBestStreak } from './productivityEngine'
+import { DayDashboardModal } from './DayDashboardModal'
 import type { CalendarData } from './types'
 
 type Timeframe = 'today' | 'weekly' | 'monthly' | 'yearly'
@@ -110,23 +112,29 @@ function scopePeriodLabel(scope: Scope, todayScopeDate: Date, today: Date): stri
 
 // ─── Timeframe cards ───────────────────────────────────────────────────────────
 
-// Reuses the exact 4 accent colors already established for the desktop
-// stat-pills (StatsRow.tsx's STAT_ACCENTS / scopeColor) — gold, green, cyan,
-// and XPadite signature purple — rather than introducing a new palette.
-const TIMEFRAMES: { id: Timeframe; icon: string; title: string; desc: string; hex: string; rgb: string }[] = [
-  { id: 'today',   icon: '🚀', title: "Today's Dashboard", desc: "View today's productivity", hex: '#f59e0b', rgb: '245,158,11' },
-  { id: 'weekly',  icon: '📆', title: 'Weekly Dashboard',  desc: "See this week's progress",  hex: '#22c55e', rgb: '34,197,94' },
-  { id: 'monthly', icon: '📈', title: 'Monthly Dashboard', desc: 'Track monthly trends',      hex: '#06b6d4', rgb: '6,182,212' },
-  { id: 'yearly',  icon: '💎', title: 'Yearly Dashboard',  desc: 'View long-term growth',     hex: '#7c3aed', rgb: '124,58,237' },
+// Reuses the EXACT gradients/shadows already implemented for the Settings →
+// "Your Subscription Plan" cards (SettingsModal.tsx) — not an approximation.
+// Today←Premium Yearly's orange/amber gradient, Weekly←Premium Monthly's
+// green, Monthly←Lifetime Pro's cyan, Yearly←Pro Yearly's signature purple.
+// hoverShadow reuses each color's own `.xp-plan-*:hover` box-shadow constant
+// (xp-plan-orange's rule exists in SettingsModal.tsx but isn't currently
+// attached to any card there — it's exactly the "orange hover" value this
+// Today card needs).
+const TIMEFRAMES: { id: Timeframe; icon: string; title: string; desc: string; bg: string; shadow: string; hoverShadow: string }[] = [
+  { id: 'today',   icon: '🚀', title: "Today's Dashboard", desc: "View today's productivity",
+    bg: 'linear-gradient(135deg, #92400e 0%, #d97706 50%, #fbbf24 100%)', shadow: '0 4px 18px rgba(217,119,6,0.42)', hoverShadow: '0 8px 28px rgba(234,88,12,0.38)' },
+  { id: 'weekly',  icon: '📆', title: 'Weekly Dashboard',  desc: "See this week's progress",
+    bg: 'linear-gradient(135deg, #22c55e 0%, #15803d 100%)', shadow: '0 4px 18px rgba(22,163,74,0.30)', hoverShadow: '0 8px 28px rgba(22,163,74,0.38)' },
+  { id: 'monthly', icon: '📈', title: 'Monthly Dashboard', desc: 'Track monthly trends',
+    bg: 'linear-gradient(135deg, #0891b2 0%, #22d3ee 100%)', shadow: '0 4px 18px rgba(6,182,212,0.28)', hoverShadow: '0 8px 28px rgba(6,182,212,0.38)' },
+  { id: 'yearly',  icon: '💎', title: 'Yearly Dashboard',  desc: 'View long-term growth',
+    bg: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)', shadow: '0 4px 18px rgba(124,58,237,0.32)', hoverShadow: '0 8px 28px rgba(124,58,237,0.42)' },
 ]
 
-function TimeframeCard({ def, selected, isDark, onSelect }: {
-  def: (typeof TIMEFRAMES)[number]; selected: boolean; isDark: boolean; onSelect: () => void
+function TimeframeCard({ def, selected, onSelect }: {
+  def: (typeof TIMEFRAMES)[number]; selected: boolean; onSelect: () => void
 }) {
   const [hovered, setHovered] = useState(false)
-  const topAlpha = isDark ? 0.26 : 0.16
-  const botAlpha = isDark ? 0.12 : 0.055
-  const borderAlpha = (isDark ? 0.42 : 0.26) + (hovered && !selected ? 0.1 : 0)
 
   return (
     <button
@@ -135,22 +143,23 @@ function TimeframeCard({ def, selected, isDark, onSelect }: {
       onMouseLeave={() => setHovered(false)}
       className="text-left rounded-2xl p-4"
       style={{
-        // Permanent premium-tinted gradient — always visible, not a hover
-        // effect. Hover/selected only adjust border/shadow/elevation below.
-        background: `linear-gradient(135deg, rgba(${def.rgb},${topAlpha}) 0%, rgba(${def.rgb},${botAlpha}) 100%)`,
-        border: selected ? '2px solid #7c3aed' : `1.5px solid rgba(${def.rgb},${borderAlpha})`,
+        // Permanent rich gradient — always visible, never a hover-only effect.
+        background: def.bg,
+        filter: hovered ? 'brightness(1.07)' : 'none',
+        // Selected uses a white ring (visible against any of the 4 base
+        // colors, including the purple card itself) plus a purple accent
+        // ring outside it — never a fill/overlay that would wash out the
+        // card's own color.
         boxShadow: selected
-          ? '0 0 0 3px rgba(124,58,237,0.22), 0 6px 16px rgba(124,58,237,0.16)'
-          : hovered
-            ? '0 6px 16px rgba(0,0,0,0.08)'
-            : '0 1px 4px rgba(0,0,0,0.04)',
-        transform: hovered && !selected ? 'translateY(-2px)' : 'none',
-        transition: 'transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease',
+          ? `0 0 0 2px rgba(255,255,255,0.92), 0 0 0 4px rgba(124,58,237,0.55), ${def.shadow}`
+          : hovered ? def.hoverShadow : def.shadow,
+        transform: hovered ? 'translateY(-2px)' : 'none',
+        transition: 'transform 160ms ease, box-shadow 160ms ease, filter 160ms ease',
       }}
     >
       <div className="mb-2" style={{ fontSize: 30, lineHeight: 1 }}>{def.icon}</div>
-      <p className="text-[13px] font-bold" style={{ color: 'var(--xp-txt)' }}>{def.title}</p>
-      <p className="text-[10.5px] mt-0.5 leading-snug" style={{ color: 'var(--xp-txt3)' }}>{def.desc}</p>
+      <p className="text-[13px] font-bold" style={{ color: '#ffffff' }}>{def.title}</p>
+      <p className="text-[10.5px] mt-0.5 leading-snug" style={{ color: 'rgba(255,255,255,0.80)' }}>{def.desc}</p>
     </button>
   )
 }
@@ -350,6 +359,47 @@ function AnalyticsLegend() {
   )
 }
 
+// ─── Monthly Dashboard overlay ─────────────────────────────────────────────────
+// MonthlyDashboardView (imported from AnalyticsPage.tsx, unmodified) has
+// never needed its own modal chrome before — it only ever rendered inline
+// inside AnalyticsPage's own header+scroll shell. This wrapper gives it that
+// same minimal chrome (the identical Back-bar recipe AnalyticsPageHeader
+// already uses) so it can be opened as a dashboard from Analytics without
+// touching the view's own internals/styling.
+function MonthlyDashboardOverlay({ onClose, isDark }: { onClose: () => void; isDark: boolean }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-[51] flex flex-col" style={{ background: 'var(--xp-bg)' }}>
+      <header
+        className="flex-shrink-0 flex items-center gap-2 px-3 sm:px-5"
+        style={{ height: 54, background: 'var(--xp-hdr)', borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}
+      >
+        <button
+          onClick={onClose}
+          className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg transition-all hover:bg-white/10 flex-shrink-0"
+          style={{ color: 'rgba(255,255,255,0.78)' }}
+          aria-label="Back"
+        >
+          <span style={{ fontSize: 13 }}>←</span>
+          <span className="hidden sm:inline ml-0.5">Back</span>
+        </button>
+        <div className="flex-1 min-w-0 text-center">
+          <span className="text-[13px] font-bold text-white">🗓️ Monthly Dashboard</span>
+        </div>
+        <div style={{ width: 54, flexShrink: 0 }} aria-hidden="true" />
+      </header>
+      <div className="flex-1 overflow-y-auto">
+        <MonthlyDashboardView isDark={isDark} />
+      </div>
+    </div>
+  )
+}
+
 // ─── AnalyticsModal (main export) ──────────────────────────────────────────────
 
 export function AnalyticsModal({ onClose }: { onClose: () => void }) {
@@ -360,6 +410,14 @@ export function AnalyticsModal({ onClose }: { onClose: () => void }) {
   const [scope, setScope] = useState<Scope>('today')
   const [todayScopeDate, setTodayScopeDate] = useState(() => new Date())
   const [showPremium, setShowPremium] = useState(false)
+  // Only Today/Monthly have an existing dashboard to open — Weekly/Yearly
+  // stay visual-only (no placeholder dashboards) per scope.
+  const [openDashboard, setOpenDashboard] = useState<'today' | 'monthly' | null>(null)
+
+  function handleTimeframeSelect(id: Timeframe) {
+    setSelectedTimeframe(id)
+    if (id === 'today' || id === 'monthly') setOpenDashboard(id)
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -459,7 +517,7 @@ export function AnalyticsModal({ onClose }: { onClose: () => void }) {
             {/* Timeframe cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-5">
               {TIMEFRAMES.map(def => (
-                <TimeframeCard key={def.id} def={def} selected={selectedTimeframe === def.id} isDark={isDark} onSelect={() => setSelectedTimeframe(def.id)} />
+                <TimeframeCard key={def.id} def={def} selected={selectedTimeframe === def.id} onSelect={() => handleTimeframeSelect(def.id)} />
               ))}
             </div>
 
@@ -559,6 +617,24 @@ export function AnalyticsModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
       </div>
+
+      {/* Today's Dashboard — the exact existing component (DayDashboardModal),
+          same props/open-close flow AnalyticsPage.tsx itself uses. */}
+      {openDashboard === 'today' && (
+        <DayDashboardModal
+          dateKey={buildDateKey(today.getFullYear(), today.getMonth(), today.getDate())}
+          month={today.getMonth()}
+          day={today.getDate()}
+          onClose={() => setOpenDashboard(null)}
+          onBack={() => setOpenDashboard(null)}
+        />
+      )}
+
+      {/* Monthly Dashboard — the exact existing MonthlyDashboardView, wrapped
+          in a minimal overlay since it previously only rendered inline. */}
+      {openDashboard === 'monthly' && (
+        <MonthlyDashboardOverlay isDark={isDark} onClose={() => setOpenDashboard(null)} />
+      )}
 
       {showPremium && <PremiumUpgradeModal onClose={() => setShowPremium(false)} />}
     </>

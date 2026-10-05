@@ -36,6 +36,7 @@ type MenuAction =
   | 'whats-new'
   | 'tasks'
   | 'analytics'
+  | 'goal-manager'
   | 'activities'
   | 'sync-calendar'
   | 'ai-coach'
@@ -62,6 +63,7 @@ const MENU_ITEMS: MenuItem[] = [
   { icon: '✨', label: "What's New",            action: 'whats-new'                                                                  },
   { icon: '✅', label: 'Task Manager',          action: 'tasks'                                                                      },
   { icon: '📊', label: 'Analytics',             action: 'analytics',     dividerBefore: true                                         },
+  { icon: '🎯', label: 'Goal Manager',          action: 'goal-manager'                                                               },
   { icon: '🎯', label: 'Activity Manager',       action: 'activities'                                                                 },
   { icon: '📅', label: 'Sync Google Calendar',  action: 'sync-calendar', dividerBefore: true                                         },
   { icon: '🤖', label: 'XPadite AI Coach',      action: 'ai-coach'                                                                   },
@@ -78,7 +80,7 @@ const MENU_ITEMS: MenuItem[] = [
 
 // Finalized order, labels and icons — used at every screen size.
 const FINAL_ORDER: MenuAction[] = [
-  'profile', 'tasks', 'activities', 'journal-notes', 'analytics', 'notifications', 'qotd',
+  'profile', 'tasks', 'activities', 'journal-notes', 'analytics', 'goal-manager', 'notifications', 'qotd',
   'ai-coach', 'motivate', 'gallery', 'sync-calendar', 'meetings', 'settings', 'tutorials', 'help', 'whats-new',
 ]
 
@@ -97,6 +99,7 @@ interface AppSidebarProps {
   onSettings?: () => void
   onWhatsNew?: () => void
   onAnalytics?: () => void
+  onGoalManager?: () => void
   onMotivate?: () => void
   onQotd?: () => void
   onProfile?: () => void
@@ -115,6 +118,7 @@ export function AppSidebar({
   onSettings,
   onWhatsNew,
   onAnalytics,
+  onGoalManager,
   onMotivate,
   onQotd,
   onProfile,
@@ -272,6 +276,7 @@ export function AppSidebar({
       case 'whats-new':      onWhatsNew?.(); break
       case 'tasks':          onTasks?.(); break
       case 'analytics':      onAnalytics?.(); break
+      case 'goal-manager':   onGoalManager?.(); break
       case 'activities':     onActivities?.(); break
       case 'gallery':        onGallery?.(); break
       case 'settings':       onSettings?.(); break

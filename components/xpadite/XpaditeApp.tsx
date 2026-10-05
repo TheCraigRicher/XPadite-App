@@ -14,6 +14,7 @@ import { MonthFullPage } from './MonthFullPage'
 import { DayDashboardModal } from './DayDashboardModal'
 import { AnalyticsPage } from './AnalyticsPage'
 import { AnalyticsModal } from './AnalyticsModal'
+import { GoalManagerModal } from './GoalManagerModal'
 import { AICoachPage } from './AICoachPage'
 import { JournalWorkspaceModal } from './JournalWorkspaceModal'
 import { NotificationsModal } from './NotificationsModal'
@@ -670,6 +671,7 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [fullPageMonth, setFullPageMonth]           = useState<number | null>(null)
   const [motivationOpen, setMotivationOpen]             = useState(false)
   const [analyticsOpen, setAnalyticsOpen]               = useState(false)
+  const [goalManagerOpen, setGoalManagerOpen]           = useState(false)
   const [aiCoachOpen, setAICoachOpen]                   = useState(false)
   const [aiCoachMotivate, setAICoachMotivate]           = useState(false)
   const [galleryOpen, setGalleryOpen]                   = useState(false)
@@ -966,6 +968,7 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
         onSettings={() => setSettingsOpen(true)}
         onWhatsNew={() => setWhatsNewOpen(true)}
         onAnalytics={() => setAnalyticsOpen(true)}
+        onGoalManager={() => setGoalManagerOpen(true)}
         onMotivate={() => {
           // Mobile: reuse the SAME canonical AI Coach tab bottom-nav entry
           // uses (same component/state, bottom nav stays visible), started
@@ -1245,6 +1248,8 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
           AnalyticsPage inline view — left untouched per "preserve existing
           mobile bottom-nav/modal behavior" until that integration is revisited. */}
       {analyticsOpen && <AnalyticsModal onClose={handleAnalyticsClose} />}
+
+      {goalManagerOpen && <GoalManagerModal onClose={() => setGoalManagerOpen(false)} />}
 
       {aiCoachOpen && <AICoachPage onClose={handleAICoachClose} startWithMotivate={aiCoachMotivate} />}
 

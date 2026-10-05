@@ -12,7 +12,6 @@ import { DayModal } from './DayModal'
 import { MonthZoomModal } from './MonthZoomModal'
 import { MonthFullPage } from './MonthFullPage'
 import { DayDashboardModal } from './DayDashboardModal'
-import { AnalyticsPage } from './AnalyticsPage'
 import { AnalyticsModal } from './AnalyticsModal'
 import { GoalManagerModal } from './GoalManagerModal'
 import { AICoachPage } from './AICoachPage'
@@ -725,6 +724,11 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
       setMobileTab('calendar')
       const today = new Date()
       setModalDay({ key: dateKey(today.getFullYear(), today.getMonth(), today.getDate()), month: today.getMonth(), day: today.getDate(), skipAnim: true })
+    } else if (tab === 'analytics') {
+      // Same AnalyticsModal as the burger menu's Analytics entry — not a
+      // separate mobileTab view, so mobileTab stays put (see activeTab below).
+      setMobileTab('calendar')
+      setAnalyticsOpen(true)
     } else {
       setMobileTab(tab)
     }
@@ -819,7 +823,6 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
 
   function handleAnalyticsClose() {
     setAnalyticsOpen(false)
-    if (mobileTab === 'analytics') setMobileTab('calendar')
   }
 
   function handleAICoachClose() {
@@ -1119,16 +1122,6 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
           </div>
         )}
 
-        {/* ── Mobile Analytics tab — inline, nav persistent */}
-        {mobileTab === 'analytics' && (
-          <div
-            className="sm:hidden"
-            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 56, zIndex: 49, transform: 'translateZ(0)', overflow: 'hidden' }}
-          >
-            <AnalyticsPage onClose={() => setMobileTab('calendar')} />
-          </div>
-        )}
-
         {/* ── Mobile Planner tab — inline, nav persistent */}
         {mobileTab === 'planner' && (
           <div className="sm:hidden">
@@ -1164,12 +1157,12 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
 
       {/* ── Bottom nav (mobile only) */}
       <MobileBottomNav
-        // Opening Tasks/Task Manager (see executeNav's 'tasks' branch) leaves
-        // mobileTab at 'calendar' and shows DayModal on top of it instead —
-        // modalDay is the real signal that Tasks is the user's current
-        // destination, so the active indicator should follow it, not the
-        // underlying mobileTab value.
-        activeTab={modalDay ? 'tasks' : mobileTab}
+        // Opening Tasks/Task Manager or Analytics (see executeNav's 'tasks'/
+        // 'analytics' branches) leaves mobileTab at 'calendar' and shows a
+        // modal on top of it instead — modalDay/analyticsOpen are the real
+        // signals for those destinations, so the active indicator follows
+        // them, not the underlying mobileTab value.
+        activeTab={modalDay ? 'tasks' : analyticsOpen ? 'analytics' : mobileTab}
         onTabChange={handleMobileNav}
       />
 
@@ -1243,11 +1236,14 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
         />
       )}
 
-      {/* New front-end-only Analytics modal (burger-menu entry point). The
-          mobile bottom-nav "Analytics" tab below still uses the older
-          AnalyticsPage inline view — left untouched per "preserve existing
-          mobile bottom-nav/modal behavior" until that integration is revisited. */}
-      {analyticsOpen && <AnalyticsModal onClose={handleAnalyticsClose} />}
+      {/* Analytics modal — single implementation shared by both entry points:
+          the burger menu and the mobile bottom-nav "Analytics" tab. */}
+      {analyticsOpen && (
+        <AnalyticsModal
+          onClose={handleAnalyticsClose}
+          onDayDoubleClick={(key, month, day) => { setAnalyticsOpen(false); setModalDay({ key, month, day }) }}
+        />
+      )}
 
       {goalManagerOpen && <GoalManagerModal onClose={() => setGoalManagerOpen(false)} />}
 

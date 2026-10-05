@@ -276,6 +276,15 @@ const MFP_STYLES = `
     .xp-goal-emoji { transform: translateY(-4px); }
   }
 
+  /* Desktop only: nudge an entire connected Goal sequence (emoji+date block
+     and its connector-line wrapper, applied to each in equal measure so the
+     chain stays continuous) slightly left for better centering. Horizontal
+     only — never combined with .xp-goal-emoji's own transform since it's a
+     different element in the tree. */
+  @media (min-width: 1024px) {
+    .xp-goal-shift { transform: translateX(-6px); }
+  }
+
   /* Dashboard pill micro-interactions */
   .xp-mfp-dash-pill{transition:background 180ms ease,border-color 180ms ease,box-shadow 180ms ease,transform 180ms ease;}
   .xp-mfp-dash-pill:hover{
@@ -575,7 +584,11 @@ function MonthCalendarLarge({
 
           return (
             <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)}>
-              {connLeft}{connRight}
+              {(!rawHyper && !rawMil && rawGoal) ? (
+                <div className="absolute inset-0 xp-goal-shift" style={{ zIndex: 0, pointerEvents: 'none' }}>
+                  {connLeft}{connRight}
+                </div>
+              ) : (<>{connLeft}{connRight}</>)}
               <ReminderRing count={reminderCount} />
 
               {/* 🔥 Hyper — kept in DOM, fades via xp-cal-fade + opacity */}
@@ -604,7 +617,7 @@ function MonthCalendarLarge({
 
               {/* 🎯 Goal — kept in DOM, fades */}
               {!rawHyper && !rawMil && rawGoal && (
-                <div className="absolute inset-[25%] xp-cal-fade" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none', overflow: 'visible' }}>
+                <div className="absolute inset-[25%] xp-cal-fade xp-goal-shift" style={{ zIndex: 2, opacity: calendarClean ? 0 : 1, pointerEvents: 'none', overflow: 'visible' }}>
                   <div className="absolute inset-0 flex items-center justify-center transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
                     <span style={{ position: 'relative', display: 'inline-block', lineHeight: 1 }}>
                       <span className="xp-goal-emoji" style={{ fontSize: 42, lineHeight: 1, userSelect: 'none', display: 'block', position: 'relative', zIndex: 1 }}>🎯</span>
@@ -1082,6 +1095,7 @@ interface MonthFullPageProps {
   onClose: () => void
   onMonthDashboard?: (month: number) => void
   onDayDoubleClick?: (key: string, month: number, day: number) => void
+  initialView?: 'calendar' | 'dashboard'
 }
 
 function playTapSound() {
@@ -1100,10 +1114,10 @@ function playTapSound() {
   } catch {}
 }
 
-export function MonthFullPage({ month, onClose, onDayDoubleClick }: MonthFullPageProps) {
+export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView }: MonthFullPageProps) {
   const { calData, sessions, activities, isDark, progressColor: _rawColor2, setToast, calendarClean, setCalendarClean } = useApp()
   const progressColor = resolveProgressColor(_rawColor2, isDark)
-  const [view, setView]               = useState<'calendar' | 'dashboard'>('calendar')
+  const [view, setView]               = useState<'calendar' | 'dashboard'>(initialView ?? 'calendar')
   const [currentMonth, setCurrentMonth] = useState(month)
   const [animType, setAnimType]        = useState<'fade' | 'right' | 'left'>('fade')
   const [pickerOpen, setPickerOpen]    = useState(false)

@@ -22,9 +22,10 @@ import { useApp } from './AppContext'
 import { useLockBodyScroll } from './useLockBodyScroll'
 import { PremiumUpgradeModal } from './PremiumUpgradeModal'
 import { MONTHS, formatMs, dateKey as buildDateKey, hexToRgba, resolveProgressColor } from './utils'
-import { computeRangeStats, getCurrentWeekRange, getCurrentMonthRange, MonthlyDashboardView } from './AnalyticsPage'
+import { computeRangeStats, getCurrentWeekRange, getCurrentMonthRange } from './AnalyticsPage'
 import { calculateBestStreak } from './productivityEngine'
 import { DayDashboardModal } from './DayDashboardModal'
+import { MonthFullPage } from './MonthFullPage'
 import type { CalendarData } from './types'
 
 type Timeframe = 'today' | 'weekly' | 'monthly' | 'yearly'
@@ -417,50 +418,9 @@ function AnalyticsLegend({ progressColor }: { progressColor: string }) {
   )
 }
 
-// ─── Monthly Dashboard overlay ─────────────────────────────────────────────────
-// MonthlyDashboardView (imported from AnalyticsPage.tsx, unmodified) has
-// never needed its own modal chrome before — it only ever rendered inline
-// inside AnalyticsPage's own header+scroll shell. This wrapper gives it that
-// same minimal chrome (the identical Back-bar recipe AnalyticsPageHeader
-// already uses) so it can be opened as a dashboard from Analytics without
-// touching the view's own internals/styling.
-function MonthlyDashboardOverlay({ onClose, isDark }: { onClose: () => void; isDark: boolean }) {
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  return (
-    <div className="fixed inset-0 z-[51] flex flex-col" style={{ background: 'var(--xp-bg)' }}>
-      <header
-        className="flex-shrink-0 flex items-center gap-2 px-3 sm:px-5"
-        style={{ height: 54, background: 'var(--xp-hdr)', borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}
-      >
-        <button
-          onClick={onClose}
-          className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg transition-all hover:bg-white/10 flex-shrink-0"
-          style={{ color: 'rgba(255,255,255,0.78)' }}
-          aria-label="Back"
-        >
-          <span style={{ fontSize: 13 }}>←</span>
-          <span className="hidden sm:inline ml-0.5">Back</span>
-        </button>
-        <div className="flex-1 min-w-0 text-center">
-          <span className="text-[13px] font-bold text-white">🗓️ Monthly Dashboard</span>
-        </div>
-        <div style={{ width: 54, flexShrink: 0 }} aria-hidden="true" />
-      </header>
-      <div className="flex-1 overflow-y-auto">
-        <MonthlyDashboardView isDark={isDark} />
-      </div>
-    </div>
-  )
-}
-
 // ─── AnalyticsModal (main export) ──────────────────────────────────────────────
 
-export function AnalyticsModal({ onClose }: { onClose: () => void }) {
+export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => void; onDayDoubleClick?: (key: string, month: number, day: number) => void }) {
   const { isDark, calData, activities, progressColor: rawProgressColor } = useApp()
   const progressColor = resolveProgressColor(rawProgressColor, isDark)
   useLockBodyScroll()
@@ -691,10 +651,21 @@ export function AnalyticsModal({ onClose }: { onClose: () => void }) {
         />
       )}
 
-      {/* Monthly Dashboard — the exact existing MonthlyDashboardView, wrapped
-          in a minimal overlay since it previously only rendered inline. */}
+      {/* Monthly Dashboard — the exact existing Expandable Month Modal
+          (MonthFullPage), opened straight into its own dashboard view so
+          this reuses that implementation's data/styling/interactions/
+          calendar-toggle behavior unmodified instead of duplicating it.
+          The wrapper only raises stacking above this modal's own z-50 —
+          MonthFullPage's internal styling/z-index is untouched. */}
       {openDashboard === 'monthly' && (
-        <MonthlyDashboardOverlay isDark={isDark} onClose={() => setOpenDashboard(null)} />
+        <div className="relative" style={{ zIndex: 51 }}>
+          <MonthFullPage
+            month={today.getMonth()}
+            initialView="dashboard"
+            onClose={() => setOpenDashboard(null)}
+            onDayDoubleClick={onDayDoubleClick}
+          />
+        </div>
       )}
 
       {showPremium && <PremiumUpgradeModal onClose={() => setShowPremium(false)} />}

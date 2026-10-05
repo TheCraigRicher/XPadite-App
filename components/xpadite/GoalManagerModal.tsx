@@ -52,6 +52,19 @@ function BullseyeIcon({ size = 48 }: { size?: number }) {
   )
 }
 
+// Journey Deadline target. The rings are unfilled, so a backing disc sized just
+// inside the outer ring masks the rail: the rail reads as tucked under the
+// target and ends on its curved outer edge, never showing inside it.
+function DeadlineBullseye({ size }: { size: number }) {
+  const back = size * (43 / 48)
+  return (
+    <div className="relative flex-shrink-0" style={{ width: size, height: size }}>
+      <div className="absolute rounded-full" style={{ width: back, height: back, left: (size - back) / 2, top: (size - back) / 2, background: 'var(--xp-card)' }} />
+      <div className="absolute inset-0"><BullseyeIcon size={size} /></div>
+    </div>
+  )
+}
+
 // ─── Coming Soon (one shared V2 dialog for every reserved interaction) ─────────
 
 function GoalManagerComingSoon({ onClose }: { onClose: () => void }) {
@@ -161,7 +174,7 @@ function Journey({ onV2 }: { onV2: () => void }) {
                   <span className="text-[15px] font-semibold" style={{ color: 'var(--xp-txt)' }}>{label}</span>
                 </div>
                 <div className="h-5 flex items-end justify-center">{done && <CheckMark size={16} />}</div>
-                {cp ? <JourneyNode letter={cp.key} done={cp.done} /> : <BullseyeIcon size={48} />}
+                {cp ? <JourneyNode letter={cp.key} done={cp.done} /> : <DeadlineBullseye size={48} />}
               </div>
             )
           })}
@@ -179,7 +192,7 @@ function Journey({ onV2 }: { onV2: () => void }) {
               <div key={label} className="flex flex-col items-center cursor-pointer min-w-0" onClick={onV2}>
                 <span className="h-5 leading-5 text-[10.5px] font-semibold whitespace-nowrap" style={{ color: 'var(--xp-txt)' }}>{label}</span>
                 <div className="h-[18px] flex items-end justify-center">{done && <CheckTick size={13} />}</div>
-                {cp ? <JourneyNode letter={cp.key} done={cp.done} size={40} /> : <BullseyeIcon size={40} />}
+                {cp ? <JourneyNode letter={cp.key} done={cp.done} size={40} /> : <DeadlineBullseye size={40} />}
               </div>
             )
           })}
@@ -264,7 +277,7 @@ function CheckpointCard({ title, tasks, footer, onV2 }: { title: string; tasks?:
           populated card). Anything taller is clipped, never grows the card. */}
       <div className="grid" style={{ gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows 240ms ease-out' }}>
         <div className="min-h-0 overflow-hidden">
-          <div className="h-[118px] sm:h-[146px] flex flex-col overflow-hidden">
+          <div className="h-[96px] sm:h-[146px] flex flex-col overflow-hidden">
           {tasks && (
             <div className="flex flex-col gap-1.5 sm:gap-2 px-1.5 pb-1.5 sm:px-3 sm:pb-2 min-w-0">
               {tasks.map(t => (
@@ -292,6 +305,9 @@ function CheckpointCard({ title, tasks, footer, onV2 }: { title: string; tasks?:
 // ─── Timeline (static two-month preview) ──────────────────────────────────────
 
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
+
+// How far the range bands stop short of the outer date-column edges.
+const INSET_CSS = '.gm-inset{--gm-inset:4px}@media (min-width:640px){.gm-inset{--gm-inset:10px}}'
 
 // Preview range: Sept 3 → Oct 7, 2026. Static data only.
 function inStartMonthRange(day: number) { return day >= 3 }
@@ -341,8 +357,27 @@ function MonthGrid({ month, daysInMonth, firstWeekday, tone, onV2 }: {
   const isStart = (d: number) => tone === 'start' && d === 3
   const isDeadline = (d: number) => tone === 'end' && d === 7
 
+  const weeks: (number | null)[][] = []
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7))
+
+  // Horizontal extent of a week's range band, as % of the 7-column row.
+  // Ends at a marker → centre of that column; otherwise the column boundary,
+  // pulled in by --gm-inset so the band stays inside the date grid.
+  function bandFor(week: (number | null)[]): { left: string; right: string } | null {
+    const hits = week.map((d, i) => (d !== null && inRange(d) ? i : -1)).filter(i => i >= 0)
+    if (hits.length === 0) return null
+    const colW = 100 / 7
+    const first = hits[0], last = hits[hits.length - 1]
+    const startsAtMarker = isStart(week[first]!)
+    const endsAtMarker = isDeadline(week[last]!)
+    const left = startsAtMarker ? `${first * colW + colW / 2}%` : `calc(${first * colW}% + var(--gm-inset))`
+    const right = endsAtMarker ? `${100 - (last * colW + colW / 2)}%` : `calc(${100 - (last + 1) * colW}% + var(--gm-inset))`
+    return { left, right }
+  }
+
   return (
     <div className="flex flex-col gap-2">
+      <style>{INSET_CSS}</style>
       <button
         onClick={onV2}
         className="self-center px-2 py-1 sm:px-4 sm:py-1.5 rounded-lg text-[9px] sm:text-[12px] leading-tight transition-opacity hover:opacity-85"
@@ -357,37 +392,44 @@ function MonthGrid({ month, daysInMonth, firstWeekday, tone, onV2 }: {
         ))}
       </div>
 
-      <div className="grid grid-cols-7 gap-y-1">
-        {cells.map((d, idx) => {
-          if (d === null) return <div key={idx} />
-          const band = inRange(d)
+      <div className="flex flex-col gap-1 gm-inset">
+        {weeks.map((week, wi) => {
+          const seg = bandFor(week)
           return (
-            <button
-              key={idx}
-              onClick={onV2}
-              className="relative flex items-center justify-center text-[9px] sm:text-[11px] font-medium h-6 sm:h-8 min-w-0"
-              style={{ color: band ? 'var(--xp-txt)' : 'var(--xp-txt3)', cursor: 'pointer' }}
-            >
-              {/* Range band: slightly shorter than the marker circles, centred on
-                  them, and starting/ending at their centres so it sits behind the
-                  markers and reads as one continuous path. */}
-              {band && (
+            <div key={wi} className="relative grid grid-cols-7">
+              {/* One band per week, clipped to that week's first/last date
+                  columns (inset from the grid edges); it starts/ends at a marker's
+                  centre when the range begins or ends there. */}
+              {seg && (
                 <span
                   aria-hidden="true"
                   className="absolute top-1/2 -translate-y-1/2 h-4 sm:h-[22px] pointer-events-none"
-                  style={{ background: 'rgba(167,139,250,0.5)', left: isStart(d) ? '50%' : 0, right: isDeadline(d) ? '50%' : 0 }}
+                  style={{ background: 'rgba(167,139,250,0.5)', left: seg.left, right: seg.right }}
                 />
               )}
 
-              {isStart(d) && <span className="absolute w-5 h-5 sm:w-7 sm:h-7 rounded-full" style={{ background: PURPLE }} />}
-              {isStart(d) && <span className="relative text-white font-bold">{d}</span>}
+              {week.map((d, idx) => {
+                if (d === null) return <div key={idx} />
+                const band = inRange(d)
+                return (
+                  <button
+                    key={idx}
+                    onClick={onV2}
+                    className="relative flex items-center justify-center text-[9px] sm:text-[11px] font-medium h-6 sm:h-8 min-w-0"
+                    style={{ color: band ? 'var(--xp-txt)' : 'var(--xp-txt3)', cursor: 'pointer' }}
+                  >
+                    {isStart(d) && <span className="absolute w-5 h-5 sm:w-7 sm:h-7 rounded-full" style={{ background: PURPLE }} />}
+                    {isStart(d) && <span className="relative text-white font-bold">{d}</span>}
 
-              {/* Deadline target — the band ends beneath it (Image 2). */}
-              {isDeadline(d) && <span className="sm:hidden contents"><DeadlineTarget D={22} date={d} fontSize={6.5} /></span>}
-              {isDeadline(d) && <span className="hidden sm:contents"><DeadlineTarget D={30} date={d} fontSize={9} /></span>}
+                    {/* Deadline target — the band ends beneath it (Image 2). */}
+                    {isDeadline(d) && <span className="sm:hidden contents"><DeadlineTarget D={22} date={d} fontSize={6.5} /></span>}
+                    {isDeadline(d) && <span className="hidden sm:contents"><DeadlineTarget D={30} date={d} fontSize={9} /></span>}
 
-              {!isStart(d) && !isDeadline(d) && <span className="relative">{d}</span>}
-            </button>
+                    {!isStart(d) && !isDeadline(d) && <span className="relative">{d}</span>}
+                  </button>
+                )
+              })}
+            </div>
           )
         })}
       </div>

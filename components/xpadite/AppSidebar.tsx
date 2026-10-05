@@ -64,7 +64,7 @@ const MENU_ITEMS: MenuItem[] = [
   { icon: '✅', label: 'Task Manager',          action: 'tasks'                                                                      },
   { icon: '📊', label: 'Analytics',             action: 'analytics',     dividerBefore: true                                         },
   { icon: '🎯', label: 'Goal Manager',          action: 'goal-manager'                                                               },
-  { icon: '🎯', label: 'Activity Manager',       action: 'activities'                                                                 },
+  { icon: '⚡', label: 'Activity Manager',       action: 'activities'                                                                 },
   { icon: '📅', label: 'Sync Google Calendar',  action: 'sync-calendar', dividerBefore: true                                         },
   { icon: '🤖', label: 'XPadite AI Coach',      action: 'ai-coach'                                                                   },
   { icon: '👥', label: 'Meetings',              action: 'meetings'                                                                   },

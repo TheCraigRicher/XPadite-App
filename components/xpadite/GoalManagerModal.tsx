@@ -488,7 +488,7 @@ export function GoalManagerModal({ onClose }: { onClose: () => void }) {
             className="flex-shrink-0 flex items-center justify-between gap-3 px-4 sm:px-6 py-3.5 sm:py-4"
             style={{ background: `linear-gradient(135deg, ${PURPLE} 0%, ${PURPLE_DEEP} 100%)` }}
           >
-            <h2 className="text-[17px] sm:text-[20px] font-extrabold leading-tight" style={{ color: '#ffffff' }}>🎯 Goal Manager</h2>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: 'white', letterSpacing: '-0.02em', lineHeight: 1.2 }}>🎯 Goal Manager</h2>
             <button
               onClick={onClose}
               aria-label="Close Goal Manager"

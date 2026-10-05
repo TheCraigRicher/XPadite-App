@@ -150,7 +150,7 @@ function Journey({ onV2 }: { onV2: () => void }) {
     <>
       {/* Desktop/tablet — label 24px + check 20px + node 48px → circle centre at 68px */}
       <div className="hidden sm:block relative">
-        <ProgressTrack top={68} thickness={12} />
+        <ProgressTrack top={68} thickness={20} />
         <div className="grid grid-cols-5 relative">
           {labels.map((label, i) => {
             const cp = CHECKPOINTS[i]
@@ -170,7 +170,7 @@ function Journey({ onV2 }: { onV2: () => void }) {
 
       {/* Mobile — label 20px + check 18px + node 40px → circle centre at 58px */}
       <div className="sm:hidden relative">
-        <ProgressTrack top={58} thickness={10} />
+        <ProgressTrack top={58} thickness={17} />
         <div className="grid grid-cols-5 relative">
           {labels.map((label, i) => {
             const cp = CHECKPOINTS[i]
@@ -260,8 +260,11 @@ function CheckpointCard({ title, tasks, footer, onV2 }: { title: string; tasks?:
         </span>
       </div>
 
+      {/* Every expanded card shares one fixed preview height (sized to the first
+          populated card). Anything taller is clipped, never grows the card. */}
       <div className="grid" style={{ gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows 240ms ease-out' }}>
         <div className="min-h-0 overflow-hidden">
+          <div className="h-[118px] sm:h-[146px] flex flex-col overflow-hidden">
           {tasks && (
             <div className="flex flex-col gap-1.5 sm:gap-2 px-1.5 pb-1.5 sm:px-3 sm:pb-2 min-w-0">
               {tasks.map(t => (
@@ -278,8 +281,8 @@ function CheckpointCard({ title, tasks, footer, onV2 }: { title: string; tasks?:
             </div>
           )}
 
-          {!tasks && <div className="h-16 sm:h-24" />}
-          {footer && <p className="px-1.5 pb-1.5 pt-1 sm:px-3 sm:pb-3 sm:pt-2 text-[7.5px] sm:text-[10.5px] leading-tight" style={{ color: 'var(--xp-txt3)' }}>{footer}</p>}
+          {footer && <p className="mt-auto px-1.5 pb-1.5 pt-1 sm:px-3 sm:pb-3 sm:pt-2 text-[7.5px] sm:text-[10.5px] leading-tight" style={{ color: 'var(--xp-txt3)' }}>{footer}</p>}
+          </div>
         </div>
       </div>
     </div>
@@ -294,6 +297,37 @@ const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 function inStartMonthRange(day: number) { return day >= 3 }
 function inEndMonthRange(day: number) { return day <= 7 }
 
+// Deadline target (Image 2): solid purple outer ring → white gap → solid purple
+// middle ring → white gap → solid purple centre holding the date in white.
+// Built from stacked discs; every radius is a fraction of the target size D.
+function DeadlineTarget({ D, date, fontSize }: { D: number; date: number; fontSize: number }) {
+  const R = D / 2
+  const s = D / 30 // 30px is the desktop reference size
+  const t = 2.5 * s // ring thickness
+  const g = 1.5 * s // white gap
+  const disc = (r: number, bg: string) => (
+    <span
+      className="absolute rounded-full"
+      style={{ width: r * 2, height: r * 2, left: R - r, top: R - r, background: bg }}
+    />
+  )
+  return (
+    <span className="absolute" style={{ width: D, height: D, left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}>
+      {disc(R, PURPLE)}
+      {disc(R - t, 'var(--xp-card)')}
+      {disc(R - t - g, PURPLE)}
+      {disc(R - 2 * t - g, 'var(--xp-card)')}
+      {disc(R - 2 * t - 2 * g, PURPLE)}
+      <span
+        className="absolute inset-0 flex items-center justify-center font-bold text-white"
+        style={{ fontSize, lineHeight: 1 }}
+      >
+        {date}
+      </span>
+    </span>
+  )
+}
+
 function MonthGrid({ month, daysInMonth, firstWeekday, tone, onV2 }: {
   month: string; daysInMonth: number; firstWeekday: number; tone: 'start' | 'end'; onV2: () => void
 }) {
@@ -306,7 +340,6 @@ function MonthGrid({ month, daysInMonth, firstWeekday, tone, onV2 }: {
   const inRange = (d: number) => tone === 'start' ? inStartMonthRange(d) : inEndMonthRange(d)
   const isStart = (d: number) => tone === 'start' && d === 3
   const isDeadline = (d: number) => tone === 'end' && d === 7
-  const isToday = (d: number) => tone === 'end' && d === 4
 
   return (
     <div className="flex flex-col gap-2">
@@ -349,19 +382,10 @@ function MonthGrid({ month, daysInMonth, firstWeekday, tone, onV2 }: {
               {isStart(d) && <span className="absolute w-5 h-5 sm:w-7 sm:h-7 rounded-full" style={{ background: PURPLE }} />}
               {isStart(d) && <span className="relative text-white font-bold">{d}</span>}
 
-              {/* Deadline (Image 6): outer purple ring, a clean white gap, then the
-                  innermost purple ring holding the date. The band ends beneath it. */}
-              {isDeadline(d) && <span className="absolute rounded-full w-[22px] h-[22px] sm:w-[30px] sm:h-[30px]" style={{ border: `2.5px solid ${PURPLE}` }} />}
-              {isDeadline(d) && (
-                <span
-                  className="absolute rounded-full flex items-center justify-center w-4 h-4 sm:w-[22px] sm:h-[22px] text-[8px] sm:text-[10px] font-bold"
-                  style={{ border: `2px solid ${PURPLE}`, background: 'var(--xp-card)', color: PURPLE }}
-                >
-                  {d}
-                </span>
-              )}
+              {/* Deadline target — the band ends beneath it (Image 2). */}
+              {isDeadline(d) && <span className="sm:hidden contents"><DeadlineTarget D={22} date={d} fontSize={6.5} /></span>}
+              {isDeadline(d) && <span className="hidden sm:contents"><DeadlineTarget D={30} date={d} fontSize={9} /></span>}
 
-              {isToday(d) && <span className="absolute w-5 h-5 sm:w-7 sm:h-7 rounded-full" style={{ border: `1.5px solid ${LAVENDER}` }} />}
               {!isStart(d) && !isDeadline(d) && <span className="relative">{d}</span>}
             </button>
           )
@@ -440,8 +464,8 @@ export function GoalManagerModal({ onClose }: { onClose: () => void }) {
             {/* 3 · Controls — mobile 2×2 grid, desktop single row */}
             <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:items-center sm:justify-between sm:gap-3">
               <div className="contents sm:flex sm:flex-wrap sm:gap-3">
-                <NumberControl label="Checkpoints" value={5} onV2={openV2} />
-                <NumberControl label="Tasks' Checklist" value={5} onV2={openV2} />
+                <NumberControl label="Add Checkpoints" value={5} onV2={openV2} />
+                <NumberControl label="Add Tasks" value={5} onV2={openV2} />
               </div>
               <div className="contents sm:flex sm:flex-wrap sm:gap-3">
                 <PurplePill onV2={openV2}>Set a Deadline</PurplePill>

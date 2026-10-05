@@ -1607,45 +1607,42 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
           className="flex items-center px-4 sm:px-6 py-3.5 sm:py-4 flex-shrink-0 relative"
           style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)', borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}
         >
-          {/* Mobile: plain arrow only */}
+          {/* Back — arrow-only, every breakpoint */}
           {onBack && (
             <button onClick={onBack} data-export-exclude="true"
-              className="sm:hidden text-base font-light hover:opacity-70 transition-opacity flex-shrink-0 absolute left-4"
+              className="text-base font-light hover:opacity-70 transition-opacity flex-shrink-0 absolute left-4"
               style={{ color: 'rgba(255,255,255,0.85)', background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1, padding: '4px 2px' }}
               aria-label="Back">
               ←
             </button>
           )}
-          {/* Desktop: Back pill */}
-          {onBack && (
-            <button onClick={onBack} data-export-exclude="true"
-              className="hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-80 flex-shrink-0 mr-3"
-              style={{ background: 'rgba(255,255,255,0.08)', border: '0.5px solid rgba(255,255,255,0.15)', color: 'rgba(255,255,255,0.8)' }}>
-              ← Back
-            </button>
-          )}
-          {/* Title — absolutely centered on mobile, flex-1 on desktop */}
-          <div className="flex-1 text-center sm:text-left min-w-0">
-            <h2 className="text-sm font-bold text-white tracking-wide">Today&apos;s Dashboard</h2>
+          {/* Title — absolutely centered on the full header width at every breakpoint,
+              independent of the Back control's and Export/Close buttons' widths. */}
+          <div className="absolute left-1/2 text-center min-w-0 max-w-[55%] sm:max-w-[45%]" style={{ transform: 'translateX(-50%)' }}>
+            <h2 className="text-sm font-bold text-white tracking-wide truncate">Today&apos;s Dashboard</h2>
             <p className="text-[10px] mt-0.5 truncate" style={{ color: 'rgba(167,139,250,0.62)' }}>{dateLabel}</p>
           </div>
-          {/* Export button — desktop only */}
-          <button onClick={openExport} data-export-exclude="true"
-            className="hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-90 transition-opacity flex-shrink-0"
-            style={{ background: 'rgba(167,139,250,0.16)', border: '0.5px solid rgba(167,139,250,0.3)', color: '#c4b5fd' }}
-            title="Export dashboard as PNG"
-            aria-label="Export dashboard">
-            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M8 2v8M5 7l3 3 3-3M2 12v1a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-1"/>
-            </svg>
-            Export
-          </button>
-          {/* Close button — desktop only */}
-          <button onClick={onClose} data-export-exclude="true"
-            className="hidden sm:block text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0 ml-2"
-            style={{ background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}>
-            × Close
-          </button>
+          {/* Export/Close — now the only flow content, pushed to the right since
+              Back/Title are out of flow (absolute). */}
+          <div className="ml-auto flex items-center gap-2">
+            {/* Export button — desktop only */}
+            <button onClick={openExport} data-export-exclude="true"
+              className="hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-90 transition-opacity flex-shrink-0"
+              style={{ background: 'rgba(167,139,250,0.16)', border: '0.5px solid rgba(167,139,250,0.3)', color: '#c4b5fd' }}
+              title="Export dashboard as PNG"
+              aria-label="Export dashboard">
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M8 2v8M5 7l3 3 3-3M2 12v1a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-1"/>
+              </svg>
+              Export
+            </button>
+            {/* Close button — desktop only */}
+            <button onClick={onClose} data-export-exclude="true"
+              className="hidden sm:block text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
+              style={{ background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}>
+              × Close
+            </button>
+          </div>
         </div>
 
         {/* ── Dashboard body — mobile: flex-1 scroll; fit mode: scale transform ── */}

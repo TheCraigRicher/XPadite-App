@@ -123,6 +123,26 @@ const MFP_STYLES = `
     box-shadow:0 4px 12px rgba(0,0,0,0.28)!important;
   }
 
+  /* Dashboard-view Back control: arrow-only, all breakpoints (overrides the
+     pill recipe above, which stays as-is for the calendar view's own Back). */
+  .xp-mfp-hdr .xp-mfp-back-dash{
+    background:transparent!important;border:none!important;box-shadow:none!important;
+    padding:6px 6px 6px 0!important;font-size:20px!important;line-height:1!important;
+  }
+  .xp-mfp-hdr .xp-mfp-back-dash:hover{
+    background:rgba(255,255,255,0.12)!important;border:none!important;box-shadow:none!important;transform:none!important;
+  }
+  .xp-mfp-back-dash .xp-back-txt{display:none!important;}
+
+  /* Dashboard-view title block: absolutely centered on the full header width
+     at every breakpoint, so it never shifts with the Back control's width
+     (the calendar view's own center column keeps its grid-based position). */
+  .xp-mfp-hdr-c-dash{
+    position:absolute!important;left:50%!important;top:50%!important;
+    transform:translate(-50%,-50%)!important;
+    width:auto!important;
+  }
+
   .xp-mfp-close{
     width:36px;height:36px;border-radius:50%;
     display:flex;align-items:center;justify-content:center;
@@ -1096,6 +1116,14 @@ interface MonthFullPageProps {
   onMonthDashboard?: (month: number) => void
   onDayDoubleClick?: (key: string, month: number, day: number) => void
   initialView?: 'calendar' | 'dashboard'
+  // True when rendered inside another modal's own container (e.g. the
+  // Analytics modal's "Monthly Dashboard" card) rather than as its own
+  // full-viewport overlay: strips the backdrop/centering/max-size chrome so
+  // the card fills whatever space its host gives it, skips this component's
+  // own body-scroll-lock and self-close-on-Escape (the host already owns
+  // both), and makes the dashboard-view Back control close straight back to
+  // the host instead of toggling to this component's own calendar view.
+  embedded?: boolean
 }
 
 function playTapSound() {
@@ -1114,7 +1142,7 @@ function playTapSound() {
   } catch {}
 }
 
-export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView }: MonthFullPageProps) {
+export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, embedded = false }: MonthFullPageProps) {
   const { calData, sessions, activities, isDark, progressColor: _rawColor2, setToast, calendarClean, setCalendarClean } = useApp()
   const progressColor = resolveProgressColor(_rawColor2, isDark)
   const [view, setView]               = useState<'calendar' | 'dashboard'>(initialView ?? 'calendar')
@@ -1158,19 +1186,23 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView }:
   const [sharing, setSharing]             = useState(false)
   const [connectTarget, setConnectTarget] = useState<Platform | null>(null)
 
-  // Modal Escape — closes MonthFullPage
+  // Modal Escape — closes MonthFullPage. Skipped when embedded: the host
+  // (e.g. AnalyticsModal) owns its own Escape handling in that case.
   useEffect(() => {
+    if (embedded) return
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, embedded])
 
-  // Lock body scroll while modal is open (prevents background calendar from scrolling through)
+  // Lock body scroll while modal is open (prevents background calendar from
+  // scrolling through). Skipped when embedded: the host already locks it.
   useEffect(() => {
+    if (embedded) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => { document.body.style.overflow = prev }
-  }, [])
+  }, [embedded])
 
   // Back button focus fix: when returning from dashboard → calendar, the back button
   // retains focus from the prior tap. Blur it after the view settles.
@@ -1446,13 +1478,13 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView }:
     <>
       <style>{MFP_STYLES}</style>
       <div
-        className="fixed inset-0 z-50 overflow-y-auto xp-mfp-overlay"
-        style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(15,23,42,0.60)' }}
+        className={embedded ? 'w-full h-full flex flex-col' : 'fixed inset-0 z-50 overflow-y-auto xp-mfp-overlay'}
+        style={embedded ? undefined : { background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(15,23,42,0.60)' }}
       >
-        <div className="min-h-full flex items-center justify-center py-8 px-4 xp-mfp-wrap">
+        <div className={embedded ? 'w-full h-full flex flex-col' : 'min-h-full flex items-center justify-center py-8 px-4 xp-mfp-wrap'}>
           <div
-            className="w-full rounded-2xl xp-mfp-box"
-            style={{
+            className={embedded ? 'w-full h-full flex flex-col overflow-hidden' : 'w-full rounded-2xl xp-mfp-box'}
+            style={embedded ? { background: 'var(--xp-card)' } : {
               maxWidth: 'min(86vw, 1280px)', background: 'var(--xp-card)',
               border: '0.5px solid rgba(124,58,237,0.30)', overflow: 'hidden',
               maxHeight: '92vh', display: 'flex', flexDirection: 'column',
@@ -1473,18 +1505,24 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView }:
                 alignItems: 'center',
               }}
             >
-              {/* Left: Back */}
+              {/* Left: Back — arrow-only in dashboard view (all breakpoints) */}
               <div className="xp-mfp-hdr-l">
                 <button
                   ref={backBtnRef}
                   onPointerUp={() => setTimeout(() => backBtnRef.current?.blur(), 0)}
-                  onClick={view === 'dashboard' ? () => { setAnimType('fade'); setView('calendar') } : onClose}
-                  className="xp-mfp-back"
+                  onClick={view === 'dashboard' ? (embedded ? onClose : () => { setAnimType('fade'); setView('calendar') }) : onClose}
+                  className={`xp-mfp-back${view === 'dashboard' ? ' xp-mfp-back-dash' : ''}`}
+                  aria-label="Back"
                 ><span className="xp-back-arrow">←</span><span className="xp-back-txt"> Back</span></button>
               </div>
 
-              {/* Center: Month/Year dropdown trigger (+ Dashboard title in dashboard view) */}
-              <div className="xp-mfp-hdr-c" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+              {/* Center: Month/Year dropdown trigger (+ Dashboard title in dashboard view) —
+                  truly centered on the full header width in dashboard view, independent of
+                  the Back control's width, via absolute centering (not flex/grid sharing). */}
+              <div
+                className={`xp-mfp-hdr-c${view === 'dashboard' ? ' xp-mfp-hdr-c-dash' : ''}`}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}
+              >
                 {view === 'dashboard' && (
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'white', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)', lineHeight: 1.2 }}>
                     Monthly Dashboard

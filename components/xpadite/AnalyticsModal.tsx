@@ -1,17 +1,22 @@
 'use client'
 
 // ── Analytics modal — front-end + real data wiring ────────────────────────────
-// The 4 timeframe cards are the dashboard hub: Today and Monthly open the
-// existing DayDashboardModal / MonthlyDashboardView (from DayDashboardModal.tsx
-// / AnalyticsPage.tsx, both reused unmodified) — Weekly and Yearly still only
-// toggle a local selected state since those dashboards aren't built yet. The
-// Overview section below is driven by real XPadite data via the SAME
-// range-stats engine AnalyticsPage.tsx already uses (computeRangeStats,
-// exported from there) and the streak functions from productivityEngine.ts
-// (also used by StatsRow) — no parallel calculation system.
+// The 4 timeframe cards are the dashboard hub: Today opens the existing
+// DayDashboardModal (its own overlay, sized to match this modal's own card);
+// Monthly opens the existing MonthFullPage (from MonthFullPage.tsx) directly
+// embedded in this modal's own container via its `embedded` prop — Weekly and
+// Yearly still only toggle a local selected state since those dashboards
+// aren't built yet. The Overview section below is driven by real XPadite data
+// via the SAME range-stats engine AnalyticsPage.tsx already uses
+// (computeRangeStats, exported from there) and the streak functions from
+// productivityEngine.ts (also used by StatsRow) — no parallel calculation
+// system.
 //
-// Reuses established XPadite patterns: useLockBodyScroll, the signature
-// purple/lavender gradient header, the same solid-triangle date-nav glyphs
+// Body scroll is locked locally (below) with the stronger position:fixed
+// technique at every breakpoint — not the shared useLockBodyScroll, whose
+// mobile branch doesn't fully stop iOS scroll-through once nested dashboards
+// add their own scrollable regions. Reuses established XPadite patterns: the
+// signature purple/lavender gradient header, the same solid-triangle date-nav glyphs
 // used in DayModal/SendToOptionsModal, PremiumUpgradeModal for "AI Insight",
 // and DayDashboardModal's exact responsive modal-sizing classes (mobile
 // full-bleed → sm:max-w-[640px] → lg:max-w-[1296px]) so this modal matches
@@ -19,7 +24,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from './AppContext'
-import { useLockBodyScroll } from './useLockBodyScroll'
 import { PremiumUpgradeModal } from './PremiumUpgradeModal'
 import { MONTHS, formatMs, dateKey as buildDateKey, hexToRgba, resolveProgressColor } from './utils'
 import { computeRangeStats, getCurrentWeekRange, getCurrentMonthRange } from './AnalyticsPage'
@@ -423,7 +427,29 @@ function AnalyticsLegend({ progressColor }: { progressColor: string }) {
 export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => void; onDayDoubleClick?: (key: string, month: number, day: number) => void }) {
   const { isDark, calData, activities, progressColor: rawProgressColor } = useApp()
   const progressColor = resolveProgressColor(rawProgressColor, isDark)
-  useLockBodyScroll()
+
+  // Freeze the page behind this modal at every breakpoint (not just desktop)
+  // so neither wheel/trackpad nor touch-scroll-through can ever expose the
+  // calendar underneath — including once a nested dashboard (Today's/Monthly)
+  // adds its own scrollable region on top.
+  useEffect(() => {
+    const scrollY = window.scrollY
+    const prevOverflow = document.body.style.overflow
+    const prevPosition = document.body.style.position
+    const prevTop = document.body.style.top
+    const prevWidth = document.body.style.width
+    document.body.style.overflow = 'hidden'
+    document.body.style.position = 'fixed'
+    document.body.style.top = `-${scrollY}px`
+    document.body.style.width = '100%'
+    return () => {
+      document.body.style.overflow = prevOverflow
+      document.body.style.position = prevPosition
+      document.body.style.top = prevTop
+      document.body.style.width = prevWidth
+      window.scrollTo(0, scrollY)
+    }
+  }, [])
 
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('today')
   const [scope, setScope] = useState<Scope>('today')
@@ -476,10 +502,11 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
 
   return (
     <>
+      {/* Outside-click intentionally does not close this modal — Analytics
+          only closes via its own explicit close/navigation controls. */}
       <div
         className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-50 flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-3 sm:pt-4"
         style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
-        onClick={onClose}
       >
         <div
           className="flex flex-col w-full h-full sm:h-auto sm:rounded-2xl sm:shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] sm:mb-6"
@@ -488,7 +515,6 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
             border: isDark ? '0.5px solid rgba(124,58,237,0.22)' : '0.5px solid var(--xp-bdr2)',
             boxShadow: isDark ? '0 30px 70px rgba(0,0,0,0.75)' : '0 20px 50px rgba(0,0,0,0.12)',
           }}
-          onClick={e => e.stopPropagation()}
         >
           {/* XPadite signature purple header */}
           <div
@@ -652,19 +678,35 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
       )}
 
       {/* Monthly Dashboard — the exact existing Expandable Month Modal
-          (MonthFullPage), opened straight into its own dashboard view so
-          this reuses that implementation's data/styling/interactions/
-          calendar-toggle behavior unmodified instead of duplicating it.
-          The wrapper only raises stacking above this modal's own z-50 —
-          MonthFullPage's internal styling/z-index is untouched. */}
+          (MonthFullPage), opened straight into its own dashboard view and
+          rendered via its `embedded` prop so it fills this modal's own
+          card shell instead of bringing its own backdrop/sizing (which
+          previously produced a second, mismatched modal layer). The shell
+          here is the same backdrop+card recipe this modal's own content
+          and DayDashboardModal both use, so Monthly now fits exactly like
+          Today's Dashboard does — a bounded height (unlike the auto-height
+          card below) matches MonthFullPage's own internal-scroll design. */}
       {openDashboard === 'monthly' && (
-        <div className="relative" style={{ zIndex: 51 }}>
-          <MonthFullPage
-            month={today.getMonth()}
-            initialView="dashboard"
-            onClose={() => setOpenDashboard(null)}
-            onDayDoubleClick={onDayDoubleClick}
-          />
+        <div
+          className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[51] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-3 sm:pt-4"
+          style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
+        >
+          <div
+            className="flex flex-col w-full h-full sm:h-[88vh] sm:rounded-2xl sm:shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] sm:mb-6"
+            style={{
+              background: 'var(--xp-bg)',
+              border: isDark ? '0.5px solid rgba(124,58,237,0.22)' : '0.5px solid var(--xp-bdr2)',
+              boxShadow: isDark ? '0 30px 70px rgba(0,0,0,0.75)' : '0 20px 50px rgba(0,0,0,0.12)',
+            }}
+          >
+            <MonthFullPage
+              month={today.getMonth()}
+              initialView="dashboard"
+              embedded
+              onClose={() => setOpenDashboard(null)}
+              onDayDoubleClick={onDayDoubleClick}
+            />
+          </div>
         </div>
       )}
 

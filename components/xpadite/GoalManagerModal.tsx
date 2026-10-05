@@ -3,7 +3,8 @@
 // ── 🎯 Goal Manager — V1 front-end preview ────────────────────────────────────
 // Static preview of the V2 feature, built from the "Goal Manager Modal - Design
 // ITR 1" reference. No data, persistence, or real goal/deadline/calendar logic:
-// every interactive control routes to ONE shared Coming Soon dialog.
+// every interactive control routes to ONE shared Coming Soon dialog. The only
+// local UI state is checklist-card expand/collapse.
 
 import { useEffect, useState } from 'react'
 import { useLockBodyScroll } from './useLockBodyScroll'
@@ -12,8 +13,10 @@ const PURPLE = '#7c3aed'
 const PURPLE_DEEP = '#5b21b6'
 const LAVENDER = '#a78bfa'
 
+const FLOW_CSS = '@media (prefers-reduced-motion: no-preference){@keyframes xp-gm-flow{from{background-position:-120% 0}to{background-position:220% 0}}}'
+
 const CHECKPOINTS = [
-  { key: 'A', label: 'Started', done: true, dateNote: 'Sept 3, 2026 10:00 AM' },
+  { key: 'A', label: 'Started', done: true },
   { key: 'B', label: 'Win 1',   done: true },
   { key: 'C', label: 'Win 2',   done: false },
   { key: 'D', label: 'Win 3',   done: false },
@@ -25,6 +28,15 @@ function CheckMark({ size = 14 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={PURPLE} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="20 6 9 17 4 12" />
+    </svg>
+  )
+}
+
+// Thicker, filled ✔ with pointed/tapered ends — mobile journey only.
+function CheckTick({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M1.6 12.7 L4.6 9.7 L9.5 14.6 L19.4 4.7 L22.4 7.7 L9.5 20.6 Z" fill={PURPLE} />
     </svg>
   )
 }
@@ -95,12 +107,39 @@ function JourneyNode({ letter, done, size = 48 }: { letter: string; done: boolea
   )
 }
 
-// Thicker, filled ✔ with pointed/tapered ends — mobile journey only.
-function CheckTick({ size = 14 }: { size?: number }) {
+// The connector spans centre-of-A to centre-of-Deadline (80% of the row, the
+// checkpoints sit at 10/30/50/70/90%). A→B is completed; B→C is the WIP segment,
+// stopping halfway toward C and fading out at its leading edge. `top` is the
+// exact vertical centre of the circles.
+const TRACK_B = '25%'     // B sits 25% along the track
+const TRACK_WIP = '37.5%' // halfway from B (25%) toward C (50%)
+
+function ProgressTrack({ top, thickness }: { top: number; thickness: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ flexShrink: 0 }}>
-      <path d="M1.6 12.7 L4.6 9.7 L9.5 14.6 L19.4 4.7 L22.4 7.7 L9.5 20.6 Z" fill={PURPLE} />
-    </svg>
+    <>
+      <style>{FLOW_CSS}</style>
+      <div
+        className="absolute overflow-hidden rounded-full pointer-events-none"
+        style={{ top, left: '10%', right: '10%', height: thickness, transform: 'translateY(-50%)', background: 'rgba(167,139,250,0.22)' }}
+      >
+        <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: TRACK_B, background: `linear-gradient(90deg, ${LAVENDER}, #c084fc)` }} />
+        <div
+          className="absolute inset-y-0"
+          style={{
+            left: TRACK_B, width: `calc(${TRACK_WIP} - ${TRACK_B})`,
+            background: 'linear-gradient(90deg, #c084fc 0%, rgba(192,132,252,0.55) 55%, rgba(192,132,252,0) 100%)',
+          }}
+        />
+        <div
+          className="absolute inset-0"
+          style={{
+            background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.55) 50%, transparent 100%)',
+            backgroundSize: '45% 100%', backgroundRepeat: 'no-repeat',
+            animation: 'xp-gm-flow 2.8s linear infinite', opacity: 0.75,
+          }}
+        />
+      </div>
+    </>
   )
 }
 
@@ -109,25 +148,19 @@ function Journey({ onV2 }: { onV2: () => void }) {
 
   return (
     <>
-      {/* Desktop/tablet — one horizontal row, aligned with the cards below */}
+      {/* Desktop/tablet — label 24px + check 20px + node 48px → circle centre at 68px */}
       <div className="hidden sm:block relative">
-        {/* Purple progress line from A through B, fading toward C */}
-        <div
-          className="absolute rounded-full"
-          style={{
-            top: 'calc(50% + 14px)', height: 6, transform: 'translateY(-50%)',
-            left: '10%', right: '50%',
-            background: `linear-gradient(90deg, ${LAVENDER} 0%, #c084fc 55%, rgba(192,132,252,0.35) 100%)`,
-          }}
-        />
+        <ProgressTrack top={68} thickness={12} />
         <div className="grid grid-cols-5 relative">
           {labels.map((label, i) => {
             const cp = CHECKPOINTS[i]
             const done = cp ? cp.done : false
             return (
-              <div key={label} className="flex flex-col items-center gap-2 cursor-pointer" onClick={onV2}>
-                <span className="text-[15px] font-semibold" style={{ color: 'var(--xp-txt)' }}>{label}</span>
-                <div className="h-4 flex items-end justify-center">{done && <CheckMark size={16} />}</div>
+              <div key={label} className="flex flex-col items-center cursor-pointer" onClick={onV2}>
+                <div className="h-6 flex items-center">
+                  <span className="text-[15px] font-semibold" style={{ color: 'var(--xp-txt)' }}>{label}</span>
+                </div>
+                <div className="h-5 flex items-end justify-center">{done && <CheckMark size={16} />}</div>
                 {cp ? <JourneyNode letter={cp.key} done={cp.done} /> : <BullseyeIcon size={48} />}
               </div>
             )
@@ -135,12 +168,9 @@ function Journey({ onV2 }: { onV2: () => void }) {
         </div>
       </div>
 
-      {/* Mobile — the same horizontal journey, scaled to fit the screen width.
-          Layout bands: label 20px, check 18px, node 40px → node centre at 58px,
-          where the progress line runs through every circle's centre. */}
+      {/* Mobile — label 20px + check 18px + node 40px → circle centre at 58px */}
       <div className="sm:hidden relative">
-        <div className="absolute rounded-full" style={{ top: 58, left: '10%', right: '10%', height: 6, transform: 'translateY(-50%)', background: 'var(--xp-bdr2)' }} />
-        <div className="absolute rounded-full" style={{ top: 58, left: '10%', width: '20%', height: 6, transform: 'translateY(-50%)', background: `linear-gradient(90deg, ${LAVENDER}, #c084fc)` }} />
+        <ProgressTrack top={58} thickness={10} />
         <div className="grid grid-cols-5 relative">
           {labels.map((label, i) => {
             const cp = CHECKPOINTS[i]
@@ -195,32 +225,63 @@ function PurplePill({ children, onV2 }: { children: React.ReactNode; onV2: () =>
 
 interface CardTask { text: string; checked: boolean }
 
-// Mobile: compact, taller-than-wide tiles (4 per row). sm+ keeps the full card.
+// The card body opens/closes via the purple triangle only (stopPropagation keeps
+// that separate from the card click, which opens the V2 Coming Soon dialog).
 function CheckpointCard({ title, tasks, footer, onV2 }: { title: string; tasks?: CardTask[]; footer?: string; onV2: () => void }) {
+  const [open, setOpen] = useState(true)
+
   return (
-    <div className="rounded-2xl flex flex-col min-h-[124px] sm:min-h-[150px] min-w-0" style={{ border: `2px solid ${PURPLE}`, background: 'var(--xp-card)', boxShadow: '0 2px 10px rgba(124,58,237,0.08)' }}>
-      <button onClick={onV2} className="flex items-start gap-1 sm:gap-2 px-1.5 pt-2 pb-1 sm:px-3 sm:pt-3 sm:pb-2 text-left min-w-0" style={{ cursor: 'pointer' }}>
-        <span className="text-[8px] sm:text-[12px] leading-[14px] sm:leading-[18px] flex-shrink-0" style={{ color: PURPLE }}>▼</span>
-        <span className="text-[9.5px] sm:text-[12.5px] font-semibold leading-tight sm:leading-snug min-w-0" style={{ color: 'var(--xp-txt)' }}>{title}</span>
-      </button>
+    // self-start: the card keeps its own height instead of stretching to the row,
+    // so a collapsed card shrinks to just its header bar.
+    <div
+      onClick={onV2}
+      className="self-start rounded-2xl flex flex-col min-w-0 overflow-hidden cursor-pointer"
+      style={{ border: `2px solid ${PURPLE}`, background: 'var(--xp-card)', boxShadow: '0 2px 10px rgba(124,58,237,0.08)' }}
+    >
+      <div className="flex items-start gap-1 sm:gap-2 px-1.5 pt-2 pb-1 sm:px-3 sm:pt-3 sm:pb-2 min-w-0">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={open ? 'Collapse checklist' : 'Expand checklist'}
+          onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
+          className="flex-shrink-0 leading-none"
+          style={{ cursor: 'pointer', background: 'none', border: 'none', padding: 0, color: PURPLE }}
+        >
+          <span
+            className="inline-block text-[8px] sm:text-[12px] leading-[14px] sm:leading-[18px]"
+            style={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 220ms ease' }}
+          >▼</span>
+        </button>
+        <span
+          className="text-[8.5px] sm:text-[12.5px] font-semibold leading-tight sm:leading-snug min-w-0 line-clamp-2 [overflow-wrap:anywhere]"
+          style={{ color: 'var(--xp-txt)' }}
+        >
+          {title}
+        </span>
+      </div>
 
-      {tasks && (
-        <div className="flex flex-col gap-1.5 sm:gap-2 px-1.5 pb-1.5 sm:px-3 sm:pb-2 min-w-0">
-          {tasks.map(t => (
-            <button key={t.text} onClick={onV2} className="flex items-center gap-1 sm:gap-2.5 text-left min-w-0 transition-opacity hover:opacity-80" style={{ cursor: 'pointer' }}>
-              <span
-                className="flex items-center justify-center rounded-[3px] sm:rounded-[4px] flex-shrink-0 w-3 h-3 sm:w-4 sm:h-4 border-[1.5px] sm:border-2"
-                style={{ borderColor: PURPLE, background: t.checked ? PURPLE : 'transparent' }}
-              >
-                {t.checked && <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeLinecap="round" strokeLinejoin="round" className="w-[7px] h-[7px] sm:w-2.5 sm:h-2.5 [stroke-width:4] sm:[stroke-width:3.5]"><polyline points="20 6 9 17 4 12" /></svg>}
-              </span>
-              <span className="text-[8.5px] sm:text-[12px] truncate min-w-0" style={{ color: 'var(--xp-txt)' }}>{t.text}</span>
-            </button>
-          ))}
+      <div className="grid" style={{ gridTemplateRows: open ? '1fr' : '0fr', transition: 'grid-template-rows 240ms ease-out' }}>
+        <div className="min-h-0 overflow-hidden">
+          {tasks && (
+            <div className="flex flex-col gap-1.5 sm:gap-2 px-1.5 pb-1.5 sm:px-3 sm:pb-2 min-w-0">
+              {tasks.map(t => (
+                <div key={t.text} className="flex items-center gap-1 sm:gap-2.5 min-w-0">
+                  <span
+                    className="flex items-center justify-center rounded-[3px] sm:rounded-[4px] flex-shrink-0 w-3 h-3 sm:w-4 sm:h-4 border-[1.5px] sm:border-2"
+                    style={{ borderColor: PURPLE, background: t.checked ? PURPLE : 'transparent' }}
+                  >
+                    {t.checked && <svg width="7" height="7" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeLinecap="round" strokeLinejoin="round" className="w-[7px] h-[7px] sm:w-2.5 sm:h-2.5 [stroke-width:4] sm:[stroke-width:3.5]"><polyline points="20 6 9 17 4 12" /></svg>}
+                  </span>
+                  <span className="text-[8.5px] sm:text-[12px] truncate min-w-0" style={{ color: 'var(--xp-txt)' }}>{t.text}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!tasks && <div className="h-16 sm:h-24" />}
+          {footer && <p className="px-1.5 pb-1.5 pt-1 sm:px-3 sm:pb-3 sm:pt-2 text-[7.5px] sm:text-[10.5px] leading-tight" style={{ color: 'var(--xp-txt3)' }}>{footer}</p>}
         </div>
-      )}
-
-      {footer && <p className="mt-auto px-1.5 pb-1.5 pt-1 sm:px-3 sm:pb-3 sm:pt-2 text-[7.5px] sm:text-[10.5px] leading-tight" style={{ color: 'var(--xp-txt3)' }}>{footer}</p>}
+      </div>
     </div>
   )
 }
@@ -272,17 +333,34 @@ function MonthGrid({ month, daysInMonth, firstWeekday, tone, onV2 }: {
               key={idx}
               onClick={onV2}
               className="relative flex items-center justify-center text-[9px] sm:text-[11px] font-medium h-6 sm:h-8 min-w-0"
-              style={{
-                background: band && !isStart(d) && !isDeadline(d) ? 'rgba(124,58,237,0.18)' : 'transparent',
-                color: band ? 'var(--xp-txt)' : 'var(--xp-txt3)',
-                cursor: 'pointer',
-              }}
+              style={{ color: band ? 'var(--xp-txt)' : 'var(--xp-txt3)', cursor: 'pointer' }}
             >
+              {/* Range band: slightly shorter than the marker circles, centred on
+                  them, and starting/ending at their centres so it sits behind the
+                  markers and reads as one continuous path. */}
+              {band && (
+                <span
+                  aria-hidden="true"
+                  className="absolute top-1/2 -translate-y-1/2 h-4 sm:h-[22px] pointer-events-none"
+                  style={{ background: 'rgba(167,139,250,0.5)', left: isStart(d) ? '50%' : 0, right: isDeadline(d) ? '50%' : 0 }}
+                />
+              )}
+
               {isStart(d) && <span className="absolute w-5 h-5 sm:w-7 sm:h-7 rounded-full" style={{ background: PURPLE }} />}
               {isStart(d) && <span className="relative text-white font-bold">{d}</span>}
-              {isDeadline(d) && <span className="sm:hidden"><BullseyeIcon size={18} /></span>}
-              {isDeadline(d) && <span className="hidden sm:inline"><BullseyeIcon size={26} /></span>}
-              {isDeadline(d) && <span className="absolute text-[8px] font-bold" style={{ color: PURPLE }}>{d}</span>}
+
+              {/* Deadline (Image 6): outer purple ring, a clean white gap, then the
+                  innermost purple ring holding the date. The band ends beneath it. */}
+              {isDeadline(d) && <span className="absolute rounded-full w-[22px] h-[22px] sm:w-[30px] sm:h-[30px]" style={{ border: `2.5px solid ${PURPLE}` }} />}
+              {isDeadline(d) && (
+                <span
+                  className="absolute rounded-full flex items-center justify-center w-4 h-4 sm:w-[22px] sm:h-[22px] text-[8px] sm:text-[10px] font-bold"
+                  style={{ border: `2px solid ${PURPLE}`, background: 'var(--xp-card)', color: PURPLE }}
+                >
+                  {d}
+                </span>
+              )}
+
               {isToday(d) && <span className="absolute w-5 h-5 sm:w-7 sm:h-7 rounded-full" style={{ border: `1.5px solid ${LAVENDER}` }} />}
               {!isStart(d) && !isDeadline(d) && <span className="relative">{d}</span>}
             </button>
@@ -294,8 +372,8 @@ function MonthGrid({ month, daysInMonth, firstWeekday, tone, onV2 }: {
 }
 
 function Timeline({ onV2 }: { onV2: () => void }) {
+  // Mobile drops the outer outline and shows both months side by side.
   return (
-    // Mobile drops the outer outline and shows both months side by side.
     <div className="rounded-2xl p-0 sm:p-5 border-0 sm:border-2" style={{ borderColor: PURPLE, background: 'var(--xp-card)' }}>
       <h3 className="text-center text-[15px] sm:text-[18px] font-semibold mb-3 sm:mb-4" style={{ color: 'var(--xp-txt)' }}>Timeline</h3>
       <div className="grid grid-cols-2 sm:grid-cols-1 md:grid-cols-2 gap-2 sm:gap-4">
@@ -359,8 +437,7 @@ export function GoalManagerModal({ onClose }: { onClose: () => void }) {
             {/* 2 · Goal progression */}
             <Journey onV2={openV2} />
 
-            {/* 3 · Controls */}
-            {/* Mobile: 2×2 grid (each pill sits under its matching control). Desktop: unchanged row. */}
+            {/* 3 · Controls — mobile 2×2 grid, desktop single row */}
             <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:items-center sm:justify-between sm:gap-3">
               <div className="contents sm:flex sm:flex-wrap sm:gap-3">
                 <NumberControl label="Checkpoints" value={5} onV2={openV2} />
@@ -368,7 +445,7 @@ export function GoalManagerModal({ onClose }: { onClose: () => void }) {
               </div>
               <div className="contents sm:flex sm:flex-wrap sm:gap-3">
                 <PurplePill onV2={openV2}>Set a Deadline</PurplePill>
-                <PurplePill onV2={openV2}>Set Goals With AI Coach</PurplePill>
+                <PurplePill onV2={openV2}>🤖 Set Goals With AI Coach</PurplePill>
               </div>
             </div>
 

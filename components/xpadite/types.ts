@@ -26,6 +26,11 @@ export interface Task {
   plannerSectionId?: string  // block.id of the linked Planner section for this task on its date
 }
 
+export interface DeadlineInfo {
+  targetDate: string        // YYYY-MM-DD the user chose for the deadline
+  completedAt: number | null // epoch ms when the user marked it complete
+}
+
 export interface DayData {
   productive: boolean
   hyper: boolean
@@ -34,6 +39,7 @@ export interface DayData {
   journal: string
   milestone?: boolean
   goal?: boolean
+  deadline?: DeadlineInfo
   attachments?: TaskAttachment[]
 }
 

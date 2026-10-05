@@ -38,6 +38,7 @@ const DEFAULT_ACTIVITIES: Activity[] = [
   { id: 'a3',      name: 'Learning',             color: '#0891b2' },
   { id: 'a4',      name: 'Coding',               color: '#6366f1' },
   { id: 'a5',      name: 'Personal',             color: '#d97706' },
+  { id: 'a-meet',  name: 'Meeting',              color: '#e3ed3a' },
   { id: 'a-meal',  name: '🍽 Meal',              color: '#f59e0b', countsTowardProductivity: false },
   { id: 'a-break', name: '☕ Break',             color: '#64748b', countsTowardProductivity: false },
   { id: 'a-plan',  name: 'Planning/Journaling',  color: '#22c55e', countsTowardProductivity: true },
@@ -45,7 +46,10 @@ const DEFAULT_ACTIVITIES: Activity[] = [
 
 // These are always present — injected/updated on every localStorage load so they can never be removed.
 // On update: only countsTowardProductivity is forced so user color/name customisations are preserved.
+// Meeting lives here (not only in DEFAULT_ACTIVITIES) so existing accounts that already
+// have a saved activity list still receive it, and so synced meeting tasks always have it.
 const BUILTIN_EXTRAS: Activity[] = [
+  { id: 'a-meet',  name: 'Meeting',              color: '#e3ed3a' },
   { id: 'a-meal',  name: '🍽 Meal',              color: '#f59e0b', countsTowardProductivity: false },
   { id: 'a-break', name: '☕ Break',             color: '#64748b', countsTowardProductivity: false },
   { id: 'a-plan',  name: 'Planning/Journaling',  color: '#22c55e', countsTowardProductivity: true },

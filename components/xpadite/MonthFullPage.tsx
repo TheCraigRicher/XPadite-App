@@ -268,6 +268,14 @@ const MFP_STYLES = `
   .xp-cal-fade{transition:opacity 200ms ease;}
   @media(prefers-reduced-motion:reduce){.xp-cal-fade{transition:none!important;}}
 
+  /* Desktop only: nudge the 🎯 Goal glyph up so its bullseye centre lines up
+     with the date number's row — a transform, so it never affects the
+     .xp-goal-date overlay (anchored to the wrapper span, not this element)
+     or the emoji's horizontal position. */
+  @media (min-width: 1024px) {
+    .xp-goal-emoji { transform: translateY(-4px); }
+  }
+
   /* Dashboard pill micro-interactions */
   .xp-mfp-dash-pill{transition:background 180ms ease,border-color 180ms ease,box-shadow 180ms ease,transform 180ms ease;}
   .xp-mfp-dash-pill:hover{

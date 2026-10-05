@@ -719,7 +719,8 @@ function ConversationArea({
               boxShadow: "0 2px 8px rgba(109,40,217,0.4)",
             }}
           >
-            🤖
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/AI%20Coach%20Icon.png" alt="" className="w-[34px] h-[34px] sm:w-[32px] sm:h-[32px] lg:w-[30px] lg:h-[30px] object-contain" />
           </div>
           <div
             style={{
@@ -811,7 +812,8 @@ function ConversationArea({
                 marginTop: 2,
               }}
             >
-              🤖
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/AI%20Coach%20Icon.png" alt="" className="w-[34px] h-[34px] sm:w-[32px] sm:h-[32px] lg:w-[30px] lg:h-[30px] object-contain" />
             </div>
           )}
           <div
@@ -856,7 +858,8 @@ function ConversationArea({
               flexShrink: 0,
             }}
           >
-            🤖
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/AI%20Coach%20Icon.png" alt="" className="w-[34px] h-[34px] sm:w-[32px] sm:h-[32px] lg:w-[30px] lg:h-[30px] object-contain" />
           </div>
           <div
             style={{
@@ -2505,8 +2508,13 @@ function WorkspaceNavBar({
   active: WorkspaceTab;
   onChange: (tab: WorkspaceTab) => void;
 }) {
-  const tabs: Array<{ id: WorkspaceTab; icon: string; label: string }> = [
-    { id: "coach", icon: "🤖", label: "AI Coach" },
+  const tabs: Array<{ id: WorkspaceTab; icon: React.ReactNode; label: string }> = [
+    {
+      id: "coach",
+      // eslint-disable-next-line @next/next/no-img-element
+      icon: <img src="/AI%20Coach%20Icon.png" alt="" className="w-9 h-9 sm:w-[34px] sm:h-[34px] lg:w-8 lg:h-8 object-contain" />,
+      label: "AI Coach",
+    },
     { id: "tasks", icon: "✓", label: "Task Manager" },
     { id: "calendar", icon: "📅", label: "Calendar" },
   ];
@@ -2981,7 +2989,7 @@ export function AICoachPage({ onClose, startWithMotivate, hasPremiumAccess = fal
         </button>
       )}
 
-      {/* Absolutely centered 🤖 AI Coach pill — independent of button widths */}
+      {/* Absolutely centered AI Coach pill — independent of button widths */}
       <div
         style={{
           position: "absolute",
@@ -3011,7 +3019,9 @@ export function AICoachPage({ onClose, startWithMotivate, hasPremiumAccess = fal
             userSelect: "none",
           }}
         >
-          🤖 AI Coach
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/AI%20Coach%20Icon.png" alt="" style={{ width: 18, height: 18, objectFit: "contain", flexShrink: 0 }} />
+          AI Coach
         </div>
       </div>
 

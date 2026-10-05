@@ -29,6 +29,30 @@ const TaskCheckIcon = () => (
   </svg>
 )
 
+// Menu icon is a tiny fixed-size glyph alongside the emoji/SVG menu icons
+// above, not a content image, so next/image's optimization doesn't apply.
+const ActivityManagerIcon = () => (
+  // eslint-disable-next-line @next/next/no-img-element
+  <img src="/Activity%20Manager%20Icon.png" alt="" className="w-5 h-5 inline-block align-middle object-contain" />
+)
+
+// Rendered well above the 20px slot so its visual weight matches the Gallery/
+// Sync emoji icons. The outer span keeps the exact original 20x20 footprint
+// (zero effect on row height or label position); the image is absolutely
+// positioned and centered inside it, so growing it never affects layout —
+// it simply overflows the slot symmetrically, same as the gap it already sat in.
+const AICoachMenuIcon = () => (
+  <span className="relative inline-block w-5 h-5 align-middle flex-shrink-0">
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    <img
+      src="/AI%20Coach%20Icon.png"
+      alt=""
+      className="absolute top-1/2 left-1/2 w-8 h-8 object-contain"
+      style={{ transform: 'translate(-50%, -50%)' }}
+    />
+  </span>
+)
+
 // ─── Menu structure ───────────────────────────────────────────────────────────
 
 type MenuAction =
@@ -87,6 +111,8 @@ const FINAL_ORDER: MenuAction[] = [
 const FINAL_MENU_ITEMS: MenuItem[] = FINAL_ORDER.map(action => {
   const item = MENU_ITEMS.find(m => m.action === action)!
   if (action === 'tasks') return { ...item, icon: <TaskCheckIcon /> }
+  if (action === 'activities') return { ...item, icon: <ActivityManagerIcon /> }
+  if (action === 'ai-coach') return { ...item, icon: <AICoachMenuIcon /> }
   if (action === 'qotd')  return { ...item, label: 'Quote of the Day' }
   if (action === 'sync-calendar') return { ...item, label: 'Sync' }
   return item

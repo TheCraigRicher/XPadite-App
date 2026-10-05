@@ -268,12 +268,12 @@ const MFP_STYLES = `
   .xp-cal-fade{transition:opacity 200ms ease;}
   @media(prefers-reduced-motion:reduce){.xp-cal-fade{transition:none!important;}}
 
-  /* Desktop only: nudge the 🎯 Goal glyph up so its bullseye centre lines up
-     with the date number's row — a transform, so it never affects the
-     .xp-goal-date overlay (anchored to the wrapper span, not this element)
-     or the emoji's horizontal position. */
+  /* Desktop only: nudge the 🎯 Goal glyph up and slightly right so its
+     bullseye centre lines up with the date number's row/column — a
+     transform, so it never affects the .xp-goal-date overlay (anchored to
+     the wrapper span, not this element) or the date digit's own position. */
   @media (min-width: 1024px) {
-    .xp-goal-emoji { transform: translateY(-4px); }
+    .xp-goal-emoji { transform: translate(3px, -4px); }
   }
 
   /* Desktop only: nudge an entire connected Goal sequence (emoji+date block

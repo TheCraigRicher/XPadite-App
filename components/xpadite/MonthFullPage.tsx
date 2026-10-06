@@ -1719,12 +1719,16 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
               {/* ── DASHBOARD VIEW ─────────────────────────────────────────────── */}
               {view === 'dashboard' && (
                 <div className="p-3 sm:p-4 lg:p-5 space-y-3 lg:space-y-4" style={{ background: isDark ? 'rgba(9,4,22,0.99)' : 'var(--xp-bg3)' }}>
-                  {/* ROW 1 — KPI area | Performance Analytics | Performance Badge.
-                      Column ratio and KPI-card styling are now the exact values reused
-                      from Today's Dashboard's own ROW1 (DayDashboardModal.tsx) rather
-                      than independently derived — same 1.52fr/1.36fr/0.70fr split, same
-                      grid-cols-2 sm:grid-cols-3 card grid, same card recipe. */}
-                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.52fr)_minmax(0,1.36fr)_minmax(0,0.70fr)] items-stretch gap-3 lg:gap-4">
+                  {/* ROW 1 — KPI area | (Performance Analytics + Performance Badge).
+                      The KPI area now has 4 rows (6 cards + 2 separated cards) and is
+                      naturally taller than gauge+badge need to be. items-stretch at this
+                      outer level would force gauge/badge to stretch to match the KPI
+                      column's height, which is exactly what produced the excess blank
+                      space at their bottoms — so this level uses items-start instead,
+                      and gauge+badge are grouped into their own nested grid (below) that
+                      keeps items-stretch between just those two, so they still match
+                      each other's bottom edge without being tied to the KPI column. */}
+                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.52fr)_minmax(0,2.06fr)] items-start gap-3 lg:gap-4">
 
                     {/* LEFT: the 6 primary Monthly KPI cards (Today's Dashboard's exact
                         dimensions/spacing/3×2 placement) plus one compact combined card
@@ -1804,18 +1808,13 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                       ))}
                     </div>
 
-                    {/* Compact combined card — Tasks Completed | Monthly Wins — fills just
-                        the space naturally left under the 6 cards above, within this same
-                        KPI column (so it can never extend under the gauge or badge). Each
-                        half keeps that metric's own color identity from before, split by a
-                        subtle divider, rather than one blended background. */}
-                    <div className="rounded-2xl overflow-hidden flex relative xp-kpi-card" style={{ minHeight: 100 } as React.CSSProperties}>
-                      {/* LEFT: Tasks Completed — min-w-0 is required alongside flex-1 so this
-                          and the Monthly Wins half end up exactly 50/50: flex items default
-                          to min-width:auto, which lets unwrappable content (the breakdown
-                          grid's labels) push a flex-basis-0 item past its equal share. */}
-                      <div className="flex-1 min-w-0 p-2.5 flex flex-col justify-center relative overflow-hidden" style={{ background: isDark ? 'linear-gradient(135deg, #047857 0%, #15803D 52%, #4D7C0F 100%)' : 'linear-gradient(135deg, #059669 0%, #22C55E 52%, #84CC16 100%)' }}>
-                        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'linear-gradient(165deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 38%, rgba(255,255,255,0) 100%)' }} />
+                    {/* Tasks Completed + Monthly Wins — now two independent KPI cards
+                        (previously one combined card with an internal divider), same
+                        gap-2 used between the rows above, equal width via grid-cols-2. */}
+                    <div className="grid grid-cols-2 gap-2">
+                      {/* Tasks Completed */}
+                      <div className="rounded-2xl flex flex-col justify-center relative overflow-hidden p-2.5 xp-kpi-card" style={{ '--kpi-glow-rgb': '34,197,94', background: isDark ? 'linear-gradient(135deg, #047857 0%, #15803D 52%, #4D7C0F 100%)' : 'linear-gradient(135deg, #059669 0%, #22C55E 52%, #84CC16 100%)', border: `0.5px solid ${isDark ? 'rgba(21,128,61,0.46)' : 'rgba(34,197,94,0.44)'}`, minHeight: 100 } as React.CSSProperties}>
+                        <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none', background: 'linear-gradient(165deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 38%, rgba(255,255,255,0) 100%)' }} />
                         <p className="relative text-base sm:text-lg font-bold leading-none tabular-nums mb-1" style={{ color: '#FFFFFF' }}>{monthTaskStats.completedTasks}/{monthTaskStats.totalTasks}</p>
                         <p className="relative text-[8.5px] font-medium leading-tight tracking-wide" style={{ color: 'rgba(255,255,255,0.72)' }}>Tasks Completed</p>
                         {monthTaskStats.totalTasks > 0 && (
@@ -1824,12 +1823,10 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                           </p>
                         )}
                       </div>
-                      {/* Subtle divider */}
-                      <div style={{ width: 1, flexShrink: 0, margin: '12px 0', background: 'rgba(255,255,255,0.35)', position: 'relative', zIndex: 1 }} />
-                      {/* RIGHT: Monthly Wins — breakdown arranged 2-up across the card's own
-                          width instead of stacked, so it stays compact without extra height. */}
-                      <div className="flex-1 min-w-0 p-2.5 flex flex-col justify-center relative overflow-hidden" style={{ background: isDark ? 'linear-gradient(135deg, #78350F 0%, #92400E 50%, #B45309 100%)' : 'linear-gradient(135deg, #D97706 0%, #F59E0B 50%, #FBBF24 100%)' }}>
-                        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'linear-gradient(165deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 38%, rgba(255,255,255,0) 100%)' }} />
+                      {/* Monthly Wins — breakdown arranged 2-up across the card's own width
+                          instead of stacked, so it stays compact without extra height. */}
+                      <div className="rounded-2xl flex flex-col justify-center relative overflow-hidden p-2.5 xp-kpi-card" style={{ '--kpi-glow-rgb': '245,158,11', background: isDark ? 'linear-gradient(135deg, #78350F 0%, #92400E 50%, #B45309 100%)' : 'linear-gradient(135deg, #D97706 0%, #F59E0B 50%, #FBBF24 100%)', border: `0.5px solid ${isDark ? 'rgba(180,83,9,0.46)' : 'rgba(217,119,6,0.44)'}`, minHeight: 100 } as React.CSSProperties}>
+                        <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none', background: 'linear-gradient(165deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 38%, rgba(255,255,255,0) 100%)' }} />
                         <div className="relative flex items-baseline gap-1.5 mb-1">
                           <span className="text-base sm:text-lg font-bold leading-none tabular-nums" style={{ color: '#FFFFFF' }}>{monthlyWinsTotal}</span>
                           <span className="text-[8.5px] font-medium" style={{ color: 'rgba(255,255,255,0.72)' }}>Monthly Wins</span>
@@ -1851,26 +1848,30 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                     </div>
                     </div>
 
-                    {/* CENTER: Performance Analytics Gauge — same dimensions/placement as
-                        Today's Dashboard's gauge card (no custom minHeight). */}
-                    <div className="rounded-2xl overflow-hidden flex flex-col" style={{ background: isDark ? 'linear-gradient(145deg,rgba(16,7,44,0.99) 0%,rgba(7,3,18,0.99) 100%)' : 'var(--xp-card)', border: isDark ? '0.5px solid rgba(124,58,237,0.35)' : '0.5px solid var(--xp-bdr2)', boxShadow: isDark ? '0 4px 36px rgba(80,0,220,0.22),0 2px 16px rgba(0,0,0,0.55)' : '0 2px 12px rgba(0,0,0,0.08)', minHeight: 280 }}>
-                      <GaugeMeter score={monthScore} />
-                    </div>
+                    {/* Gauge + Badge, grouped so items-stretch matches their heights to
+                        EACH OTHER only — same 1.36fr/0.70fr relative split as before. */}
+                    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.36fr)_minmax(0,0.70fr)] items-stretch gap-3 lg:gap-4">
+                      {/* Performance Analytics Gauge — same dimensions/placement as
+                          Today's Dashboard's gauge card (no custom minHeight beyond its
+                          own 280px floor; width-driven, so it's never distorted). */}
+                      <div className="rounded-2xl overflow-hidden flex flex-col" style={{ background: isDark ? 'linear-gradient(145deg,rgba(16,7,44,0.99) 0%,rgba(7,3,18,0.99) 100%)' : 'var(--xp-card)', border: isDark ? '0.5px solid rgba(124,58,237,0.35)' : '0.5px solid var(--xp-bdr2)', boxShadow: isDark ? '0 4px 36px rgba(80,0,220,0.22),0 2px 16px rgba(0,0,0,0.55)' : '0 2px 12px rgba(0,0,0,0.08)', minHeight: 280 }}>
+                        <GaugeMeter score={monthScore} />
+                      </div>
 
-                    {/* RIGHT: Monthly Performance Badge — the exact existing Today's
-                        Dashboard badge system (AchievementBanner: same artwork,
-                        animations, glow and copy pools), adapted to this month's
-                        context via dateLabel/periodLabel rather than a separate
-                        invented badge design. */}
-                    <AchievementBanner
-                      tier={monthTier}
-                      level={monthLevel}
-                      isDark={isDark}
-                      firstName={firstName}
-                      dateLabel={`${MONTHS[currentMonth]} ${APP_YEAR}`}
-                      periodLabel={`${MONTHS[currentMonth]}'s`}
-                      triggerShine={monthBadgeShine}
-                    />
+                      {/* Monthly Performance Badge — the exact existing Today's Dashboard
+                          badge system (AchievementBanner: same artwork, animations, glow
+                          and copy pools), adapted to this month's context via
+                          dateLabel/periodLabel rather than a separate invented badge. */}
+                      <AchievementBanner
+                        tier={monthTier}
+                        level={monthLevel}
+                        isDark={isDark}
+                        firstName={firstName}
+                        dateLabel={`${MONTHS[currentMonth]} ${APP_YEAR}`}
+                        periodLabel={`${MONTHS[currentMonth]}'s`}
+                        triggerShine={monthBadgeShine}
+                      />
+                    </div>
                   </div>
 
                   {/* ROW 2 — Monthly Progress (cumulative) | Activity Breakdown */}

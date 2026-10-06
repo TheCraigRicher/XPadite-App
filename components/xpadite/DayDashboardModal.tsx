@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useMemo, useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react'
 import { useApp } from './AppContext'
@@ -7,6 +7,7 @@ import type { Task } from './types'
 import { GaugeMeter } from './GaugeMeter'
 import { useDisplayFirstName } from './useDisplayFirstName'
 import { AICoachMenuIcon } from './AppSidebar'
+import { TrendBarChart, type TrendBucket } from './TrendBarChart'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -35,15 +36,6 @@ function niceYMax(ms: number): number {
 function fmtHrTick(ms: number): string {
   const h = ms / 3_600_000
   return h >= 1 ? `${h.toFixed(0)}h` : `${Math.round(ms / 60_000)}m`
-}
-
-function lightenHex(hex: string, amount: number): string {
-  const clean = hex.replace('#', '')
-  if (clean.length !== 6) return hex
-  const r = parseInt(clean.slice(0, 2), 16)
-  const g = parseInt(clean.slice(2, 4), 16)
-  const b = parseInt(clean.slice(4, 6), 16)
-  return `#${Math.min(255, Math.round(r + (255 - r) * amount)).toString(16).padStart(2, '0')}${Math.min(255, Math.round(g + (255 - g) * amount)).toString(16).padStart(2, '0')}${Math.min(255, Math.round(b + (255 - b) * amount)).toString(16).padStart(2, '0')}`
 }
 
 // ─── Rank system (mirrors GaugeMeter thresholds) ──────────────────────────────
@@ -118,35 +110,6 @@ function getFinalPerformanceLevel(taskScore: number, totalMs: number): Performan
 // GaugeMeter segments: 0-20 / 20-40 / 40-60 / 60-80 / 80-100
 function performanceLevelToGaugeScore(level: PerformanceLevel): number {
   return ([0, 10, 30, 50, 70, 90] as const)[level]
-}
-
-// ─── Activity icon SVG paths for milestone markers (Lucide-compatible, 24×24 vb) ─
-
-function getActivityIconPath(name: string): string {
-  const n = name.toLowerCase()
-  // Code brackets: </>
-  if (n.includes('cod') || n.includes('dev') || n.includes('prog') || n.includes('xpadite'))
-    return 'M6 9l-4 3 4 3M18 9l4 3-4 3M14 6l-4 12'
-  // Open book / learning
-  if (n.includes('learn') || n.includes('study') || n.includes('book'))
-    return 'M2 4h7a2 2 0 0 1 2 2v13a2 2 0 0 0-2-2H2zM22 4h-7a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h7z'
-  // Dumbbell
-  if (n.includes('workout') || n.includes('gym') || n.includes('exercise'))
-    return 'M6 5v14M18 5v14M6 12h12M3 8h3M18 8h3M3 16h3M18 16h3'
-  // Coffee cup
-  if (n.includes('break') || n.includes('coffee') || n.includes('☕'))
-    return 'M17 8h1a4 4 0 0 1 0 8h-1M3 8h14v9a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4zM6 2v2M10 2v2M14 2v2'
-  // Rocket
-  if (n.includes('project') || n.includes('launch') || n.includes('rocket'))
-    return 'M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09zM12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z'
-  // Briefcase
-  if (n.includes('work'))
-    return 'M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2'
-  // Personal / user
-  if (n.includes('personal'))
-    return 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z'
-  // Default: activity pulse
-  return 'M22 12h-4l-3 9L9 3l-3 9H2'
 }
 
 // ─── Deterministic task progress-bar gradient palette ─────────────────────────
@@ -362,393 +325,6 @@ function WeeklyBars({ data }: { data: { label: string; ms: number; isToday: bool
               fill={d.isToday ? '#a78bfa' : 'rgba(148,163,184,0.5)'}>
               {d.label}
             </text>
-          </g>
-        )
-      })}
-    </svg>
-  )
-}
-
-// ─── Today Overview Bars (activity breakdown for today) ───────────────────────
-
-function TodayOverviewBars({ data, totalMs, animate = true }: { data: { label: string; ms: number; color: string }[]; totalMs: number; animate?: boolean }) {
-  const [hovIdx, setHovIdx] = useState<number | null>(null)
-  const VW = 440, VH = 210
-  const PL = 34, PB = 36, PT = 22, PR = 8
-  const plotW = VW - PL - PR
-  const plotH = VH - PT - PB
-  const display = data.slice(0, 6)
-
-  // Per-bar staggered animation: single elapsed timer, per-bar cubic ease-out
-  const STAGGER_MS  = 25
-  const DURATION_MS = 1300
-  const barCount    = display.length
-  const totalDur    = DURATION_MS + STAGGER_MS * Math.max(0, barCount - 1)
-  const [elapsed, setElapsed] = useState(() => animate ? totalDur : 0)
-  // true if bars were already at full height on mount (reduced-motion path)
-  const barStartedRef = useRef(animate)
-
-  useEffect(() => {
-    if (!animate || barCount === 0) return
-    if (barStartedRef.current) return  // already complete (reduced-motion), skip rAF
-    barStartedRef.current = true
-    setElapsed(0)
-    const startTime = performance.now()
-    let rafId: number
-    function tick(now: number) {
-      const e = now - startTime
-      setElapsed(e)
-      if (e < totalDur) { rafId = requestAnimationFrame(tick) }
-    }
-    rafId = requestAnimationFrame(tick)
-    return () => { cancelAnimationFrame(rafId) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [animate])
-
-  function getBarFrac(i: number): number {
-    const barElapsed = elapsed - i * STAGGER_MS
-    if (barElapsed <= 0) return 0
-    const t = Math.min(barElapsed / DURATION_MS, 1)
-    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
-  }
-
-  if (display.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No activity data yet</p>
-      </div>
-    )
-  }
-
-  const maxMs = Math.max(...display.map(d => d.ms), 1)
-  const yMax  = niceYMax(maxMs)
-  const slotW = plotW / display.length
-  const barW  = Math.min(Math.max(slotW * 0.68, 18), 58)
-
-  return (
-    <svg viewBox={`0 0 ${VW} ${VH}`} style={{ width: '100%', height: '100%', display: 'block', overflow: 'visible' }}>
-      <defs>
-        {display.map((d, i) => (
-          <linearGradient key={i} id={`tob${i}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={lightenHex(d.color, 0.28)} />
-            <stop offset="100%" stopColor={d.color} />
-          </linearGradient>
-        ))}
-        {display.map((d, i) => (
-          <filter key={`gf${i}`} id={`tobglow${i}`} x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="b"/>
-            <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-        ))}
-      </defs>
-
-      {Array.from({ length: 4 }, (_, i) => {
-        const frac = (i + 1) / 4
-        const y = PT + plotH * (1 - frac)
-        return (
-          <g key={i}>
-            <line x1={PL} y1={y} x2={PL + plotW} y2={y}
-              stroke="rgba(148,163,184,0.08)" strokeWidth="0.5" strokeDasharray="2,4" />
-            <text x={PL - 5} y={y + 3.5} textAnchor="end" fontSize="8" fill="rgba(148,163,184,0.4)">
-              {fmtHrTick(frac * yMax)}
-            </text>
-          </g>
-        )
-      })}
-      <line x1={PL} y1={PT + plotH} x2={PL + plotW} y2={PT + plotH}
-        stroke="rgba(148,163,184,0.16)" strokeWidth="0.75" />
-
-      {display.map((d, i) => {
-        const fullBarH = d.ms > 0 ? Math.max((d.ms / yMax) * plotH, 4) : 0
-        const barH  = fullBarH * getBarFrac(i)
-        const bcx   = PL + i * slotW + slotW / 2
-        const x     = bcx - barW / 2
-        const baseY = PT + plotH
-        const isHov = hovIdx === i
-        const yShift = isHov ? -2 : 0
-        const y     = baseY - barH + yShift
-        const hrs   = d.ms / 3_600_000
-        const lbl   = d.ms > 0 ? (hrs >= 1 ? `${hrs.toFixed(1)}h` : `${Math.round(d.ms / 60_000)}m`) : ''
-        const short = d.label.length > 7 ? d.label.slice(0, 6) + '…' : d.label
-        const pct   = totalMs > 0 ? Math.round((d.ms / totalMs) * 100) : 0
-
-        return (
-          <g key={`tob-${i}`}
-            onMouseEnter={() => setHovIdx(i)}
-            onMouseLeave={() => setHovIdx(null)}
-            style={{ cursor: 'pointer' }}>
-            {d.ms > 0 && isHov && (
-              <rect x={(x - 2).toFixed(1)} y={(y - 1).toFixed(1)}
-                width={(barW + 4).toFixed(1)} height={(barH + 1 + Math.abs(yShift)).toFixed(1)}
-                rx="6" fill={d.color} opacity="0.12" filter={`url(#tobglow${i})`} />
-            )}
-            {d.ms > 0 && (
-              <rect
-                x={x.toFixed(1)} y={y.toFixed(1)}
-                width={barW.toFixed(1)} height={(barH + Math.abs(yShift)).toFixed(1)}
-                rx="5" fill={`url(#tob${i})`}
-                style={{ transition: 'transform 220ms cubic-bezier(0.22,1,0.36,1)', filter: isHov ? `drop-shadow(0 0 9px ${d.color}55)` : 'none' }}
-              />
-            )}
-            {lbl && barH > 14 && (
-              <text x={bcx.toFixed(1)} y={(y - 5).toFixed(1)} textAnchor="middle"
-                fontSize={isHov ? '9' : '8'} fontWeight={isHov ? '800' : '700'}
-                fill={d.color}>
-                {lbl}
-              </text>
-            )}
-            <text x={bcx.toFixed(1)} y={(PT + plotH + 16).toFixed(1)} textAnchor="middle"
-              fontSize="8.5" fontWeight={isHov ? '700' : '500'}
-              fill={isHov ? d.color : 'rgba(148,163,184,0.65)'}>
-              {short}
-            </text>
-            {/* Tooltip on hover */}
-            {isHov && d.ms > 0 && (
-              <g>
-                <rect x={(bcx - 54).toFixed(1)} y={(y - 42).toFixed(1)}
-                  width="108" height="34" rx="6"
-                  fill="var(--xp-card)" stroke={d.color} strokeWidth="0.75" strokeOpacity="0.4"
-                  style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.25))' }} />
-                <text x={bcx.toFixed(1)} y={(y - 26).toFixed(1)} textAnchor="middle"
-                  fontSize="8.5" fontWeight="700" fill={d.color}>{d.label}</text>
-                <text x={bcx.toFixed(1)} y={(y - 15).toFixed(1)} textAnchor="middle"
-                  fontSize="8" fill="rgba(148,163,184,0.8)">{lbl} · {pct}% of day</text>
-              </g>
-            )}
-          </g>
-        )
-      })}
-    </svg>
-  )
-}
-
-// ─── Progress Graph ───────────────────────────────────────────────────────────
-
-type RawSession = { startTs: number; endTs: number | null; actId?: string; taskText?: string }
-
-function ProgressGraph({ sessions, totalMs, activityColors, activityNames, animate = true }: { sessions: RawSession[]; totalMs: number; activityColors?: Map<string, string>; activityNames?: Map<string, string>; animate?: boolean }) {
-  const revealFrac = useEaseOut(animate, 1300)
-  const VW = 600, VH = 200
-  const PL = 40, PB = 26, PT = 14, PR = 12
-  const plotW = VW - PL - PR
-  const plotH = VH - PT - PB
-  const DAY_MS = 86_400_000
-
-  // Filter valid completed sessions and sort chronologically
-  const sorted = [...sessions]
-    .filter(s => s.endTs !== null && getSessionDurationMs(s.startTs, s.endTs!) > 0)
-    .sort((a, b) => a.startTs - b.startTs)
-
-  if (sorted.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-2">
-        <div style={{
-          width: 40, height: 40, borderRadius: '50%',
-          background: 'rgba(124,58,237,0.1)', border: '1px solid rgba(124,58,237,0.2)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
-        }}>⏱</div>
-        <p className="text-[11px] text-center font-medium" style={{ color: 'var(--xp-txt3)' }}>
-          No focused work recorded yet
-        </p>
-        <p className="text-[10px] text-center" style={{ color: 'var(--xp-txt3)', opacity: 0.6 }}>
-          Start a timer to see your progress
-        </p>
-      </div>
-    )
-  }
-
-  // Derive day-start (local midnight) directly from the first session's timestamp.
-  // This guarantees x-axis alignment regardless of what APP_YEAR/month/day props
-  // the parent holds — the sessions themselves are the authoritative time reference.
-  const _d0 = new Date(sorted[0].startTs)
-  _d0.setHours(0, 0, 0, 0)
-  const dayStartTs = _d0.getTime()
-
-  // --- Pass 1: build (txMs, ms) point pairs from raw session boundaries ---
-  // txMs  = ms elapsed since local midnight (x position)
-  // ms    = cumulative productive ms at that point (y position)
-  //
-  // Each session contributes exactly two points:
-  //   (sessionStart, cum_before)  — start of rising segment
-  //   (sessionEnd,   cum_after)   — end of rising segment
-  // Between sessions the y value is held constant → horizontal flat segment.
-  interface RawPt { txMs: number; ms: number }
-  const rawPts: RawPt[] = [{ txMs: 0, ms: 0 }]
-  let cum = 0
-  let prevEndTxMs = 0
-
-  for (const s of sorted) {
-    const dur      = getSessionDurationMs(s.startTs, s.endTs!)
-    const sTxMs    = Math.max(s.startTs - dayStartTs, prevEndTxMs)   // clamp overlaps
-    const eTxMs    = Math.min(sTxMs + dur, DAY_MS)                   // clamp to day boundary
-    rawPts.push({ txMs: sTxMs, ms: cum })   // flat segment ends here (inactivity)
-    cum += dur
-    rawPts.push({ txMs: eTxMs, ms: cum })   // rising segment ends here (work done)
-    prevEndTxMs = eTxMs
-  }
-
-  // --- Scale ---
-  const yMax    = niceYMax(Math.max(cum, totalMs))
-  const padPx   = plotH * 0.06   // 6% bottom pad — zero line floats above x-axis
-  const usableH = plotH - padPx
-
-  const toX = (txMs: number) => PL + (txMs / DAY_MS) * plotW
-  const toY = (ms: number)   => PT + plotH - padPx - (ms / yMax) * usableH
-
-  // --- SVG coordinates for the solid path ---
-  const svgSolid = rawPts.map(p => ({ sx: toX(p.txMs), sy: toY(p.ms) }))
-  const solidLP  = svgSolid.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.sx.toFixed(1)} ${p.sy.toFixed(1)}`).join(' ')
-
-  // Dotted continuation: flat from last session end → end of day
-  const dottedSx   = toX(prevEndTxMs)
-  const dottedY    = toY(cum)
-  const dottedEndX = toX(DAY_MS)
-  const dottedLP   = `M ${dottedSx.toFixed(1)} ${dottedY.toFixed(1)} L ${dottedEndX.toFixed(1)} ${dottedY.toFixed(1)}`
-
-  // Gradient fill covers solid + dotted region, closed to the x-axis baseline
-  const baseY  = (PT + plotH).toFixed(1)
-  const fillLP = solidLP + ` L ${dottedEndX.toFixed(1)} ${dottedY.toFixed(1)}`
-  const fp     = `${fillLP} L ${dottedEndX.toFixed(1)} ${baseY} L ${svgSolid[0].sx.toFixed(1)} ${baseY} Z`
-
-  // Milestone dots: one per session end, placed at the accumulated cumulative total
-  let dotCum = 0
-  const dotPts: { sx: number; sy: number; cumMs: number; actId?: string }[] = []
-  for (const s of sorted) {
-    const dur   = getSessionDurationMs(s.startTs, s.endTs!)
-    dotCum += dur
-    const eTxMs = Math.min(Math.max(s.startTs - dayStartTs, 0) + dur, DAY_MS)
-    dotPts.push({ sx: toX(eTxMs), sy: toY(dotCum), cumMs: dotCum, actId: s.actId })
-  }
-
-  // X-axis: 4 divisions = clean 6-hour intervals (12am → 6am → 12pm → 6pm → 12am)
-  const XTICKS = 4, YTICKS = 5, MARKER_R = 10
-  // Label color: readable in both light and dark mode
-  const LABEL_FILL = 'rgba(100,116,139,0.72)'
-
-  const fmtT = (txMs: number) => {
-    const d = new Date(dayStartTs + txMs)
-    const h = d.getHours(), m = d.getMinutes()
-    const ap = h >= 12 ? 'pm' : 'am'
-    const h12 = h % 12 || 12
-    return m === 0 ? `${h12}${ap}` : `${h12}:${m.toString().padStart(2, '0')}`
-  }
-
-  return (
-    <svg viewBox={`0 0 ${VW} ${VH}`} style={{ width: '100%', height: '100%', display: 'block' }}>
-      <defs>
-        <linearGradient id="pg-area" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#7c3aed" stopOpacity="0.28" />
-          <stop offset="70%" stopColor="#7c3aed" stopOpacity="0.05" />
-          <stop offset="100%" stopColor="#7c3aed" stopOpacity="0" />
-        </linearGradient>
-        <linearGradient id="pg-line" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#818cf8" />
-          <stop offset="100%" stopColor="#7c3aed" />
-        </linearGradient>
-        <filter id="pg-glow">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="b"/>
-          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-        <clipPath id="pg-clip">
-          <rect x={PL} y={PT} width={plotW} height={plotH} />
-        </clipPath>
-        <clipPath id="pg-reveal">
-          <rect x={PL} y={PT - 20} width={plotW * revealFrac} height={plotH + 40} />
-        </clipPath>
-      </defs>
-
-      {/* Y-axis gridlines and labels */}
-      {Array.from({ length: YTICKS + 1 }, (_, i) => {
-        const frac = i / YTICKS
-        const y = toY(frac * yMax)
-        return (
-          <g key={`yg${i}`}>
-            <line x1={PL} y1={y} x2={PL + plotW} y2={y}
-              stroke="rgba(148,163,184,0.09)" strokeWidth="0.5" strokeDasharray="2,5" />
-            <text x={PL - 6} y={y + 3.5} textAnchor="end" fontSize="8" fill={LABEL_FILL}>
-              {fmtHrTick(frac * yMax)}
-            </text>
-          </g>
-        )
-      })}
-
-      {/* X-axis gridlines and labels — one every 6 hours */}
-      {Array.from({ length: XTICKS + 1 }, (_, i) => {
-        const txMs = (i / XTICKS) * DAY_MS
-        const x = toX(txMs)
-        return (
-          <g key={`xg${i}`}>
-            <line x1={x} y1={PT} x2={x} y2={PT + plotH}
-              stroke="rgba(148,163,184,0.06)" strokeWidth="0.5" />
-            <text x={x} y={PT + plotH + 15} textAnchor="middle" fontSize="8" fill={LABEL_FILL}>
-              {fmtT(txMs)}
-            </text>
-          </g>
-        )
-      })}
-
-      <line x1={PL} y1={PT} x2={PL} y2={PT + plotH} stroke="rgba(148,163,184,0.16)" strokeWidth="0.75" />
-      <line x1={PL} y1={PT + plotH} x2={PL + plotW} y2={PT + plotH} stroke="rgba(148,163,184,0.16)" strokeWidth="0.75" />
-
-      {/* Left-to-right reveal: pg-clip = plot bounds, pg-reveal = growing left-to-right rect */}
-      <g clipPath="url(#pg-clip)">
-        <g clipPath="url(#pg-reveal)">
-          {/* Gradient fill under the entire 24h curve */}
-          <path d={fp} fill="url(#pg-area)" />
-          {/* Soft glow on the solid portion */}
-          <path d={solidLP} fill="none" stroke="#7c3aed" strokeWidth="4" strokeOpacity="0.15"
-            strokeLinecap="round" strokeLinejoin="round" filter="url(#pg-glow)" />
-          {/* Solid line: midnight → last session end */}
-          <path d={solidLP} fill="none" stroke="url(#pg-line)" strokeWidth="2.5"
-            strokeLinecap="round" strokeLinejoin="round" />
-          {/* Dotted continuation: last session end → midnight */}
-          <path d={dottedLP} fill="none" stroke="#7c3aed" strokeWidth="2"
-            strokeDasharray="4,4" strokeOpacity="0.35" strokeLinecap="round" />
-        </g>
-      </g>
-
-      {/* Milestone markers — outside clip groups; fade in as reveal passes their x */}
-      {dotPts.map((p, i) => {
-        const dotFrac    = plotW > 0 ? (p.sx - PL) / plotW : 0
-        const op         = animate ? Math.max(0, Math.min(1, (revealFrac - dotFrac + 0.04) / 0.04)) : 0
-        const actColor   = (p.actId && activityColors?.get(p.actId)) ?? '#7c3aed'
-        const actName    = (p.actId && activityNames?.get(p.actId)) ?? ''
-        const iconPath   = getActivityIconPath(actName)
-        const timeLabel  = p.cumMs >= 3_600_000
-          ? `${(p.cumMs / 3_600_000).toFixed(1)}h`
-          : `${Math.round(p.cumMs / 60_000)}m`
-        const markerCy   = Math.max(p.sy - 48, PT + MARKER_R + 6)
-        const markerBotY = markerCy + MARKER_R
-        const dotTopY    = p.sy - 6
-        const hasLine    = dotTopY > markerBotY + 4
-        const iconS      = 14 / 24
-        return (
-          <g key={`mk${i}`} opacity={op.toFixed(3)}>
-            {hasLine && (
-              <line x1={p.sx.toFixed(1)} y1={markerBotY.toFixed(1)}
-                x2={p.sx.toFixed(1)} y2={dotTopY.toFixed(1)}
-                stroke={actColor} strokeWidth="0.75" strokeDasharray="2,2" opacity="0.38" />
-            )}
-            <text x={p.sx.toFixed(1)} y={(markerCy - MARKER_R - 4).toFixed(1)}
-              textAnchor="middle" fontSize="7.5" fontWeight="600"
-              fill={actColor} fillOpacity="0.80">{timeLabel}</text>
-            <circle cx={p.sx.toFixed(1)} cy={markerCy.toFixed(1)} r={MARKER_R}
-              fill={actColor} fillOpacity="0.13" stroke={actColor} strokeWidth="1" strokeOpacity="0.5" />
-            <path d={iconPath} fill="none" stroke={actColor} strokeWidth="2"
-              strokeLinecap="round" strokeLinejoin="round"
-              transform={`translate(${(p.sx - 7).toFixed(2)},${(markerCy - 7).toFixed(2)}) scale(${(14/24).toFixed(4)})`} />
-          </g>
-        )
-      })}
-      {dotPts.map((p, i) => {
-        const dotFrac2 = plotW > 0 ? (p.sx - PL) / plotW : 0
-        const op2      = animate ? Math.max(0, Math.min(1, (revealFrac - dotFrac2 + 0.04) / 0.04)) : 0
-        return (
-          <g key={`dot${i}`} opacity={op2.toFixed(3)}>
-            <circle cx={p.sx.toFixed(1)} cy={p.sy.toFixed(1)} r="6" fill="rgba(124,58,237,0.18)" />
-            <circle cx={p.sx.toFixed(1)} cy={p.sy.toFixed(1)} r="4"
-              fill="#7c3aed" stroke="rgba(221,214,254,0.5)" strokeWidth="1.5" />
-            <circle cx={p.sx.toFixed(1)} cy={p.sy.toFixed(1)} r="1.8" fill="#ede9fe" />
           </g>
         )
       })}
@@ -1163,8 +739,6 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
   const [fitScale, setFitScale]     = useState(1)
   const [showExport, setShowExport] = useState(false)
   const [showAiCoach,      setShowAiCoach]      = useState(false)
-  const [aiCoachHover,    setAiCoachHover]    = useState(false)
-  const [aiCoachActive,   setAiCoachActive]   = useState(false)
   const [exportState, setExportState] = useState<ExportState>('idle')
   const [exportError, setExportError] = useState<string>('')
   const captureRef   = useRef<HTMLDivElement>(null)
@@ -1309,15 +883,36 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
       .toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' }),
     [month, day])
 
-  const summary = useMemo(() => {
-    if (!stats) return 'No tracked data for this day yet.'
-    const { totalMs, longestMs, actBreakdown, completedTasks } = stats
-    const topAct = actBreakdown[0]
-    const hrs  = (totalMs  / 3_600_000).toFixed(1)
-    const lHrs = (longestMs / 3_600_000).toFixed(1)
-    if (!topAct) return `${completedTasks} task${completedTasks !== 1 ? 's' : ''} completed. Start tracking time to see your session breakdown.`
-    return `A ${topAct.name.toLowerCase()}-focused day with ${hrs}h tracked. Longest session: ${lHrs}h — ${parseFloat(lHrs) > 2 ? 'impressive deep work' : 'keep building the habit'}. ${completedTasks > 0 ? `${completedTasks} task${completedTasks !== 1 ? 's' : ''} completed.` : ''}`
-  }, [stats])
+  // Hourly progress buckets — 3-hour-wide slots spanning the full day, each
+  // holding that slot's own (non-cumulative) productive time, feeding the
+  // shared Monthly/Daily trend chart. isFuture/isCurrent only apply when the
+  // selected day is actually today; a past day has no "future" hours left,
+  // a future day hasn't begun at all.
+  const hourlyBuckets = useMemo((): TrendBucket[] => {
+    const BUCKET_HOURS = 3
+    const LABELS = ['12 AM', '3 AM', '6 AM', '9 AM', '12 PM', '3 PM', '6 PM', '9 PM']
+    const selectedDate = new Date(APP_YEAR, month, day)
+    const now = new Date()
+    const isSelectedToday = selectedDate.getFullYear() === now.getFullYear()
+      && selectedDate.getMonth() === now.getMonth()
+      && selectedDate.getDate() === now.getDate()
+    const currentHour = now.getHours()
+    const sessions = stats?.productiveSessions ?? []
+
+    return LABELS.map((label, i) => {
+      const startHour = i * BUCKET_HOURS
+      const endHour = startHour + BUCKET_HOURS
+      let ms = 0
+      sessions.forEach(s => {
+        if (new Date(s.startTs).getHours() >= startHour && new Date(s.startTs).getHours() < endHour) {
+          ms += getSessionDurationMs(s.startTs, s.endTs!)
+        }
+      })
+      const isFuture = isSelectedToday ? startHour > currentHour : selectedDate > now
+      const isCurrent = isSelectedToday && currentHour >= startHour && currentHour < endHour
+      return { label, ms, isFuture, isCurrent, crossMonth: null }
+    })
+  }, [stats, month, day])
 
   const hasActivity = stats !== null && stats.actBreakdown.length > 0
   const hasSessions = stats !== null && stats.allSessions.length > 0
@@ -1723,11 +1318,13 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
           </div>
 
           {/* ══════════════════════════════════════════════════════════════════
-              ROW 2 — [Today's Progress ~68%] | [Weekly Overview ~32%]
+              ROW 2 — [Daily Progress ~68%] | [Activity Distribution ~32%]
               ══════════════════════════════════════════════════════════════════ */}
           <div className={`grid grid-cols-1 lg:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)] items-stretch ${isMaximized ? 'gap-2 h-full' : 'gap-3 lg:gap-4'}`}>
 
-            {/* Today's Progress — wide, full graph area */}
+            {/* Daily Progress — wide, full graph area. Shares the exact same
+                bar + smooth-curve trend chart as Monthly Dashboard — only the
+                bucket data (time-of-day here vs. weeks there) differs. */}
             <div className={`rounded-2xl flex flex-col xp-hover-card ${isMaximized ? 'p-3' : 'p-4 sm:p-5'}`} style={card1}>
               <div className={`flex items-start justify-between flex-shrink-0 ${isMaximized ? 'mb-1.5' : 'mb-3'}`}>
                 <div>
@@ -1737,7 +1334,7 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                   </p>
                   <p className="text-[9px] mt-0.5"
                     style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>
-                    Cumulative productive time
+                    Productive time by time of day
                   </p>
                 </div>
                 {stats && stats.productiveMs > 0 && (
@@ -1750,42 +1347,13 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                 )}
               </div>
               <div className={isMaximized ? 'flex-1 min-h-0' : 'flex-1 min-h-[220px] lg:min-h-[260px]'}>
-                <ProgressGraph
-                  sessions={stats?.productiveSessions ?? []}
-                  totalMs={stats?.productiveMs ?? 0}
-                  activityColors={new Map<string, string>(activities.map(a => [a.id, a.color] as [string, string]))}
-                  activityNames={new Map<string, string>(activities.map(a => [a.id, a.name] as [string, string]))}
-                  animate={dataRevealActive}
-                />
+                <TrendBarChart key={dateKey} buckets={hourlyBuckets} isDark={isDark} emptyMessage="No focus sessions today" />
               </div>
             </div>
 
-            {/* Today's Overview — activity breakdown bars */}
-            <div className={`rounded-2xl xp-hover-card ${isMaximized ? 'p-3 flex flex-col' : 'p-4 sm:p-5'}`} style={card2}>
-              <p className={`text-[11px] font-semibold tracking-wide flex-shrink-0 ${isMaximized ? 'mb-1' : 'mb-2'}`}
-                style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>
-                Today's Overview
-              </p>
-              <div className={isMaximized ? 'flex-1 min-h-0' : 'min-h-[220px] lg:min-h-[260px]'}>
-                <TodayOverviewBars
-                  data={stats?.actBreakdown.map(a => ({ label: a.name, ms: a.ms, color: a.color })) ?? []}
-                  totalMs={stats?.totalMs ?? 0}
-                  animate={dataRevealActive}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* ══════════════════════════════════════════════════════════════════
-              ROW 3 — Three columns
-              Activity Distribution | Session Log | Task Breakdown
-              ══════════════════════════════════════════════════════════════════ */}
-          <div
-            className={`grid grid-cols-1 sm:grid-cols-2 items-stretch ${isMaximized ? 'lg:grid-cols-3 gap-2 h-full overflow-hidden' : 'lg:grid-cols-[minmax(0,30fr)_minmax(0,31fr)_minmax(0,39fr)] gap-3 lg:gap-4'}`}
-          >
-
-            {/* Activity Distribution — donut left, legend right (horizontal) */}
-            <div className={`rounded-2xl xp-hover-card ${isMaximized ? 'p-3 flex flex-col overflow-hidden' : 'p-3.5'}`} style={card1}>
+            {/* Activity Distribution — donut left, legend right (horizontal).
+                Moved here from ROW 3 now that Today's Overview is gone. */}
+            <div className={`rounded-2xl xp-hover-card ${isMaximized ? 'p-3 flex flex-col overflow-hidden' : 'p-4 sm:p-5'}`} style={card2}>
               <p className={`text-[11px] font-semibold tracking-wide flex-shrink-0 ${isMaximized ? 'mb-2' : 'mb-2.5'}`}
                 style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>
                 Activity Distribution
@@ -1861,6 +1429,14 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
                 </div>
               )}
             </div>
+          </div>
+
+          {/* ══════════════════════════════════════════════════════════════════
+              ROW 3 — Two columns: Session Log | Task Breakdown
+              ══════════════════════════════════════════════════════════════════ */}
+          <div
+            className={`grid grid-cols-1 sm:grid-cols-2 items-stretch ${isMaximized ? 'gap-2 h-full overflow-hidden' : 'gap-3 lg:gap-4'}`}
+          >
 
             {/* Session Log */}
             <div className={`rounded-2xl overflow-hidden ${isMaximized ? 'flex flex-col' : ''}`} style={card2}>
@@ -2009,54 +1585,6 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
               )}
             </div>
 
-          </div>
-
-          {/* ── Daily Summary ─────────────────────────────────────────────── */}
-          <div className={`rounded-2xl ${isMaximized ? 'px-3 py-2' : 'px-4 py-3'}`}
-            style={{
-              background: 'linear-gradient(135deg, rgba(109,40,217,0.82) 0%, rgba(79,70,229,0.68) 100%)',
-              border: '0.5px solid rgba(192,132,252,0.32)',
-              boxShadow: '0 4px 22px rgba(109,40,217,0.30), 0 1px 8px rgba(88,28,135,0.18), inset 0 1px 0 rgba(255,255,255,0.10)',
-            }}>
-            <div className="flex items-start gap-3.5">
-              <span className="text-[18px] flex-shrink-0 mt-0.5">🤖</span>
-              <div className="flex-1 min-w-0">
-                <div className={`flex items-center justify-between gap-3 ${isMaximized ? 'mb-1' : 'mb-1.5'}`}>
-                  <p className="text-[10px] font-bold tracking-widest uppercase"
-                    style={{ color: '#ffffff', letterSpacing: '0.08em' }}>
-                    Daily Summary
-                  </p>
-                  <button
-                    onClick={() => setShowAiCoach(true)}
-                    data-export-exclude="true"
-                    onMouseEnter={() => setAiCoachHover(true)}
-                    onMouseLeave={() => { setAiCoachHover(false); setAiCoachActive(false) }}
-                    onMouseDown={() => setAiCoachActive(true)}
-                    onMouseUp={() => setAiCoachActive(false)}
-                    className="flex-shrink-0 flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-xl"
-                    style={{
-                      background: 'rgba(255,255,255,1)',
-                      border: `1px solid rgba(139,92,246,${aiCoachHover ? '0.55' : '0.32'})`,
-                      color: '#7c3aed',
-                      boxShadow: aiCoachActive
-                        ? '0 1px 3px rgba(109,40,217,0.10)'
-                        : aiCoachHover
-                        ? '0 0 0 1px rgba(124,58,237,0.08), 0 2px 10px rgba(109,40,217,0.28), 0 5px 18px rgba(109,40,217,0.13)'
-                        : '0 1px 4px rgba(109,40,217,0.12), 0 2px 8px rgba(109,40,217,0.06)',
-                      transform: prefersReducedRef.current ? 'none' : aiCoachActive ? 'scale(0.986)' : aiCoachHover ? 'scale(1.018)' : 'scale(1)',
-                      transition: aiCoachActive
-                        ? 'all 80ms ease'
-                        : 'background 200ms ease, box-shadow 200ms ease, transform 200ms cubic-bezier(0.22,1,0.36,1), border-color 200ms ease',
-                    }}>
-                    🤖 AI Coach
-                  </button>
-                </div>
-                <p className="text-[11.5px] leading-relaxed"
-                  style={{ color: 'rgba(255,255,255,0.88)' }}>
-                  {summary}
-                </p>
-              </div>
-            </div>
           </div>
 
         </div>

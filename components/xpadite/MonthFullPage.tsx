@@ -12,7 +12,7 @@ import {
 } from './utils'
 import { useUpcomingReminderDates } from './useUpcomingReminderDates'
 import { useDisplayFirstName } from './useDisplayFirstName'
-import { AchievementBanner, PERFORMANCE_TIERS, getTaskPerformanceLevel } from './DayDashboardModal'
+import { AchievementBanner, PERFORMANCE_TIERS, getTaskPerformanceLevel, DonutChart } from './DayDashboardModal'
 import { ProductiveDot } from './LegendRow'
 
 // ─── Injected styles (keyframes + premium button hover rules) ─────────────────
@@ -738,77 +738,7 @@ function MonthWeeklyBars({ month, sessions }: { month: number; sessions: { dateK
   )
 }
 
-// ─── Activity donut chart ─────────────────────────────────────────────────────
-
 type ActivityRow = { name: string; color: string; ms: number }
-
-function ActivityPieChart({ breakdown, totalMs }: { breakdown: ActivityRow[]; totalMs: number }) {
-  const [hovered, setHovered] = useState<number | null>(null)
-  const { isDark } = useApp()
-  const surface = isDark ? '#16162a' : '#ffffff'
-
-  if (breakdown.length === 0 || totalMs === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-10 rounded-xl" style={{ background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
-        <p className="text-2xl mb-2">⏱</p>
-        <p className="text-xs" style={{ color: 'var(--xp-txt3)' }}>No tracked time this month</p>
-      </div>
-    )
-  }
-
-  const cx = 110, cy = 110, ro = 85, ri = 44
-  const toRad = (d: number) => d * Math.PI / 180
-
-  type Slice = ActivityRow & { pct: number; start: number; end: number }
-  const slices: Slice[] = []
-  let cursor = -90
-  for (const a of breakdown) {
-    const pct = a.ms / totalMs
-    const sweep = pct * 360
-    slices.push({ ...a, pct, start: cursor, end: cursor + sweep })
-    cursor += sweep
-  }
-
-  function arcPath(s: Slice): string {
-    if (s.pct >= 0.9999) {
-      return `M ${(cx - ro).toFixed(1)} ${cy} A ${ro} ${ro} 0 1 1 ${(cx + ro).toFixed(1)} ${cy} A ${ro} ${ro} 0 1 1 ${(cx - ro).toFixed(1)} ${cy} Z`
-    }
-    const x1 = cx + ro * Math.cos(toRad(s.start))
-    const y1 = cy + ro * Math.sin(toRad(s.start))
-    const x2 = cx + ro * Math.cos(toRad(s.end))
-    const y2 = cy + ro * Math.sin(toRad(s.end))
-    const large = (s.end - s.start) > 180 ? 1 : 0
-    return `M ${cx} ${cy} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${ro} ${ro} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z`
-  }
-
-  const h = hovered !== null ? slices[hovered] : null
-
-  return (
-    <svg viewBox="0 0 220 220" className="w-full max-w-[220px] mx-auto">
-      {slices.map((s, i) => (
-        <path
-          key={i} d={arcPath(s)} fill={s.color} stroke={surface} strokeWidth={2.5}
-          opacity={hovered === null || hovered === i ? 1 : 0.4}
-          style={{ cursor: 'pointer', transition: 'opacity 140ms ease' }}
-          onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}
-        />
-      ))}
-      <circle cx={cx} cy={cy} r={ri} fill={surface} />
-      {h ? (
-        <>
-          <text x={cx} y={cy - 14} textAnchor="middle" fontSize="8.5" fontWeight="700" fill={h.color}>{h.name.length > 11 ? h.name.slice(0, 10) + '…' : h.name}</text>
-          <text x={cx} y={cy + 4}  textAnchor="middle" fontSize="17"  fontWeight="900" fill={h.color}>{Math.round(h.pct * 100)}%</text>
-          <text x={cx} y={cy + 19} textAnchor="middle" fontSize="8" fill="var(--xp-txt3)">{formatMs(h.ms)}</text>
-        </>
-      ) : (
-        <>
-          <text x={cx} y={cy + 5}  textAnchor="middle" fontSize="20" fontWeight="900" fill="var(--xp-txt)">{breakdown.length}</text>
-          <text x={cx} y={cy + 18} textAnchor="middle" fontSize="8" fill="var(--xp-txt3)">activities</text>
-        </>
-      )}
-    </svg>
-  )
-}
 
 // ─── Stat tile + section divider ──────────────────────────────────────────────
 
@@ -831,249 +761,275 @@ function SectionDivider({ title }: { title: string }) {
   )
 }
 
-// ─── Cumulative focus progress chart ─────────────────────────────────────────
+// ─── Monthly weekly trend chart (bars + curved line + points) ─────────────────
+// Replaces the old day-by-day cumulative chart and the separate Weekly Focus
+// Breakdown bar chart with one combined visualization.
 
-function MonthCumulativeChart({ month, sessions, isDark }: {
-  month: number
-  sessions: { dateKey: string; startTs: number; endTs: number | null }[]
+interface WeekBucket {
+  label: string
+  ms: number
+  // Set only when this week spans two calendar months AND the bucket is in
+  // "calendar" mode — chronologically-ordered portions for the hover detail.
+  crossMonth: { range: string; ms: number }[] | null
+}
+
+type WeekMode = 'calendar' | 'month-only'
+
+function WeekModeDropdown({ mode, onChange, isDark }: {
+  mode: WeekMode
+  onChange: (m: WeekMode) => void
   isDark: boolean
 }) {
-  const { points, totalDays, maxMs } = useMemo(() => {
-    const td = new Date(APP_YEAR, month + 1, 0).getDate()
-    const byDay = new Map<string, number>()
-    for (const s of sessions) {
-      if (s.endTs !== null) {
-        byDay.set(s.dateKey, (byDay.get(s.dateKey) ?? 0) + (s.endTs - s.startTs))
-      }
-    }
-    let cum = 0
-    const pts: number[] = []
-    for (let d = 1; d <= td; d++) {
-      cum += byDay.get(dateKey(APP_YEAR, month, d)) ?? 0
-      pts.push(cum)
-    }
-    return { points: pts, totalDays: td, maxMs: cum }
-  }, [month, sessions])
+  const [open, setOpen] = useState(false)
+  const [hover, setHover] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
 
-  if (maxMs === 0) {
+  useEffect(() => {
+    if (!open) return
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const LABELS: Record<WeekMode, string> = { calendar: 'Calendar Weeks', 'month-only': 'This Month Only' }
+
+  return (
+    <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 20,
+          fontSize: 9, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+          background: hover || open ? (isDark ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.10)') : (isDark ? 'rgba(124,58,237,0.10)' : 'rgba(124,58,237,0.06)'),
+          border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.32)' : 'rgba(124,58,237,0.20)'}`,
+          color: isDark ? '#c4b5fd' : '#7c3aed',
+          transition: 'background 150ms ease',
+        }}
+      >
+        {LABELS[mode]}
+        <span style={{ fontSize: 8, lineHeight: 1, transition: 'transform 150ms ease', transform: open ? 'rotate(180deg)' : 'none' }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 20, minWidth: 142,
+          background: isDark ? 'rgba(20,11,46,0.99)' : '#ffffff',
+          border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'var(--xp-bdr2)'}`,
+          borderRadius: 10, padding: 4,
+          boxShadow: '0 10px 28px rgba(0,0,0,0.28)',
+        }}>
+          {(['calendar', 'month-only'] as const).map(m => (
+            <button
+              key={m}
+              onClick={() => { onChange(m); setOpen(false) }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left', padding: '6px 8px', borderRadius: 6,
+                fontSize: 9.5, fontWeight: m === mode ? 700 : 500, cursor: 'pointer', border: 'none',
+                background: m === mode ? (isDark ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.10)') : 'transparent',
+                color: m === mode ? (isDark ? '#c4b5fd' : '#7c3aed') : (isDark ? 'rgba(226,232,240,0.85)' : 'var(--xp-txt)'),
+              }}
+            >
+              {LABELS[m]}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MonthlyWeeklyTrendChart({ weeks, isDark }: {
+  weeks: WeekBucket[]
+  isDark: boolean
+}) {
+  // Lazy initial value (not an effect) so the reduced-motion case never needs
+  // a synchronous setState inside the effect below — it just skips starting
+  // the animation loop when this is already 1.
+  const [revealFrac, setRevealFrac] = useState(() => (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) ? 1 : 0)
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null)
+  const rafRef = useRef<number>(0)
+
+  // Plays once per mount. The caller remounts this component (via a `key`
+  // keyed to month+mode) to replay it on a month/mode switch instead of
+  // resetting state from inside this effect.
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const DURATION = 1100
+    const start = performance.now()
+    function tick(now: number) {
+      const t = Math.min((now - start) / DURATION, 1)
+      setRevealFrac(1 - Math.pow(1 - t, 3))
+      if (t < 1) rafRef.current = requestAnimationFrame(tick)
+    }
+    rafRef.current = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(rafRef.current)
+  }, [])
+
+  if (weeks.every(w => w.ms === 0)) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 160, flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 180, flexDirection: 'column', gap: 8 }}>
         <span style={{ fontSize: 22 }}>📈</span>
         <p style={{ fontSize: 10, color: isDark ? 'rgba(148,163,184,0.50)' : 'var(--xp-txt3)' }}>No focus sessions this month</p>
       </div>
     )
   }
 
-  const W = 480, H = 160
-  const PAD = { top: 18, right: 16, bottom: 30, left: 44 }
+  const n = weeks.length
+  const maxMs = Math.max(...weeks.map(w => w.ms), 1)
+  const maxHours = maxMs / 3_600_000
+  // Sensible 1-16h default range that grows to fit higher totals — never clips.
+  const yMaxHours = Math.max(16, Math.ceil((maxHours * 1.15) / 2) * 2)
+  const yMaxMs = yMaxHours * 3_600_000
+
+  const W = 520, H = 220
+  const PAD = { top: 40, bottom: 28, left: 32, right: 14 }
   const cW = W - PAD.left - PAD.right
   const cH = H - PAD.top - PAD.bottom
-  const xPos = (i: number) => PAD.left + (totalDays > 1 ? i / (totalDays - 1) : 0.5) * cW
-  const yPos = (ms: number) => PAD.top + cH - (ms / maxMs) * cH
-  const linePath = points.map((ms, i) => `${i === 0 ? 'M' : 'L'} ${xPos(i).toFixed(1)} ${yPos(ms).toFixed(1)}`).join(' ')
-  const areaPath = `${linePath} L ${xPos(totalDays - 1).toFixed(1)} ${(PAD.top + cH).toFixed(1)} L ${xPos(0).toFixed(1)} ${(PAD.top + cH).toFixed(1)} Z`
-  const maxHours = maxMs / 3_600_000
-  const rawStep = maxHours <= 10 ? 2 : maxHours <= 30 ? 5 : maxHours <= 60 ? 10 : maxHours <= 120 ? 20 : 30
-  const yLines: number[] = []
-  for (let h = rawStep; h < maxHours * 1.2; h += rawStep) { if (yLines.length >= 5) break; yLines.push(h) }
-  const xLabels = [1, 5, 10, 15, 20, 25, totalDays].filter((d, i, arr) => arr.indexOf(d) === i && d <= totalDays)
-  const lineCol = '#a78bfa'
-  const gridCol = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'
-  const txtCol  = isDark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.70)'
-  const now = new Date()
-  const todayIdx = (now.getMonth() === month && now.getFullYear() === APP_YEAR) ? Math.min(now.getDate() - 1, totalDays - 1) : null
+  const slotW = cW / n
+  const barW = Math.min(Math.max(slotW * 0.44, 26), 60)
+  const xCenter = (i: number) => PAD.left + i * slotW + slotW / 2
+  const yPos = (ms: number) => PAD.top + cH - (ms / yMaxMs) * cH
+  const baseY = PAD.top + cH
 
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
-      <defs>
-        <linearGradient id="mfpCumGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stopColor={lineCol} stopOpacity={isDark ? 0.30 : 0.18} />
-          <stop offset="100%" stopColor={lineCol} stopOpacity={0.01} />
-        </linearGradient>
-        <clipPath id="mfpCumClip">
-          <rect x={PAD.left} y={PAD.top - 2} width={cW} height={cH + 4} />
-        </clipPath>
-      </defs>
-      {yLines.map(h => {
-        const y = yPos(h * 3_600_000)
-        if (y < PAD.top) return null
-        return (
-          <g key={h}>
-            <line x1={PAD.left} x2={PAD.left + cW} y1={y.toFixed(1)} y2={y.toFixed(1)} stroke={gridCol} strokeWidth={1} />
-            <text x={PAD.left - 5} y={y + 3.5} textAnchor="end" fontSize={8} fill={txtCol}>{h}h</text>
-          </g>
-        )
-      })}
-      <path d={areaPath} fill="url(#mfpCumGrad)" clipPath="url(#mfpCumClip)" />
-      <path d={linePath} fill="none" stroke={lineCol} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" clipPath="url(#mfpCumClip)" />
-      {todayIdx !== null && (
-        <line x1={xPos(todayIdx)} x2={xPos(todayIdx)} y1={PAD.top} y2={PAD.top + cH} stroke="rgba(167,139,250,0.40)" strokeWidth={1.5} strokeDasharray="3 3" />
-      )}
-      <line x1={PAD.left} x2={PAD.left + cW} y1={PAD.top + cH} y2={PAD.top + cH} stroke={gridCol} strokeWidth={1} />
-      {xLabels.map(d => (
-        <text key={d} x={xPos(d - 1)} y={PAD.top + cH + 14} textAnchor="middle" fontSize={8} fill={txtCol}>{d}</text>
-      ))}
-    </svg>
-  )
-}
+  const step = yMaxHours <= 16 ? 2 : yMaxHours <= 30 ? 5 : yMaxHours <= 60 ? 10 : 20
+  const yTicks: number[] = []
+  for (let h = step; h <= yMaxHours; h += step) yTicks.push(h)
 
-// ─── Weekly focus breakdown bar chart ─────────────────────────────────────────
+  const peakIdx = weeks.reduce((best, w, i) => (w.ms > weeks[best].ms ? i : best), 0)
+  const hasPeak = weeks[peakIdx].ms > 0
 
-function WeeklyFocusChart({ month, sessions, isDark }: {
-  month: number
-  sessions: { dateKey: string; startTs: number; endTs: number | null }[]
-  isDark: boolean
-}) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const animRafRef   = useRef<number>(0)
-  const animDoneRef  = useRef(false)
-  const [animProgress, setAnimProgress] = useState(0)
-
-  const weeks = useMemo(() => {
-    const td = new Date(APP_YEAR, month + 1, 0).getDate()
-    const now = new Date()
-    const isCurrentMonth = now.getMonth() === month && now.getFullYear() === APP_YEAR
-    const todayDate = now.getDate()
-    const result: { label: string; days: string; ms: number; isCurrentWeek: boolean; isFutureWeek: boolean }[] = []
-    let wk = 1
-    for (let start = 1; start <= td; start += 7) {
-      const end = Math.min(start + 6, td)
-      const keys = new Set<string>()
-      for (let d = start; d <= end; d++) keys.add(dateKey(APP_YEAR, month, d))
-      const ms = sessions.filter(s => s.endTs !== null && keys.has(s.dateKey)).reduce((sum, s) => sum + (s.endTs! - s.startTs), 0)
-      const isCurrentWeek = isCurrentMonth && todayDate >= start && todayDate <= end
-      const isFutureWeek  = isCurrentMonth && todayDate < start
-      result.push({ label: `Week ${wk++}`, days: start === end ? `${start}` : `${start}–${end}`, ms, isCurrentWeek, isFutureWeek })
-    }
-    return result
-  }, [month, sessions])
-
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const obs = new IntersectionObserver(([entry]) => {
-      if (!entry.isIntersecting || animDoneRef.current) return
-      animDoneRef.current = true
-      obs.disconnect()
-      const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-      if (prefersReduced) { setAnimProgress(1); return }
-      const DURATION = 700
-      const start = performance.now()
-      function tick(now: number) {
-        const t = Math.min((now - start) / DURATION, 1)
-        setAnimProgress(t)
-        if (t < 1) animRafRef.current = requestAnimationFrame(tick)
-      }
-      animRafRef.current = requestAnimationFrame(tick)
-    }, { threshold: 0.25 })
-    obs.observe(el)
-    return () => { obs.disconnect(); cancelAnimationFrame(animRafRef.current) }
-  }, [])
-
-  function getBarFrac(i: number): number {
-    const STAGGER = 0.09
-    const barStart = i * STAGGER
-    const t = Math.max(0, Math.min((animProgress - barStart) / (1 - barStart), 1))
+  function barFrac(i: number): number {
+    const stagger = n > 1 ? 0.45 / n : 0
+    const localStart = i * stagger
+    const t = Math.max(0, Math.min((revealFrac - localStart) / Math.max(1 - localStart, 0.01), 1))
     return 1 - Math.pow(1 - t, 3)
   }
 
-  const maxMs = Math.max(...weeks.map(w => w.ms), 1)
-  const COLORS = ['#7c3aed', '#6366f1', '#0ea5e9', '#14b8a6', '#f97316']
-  const W = 480, H = 180
-  const PAD = { top: 28, bottom: 44, left: 10, right: 10 }
-  const cW = W - PAD.left - PAD.right
-  const cH = H - PAD.top - PAD.bottom
-  const slotW = cW / weeks.length
-  const barW = Math.min(Math.max(slotW * 0.46, 28), 54)
+  const linePts = weeks.map((w, i) => ({ x: xCenter(i), y: yPos(w.ms) }))
+
+  // Catmull-Rom → cubic Bézier conversion for a smooth curve through every point.
+  function smoothPath(pts: { x: number; y: number }[]): string {
+    if (pts.length < 2) return ''
+    let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[i - 1] ?? pts[i]
+      const p1 = pts[i]
+      const p2 = pts[i + 1]
+      const p3 = pts[i + 2] ?? p2
+      const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6
+      const c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6
+      d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+    }
+    return d
+  }
+  const linePath = smoothPath(linePts)
+  const gridCol = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'
+  const txtCol  = isDark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.70)'
 
   return (
-    <div ref={containerRef} style={{ flex: 1 }}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+    <div style={{ position: 'relative' }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block', overflow: 'visible' }}>
         <defs>
-          {weeks.map((w, i) => (
-            <linearGradient key={i} id={`wfc${month}_${i}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%"   stopColor={COLORS[i % COLORS.length]} stopOpacity={0.92} />
-              <stop offset="100%" stopColor={COLORS[i % COLORS.length]} stopOpacity={0.55} />
-            </linearGradient>
-          ))}
+          <linearGradient id="mfpWeekBar" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#a855f7" />
+            <stop offset="100%" stopColor="#6d28d9" />
+          </linearGradient>
+          <clipPath id="mfpWeekLineClip">
+            <rect x={0} y={0} width={W * revealFrac} height={H} />
+          </clipPath>
         </defs>
 
-        {/* Baseline */}
-        <line x1={PAD.left} x2={W - PAD.right} y1={PAD.top + cH} y2={PAD.top + cH}
-          stroke={isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'} strokeWidth={1} />
-
-        {weeks.map((w, i) => {
-          const frac   = getBarFrac(i)
-          const fullH  = maxMs > 0 ? (w.ms / maxMs) * cH : 0
-          const barH   = fullH * frac
-          const cx     = PAD.left + i * slotW + slotW / 2
-          const x      = cx - barW / 2
-          const y      = PAD.top + cH - barH
-          const baseY  = PAD.top + cH
-          const color  = COLORS[i % COLORS.length]
-
+        {yTicks.map(h => {
+          const y = yPos(h * 3_600_000)
           return (
-            <g key={w.label}>
-              {/* Ghost placeholder for future/empty weeks */}
-              {(w.isFutureWeek || (w.ms === 0 && !w.isCurrentWeek)) && (
-                <rect x={x} y={PAD.top} width={barW} height={cH} rx={5}
-                  fill={isDark ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.025)'}
-                  stroke={isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'} strokeWidth={0.75} strokeDasharray="3 3"
-                />
-              )}
-
-              {/* Ghost height placeholder for current week with 0 ms */}
-              {w.isCurrentWeek && w.ms === 0 && (
-                <rect x={x} y={PAD.top} width={barW} height={cH} rx={5}
-                  fill={isDark ? 'rgba(124,58,237,0.06)' : 'rgba(124,58,237,0.04)'}
-                  stroke={isDark ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.12)'} strokeWidth={0.75} strokeDasharray="3 3"
-                />
-              )}
-
-              {/* Main bar */}
-              {w.ms > 0 && barH > 0 && (
-                <rect x={x} y={y} width={barW} height={Math.max(barH, 3)} rx={5}
-                  fill={`url(#wfc${month}_${i})`}
-                  style={{ filter: w.isCurrentWeek ? `drop-shadow(0 0 8px ${color}66)` : 'none' }}
-                />
-              )}
-
-              {/* WIP label — current week */}
-              {w.isCurrentWeek && (
-                w.ms > 0 && barH > 22
-                  ? <text x={cx} y={y + barH / 2 + 4} textAnchor="middle" fontSize={8.5} fontWeight="800"
-                      fill="rgba(255,255,255,0.88)" letterSpacing="0.10em">WIP</text>
-                  : <text x={cx} y={PAD.top + cH / 2 + 4} textAnchor="middle" fontSize={8.5} fontWeight="800"
-                      fill={color} letterSpacing="0.10em" opacity={0.65}>WIP</text>
-              )}
-
-              {/* Focus time label above bar */}
-              {w.ms > 0 && !w.isFutureWeek && barH > 0 && (
-                <text x={cx} y={y - 6} textAnchor="middle" fontSize={8.5} fontWeight="700" fill={color}>
-                  {formatMs(w.ms)}
-                </text>
-              )}
-
-              {/* Week label */}
-              <text x={cx} y={baseY + 15} textAnchor="middle" fontSize={9}
-                fontWeight={w.isCurrentWeek ? 700 : 500}
-                fill={w.isCurrentWeek ? color : isDark ? 'rgba(203,213,225,0.65)' : 'var(--xp-txt2)'}>
-                {w.label}
-              </text>
-
-              {/* Day range */}
-              <text x={cx} y={baseY + 28} textAnchor="middle" fontSize={7.5}
-                fill={isDark ? 'rgba(148,163,184,0.40)' : 'rgba(100,116,139,0.55)'}>
-                {w.days}
-              </text>
+            <g key={h}>
+              <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke={gridCol} strokeWidth={1} />
+              <text x={PAD.left - 6} y={y + 3} textAnchor="end" fontSize={7.5} fill={txtCol}>{h}h</text>
             </g>
           )
         })}
+        <line x1={PAD.left} x2={W - PAD.right} y1={baseY} y2={baseY} stroke={isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'} strokeWidth={1} />
+
+        {/* Full-column hover hit areas */}
+        {weeks.map((w, i) => (
+          <rect key={`hit-${w.label}`} x={xCenter(i) - slotW / 2} y={PAD.top} width={slotW} height={cH} fill="transparent"
+            style={{ cursor: 'pointer' }}
+            onMouseEnter={() => setHoverIdx(i)} onMouseLeave={() => setHoverIdx(null)} />
+        ))}
+
+        {/* Bars — rise from the baseline, staggered left to right */}
+        {weeks.map((w, i) => {
+          const frac = barFrac(i)
+          const fullH = (w.ms / yMaxMs) * cH
+          const barH = fullH * frac
+          const x = xCenter(i) - barW / 2
+          const y = baseY - barH
+          return (
+            <rect key={w.label} x={x} y={y} width={barW} height={Math.max(barH, 0)} rx={6}
+              fill="url(#mfpWeekBar)" pointerEvents="none"
+              opacity={hoverIdx === null || hoverIdx === i ? 1 : 0.55}
+              style={{ transition: 'opacity 150ms ease' }}
+            />
+          )
+        })}
+
+        {/* Trend line — wipes in left to right */}
+        <g clipPath="url(#mfpWeekLineClip)">
+          <path d={linePath} fill="none" stroke="#ef4444" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
+        </g>
+
+        {/* Points + exact time labels + peak trophy */}
+        {weeks.map((w, i) => {
+          const threshold = n > 1 ? (i / (n - 1)) * 0.92 : 0
+          const visible = revealFrac >= threshold
+          const p = linePts[i]
+          return (
+            <g key={w.label} pointerEvents="none" style={{ opacity: visible ? 1 : 0, transition: 'opacity 280ms ease' }}>
+              <circle cx={p.x} cy={p.y} r={5} fill={isDark ? '#1a1030' : '#ffffff'} stroke="#7c3aed" strokeWidth={2.5} />
+              <text x={p.x} y={p.y - 11} textAnchor="middle" fontSize={8.5} fontWeight={700} fill="#7c3aed">
+                {formatMs(w.ms)}
+              </text>
+              {hasPeak && i === peakIdx && (
+                <text x={p.x} y={p.y - 23} textAnchor="middle" fontSize={11}>🏆</text>
+              )}
+            </g>
+          )
+        })}
+
+        {weeks.map((w, i) => (
+          <text key={`lbl-${w.label}`} x={xCenter(i)} y={baseY + 16} textAnchor="middle" fontSize={8.5} fontWeight={700}
+            fill={isDark ? 'rgba(226,232,240,0.78)' : 'var(--xp-txt2)'} pointerEvents="none">
+            {w.label}
+          </text>
+        ))}
       </svg>
+
+      {/* Cross-month breakdown — only for weeks that straddle two months in Calendar Weeks mode */}
+      {hoverIdx !== null && weeks[hoverIdx].crossMonth && (
+        <div style={{
+          position: 'absolute', left: `${(xCenter(hoverIdx) / W) * 100}%`, transform: 'translateX(-50%)',
+          bottom: `${100 - (PAD.top / H) * 100 + 2}%`,
+          background: isDark ? 'rgba(20,11,46,0.98)' : '#ffffff',
+          border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.35)' : 'var(--xp-bdr2)'}`,
+          borderRadius: 10, padding: '6px 10px', boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
+          fontSize: 9, whiteSpace: 'nowrap', zIndex: 5, pointerEvents: 'none',
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 2, color: isDark ? 'rgba(255,255,255,0.90)' : 'var(--xp-txt)' }}>
+            {weeks[hoverIdx].label} — {formatMs(weeks[hoverIdx].ms)}
+          </div>
+          {weeks[hoverIdx].crossMonth!.map(part => (
+            <div key={part.range} style={{ color: isDark ? 'rgba(203,213,225,0.75)' : 'var(--xp-txt2)' }}>
+              {part.range} · {formatMs(part.ms)}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
-
 // ─── Month/Year picker ────────────────────────────────────────────────────────
 
 const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -1369,6 +1325,72 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
     [monthSessions]
   )
 
+  // ── Monthly Progress weekly buckets (Sunday→Saturday calendar weeks, with an
+  //    optional "this month only" mode) — drives MonthlyWeeklyTrendChart below. ──
+
+  const [weekMode, setWeekMode] = useState<WeekMode>('calendar')
+
+  // Per-day totals across the user's ENTIRE session history (not just this
+  // month) — calendar weeks at a month's start/end can reach into the
+  // adjacent month, so this is the source of truth those days are summed from.
+  const dailyMsMap = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const s of sessions) {
+      if (s.endTs === null) continue
+      map.set(s.dateKey, (map.get(s.dateKey) ?? 0) + (s.endTs - s.startTs))
+    }
+    return map
+  }, [sessions])
+
+  const weeklyBuckets = useMemo((): WeekBucket[] => {
+    const firstOfMonth = new Date(APP_YEAR, currentMonth, 1)
+    const lastOfMonth   = new Date(APP_YEAR, currentMonth + 1, 0)
+    const cursor = new Date(firstOfMonth)
+    cursor.setDate(cursor.getDate() - cursor.getDay()) // back to that week's Sunday
+
+    const dayMs = (d: Date) => dailyMsMap.get(dateKey(d.getFullYear(), d.getMonth(), d.getDate())) ?? 0
+    const shortRange = (days: Date[]): string => {
+      if (days.length === 1) return `${MONTH_ABBR[days[0].getMonth()]} ${days[0].getDate()}`
+      const a = days[0], b = days[days.length - 1]
+      return a.getMonth() === b.getMonth()
+        ? `${MONTH_ABBR[a.getMonth()]} ${a.getDate()}–${b.getDate()}`
+        : `${MONTH_ABBR[a.getMonth()]} ${a.getDate()}–${MONTH_ABBR[b.getMonth()]} ${b.getDate()}`
+    }
+
+    const buckets: WeekBucket[] = []
+    let weekNum = 1
+    while (cursor <= lastOfMonth) {
+      const inMonth: Date[] = [], before: Date[] = [], after: Date[] = []
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(cursor)
+        d.setDate(d.getDate() + i)
+        if (d.getMonth() === currentMonth && d.getFullYear() === APP_YEAR) inMonth.push(d)
+        else if (d < firstOfMonth) before.push(d)
+        else after.push(d)
+      }
+      const inMonthMs = inMonth.reduce((s, d) => s + dayMs(d), 0)
+      const beforeMs  = before.reduce((s, d) => s + dayMs(d), 0)
+      const afterMs   = after.reduce((s, d) => s + dayMs(d), 0)
+
+      const ms = weekMode === 'calendar' ? inMonthMs + beforeMs + afterMs : inMonthMs
+
+      const spansTwoMonths = inMonth.length > 0 && inMonth.length < 7 && (before.length > 0 || after.length > 0)
+      let crossMonth: WeekBucket['crossMonth'] = null
+      if (weekMode === 'calendar' && spansTwoMonths) {
+        const parts: { range: string; ms: number }[] = []
+        if (before.length) parts.push({ range: shortRange(before), ms: beforeMs })
+        if (inMonth.length) parts.push({ range: shortRange(inMonth), ms: inMonthMs })
+        if (after.length) parts.push({ range: shortRange(after), ms: afterMs })
+        crossMonth = parts
+      }
+
+      buckets.push({ label: `Week ${weekNum}`, ms, crossMonth })
+      weekNum++
+      cursor.setDate(cursor.getDate() + 7)
+    }
+    return buckets
+  }, [currentMonth, dailyMsMap, weekMode])
+
   const actBreakdown = useMemo((): ActivityRow[] => {
     const actMs = new Map<string, number>()
     for (const key of monthKeys) {
@@ -1559,6 +1581,11 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
     return () => clearTimeout(t)
   }, [currentMonth])
 
+  // Activity Breakdown reuses Today's Dashboard's DonutChart + legend/total-row
+  // structure (imported above) — this is its own hover-index state since
+  // DayDashboardModal's actHovIdx is local to that component.
+  const [monthActHovIdx, setMonthActHovIdx] = useState<number | null>(null)
+
   return (
     <>
       <style>{MFP_STYLES}</style>
@@ -1728,7 +1755,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                       and gauge+badge are grouped into their own nested grid (below) that
                       keeps items-stretch between just those two, so they still match
                       each other's bottom edge without being tied to the KPI column. */}
-                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.52fr)_minmax(0,2.06fr)] items-start gap-3 lg:gap-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.52fr)_minmax(0,2.06fr)] items-stretch gap-3 lg:gap-4">
 
                     {/* LEFT: the 6 primary Monthly KPI cards (Today's Dashboard's exact
                         dimensions/spacing/3×2 placement) plus one compact combined card
@@ -1848,13 +1875,18 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                     </div>
                     </div>
 
-                    {/* Gauge + Badge, grouped so items-stretch matches their heights to
-                        EACH OTHER only — same 1.36fr/0.70fr relative split as before. */}
+                    {/* Gauge + Badge, grouped in their own 1.36fr/0.70fr grid so they
+                        stretch to match each other; the outer row's own items-stretch
+                        (restored above) then matches this whole wrapper's height to the
+                        KPI column's, so all three bottoms land on the same line. */}
                     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.36fr)_minmax(0,0.70fr)] items-stretch gap-3 lg:gap-4">
-                      {/* Performance Analytics Gauge — same dimensions/placement as
-                          Today's Dashboard's gauge card (no custom minHeight beyond its
-                          own 280px floor; width-driven, so it's never distorted). */}
-                      <div className="rounded-2xl overflow-hidden flex flex-col" style={{ background: isDark ? 'linear-gradient(145deg,rgba(16,7,44,0.99) 0%,rgba(7,3,18,0.99) 100%)' : 'var(--xp-card)', border: isDark ? '0.5px solid rgba(124,58,237,0.35)' : '0.5px solid var(--xp-bdr2)', boxShadow: isDark ? '0 4px 36px rgba(80,0,220,0.22),0 2px 16px rgba(0,0,0,0.55)' : '0 2px 12px rgba(0,0,0,0.08)', minHeight: 280 }}>
+                      {/* Performance Analytics Gauge — stretched (via the outer grid's
+                          items-stretch, restored above) so its bottom aligns with the
+                          KPI area's bottom; justify-center keeps the SVG (which is
+                          width-driven and never distorted) vertically centered within
+                          that stretched card instead of leaving blank space only below
+                          it — same width/placement as Today's Dashboard's gauge card. */}
+                      <div className="rounded-2xl overflow-hidden flex flex-col justify-center" style={{ background: isDark ? 'linear-gradient(145deg,rgba(16,7,44,0.99) 0%,rgba(7,3,18,0.99) 100%)' : 'var(--xp-card)', border: isDark ? '0.5px solid rgba(124,58,237,0.35)' : '0.5px solid var(--xp-bdr2)', boxShadow: isDark ? '0 4px 36px rgba(80,0,220,0.22),0 2px 16px rgba(0,0,0,0.55)' : '0 2px 12px rgba(0,0,0,0.08)', minHeight: 280 }}>
                         <GaugeMeter score={monthScore} />
                       </div>
 
@@ -1877,31 +1909,102 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                   {/* ROW 2 — Monthly Progress (cumulative) | Activity Breakdown */}
                   <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)] items-stretch gap-3 lg:gap-4">
 
-                    {/* Monthly Progress — cumulative day-by-day area chart */}
+                    {/* Monthly Progress — weekly bar + trend-line chart (replaces the old
+                        day-by-day cumulative line and the separate Weekly Focus
+                        Breakdown chart, which is now folded into this one view). */}
                     <div className="rounded-2xl p-4 sm:p-5 flex flex-col" style={card1}>
-                      <div className="flex items-start justify-between flex-shrink-0 mb-3">
+                      <div className="flex items-start justify-between flex-shrink-0 mb-2">
                         <div>
                           <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Monthly Progress</p>
-                          <p className="text-[9px] mt-0.5" style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>Cumulative focus time across {MONTHS[currentMonth]}</p>
+                          <p className="text-[9px] mt-0.5" style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>Weekly focus time across {MONTHS[currentMonth]}</p>
                         </div>
                         {totalMs > 0 && (
-                          <div className="text-right">
+                          <div className="text-right flex-shrink-0">
                             <p className="text-[14px] font-bold tabular-nums" style={{ color: '#a78bfa' }}>{formatMs(totalMs)}</p>
                             <p className="text-[9px]" style={{ color: isDark ? 'rgba(148,163,184,0.45)' : 'var(--xp-txt3)' }}>total</p>
                           </div>
                         )}
                       </div>
-                      <div style={{ flex: 1, minHeight: 160 }}>
-                        <MonthCumulativeChart month={currentMonth} sessions={monthSessions} isDark={isDark} />
+                      <div className="flex justify-end flex-shrink-0 mb-2">
+                        <WeekModeDropdown mode={weekMode} onChange={setWeekMode} isDark={isDark} />
+                      </div>
+                      <div style={{ flex: 1, minHeight: 180 }}>
+                        <MonthlyWeeklyTrendChart key={`${currentMonth}-${weekMode}`} weeks={weeklyBuckets} isDark={isDark} />
                       </div>
                     </div>
 
-                    {/* Activity Breakdown donut */}
+                    {/* Activity Breakdown — reuses Today's Dashboard's exact Activity
+                        Distribution implementation (DonutChart + legend + total row,
+                        imported from DayDashboardModal.tsx) rather than the old separate
+                        ActivityPieChart, fed with this month's aggregated actBreakdown/
+                        totalMs instead of a single day's. */}
                     <div className="rounded-2xl p-4 sm:p-5" style={card2}>
                       <p className="text-[11px] font-semibold tracking-wide mb-3" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Activity Breakdown</p>
                       {actBreakdown.length > 0 ? (
                         <div className="flex flex-col items-center">
-                          <ActivityPieChart breakdown={actBreakdown} totalMs={totalMs} />
+                          <DonutChart
+                            segments={actBreakdown.map(a => ({ color: a.color, pct: totalMs > 0 ? a.ms / totalMs : 0, name: a.name, ms: a.ms }))}
+                            size="lg"
+                            hoveredIdx={monthActHovIdx}
+                            onHoverIdx={setMonthActHovIdx}
+                            animate
+                          />
+                          <div className="w-full mt-5">
+                            {actBreakdown.map((a, i) => {
+                              const isHov = monthActHovIdx === i
+                              const pct = totalMs > 0 ? Math.round((a.ms / totalMs) * 100) : 0
+                              return (
+                                <div
+                                  key={a.name}
+                                  onMouseEnter={() => setMonthActHovIdx(i)}
+                                  onMouseLeave={() => setMonthActHovIdx(null)}
+                                  style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: 'minmax(80px,1fr) 52px 32px',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    marginBottom: 5,
+                                    cursor: 'default',
+                                    opacity: monthActHovIdx !== null && !isHov ? 0.5 : 1,
+                                    transition: 'opacity 180ms ease',
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+                                    <div className="w-2 h-2 rounded-full flex-shrink-0"
+                                      style={{ background: a.color, boxShadow: isHov ? `0 0 5px ${a.color}88` : 'none' }} />
+                                    <span className="text-[9px] truncate"
+                                      style={{ color: isHov ? (isDark ? 'rgba(255,255,255,0.95)' : 'var(--xp-txt)') : isDark ? 'rgba(203,213,225,0.78)' : 'var(--xp-txt2)', fontWeight: isHov ? 600 : 400 }}>
+                                      {a.name}
+                                    </span>
+                                  </div>
+                                  <span className="text-[9px] tabular-nums font-semibold text-right"
+                                    style={{ color: isHov ? (isDark ? 'rgba(255,255,255,0.95)' : 'var(--xp-txt)') : isDark ? 'rgba(255,255,255,0.72)' : 'var(--xp-txt)' }}>
+                                    {formatMs(a.ms)}
+                                  </span>
+                                  <span className="text-[8px] tabular-nums text-right"
+                                    style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>
+                                    {pct}%
+                                  </span>
+                                </div>
+                              )
+                            })}
+                            <div style={{
+                              display: 'grid', gridTemplateColumns: 'minmax(80px,1fr) 52px 32px',
+                              alignItems: 'center', gap: 4, paddingTop: 6,
+                              borderTop: isDark ? '0.5px solid rgba(255,255,255,0.07)' : '0.5px solid var(--xp-bdr)',
+                            }}>
+                              <span className="text-[9px] font-semibold"
+                                style={{ color: isDark ? 'rgba(255,255,255,0.55)' : 'var(--xp-txt3)' }}>Total</span>
+                              <span className="text-[9px] font-bold tabular-nums text-right"
+                                style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>
+                                {formatMs(totalMs)}
+                              </span>
+                              <span className="text-[8px] tabular-nums text-right"
+                                style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>
+                                100%
+                              </span>
+                            </div>
+                          </div>
                         </div>
                       ) : (
                         <div className="flex items-center justify-center h-24">
@@ -2014,20 +2117,6 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                           <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No tasks this month</p>
                         </div>
                       )}
-                    </div>
-                  </div>
-
-                  {/* ROW 4 — Weekly Focus Breakdown (full width; the badge that used to
-                      share this row now lives in row 1, right column) */}
-                  <div className="rounded-2xl p-4 sm:p-5 flex flex-col" style={card1}>
-                    <div className="flex items-start justify-between flex-shrink-0 mb-1">
-                      <div>
-                        <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Weekly Focus Breakdown</p>
-                        <p className="text-[9px] mt-0.5" style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>Total focus hours per week · {MONTHS[currentMonth]}</p>
-                      </div>
-                    </div>
-                    <div style={{ flex: 1, minHeight: 160 }}>
-                      <WeeklyFocusChart month={currentMonth} sessions={monthSessions} isDark={isDark} />
                     </div>
                   </div>
                 </div>

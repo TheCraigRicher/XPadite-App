@@ -195,9 +195,9 @@ function useEaseOut(active: boolean, durationMs: number): number {
 
 // ─── SVG Donut ────────────────────────────────────────────────────────────────
 
-interface DonutSegment { color: string; pct: number; name?: string; ms?: number; sessions?: number }
+export interface DonutSegment { color: string; pct: number; name?: string; ms?: number; sessions?: number }
 
-function DonutChart({
+export function DonutChart({
   segments, size = 'md', hoveredIdx = null, onHoverIdx, animate = true,
 }: {
   segments: DonutSegment[]

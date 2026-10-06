@@ -1078,8 +1078,10 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
         onAICoach={() => setAICoachOpen(true)}
       />
 
-      {/* +/-/edit buttons — centered strip just below navbar — desktop only */}
-      <div className="hidden sm:block">
+      {/* +/-/edit buttons — centered strip just below navbar — tablet only now
+          (removed on desktop per the main-calendar decluttering below; mobile
+          was already hidden). */}
+      <div className="hidden sm:block lg:hidden">
         <ActivityButtons />
       </div>
 
@@ -1090,20 +1092,27 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
       >
         {/* ── Overview / Calendar view (always shown on desktop; shown on 'overview' tab on mobile) */}
         <main
-          className={mobileTab === 'calendar' ? '' : 'hidden sm:flex'}
+          // Desktop-only top breathing room now that the stats/legend/controls
+          // section above no longer occupies this space at lg:. Tablet/mobile
+          // keep their existing spacing (that section is still present there).
+          className={`${mobileTab === 'calendar' ? '' : 'hidden sm:flex'} lg:pt-4`}
           style={{ flex: 1, display: mobileTab === 'calendar' ? 'flex' : undefined, flexDirection: 'column' }}
         >
-          {/* Stats + Legend — chevron button controls on all screen sizes */}
-          <div
-            style={{
-              overflow: legendVisible ? 'visible' : 'hidden',
-              maxHeight: legendVisible ? 480 : 0,
-              opacity: legendVisible ? 1 : 0,
-              transition: 'max-height 260ms ease-in-out, opacity 200ms ease',
-            }}
-          >
-            <StatsRow />
-            <LegendRow />
+          {/* Stats + Legend — chevron button controls on tablet/mobile; removed
+              entirely on desktop (lg:hidden) so the calendar reclaims that
+              space instead of leaving a gap. */}
+          <div className="lg:hidden">
+            <div
+              style={{
+                overflow: legendVisible ? 'visible' : 'hidden',
+                maxHeight: legendVisible ? 480 : 0,
+                opacity: legendVisible ? 1 : 0,
+                transition: 'max-height 260ms ease-in-out, opacity 200ms ease',
+              }}
+            >
+              <StatsRow />
+              <LegendRow />
+            </div>
           </div>
 
           {/* Calendar */}

@@ -1785,7 +1785,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                         <div
                           key={m.label}
                           className="rounded-2xl flex flex-col relative overflow-hidden p-2.5 xp-kpi-card"
-                          style={{ '--kpi-glow-rgb': m.glowRgb, background: m.bg, border: `0.5px solid ${m.border}`, minHeight: 80 } as React.CSSProperties}
+                          style={{ '--kpi-glow-rgb': m.glowRgb, background: m.bg, border: `0.5px solid ${m.border}`, minHeight: 100 } as React.CSSProperties}
                         >
                           {/* Glass sheen — smooth top highlight, same recipe as Today's Dashboard */}
                           <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none', background: 'linear-gradient(165deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 38%, rgba(255,255,255,0) 100%)' }} />
@@ -1809,9 +1809,12 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                         KPI column (so it can never extend under the gauge or badge). Each
                         half keeps that metric's own color identity from before, split by a
                         subtle divider, rather than one blended background. */}
-                    <div className="rounded-2xl overflow-hidden flex relative xp-kpi-card" style={{ minHeight: 80 } as React.CSSProperties}>
-                      {/* LEFT: Tasks Completed */}
-                      <div className="flex-1 p-2.5 flex flex-col justify-center relative overflow-hidden" style={{ background: isDark ? 'linear-gradient(135deg, #047857 0%, #15803D 52%, #4D7C0F 100%)' : 'linear-gradient(135deg, #059669 0%, #22C55E 52%, #84CC16 100%)' }}>
+                    <div className="rounded-2xl overflow-hidden flex relative xp-kpi-card" style={{ minHeight: 100 } as React.CSSProperties}>
+                      {/* LEFT: Tasks Completed — min-w-0 is required alongside flex-1 so this
+                          and the Monthly Wins half end up exactly 50/50: flex items default
+                          to min-width:auto, which lets unwrappable content (the breakdown
+                          grid's labels) push a flex-basis-0 item past its equal share. */}
+                      <div className="flex-1 min-w-0 p-2.5 flex flex-col justify-center relative overflow-hidden" style={{ background: isDark ? 'linear-gradient(135deg, #047857 0%, #15803D 52%, #4D7C0F 100%)' : 'linear-gradient(135deg, #059669 0%, #22C55E 52%, #84CC16 100%)' }}>
                         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'linear-gradient(165deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 38%, rgba(255,255,255,0) 100%)' }} />
                         <p className="relative text-base sm:text-lg font-bold leading-none tabular-nums mb-1" style={{ color: '#FFFFFF' }}>{monthTaskStats.completedTasks}/{monthTaskStats.totalTasks}</p>
                         <p className="relative text-[8.5px] font-medium leading-tight tracking-wide" style={{ color: 'rgba(255,255,255,0.72)' }}>Tasks Completed</p>
@@ -1825,7 +1828,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                       <div style={{ width: 1, flexShrink: 0, margin: '12px 0', background: 'rgba(255,255,255,0.35)', position: 'relative', zIndex: 1 }} />
                       {/* RIGHT: Monthly Wins — breakdown arranged 2-up across the card's own
                           width instead of stacked, so it stays compact without extra height. */}
-                      <div className="flex-1 p-2.5 flex flex-col justify-center relative overflow-hidden" style={{ background: isDark ? 'linear-gradient(135deg, #78350F 0%, #92400E 50%, #B45309 100%)' : 'linear-gradient(135deg, #D97706 0%, #F59E0B 50%, #FBBF24 100%)' }}>
+                      <div className="flex-1 min-w-0 p-2.5 flex flex-col justify-center relative overflow-hidden" style={{ background: isDark ? 'linear-gradient(135deg, #78350F 0%, #92400E 50%, #B45309 100%)' : 'linear-gradient(135deg, #D97706 0%, #F59E0B 50%, #FBBF24 100%)' }}>
                         <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'linear-gradient(165deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 38%, rgba(255,255,255,0) 100%)' }} />
                         <div className="relative flex items-baseline gap-1.5 mb-1">
                           <span className="text-base sm:text-lg font-bold leading-none tabular-nums" style={{ color: '#FFFFFF' }}>{monthlyWinsTotal}</span>

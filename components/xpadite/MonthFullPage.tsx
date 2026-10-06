@@ -930,18 +930,21 @@ function MonthlyWeeklyTrendChart({ weeks, isDark }: {
   const linePts = weeks.map((w, i) => ({ x: xCenter(i), y: yPos(w.ms) - LINE_GAP }))
   const activePts = lastActiveIdx >= 0 ? linePts.slice(0, lastActiveIdx + 1) : []
 
-  // Catmull-Rom → cubic Bézier conversion for a smooth curve through every point.
+  // Per-segment horizontal-tangent cubic Bézier: each segment leaves its
+  // start point and arrives at its end point moving horizontally, which
+  // always produces a genuine flowing S-curve — including between just 2
+  // points, where the earlier Catmull-Rom approach degenerated to a straight
+  // diagonal (its clamped control points landed exactly on the line between
+  // the two points). The points themselves stay at their exact data value;
+  // this only shapes the line connecting them.
   function smoothPath(pts: { x: number; y: number }[]): string {
     if (pts.length < 2) return ''
     let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`
     for (let i = 0; i < pts.length - 1; i++) {
-      const p0 = pts[i - 1] ?? pts[i]
       const p1 = pts[i]
       const p2 = pts[i + 1]
-      const p3 = pts[i + 2] ?? p2
-      const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6
-      const c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6
-      d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+      const midX = (p1.x + p2.x) / 2
+      d += ` C ${midX.toFixed(1)} ${p1.y.toFixed(1)}, ${midX.toFixed(1)} ${p2.y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
     }
     return d
   }
@@ -1158,7 +1161,9 @@ function playTapSound() {
 }
 
 export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, embedded = false }: MonthFullPageProps) {
-  const { calData, sessions, activities, isDark, progressColor: _rawColor2, setToast, calendarClean, setCalendarClean } = useApp()
+  // Note: AppContext's flat `sessions` is deliberately NOT used here — see
+  // allTaskSessions below for why calData is the authoritative source.
+  const { calData, activities, isDark, progressColor: _rawColor2, setToast, calendarClean, setCalendarClean } = useApp()
   const progressColor = resolveProgressColor(_rawColor2, isDark)
   const [view, setView]               = useState<'calendar' | 'dashboard'>(initialView ?? 'calendar')
   const [currentMonth, setCurrentMonth] = useState(month)
@@ -1353,6 +1358,32 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
     return Math.min(100, score)
   }, [stats, currentMonth, calData])
 
+  // The flat top-level `sessions` array (AppContext) is only ever written by
+  // the global Clock In/Out button in AppHeader.tsx — Task Manager's own
+  // per-task Start/Stop timer sessions are written straight into
+  // calData[date].tasks[].sessions and never also call addSession(), so
+  // `sessions` is NOT a complete record of a user's tracked time. calData is
+  // the authoritative source (it's what DayDashboardModal/actBreakdown/
+  // monthTaskStats/monthTopSessions already correctly read from) — this
+  // flattens it ONCE, across every date on record (not just this month, so
+  // a calendar week reaching into an adjacent month, or switching to a past
+  // month, still aggregates from real data), for the computations below that
+  // previously read the incomplete `sessions` array instead.
+  const allTaskSessions = useMemo(() => {
+    const result: { dateKey: string; startTs: number; endTs: number }[] = []
+    for (const key of Object.keys(calData)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const day = calData[key] as any
+      for (const task of (day?.tasks ?? [])) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const s of (task.sessions ?? []) as any[]) {
+          if (s.endTs !== null) result.push({ dateKey: key, startTs: s.startTs, endTs: s.endTs })
+        }
+      }
+    }
+    return result
+  }, [calData])
+
   const monthKeys = useMemo(() => {
     const s = new Set<string>()
     const td = new Date(APP_YEAR, currentMonth + 1, 0).getDate()
@@ -1361,12 +1392,12 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
   }, [currentMonth])
 
   const monthSessions = useMemo(
-    () => sessions.filter(s => monthKeys.has(s.dateKey)),
-    [sessions, monthKeys]
+    () => allTaskSessions.filter(s => monthKeys.has(s.dateKey)),
+    [allTaskSessions, monthKeys]
   )
 
   const totalMs = useMemo(
-    () => monthSessions.filter(s => s.endTs !== null).reduce((sum, s) => sum + (s.endTs! - s.startTs), 0),
+    () => monthSessions.reduce((sum, s) => sum + (s.endTs - s.startTs), 0),
     [monthSessions]
   )
 
@@ -1380,12 +1411,11 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
   // adjacent month, so this is the source of truth those days are summed from.
   const dailyMsMap = useMemo(() => {
     const map = new Map<string, number>()
-    for (const s of sessions) {
-      if (s.endTs === null) continue
+    for (const s of allTaskSessions) {
       map.set(s.dateKey, (map.get(s.dateKey) ?? 0) + (s.endTs - s.startTs))
     }
     return map
-  }, [sessions])
+  }, [allTaskSessions])
 
   const weeklyBuckets = useMemo((): WeekBucket[] => {
     const firstOfMonth = new Date(APP_YEAR, currentMonth, 1)
@@ -1532,10 +1562,10 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
     const td = new Date(py, pm + 1, 0).getDate()
     const pKeys = new Set<string>()
     for (let d = 1; d <= td; d++) pKeys.add(dateKey(py, pm, d))
-    const pSessions = sessions.filter(s => pKeys.has(s.dateKey) && s.endTs !== null)
-    const pTotalMs = pSessions.reduce((sum, s) => sum + (s.endTs! - s.startTs), 0)
+    const pSessions = allTaskSessions.filter(s => pKeys.has(s.dateKey))
+    const pTotalMs = pSessions.reduce((sum, s) => sum + (s.endTs - s.startTs), 0)
     return { totalMs: pTotalMs, sessionCount: pSessions.length }
-  }, [sessions, currentMonth])
+  }, [allTaskSessions, currentMonth])
 
   // Peak Performance Time — buckets every completed session this month into
   // 2-hour time-of-day windows by its start hour, scores each bucket on BOTH
@@ -1546,7 +1576,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
   // unusually long session, since a lone session only ever contributes to
   // one bucket's score alongside every other session that month.
   const peakTime = useMemo(() => {
-    const completed = monthSessions.filter(s => s.endTs !== null)
+    const completed = monthSessions
     if (completed.length < 3) return null
 
     const BUCKET_HOURS = 2
@@ -1556,7 +1586,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
     for (const s of completed) {
       const bucket = Math.floor(new Date(s.startTs).getHours() / BUCKET_HOURS)
       counts[bucket] += 1
-      durations[bucket] += s.endTs! - s.startTs
+      durations[bucket] += s.endTs - s.startTs
     }
     const maxCount = Math.max(...counts, 1)
     const maxDur   = Math.max(...durations, 1)
@@ -1611,7 +1641,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
   }, [monthSessions])
 
   const longestSession = monthTopSessions[0] ?? null
-  const totalSessionCount = useMemo(() => monthSessions.filter(s => s.endTs !== null).length, [monthSessions])
+  const totalSessionCount = monthSessions.length
   const monthlyWinsTotal = stats.goalDays + stats.milestoneDays + stats.hyperDays + stats.productiveDays
 
   const stopProp = useCallback((e: React.MouseEvent) => e.stopPropagation(), [])

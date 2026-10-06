@@ -5,7 +5,7 @@ import { useApp } from './AppContext'
 import { formatMs, formatTime, isProductiveActivity, APP_YEAR, dateKey as makeDateKey } from './utils'
 import type { Task } from './types'
 import { GaugeMeter } from './GaugeMeter'
-import { createClient } from '@/lib/supabase/client'
+import { useDisplayFirstName } from './useDisplayFirstName'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -63,7 +63,7 @@ function getRank(score: number) {
 // Single source of truth for all badge + gauge rendering.
 // FinalPerformanceLevel = max(TaskPerformanceLevel, HoursPerformanceLevel).
 
-type PerformanceLevel = 0 | 1 | 2 | 3 | 4 | 5
+export type PerformanceLevel = 0 | 1 | 2 | 3 | 4 | 5
 
 interface PerformanceTier {
   level: PerformanceLevel
@@ -74,7 +74,7 @@ interface PerformanceTier {
   glow: string
 }
 
-const PERFORMANCE_TIERS: PerformanceTier[] = [
+export const PERFORMANCE_TIERS: PerformanceTier[] = [
   { level: 0, title: 'Time to Get Into Action', message: 'Every great achievement begins with a focused session. Start today and earn your first performance badge.',             color: '#94a3b8', glow: 'rgba(148,163,184,0.35)' },
   { level: 1, title: 'Getting Started',         message: "You've taken the first step. Keep building momentum and unlock the next level.",                                         color: '#eab308', glow: 'rgba(234,179,8,0.35)'    },
   { level: 2, title: 'In Action',               message: "You're making solid progress. Stay consistent and keep moving forward.",                                                  color: '#22c55e', glow: 'rgba(34,197,94,0.35)'    },
@@ -85,7 +85,7 @@ const PERFORMANCE_TIERS: PerformanceTier[] = [
 
 // Task performance: maps the existing 0-100 score to a level.
 // Existing score thresholds are preserved exactly — do not change.
-function getTaskPerformanceLevel(score: number): PerformanceLevel {
+export function getTaskPerformanceLevel(score: number): PerformanceLevel {
   if (score === 0) return 0
   if (score < 20)  return 1
   if (score < 40)  return 2
@@ -822,11 +822,16 @@ const BADGE_ASSETS: Partial<Record<PerformanceLevel, string>> = {
 
 // ─── Top-right achievement banner — driven by FinalPerformanceLevel ───────────
 
-function AchievementBanner({
-  tier, level, isDark, firstName, dateLabel, triggerShine = false,
+// periodLabel lets a different time-scoped dashboard (e.g. Monthly) reuse this
+// exact badge — artwork, animations, copy pools, everything — by swapping only
+// the "today's" possessive in the badge-earned sentence for its own period
+// (e.g. "October's"). Defaults to "today's" so DayDashboardModal's own call
+// site needs no change.
+export function AchievementBanner({
+  tier, level, isDark, firstName, dateLabel, triggerShine = false, periodLabel = "today's",
 }: {
   tier: PerformanceTier; level: PerformanceLevel; isDark: boolean;
-  firstName?: string; dateLabel?: string; triggerShine?: boolean
+  firstName?: string; dateLabel?: string; triggerShine?: boolean; periodLabel?: string
 }) {
   const badgeAsset = BADGE_ASSETS[level] ?? null
   const { color, glow } = tier
@@ -838,10 +843,10 @@ function AchievementBanner({
     const name = firstName?.trim() || ''
     return {
       headline: name ? raw.headline.replace('{name}', name) : raw.headline.replace(', {name}', '').replace(' {name}', ''),
-      badge:    raw.badge,
+      badge:    raw.badge?.replace("today's", periodLabel),
       support:  raw.support,
     }
-  }, [level, dateLabel, firstName])
+  }, [level, dateLabel, firstName, periodLabel])
 
   const [shineKey, setShineKey] = useState(0)
   const [showConfetti, setShowConfetti] = useState(false)
@@ -1150,7 +1155,7 @@ type ExportState = 'idle' | 'preparing' | 'ready' | 'downloading' | 'emailing' |
 
 export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayDashboardModalProps) {
   const { calData, activities, isDark } = useApp()
-  const [firstName, setFirstName]   = useState<string>('')
+  const firstName                   = useDisplayFirstName()
   const [actHovIdx, setActHovIdx]   = useState<number | null>(null)
   const [fitMode, setFitMode]       = useState(false)
   const isMaximized                 = false  // body layout is always normal; Fit to Screen uses CSS transform
@@ -1234,35 +1239,6 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
     window.addEventListener('resize', measure)
     return () => window.removeEventListener('resize', measure)
   }, [fitMode])
-
-  // Load display name: localStorage profile first (highest priority), then Supabase fallback
-  useEffect(() => {
-    // Priority 1: Profile page data stored in localStorage['xp9-profile']
-    try {
-      const raw = localStorage.getItem('xp9-profile')
-      if (raw) {
-        const p = JSON.parse(raw) as { firstName?: string; displayName?: string }
-        const name = (p.firstName || p.displayName || '').trim()
-        if (name) { setFirstName(name.split(/\s+/)[0]); return }
-      }
-    } catch {}
-
-    // Priority 2: Supabase auth metadata (OAuth sign-in) → profiles table
-    const supabase = createClient()
-    supabase.auth.getUser().then(async ({ data }) => {
-      const meta = data.user?.user_metadata as Record<string, string> | undefined
-      let full = (meta?.full_name ?? meta?.name ?? meta?.display_name ?? '').trim()
-      if (!full && data.user?.id) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('full_name')
-          .eq('id', data.user.id)
-          .single()
-        full = ((profile as { full_name?: string } | null)?.full_name ?? '').trim()
-      }
-      if (full) setFirstName(full.split(/\s+/)[0])
-    }).catch(() => {})
-  }, [])
 
   const dayData = calData[dateKey]
 
@@ -1601,24 +1577,30 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
         onClick={e => e.stopPropagation()}
       >
 
-        {/* ── Header ──────────────────────────────────────────────────────── */}
+        {/* ── Header — explicit min-height (the reference height Analytics and
+             Monthly Dashboard both match) since the absolutely-positioned
+             Back/Title below no longer contribute to the flex row's auto
+             height. Both are explicitly vertically centered via top:50% +
+             transform — relying on "static position" fallback (no explicit
+             top) previously centered neither reliably, which is what was
+             compressing/clipping this header. ── */}
         <div
           ref={headerRef}
-          className="flex items-center px-4 sm:px-6 py-3.5 sm:py-4 flex-shrink-0 relative"
+          className="flex items-center px-4 sm:px-6 py-3.5 sm:py-4 flex-shrink-0 relative min-h-[60px] sm:min-h-[64px]"
           style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)', borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}
         >
           {/* Back — arrow-only, every breakpoint */}
           {onBack && (
             <button onClick={onBack} data-export-exclude="true"
               className="text-base font-light hover:opacity-70 transition-opacity flex-shrink-0 absolute left-4"
-              style={{ color: 'rgba(255,255,255,0.85)', background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1, padding: '4px 2px' }}
+              style={{ color: 'rgba(255,255,255,0.85)', background: 'none', border: 'none', cursor: 'pointer', lineHeight: 1, padding: '4px 2px', top: '50%', transform: 'translateY(-50%)' }}
               aria-label="Back">
               ←
             </button>
           )}
           {/* Title — absolutely centered on the full header width at every breakpoint,
               independent of the Back control's and Export/Close buttons' widths. */}
-          <div className="absolute left-1/2 text-center min-w-0 max-w-[55%] sm:max-w-[45%]" style={{ transform: 'translateX(-50%)' }}>
+          <div className="absolute left-1/2 text-center min-w-0 max-w-[55%] sm:max-w-[45%]" style={{ top: '50%', transform: 'translate(-50%,-50%)' }}>
             <h2 className="text-sm font-bold text-white tracking-wide truncate">Today&apos;s Dashboard</h2>
             <p className="text-[10px] mt-0.5 truncate" style={{ color: 'rgba(167,139,250,0.62)' }}>{dateLabel}</p>
           </div>

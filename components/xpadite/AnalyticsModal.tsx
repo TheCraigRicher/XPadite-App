@@ -516,16 +516,18 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
             boxShadow: isDark ? '0 30px 70px rgba(0,0,0,0.75)' : '0 20px 50px rgba(0,0,0,0.12)',
           }}
         >
-          {/* XPadite signature purple header */}
+          {/* XPadite signature purple header — vertical height matched to
+              Today's Dashboard's header (min-h-[60px]/sm:min-h-[64px]);
+              icon/title/subtitle/buttons sized down to fit that height. */}
           <div
-            className="flex-shrink-0 flex items-start justify-between gap-3 px-4 sm:px-6 py-3.5 sm:py-4"
+            className="flex-shrink-0 flex items-center justify-between gap-3 px-4 sm:px-6 py-3.5 sm:py-4 min-h-[60px] sm:min-h-[64px]"
             style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)' }}
           >
-            <div className="flex items-center gap-3 min-w-0">
-              <span style={{ fontSize: 24, lineHeight: 1, flexShrink: 0 }}>📊</span>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span style={{ fontSize: 20, lineHeight: 1, flexShrink: 0 }}>📊</span>
               <div className="min-w-0">
-                <h2 className="text-[17px] sm:text-[20px] font-extrabold leading-tight" style={{ color: '#ffffff' }}>Analytics</h2>
-                <p className="text-[10.5px] sm:text-[12px] mt-0.5 truncate" style={{ color: 'rgba(255,255,255,0.78)' }}>
+                <h2 className="text-[14px] sm:text-[16px] font-extrabold leading-tight" style={{ color: '#ffffff' }}>Analytics</h2>
+                <p className="text-[9px] sm:text-[10px] mt-0.5 truncate" style={{ color: 'rgba(255,255,255,0.78)' }}>
                   Track your progress, performance &amp; productivity
                 </p>
               </div>
@@ -533,7 +535,7 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
             <div className="flex items-center gap-2 flex-shrink-0">
               <button
                 onClick={() => setShowPremium(true)}
-                className="hidden sm:flex items-center gap-1.5 text-[11.5px] font-bold px-3.5 py-2 rounded-full transition-opacity hover:opacity-85"
+                className="hidden sm:flex items-center gap-1.5 text-[10.5px] font-bold px-3 py-1.5 rounded-full transition-opacity hover:opacity-85"
                 style={{ background: '#ffffff', color: '#7c3aed', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
               >
                 ✨ AI Insight
@@ -541,7 +543,7 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
               <button
                 onClick={() => setShowPremium(true)}
                 className="sm:hidden flex items-center justify-center rounded-full transition-opacity hover:opacity-85"
-                style={{ width: 30, height: 30, background: '#ffffff', color: '#7c3aed', fontSize: 13 }}
+                style={{ width: 26, height: 26, background: '#ffffff', color: '#7c3aed', fontSize: 12 }}
                 aria-label="AI Insight"
               >
                 ✨
@@ -550,7 +552,7 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
                 onClick={onClose}
                 aria-label="Close Analytics"
                 className="flex items-center justify-center rounded-full flex-shrink-0 transition-opacity hover:opacity-75"
-                style={{ width: 30, height: 30, background: 'rgba(255,255,255,0.18)', color: '#ffffff', border: 'none', cursor: 'pointer' }}
+                style={{ width: 26, height: 26, background: 'rgba(255,255,255,0.18)', color: '#ffffff', border: 'none', cursor: 'pointer' }}
               >
                 ✕
               </button>

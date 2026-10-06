@@ -11,6 +11,8 @@ import {
   hexToRgba, resolveProgressColor,
 } from './utils'
 import { useUpcomingReminderDates } from './useUpcomingReminderDates'
+import { useDisplayFirstName } from './useDisplayFirstName'
+import { AchievementBanner, PERFORMANCE_TIERS, getTaskPerformanceLevel } from './DayDashboardModal'
 
 // ─── Injected styles (keyframes + premium button hover rules) ─────────────────
 
@@ -144,11 +146,14 @@ const MFP_STYLES = `
   }
 
   /* Dashboard-view header: vertical height matched to Today's Dashboard's
-     header (py-3.5/py-4 — 14px mobile, 16px sm+). The calendar view's own
-     header padding (set inline above) is untouched. */
-  .xp-mfp-hdr.xp-mfp-hdr-dash{padding-top:14px!important;padding-bottom:14px!important;}
+     header (py-3.5/py-4 — 14px mobile, 16px sm+ — plus the same explicit
+     min-height floor, since this grid's right column is empty in dashboard
+     view and the center title is absolutely positioned, so neither
+     contributes to the grid row's auto height on its own). The calendar
+     view's own header padding (set inline above) is untouched. */
+  .xp-mfp-hdr.xp-mfp-hdr-dash{padding-top:14px!important;padding-bottom:14px!important;min-height:60px!important;}
   @media(min-width:640px){
-    .xp-mfp-hdr.xp-mfp-hdr-dash{padding-top:16px!important;padding-bottom:16px!important;}
+    .xp-mfp-hdr.xp-mfp-hdr-dash{padding-top:16px!important;padding-bottom:16px!important;min-height:64px!important;}
   }
 
   .xp-mfp-close{
@@ -1464,14 +1469,18 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
   const card1: React.CSSProperties = { background: S1, border: `0.5px solid ${BDR}`, boxShadow: isDark ? '0 2px 20px rgba(0,0,0,0.42)' : '0 1px 10px rgba(0,0,0,0.07)' }
   const card2: React.CSSProperties = { background: S2, border: `0.5px solid ${BDR}`, boxShadow: isDark ? '0 2px 18px rgba(0,0,0,0.38)' : '0 1px 6px rgba(0,0,0,0.05)' }
 
-  const badgeTier = (() => {
-    if (monthScore >= 90) return { rank: 'Master',     icon: '👑', color: '#fbbf24', bg: 'linear-gradient(135deg,#92400e,#b45309,#d97706)', border: 'rgba(251,191,36,0.45)', msg: 'Extraordinary commitment.' }
-    if (monthScore >= 75) return { rank: 'Elite',      icon: '🏆', color: '#c4b5fd', bg: 'linear-gradient(135deg,#3b0764,#6d28d9,#7c3aed)', border: 'rgba(167,139,250,0.50)', msg: 'Outstanding performance.' }
-    if (monthScore >= 60) return { rank: 'Advanced',   icon: '🚀', color: '#7dd3fc', bg: 'linear-gradient(135deg,#0c4a6e,#0369a1,#0284c7)', border: 'rgba(56,189,248,0.45)',  msg: 'Impressive discipline.' }
-    if (monthScore >= 45) return { rank: 'Consistent', icon: '⚡', color: '#6ee7b7', bg: 'linear-gradient(135deg,#064e3b,#047857,#059669)', border: 'rgba(52,211,153,0.45)',  msg: 'Great momentum.' }
-    if (monthScore >= 25) return { rank: 'Learning',   icon: '📈', color: '#93c5fd', bg: 'linear-gradient(135deg,#1e3a8a,#1d4ed8,#2563eb)', border: 'rgba(96,165,250,0.45)',  msg: 'Keep pushing forward.' }
-    return                        { rank: 'Beginner',  icon: '🌱', color: '#86efac', bg: 'linear-gradient(135deg,#14532d,#166534,#15803d)', border: 'rgba(134,239,172,0.45)', msg: 'Every journey starts here.' }
-  })()
+  // Monthly Performance Badge reuses Today's Dashboard's existing badge system
+  // (same artwork/animations/copy) rather than inventing a separate one —
+  // monthScore is already a 0-100 score like Today's own task score, so the
+  // same level/tier mapping applies directly.
+  const monthLevel = getTaskPerformanceLevel(monthScore)
+  const monthTier  = PERFORMANCE_TIERS[monthLevel]
+  const firstName  = useDisplayFirstName()
+  const [monthBadgeShine, setMonthBadgeShine] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setMonthBadgeShine(true), 900)
+    return () => clearTimeout(t)
+  }, [currentMonth])
 
   return (
     <>
@@ -1636,25 +1645,49 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                   {/* ROW 1 — Monthly Achievement | Performance Analytics (center feature) | Performance Badge */}
                   <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.3fr)_minmax(0,0.85fr)] items-stretch gap-3 lg:gap-4">
 
-                    {/* LEFT: Monthly Achievement — compact deck, each row tinted to its own metric color */}
+                    {/* LEFT: Monthly Achievement — compact rows, each using the exact same
+                        premium gradient recipe as the original large KPI cards (rich
+                        saturated gradient, glass-sheen overlay, white foreground text)
+                        instead of pale translucent tints. Reveal is the same
+                        IntersectionObserver-triggered achFrac animation as before, now
+                        driving a fade/slide-in since a width-fill bar doesn't read
+                        against an already-fully-colored gradient row. */}
                     <div ref={achRef} className="rounded-2xl p-3 flex flex-col" style={card1}>
                       <p className="text-[11px] font-bold mb-3" style={{ color: isDark ? '#a78bfa' : '#7c3aed' }}>Monthly Achievement</p>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
                         {([
-                          { emoji: '📅', label: 'Days in Month', value: String(stats.totalDays),      fill: null,                                                                    rgb: '56,189,248' },
-                          { emoji: '⭐', label: 'Productive',     value: String(stats.productiveDays), fill: stats.totalDays > 0 ? stats.productiveDays / stats.totalDays : 0,        rgb: '34,197,94' },
-                          { emoji: '🔥', label: 'Current Streak', value: `${currentStreak}d`,          fill: longestStreak > 0 ? currentStreak / longestStreak : 0,                   rgb: '249,115,22' },
-                          { emoji: '⚡', label: 'Best Streak',    value: `${longestStreak}d`,          fill: stats.totalDays > 0 ? longestStreak / stats.totalDays : 0,               rgb: '219,39,119' },
-                          { emoji: '📊', label: 'Performance',    value: `${monthScore}%`,             fill: monthScore / 100,                                                       rgb: '167,139,250' },
-                          { emoji: '🎯', label: 'Goals',          value: String(stats.goalDays),       fill: stats.goalDays > 0 ? Math.min(stats.goalDays / Math.max(stats.totalDays, 1), 1) : null,           rgb: '20,184,166' },
-                          { emoji: '🏆', label: 'Milestones',     value: String(stats.milestoneDays),  fill: stats.milestoneDays > 0 ? Math.min(stats.milestoneDays / Math.max(stats.totalDays, 1), 1) : null, rgb: '245,158,11' },
-                        ] as { emoji: string; label: string; value: string; fill: number | null; rgb: string }[]).map(item => (
-                          <div key={item.label} style={{ position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 8px', borderRadius: 8, background: `rgba(${item.rgb},${isDark ? 0.10 : 0.06})`, border: `0.5px solid rgba(${item.rgb},${isDark ? 0.24 : 0.18})` }}>
-                            {item.fill !== null && item.fill > 0 && (
-                              <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${item.fill * achFrac * 100}%`, background: `linear-gradient(90deg,rgba(${item.rgb},${isDark ? 0.28 : 0.16}) 0%,rgba(${item.rgb},${isDark ? 0.10 : 0.05}) 100%)`, borderRadius: 8, pointerEvents: 'none' }} />
-                            )}
-                            <span style={{ position: 'relative', fontSize: 10, color: isDark ? 'rgba(203,213,225,0.65)' : 'var(--xp-txt3)' }}>{item.emoji} {item.label}</span>
-                            <span style={{ position: 'relative', fontSize: 11, fontWeight: 700, color: `rgb(${item.rgb})` }}>{item.value}</span>
+                          { emoji: '📅', label: 'Days in Month', value: String(stats.totalDays),
+                            bg: isDark ? 'linear-gradient(135deg, #1D4ED8 0%, #0369A1 52%, #0891B2 100%)' : 'linear-gradient(135deg, #2563EB 0%, #0EA5E9 52%, #22D3EE 100%)',
+                            border: isDark ? 'rgba(8,145,178,0.46)' : 'rgba(14,165,233,0.45)' },
+                          { emoji: '⭐', label: 'Productive', value: String(stats.productiveDays),
+                            bg: isDark ? 'linear-gradient(135deg, #047857 0%, #15803D 52%, #4D7C0F 100%)' : 'linear-gradient(135deg, #059669 0%, #22C55E 52%, #84CC16 100%)',
+                            border: isDark ? 'rgba(21,128,61,0.46)' : 'rgba(34,197,94,0.44)' },
+                          { emoji: '🔥', label: 'Current Streak', value: `${currentStreak}d`,
+                            bg: isDark ? 'linear-gradient(135deg, #92400E 0%, #B45309 50%, #D97706 100%)' : 'linear-gradient(135deg, #F59E0B 0%, #F97316 50%, #EF4444 100%)',
+                            border: isDark ? 'rgba(217,119,6,0.46)' : 'rgba(249,115,22,0.46)' },
+                          { emoji: '⚡', label: 'Best Streak', value: `${longestStreak}d`,
+                            bg: isDark ? 'linear-gradient(135deg, #9D174D 0%, #BE185D 48%, #86198F 100%)' : 'linear-gradient(135deg, #DB2777 0%, #EC4899 48%, #C026D3 100%)',
+                            border: isDark ? 'rgba(190,24,93,0.46)' : 'rgba(219,39,119,0.46)' },
+                          { emoji: '📊', label: 'Performance', value: `${monthScore}%`,
+                            bg: isDark ? 'linear-gradient(135deg, #5B21B6 0%, #7E22CE 50%, #A21CAF 100%)' : 'linear-gradient(135deg, #7C3AED 0%, #A855F7 50%, #D946EF 100%)',
+                            border: isDark ? 'rgba(162,28,175,0.46)' : 'rgba(126,34,206,0.45)' },
+                          { emoji: '🎯', label: 'Goals', value: String(stats.goalDays),
+                            bg: isDark ? 'linear-gradient(135deg, #0E7490 0%, #0F766E 54%, #0D9488 100%)' : 'linear-gradient(135deg, #06B6D4 0%, #14B8A6 54%, #2DD4BF 100%)',
+                            border: isDark ? 'rgba(13,148,136,0.46)' : 'rgba(20,184,166,0.44)' },
+                          { emoji: '🏆', label: 'Milestones', value: String(stats.milestoneDays),
+                            bg: isDark ? 'linear-gradient(135deg, #78350F 0%, #92400E 50%, #B45309 100%)' : 'linear-gradient(135deg, #D97706 0%, #F59E0B 50%, #FBBF24 100%)',
+                            border: isDark ? 'rgba(180,83,9,0.46)' : 'rgba(217,119,6,0.44)' },
+                        ] as { emoji: string; label: string; value: string; bg: string; border: string }[]).map(item => (
+                          <div key={item.label} style={{
+                            position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 8,
+                            padding: '6px 8px', borderRadius: 10,
+                            background: item.bg, border: `0.5px solid ${item.border}`,
+                            opacity: achFrac, transform: `translateX(${(1 - achFrac) * -6}px)`,
+                          }}>
+                            <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none', background: 'linear-gradient(165deg,rgba(255,255,255,0.22) 0%,rgba(255,255,255,0.06) 38%,rgba(255,255,255,0) 100%)' }} />
+                            <div style={{ position: 'relative', width: 20, height: 20, borderRadius: 5, background: 'rgba(255,255,255,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}>{item.emoji}</div>
+                            <span style={{ position: 'relative', fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.88)', flex: 1 }}>{item.label}</span>
+                            <span style={{ position: 'relative', fontSize: 12, fontWeight: 800, color: '#ffffff' }}>{item.value}</span>
                           </div>
                         ))}
                       </div>
@@ -1665,24 +1698,20 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                       <GaugeMeter score={monthScore} />
                     </div>
 
-                    {/* RIGHT: Monthly Performance Badge — existing badge system, moved up from row 4 */}
-                    <div className="rounded-2xl p-5 flex flex-col items-center justify-center text-center" style={{ ...card2, position: 'relative', overflow: 'hidden' }}>
-                      <div style={{ position: 'absolute', inset: 0, background: isDark ? 'linear-gradient(145deg,rgba(124,58,237,0.06) 0%,rgba(0,0,0,0) 60%)' : 'linear-gradient(145deg,rgba(124,58,237,0.04) 0%,rgba(0,0,0,0) 60%)', borderRadius: 'inherit', pointerEvents: 'none' }} />
-                      <p style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.10em', color: isDark ? 'rgba(167,139,250,0.65)' : '#7c3aed', marginBottom: 12, position: 'relative' }}>
-                        {MONTHS[currentMonth].toUpperCase()} PERFORMANCE
-                      </p>
-                      <div style={{ width: 88, height: 88, borderRadius: '50%', background: badgeTier.bg, border: `2.5px solid ${badgeTier.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, marginBottom: 12, boxShadow: `0 6px 24px ${badgeTier.border}`, position: 'relative' }}>
-                        {badgeTier.icon}
-                      </div>
-                      <p style={{ fontSize: 17, fontWeight: 800, color: badgeTier.color, marginBottom: 6, letterSpacing: '-0.01em', position: 'relative' }}>{badgeTier.rank}</p>
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 12px', borderRadius: 20, background: isDark ? 'rgba(124,58,237,0.14)' : 'rgba(124,58,237,0.08)', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.24)' : 'rgba(124,58,237,0.15)'}`, marginBottom: 10, position: 'relative' }}>
-                        <span style={{ fontSize: 9, fontWeight: 700, color: '#a78bfa' }}>Score: {monthScore}%</span>
-                      </div>
-                      <p style={{ fontSize: 9.5, color: isDark ? 'rgba(203,213,225,0.60)' : 'var(--xp-txt2)', marginBottom: 6, fontStyle: 'italic', position: 'relative' }}>{badgeTier.msg}</p>
-                      <p style={{ fontSize: 8.5, color: isDark ? 'rgba(148,163,184,0.45)' : 'var(--xp-txt3)', position: 'relative' }}>
-                        {`You earned ${MONTHS[currentMonth]}'s ${badgeTier.rank} Badge`}
-                      </p>
-                    </div>
+                    {/* RIGHT: Monthly Performance Badge — the exact existing Today's
+                        Dashboard badge system (AchievementBanner: same artwork,
+                        animations, glow and copy pools), adapted to this month's
+                        context via dateLabel/periodLabel rather than a separate
+                        invented badge design. */}
+                    <AchievementBanner
+                      tier={monthTier}
+                      level={monthLevel}
+                      isDark={isDark}
+                      firstName={firstName}
+                      dateLabel={`${MONTHS[currentMonth]} ${APP_YEAR}`}
+                      periodLabel={`${MONTHS[currentMonth]}'s`}
+                      triggerShine={monthBadgeShine}
+                    />
                   </div>
 
                   {/* ROW 2 — Monthly Progress (cumulative) | Activity Breakdown */}

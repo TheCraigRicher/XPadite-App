@@ -682,17 +682,19 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
           rendered via its `embedded` prop so it fills this modal's own
           card shell instead of bringing its own backdrop/sizing (which
           previously produced a second, mismatched modal layer). The shell
-          here is the same backdrop+card recipe this modal's own content
-          and DayDashboardModal both use, so Monthly now fits exactly like
-          Today's Dashboard does — a bounded height (unlike the auto-height
-          card below) matches MonthFullPage's own internal-scroll design. */}
+          here is the IDENTICAL backdrop+card recipe (incl. sm:h-auto) used
+          by this modal's own main content and by DayDashboardModal, so
+          switching Analytics → Monthly never changes the outer modal's
+          width/height — MonthFullPage's scroll body switches to matching
+          content-driven height on desktop/tablet via `embedded` (mobile
+          still scrolls internally within this same bounded shell). */}
       {openDashboard === 'monthly' && (
         <div
           className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[51] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-3 sm:pt-4"
           style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
         >
           <div
-            className="flex flex-col w-full h-full sm:h-[88vh] sm:rounded-2xl sm:shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] sm:mb-6"
+            className="flex flex-col w-full h-full sm:h-auto sm:rounded-2xl sm:shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] sm:mb-6"
             style={{
               background: 'var(--xp-bg)',
               border: isDark ? '0.5px solid rgba(124,58,237,0.22)' : '0.5px solid var(--xp-bdr2)',

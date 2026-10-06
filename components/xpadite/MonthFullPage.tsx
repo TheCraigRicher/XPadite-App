@@ -1695,6 +1695,27 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
   // DayDashboardModal's actHovIdx is local to that component.
   const [monthActHovIdx, setMonthActHovIdx] = useState<number | null>(null)
 
+  // Total Activities bars — scroll-triggered reveal, same IntersectionObserver
+  // pattern already used elsewhere in this file (e.g. the Monthly Achievement
+  // fill animation). Lazy initial state (rather than setting it inside the
+  // effect) keeps the reduced-motion case out of the effect body entirely.
+  const activitiesCardRef = useRef<HTMLDivElement>(null)
+  const [activitiesRevealed, setActivitiesRevealed] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
+  useEffect(() => {
+    if (activitiesRevealed) return
+    const el = activitiesCardRef.current
+    if (!el) return
+    const obs = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return
+      setActivitiesRevealed(true)
+      obs.disconnect()
+    }, { threshold: 0.25 })
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [activitiesRevealed])
+
   return (
     <>
       <style>{MFP_STYLES}</style>
@@ -2132,8 +2153,10 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                         actBreakdown/totalMs instead of a single day's tasks. Bar
                         length is relative to the top activity (matching Task
                         Breakdown's own behavior); the displayed percentage stays
-                        the activity's true share of the month's total time. */}
-                    <div className="rounded-2xl p-3.5" style={card1}>
+                        the activity's true share of the month's total time. Bars
+                        animate in from 0 once this card scrolls into view
+                        (activitiesRevealed, set up above). */}
+                    <div ref={activitiesCardRef} className="rounded-2xl p-3.5" style={card1}>
                       <p className="text-[11px] font-semibold tracking-wide mb-2.5" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Total Activities</p>
                       {actBreakdown.length > 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -2141,16 +2164,17 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                             const gradStr  = TASK_GRAD_STRINGS[idx % TASK_GRAD_STRINGS.length]
                             const barPct   = Math.round((a.ms / (actBreakdown[0]?.ms ?? 1)) * 100)
                             const totalPct = totalMs > 0 ? Math.round((a.ms / totalMs) * 100) : 0
+                            const shownPct = activitiesRevealed ? (barPct > 0 ? Math.max(barPct, 4) : 0) : 0
                             return (
                               <div key={a.name}>
                                 <div className="h-2.5 rounded-full overflow-hidden mb-1.5"
                                   style={{ background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }}>
                                   <div className="h-full rounded-full"
                                     style={{
-                                      width: `${barPct > 0 ? Math.max(barPct, 4) : 0}%`,
+                                      width: `${shownPct}%`,
                                       background: gradStr,
                                       boxShadow: isDark ? '0 0 12px rgba(124,58,237,0.44), 0 1px 0 rgba(255,255,255,0.12) inset' : '0 1px 0 rgba(255,255,255,0.35) inset',
-                                      transition: 'width 1300ms cubic-bezier(0.4, 0, 0.2, 1)',
+                                      transition: `width 1300ms cubic-bezier(0.4, 0, 0.2, 1) ${idx * 90}ms`,
                                     }} />
                                 </div>
                                 <div className="flex items-baseline justify-between gap-2">

@@ -13,6 +13,7 @@ import {
 import { useUpcomingReminderDates } from './useUpcomingReminderDates'
 import { useDisplayFirstName } from './useDisplayFirstName'
 import { AchievementBanner, PERFORMANCE_TIERS, getTaskPerformanceLevel } from './DayDashboardModal'
+import { ProductiveDot } from './LegendRow'
 
 // ─── Injected styles (keyframes + premium button hover rules) ─────────────────
 
@@ -1166,33 +1167,6 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
   const pickerRef   = useRef<HTMLDivElement>(null)
   const triggerRef  = useRef<HTMLButtonElement>(null)
 
-  // Monthly Achievement fill-bar animation
-  const achRef         = useRef<HTMLDivElement>(null)
-  const achRafRef      = useRef<number>(0)
-  const achAnimDoneRef = useRef(false)
-  const [achFrac, setAchFrac] = useState(0)
-  useEffect(() => {
-    const el = achRef.current
-    if (!el) return
-    const obs = new IntersectionObserver(([entry]) => {
-      if (!entry.isIntersecting || achAnimDoneRef.current) return
-      achAnimDoneRef.current = true
-      obs.disconnect()
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setAchFrac(1); return }
-      const DURATION = 600
-      const start = performance.now()
-      function tick(now: number) {
-        const t = Math.min((now - start) / DURATION, 1)
-        const eased = 1 - Math.pow(1 - t, 3)
-        setAchFrac(eased)
-        if (t < 1) achRafRef.current = requestAnimationFrame(tick)
-      }
-      achRafRef.current = requestAnimationFrame(tick)
-    }, { threshold: 0.3 })
-    obs.observe(el)
-    return () => { obs.disconnect(); cancelAnimationFrame(achRafRef.current) }
-  }, [])
-
   // Share panel state
   const [panelOpen, setPanelOpen]         = useState(false)
   const [panelAnim, setPanelAnim]         = useState(false)
@@ -1460,6 +1434,109 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
     return result.sort((a, b) => b.durationMs - a.durationMs).slice(0, 10)
   }, [calData, monthKeys, activities])
 
+  // ── Monthly KPI card data (days-worked remaining, vs-last-month deltas,
+  //    peak time-of-day window) — all derived from the same calData/sessions
+  //    this dashboard already uses, no new data sources. ──────────────────
+
+  const daysRemaining = useMemo(() => {
+    const now = new Date()
+    const isCurrentCalMonth = now.getMonth() === currentMonth && now.getFullYear() === APP_YEAR
+    if (!isCurrentCalMonth) return 0
+    return Math.max(stats.totalDays - now.getDate(), 0)
+  }, [currentMonth, stats.totalDays])
+
+  // Previous calendar month's totals, for the "vs last month" sub-lines.
+  // Resolves to zero/empty if that month has no data (e.g. before the user
+  // started using XPadite) — the comparison line is simply omitted then,
+  // rather than inventing a delta.
+  const prevMonth = useMemo(() => {
+    const pm = currentMonth === 0 ? 11 : currentMonth - 1
+    const py = currentMonth === 0 ? APP_YEAR - 1 : APP_YEAR
+    const td = new Date(py, pm + 1, 0).getDate()
+    const pKeys = new Set<string>()
+    for (let d = 1; d <= td; d++) pKeys.add(dateKey(py, pm, d))
+    const pSessions = sessions.filter(s => pKeys.has(s.dateKey) && s.endTs !== null)
+    const pTotalMs = pSessions.reduce((sum, s) => sum + (s.endTs! - s.startTs), 0)
+    return { totalMs: pTotalMs, sessionCount: pSessions.length }
+  }, [sessions, currentMonth])
+
+  // Peak Performance Time — buckets every completed session this month into
+  // 2-hour time-of-day windows by its start hour, scores each bucket on BOTH
+  // how often (frequency) and how long (accumulated duration) the user works
+  // in it, then reports the single dominant window (merging an adjacent
+  // bucket when it meaningfully contributes) plus, only when it's genuinely
+  // comparable in strength, a second recurring window — never from one
+  // unusually long session, since a lone session only ever contributes to
+  // one bucket's score alongside every other session that month.
+  const peakTime = useMemo(() => {
+    const completed = monthSessions.filter(s => s.endTs !== null)
+    if (completed.length < 3) return null
+
+    const BUCKET_HOURS = 2
+    const NUM_BUCKETS = 24 / BUCKET_HOURS
+    const counts = new Array(NUM_BUCKETS).fill(0) as number[]
+    const durations = new Array(NUM_BUCKETS).fill(0) as number[]
+    for (const s of completed) {
+      const bucket = Math.floor(new Date(s.startTs).getHours() / BUCKET_HOURS)
+      counts[bucket] += 1
+      durations[bucket] += s.endTs! - s.startTs
+    }
+    const maxCount = Math.max(...counts, 1)
+    const maxDur   = Math.max(...durations, 1)
+    const scores   = counts.map((c, i) => (c / maxCount) * 0.5 + (durations[i] / maxDur) * 0.5)
+    const totalDur = durations.reduce((a, b) => a + b, 0)
+    if (totalDur === 0) return null
+
+    function fmtHour(h: number): string {
+      const hh = ((h % 24) + 24) % 24
+      const period = hh < 12 ? 'AM' : 'PM'
+      let h12 = hh % 12
+      if (h12 === 0) h12 = 12
+      return `${h12} ${period}`
+    }
+    const windowLabel = (startBucket: number, endBucketExclusive: number) =>
+      `${fmtHour(startBucket * BUCKET_HOURS)} – ${fmtHour(endBucketExclusive * BUCKET_HOURS)}`
+
+    let topIdx = 0
+    for (let i = 1; i < NUM_BUCKETS; i++) if (scores[i] > scores[topIdx]) topIdx = i
+    if (scores[topIdx] === 0) return null
+
+    const leftIdx  = topIdx > 0 ? topIdx - 1 : -1
+    const rightIdx = topIdx < NUM_BUCKETS - 1 ? topIdx + 1 : -1
+    let mergeIdx = -1
+    if (leftIdx >= 0 && rightIdx >= 0) mergeIdx = scores[leftIdx] >= scores[rightIdx] ? leftIdx : rightIdx
+    else if (leftIdx >= 0) mergeIdx = leftIdx
+    else if (rightIdx >= 0) mergeIdx = rightIdx
+
+    const used = new Set([topIdx])
+    let winStart = topIdx, winEnd = topIdx + 1
+    if (mergeIdx >= 0 && scores[mergeIdx] >= scores[topIdx] * 0.6) {
+      used.add(mergeIdx)
+      winStart = Math.min(topIdx, mergeIdx)
+      winEnd   = Math.max(topIdx, mergeIdx) + 1
+    }
+    const window1Dur = Array.from(used).reduce((s, i) => s + durations[i], 0)
+
+    let secondIdx = -1
+    for (let i = 0; i < NUM_BUCKETS; i++) {
+      if (used.has(i) || i === winStart - 1 || i === winEnd) continue
+      if (secondIdx === -1 || scores[i] > scores[secondIdx]) secondIdx = i
+    }
+    const secondary = secondIdx >= 0 && scores[secondIdx] >= scores[topIdx] * 0.65
+      ? windowLabel(secondIdx, secondIdx + 1)
+      : null
+
+    return {
+      primary: windowLabel(winStart, winEnd),
+      secondary,
+      sharePct: Math.round((window1Dur / totalDur) * 100),
+    }
+  }, [monthSessions])
+
+  const longestSession = monthTopSessions[0] ?? null
+  const totalSessionCount = useMemo(() => monthSessions.filter(s => s.endTs !== null).length, [monthSessions])
+  const monthlyWinsTotal = stats.goalDays + stats.milestoneDays + stats.hyperDays + stats.productiveDays
+
   const stopProp = useCallback((e: React.MouseEvent) => e.stopPropagation(), [])
   const animName = animType === 'right' ? 'xp-from-right' : animType === 'left' ? 'xp-from-left' : 'xp-mfp-in'
 
@@ -1642,55 +1719,104 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
               {/* ── DASHBOARD VIEW ─────────────────────────────────────────────── */}
               {view === 'dashboard' && (
                 <div className="p-3 sm:p-4 lg:p-5 space-y-3 lg:space-y-4" style={{ background: isDark ? 'rgba(9,4,22,0.99)' : 'var(--xp-bg3)' }}>
-                  {/* ROW 1 — Monthly Achievement | Performance Analytics (center feature) | Performance Badge */}
-                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.3fr)_minmax(0,0.85fr)] items-stretch gap-3 lg:gap-4">
+                  {/* ROW 1 — 8 Monthly KPI cards | Performance Analytics (center feature) | Performance Badge.
+                      Left column widened vs. the old compact-list proportions so the
+                      4-col×2-row KPI block has real room, while still aligning cleanly
+                      with the gauge/badge beside it as one top section. */}
+                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1.15fr)_minmax(0,0.8fr)] items-stretch gap-3 lg:gap-4">
 
-                    {/* LEFT: Monthly Achievement — compact rows, each using the exact same
-                        premium gradient recipe as the original large KPI cards (rich
-                        saturated gradient, glass-sheen overlay, white foreground text)
-                        instead of pale translucent tints. Reveal is the same
-                        IntersectionObserver-triggered achFrac animation as before, now
-                        driving a fade/slide-in since a width-fill bar doesn't read
-                        against an already-fully-colored gradient row. */}
-                    <div ref={achRef} className="rounded-2xl p-3 flex flex-col" style={card1}>
-                      <p className="text-[11px] font-bold mb-3" style={{ color: isDark ? '#a78bfa' : '#7c3aed' }}>Monthly Achievement</p>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1 }}>
-                        {([
-                          { emoji: '📅', label: 'Days in Month', value: String(stats.totalDays),
-                            bg: isDark ? 'linear-gradient(135deg, #1D4ED8 0%, #0369A1 52%, #0891B2 100%)' : 'linear-gradient(135deg, #2563EB 0%, #0EA5E9 52%, #22D3EE 100%)',
-                            border: isDark ? 'rgba(8,145,178,0.46)' : 'rgba(14,165,233,0.45)' },
-                          { emoji: '⭐', label: 'Productive', value: String(stats.productiveDays),
-                            bg: isDark ? 'linear-gradient(135deg, #047857 0%, #15803D 52%, #4D7C0F 100%)' : 'linear-gradient(135deg, #059669 0%, #22C55E 52%, #84CC16 100%)',
-                            border: isDark ? 'rgba(21,128,61,0.46)' : 'rgba(34,197,94,0.44)' },
-                          { emoji: '🔥', label: 'Current Streak', value: `${currentStreak}d`,
-                            bg: isDark ? 'linear-gradient(135deg, #92400E 0%, #B45309 50%, #D97706 100%)' : 'linear-gradient(135deg, #F59E0B 0%, #F97316 50%, #EF4444 100%)',
-                            border: isDark ? 'rgba(217,119,6,0.46)' : 'rgba(249,115,22,0.46)' },
-                          { emoji: '⚡', label: 'Best Streak', value: `${longestStreak}d`,
-                            bg: isDark ? 'linear-gradient(135deg, #9D174D 0%, #BE185D 48%, #86198F 100%)' : 'linear-gradient(135deg, #DB2777 0%, #EC4899 48%, #C026D3 100%)',
-                            border: isDark ? 'rgba(190,24,93,0.46)' : 'rgba(219,39,119,0.46)' },
-                          { emoji: '📊', label: 'Performance', value: `${monthScore}%`,
-                            bg: isDark ? 'linear-gradient(135deg, #5B21B6 0%, #7E22CE 50%, #A21CAF 100%)' : 'linear-gradient(135deg, #7C3AED 0%, #A855F7 50%, #D946EF 100%)',
-                            border: isDark ? 'rgba(162,28,175,0.46)' : 'rgba(126,34,206,0.45)' },
-                          { emoji: '🎯', label: 'Goals', value: String(stats.goalDays),
-                            bg: isDark ? 'linear-gradient(135deg, #0E7490 0%, #0F766E 54%, #0D9488 100%)' : 'linear-gradient(135deg, #06B6D4 0%, #14B8A6 54%, #2DD4BF 100%)',
-                            border: isDark ? 'rgba(13,148,136,0.46)' : 'rgba(20,184,166,0.44)' },
-                          { emoji: '🏆', label: 'Milestones', value: String(stats.milestoneDays),
-                            bg: isDark ? 'linear-gradient(135deg, #78350F 0%, #92400E 50%, #B45309 100%)' : 'linear-gradient(135deg, #D97706 0%, #F59E0B 50%, #FBBF24 100%)',
-                            border: isDark ? 'rgba(180,83,9,0.46)' : 'rgba(217,119,6,0.44)' },
-                        ] as { emoji: string; label: string; value: string; bg: string; border: string }[]).map(item => (
-                          <div key={item.label} style={{
-                            position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 8,
-                            padding: '6px 8px', borderRadius: 10,
-                            background: item.bg, border: `0.5px solid ${item.border}`,
-                            opacity: achFrac, transform: `translateX(${(1 - achFrac) * -6}px)`,
-                          }}>
-                            <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none', background: 'linear-gradient(165deg,rgba(255,255,255,0.22) 0%,rgba(255,255,255,0.06) 38%,rgba(255,255,255,0) 100%)' }} />
-                            <div style={{ position: 'relative', width: 20, height: 20, borderRadius: 5, background: 'rgba(255,255,255,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}>{item.emoji}</div>
-                            <span style={{ position: 'relative', fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.88)', flex: 1 }}>{item.label}</span>
-                            <span style={{ position: 'relative', fontSize: 12, fontWeight: 800, color: '#ffffff' }}>{item.value}</span>
+                    {/* LEFT: 8 Monthly KPI cards — the exact same premium gradient card
+                        language as Today's Dashboard's own KPI cards (reused verbatim
+                        for 4 of the 8 where the metric matches by name: Total Worked,
+                        Longest Session, Sessions→Total Sessions, Tasks Done→Tasks
+                        Completed), replacing the old compact Monthly Achievement rows. */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 content-start">
+                      {([
+                        {
+                          label: 'Days Worked', icon: '📅',
+                          value: `${stats.productiveDays}/${stats.totalDays}`,
+                          sub: daysRemaining > 0 ? `${daysRemaining} day${daysRemaining === 1 ? '' : 's'} remaining` : null,
+                          bg: isDark ? 'linear-gradient(135deg, #1E3A8A 0%, #1D4ED8 50%, #3B82F6 100%)' : 'linear-gradient(135deg, #2563EB 0%, #3B82F6 50%, #60A5FA 100%)',
+                          border: isDark ? 'rgba(59,130,246,0.46)' : 'rgba(37,99,235,0.42)', glowRgb: '59,130,246',
+                        },
+                        {
+                          label: 'Total Worked', icon: '⏱',
+                          value: formatMs(totalMs),
+                          sub: prevMonth.totalMs > 0
+                            ? `${totalMs >= prevMonth.totalMs ? '↑' : '↓'} ${formatMs(Math.abs(totalMs - prevMonth.totalMs))} vs last month`
+                            : null,
+                          bg: isDark ? 'linear-gradient(135deg, #5B21B6 0%, #7E22CE 50%, #A21CAF 100%)' : 'linear-gradient(135deg, #7C3AED 0%, #A855F7 50%, #D946EF 100%)',
+                          border: isDark ? 'rgba(162,28,175,0.46)' : 'rgba(126,34,206,0.45)', glowRgb: '167,139,250',
+                        },
+                        {
+                          label: 'Longest Streak', icon: '🔗',
+                          value: `${longestStreak} day${longestStreak === 1 ? '' : 's'}`,
+                          sub: currentStreak > 0 ? `${currentStreak}d current` : null,
+                          bg: isDark ? 'linear-gradient(135deg, #9D174D 0%, #BE185D 48%, #86198F 100%)' : 'linear-gradient(135deg, #DB2777 0%, #EC4899 48%, #C026D3 100%)',
+                          border: isDark ? 'rgba(190,24,93,0.46)' : 'rgba(219,39,119,0.46)', glowRgb: '219,39,119',
+                        },
+                        {
+                          label: 'Peak Performance Time', icon: '⏰',
+                          value: peakTime?.primary ?? '—',
+                          value2: peakTime?.secondary ?? null,
+                          sub: !peakTime ? 'Not enough data yet' : !peakTime.secondary ? `${peakTime.sharePct}% of focused work` : null,
+                          bg: isDark ? 'linear-gradient(135deg, #5B21B6 0%, #4338CA 52%, #1D4ED8 100%)' : 'linear-gradient(135deg, #7C3AED 0%, #6366F1 52%, #3B82F6 100%)',
+                          border: 'rgba(99,102,241,0.46)', glowRgb: '99,102,241',
+                        },
+                        {
+                          label: 'Longest Session', icon: <ProductiveDot color={progressColor} size={14} />,
+                          value: longestSession ? formatMs(longestSession.durationMs) : '—',
+                          sub: longestSession?.actName ?? null,
+                          bg: isDark ? 'linear-gradient(135deg, #1D4ED8 0%, #0369A1 52%, #0891B2 100%)' : 'linear-gradient(135deg, #2563EB 0%, #0EA5E9 52%, #22D3EE 100%)',
+                          border: isDark ? 'rgba(8,145,178,0.46)' : 'rgba(14,165,233,0.45)', glowRgb: '14,165,233',
+                        },
+                        {
+                          label: 'Total Sessions', icon: '📋',
+                          value: String(totalSessionCount),
+                          sub: prevMonth.sessionCount > 0
+                            ? `${totalSessionCount >= prevMonth.sessionCount ? '↑' : '↓'} ${Math.abs(totalSessionCount - prevMonth.sessionCount)} vs last month`
+                            : null,
+                          bg: isDark ? 'linear-gradient(135deg, #0E7490 0%, #0F766E 54%, #0D9488 100%)' : 'linear-gradient(135deg, #06B6D4 0%, #14B8A6 54%, #2DD4BF 100%)',
+                          border: isDark ? 'rgba(13,148,136,0.46)' : 'rgba(20,184,166,0.44)', glowRgb: '20,184,166',
+                        },
+                        {
+                          label: 'Tasks Completed', icon: '✓',
+                          value: `${monthTaskStats.completedTasks}/${monthTaskStats.totalTasks}`,
+                          sub: monthTaskStats.totalTasks > 0 ? `${Math.round((monthTaskStats.completedTasks / monthTaskStats.totalTasks) * 100)}% complete` : null,
+                          bg: isDark ? 'linear-gradient(135deg, #047857 0%, #15803D 52%, #4D7C0F 100%)' : 'linear-gradient(135deg, #059669 0%, #22C55E 52%, #84CC16 100%)',
+                          border: isDark ? 'rgba(21,128,61,0.46)' : 'rgba(34,197,94,0.44)', glowRgb: '34,197,94',
+                        },
+                        {
+                          label: 'Monthly Wins', icon: '🏅',
+                          value: String(monthlyWinsTotal),
+                          sub: (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                              🎯 {stats.goalDays} · 🏆 {stats.milestoneDays} · 🔥 {stats.hyperDays} · <ProductiveDot color="#ffffff" size={8} /> {stats.productiveDays}
+                            </span>
+                          ),
+                          bg: isDark ? 'linear-gradient(135deg, #78350F 0%, #92400E 50%, #B45309 100%)' : 'linear-gradient(135deg, #D97706 0%, #F59E0B 50%, #FBBF24 100%)',
+                          border: isDark ? 'rgba(180,83,9,0.46)' : 'rgba(217,119,6,0.44)', glowRgb: '245,158,11',
+                        },
+                      ] as { label: string; icon: React.ReactNode; value: string; value2?: string | null; sub: React.ReactNode; bg: string; border: string; glowRgb: string }[]).map(m => (
+                        <div
+                          key={m.label}
+                          className="rounded-2xl flex flex-col relative overflow-hidden p-2 xp-kpi-card"
+                          style={{ '--kpi-glow-rgb': m.glowRgb, background: m.bg, border: `0.5px solid ${m.border}`, minHeight: 74 } as React.CSSProperties}
+                        >
+                          {/* Glass sheen — smooth top highlight, same recipe as Today's Dashboard */}
+                          <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none', background: 'linear-gradient(165deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 38%, rgba(255,255,255,0) 100%)' }} />
+                          {/* Icon tile */}
+                          <div style={{ width: 18, height: 18, borderRadius: 5, marginBottom: 4, flexShrink: 0, background: 'rgba(255,255,255,0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#FFFFFF' }}>
+                            {m.icon}
                           </div>
-                        ))}
-                      </div>
+                          {/* Value(s) */}
+                          <p className="text-[12px] font-bold leading-tight tabular-nums" style={{ color: '#FFFFFF' }}>{m.value}</p>
+                          {m.value2 && <p className="text-[12px] font-bold leading-tight tabular-nums" style={{ color: '#FFFFFF' }}>{m.value2}</p>}
+                          {/* Label */}
+                          <p className="text-[7.5px] font-medium mt-auto leading-tight tracking-wide" style={{ color: 'rgba(255,255,255,0.72)' }}>{m.label}</p>
+                          {m.sub && <p className="text-[7px] mt-0.5 font-semibold leading-tight" style={{ color: 'rgba(255,255,255,0.86)' }}>{m.sub}</p>}
+                        </div>
+                      ))}
                     </div>
 
                     {/* CENTER: Performance Analytics Gauge — the focal point of the top section */}

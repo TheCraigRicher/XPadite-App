@@ -30,6 +30,7 @@ import { computeRangeStats, getCurrentWeekRange, getCurrentMonthRange } from './
 import { calculateBestStreak } from './productivityEngine'
 import { DayDashboardModal } from './DayDashboardModal'
 import { MonthFullPage } from './MonthFullPage'
+import { ProductiveDot } from './LegendRow'
 import type { CalendarData } from './types'
 
 type Timeframe = 'today' | 'weekly' | 'monthly' | 'yearly'
@@ -275,19 +276,6 @@ function OverviewStat({ icon, tint, value, label }: { icon: React.ReactNode; tin
 }
 
 // ─── XPadite productive/streak markers ─────────────────────────────────────
-// Reused verbatim from LegendRow.tsx's existing implementation (same dot +
-// ring boxShadow technique, same streak dot-bar-dot-bar-dot layout) rather
-// than approximating it with emoji.
-
-function ProductiveDot({ color, size = 16 }: { color: string; size?: number }) {
-  return (
-    <div
-      className="rounded-full flex-shrink-0"
-      style={{ width: size, height: size, background: color, boxShadow: `0 0 0 2px ${hexToRgba(color, 0.25)}` }}
-    />
-  )
-}
-
 function StreakMarker({ color }: { color: string }) {
   const dot = { width: 9, height: 9, borderRadius: '50%', background: color, boxShadow: `0 0 0 1.5px ${hexToRgba(color, 0.3)}` } as const
   const bar = { width: 9, height: 2, background: color } as const

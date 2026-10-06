@@ -19,6 +19,19 @@ function Tip({ content, children }: { content: string; children: ReactNode }) {
   )
 }
 
+// XPadite's signature "Productive" indicator — a solid progress-color dot
+// with a soft ring, the same dot used inline below and throughout the app's
+// calendar/legend surfaces. Exported so other dashboards (Analytics, Monthly
+// Dashboard) can reuse the exact visual instead of approximating it with emoji.
+export function ProductiveDot({ color, size = 16 }: { color: string; size?: number }) {
+  return (
+    <div
+      className="rounded-full flex-shrink-0"
+      style={{ width: size, height: size, background: color, boxShadow: `0 0 0 2px ${hexToRgba(color, 0.25)}` }}
+    />
+  )
+}
+
 export function LegendRow() {
   const { progressColor: _rawColor, isDark } = useApp()
   const progressColor = resolveProgressColor(_rawColor, isDark)

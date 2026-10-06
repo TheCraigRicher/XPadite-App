@@ -12,7 +12,7 @@ import {
 } from './utils'
 import { useUpcomingReminderDates } from './useUpcomingReminderDates'
 import { useDisplayFirstName } from './useDisplayFirstName'
-import { AchievementBanner, PERFORMANCE_TIERS, getTaskPerformanceLevel, DonutChart } from './DayDashboardModal'
+import { AchievementBanner, PERFORMANCE_TIERS, getTaskPerformanceLevel, DonutChart, TASK_GRAD_STRINGS } from './DayDashboardModal'
 import { ProductiveDot } from './LegendRow'
 
 // ─── Injected styles (keyframes + premium button hover rules) ─────────────────
@@ -1521,6 +1521,30 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
     return { totalTasks, completedTasks }
   }, [calData, monthKeys])
 
+  // Pending Tasks — real, unfinished Task Manager records for the selected
+  // month, oldest first. Same calData source as monthTaskStats above, so
+  // completing/adding/removing a task here is reflected immediately.
+  const pendingTasks = useMemo(() => {
+    const result: { id: string; text: string; dateKey: string }[] = []
+    for (const key of monthKeys) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const day = calData[key] as any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const t of (day?.tasks ?? []) as any[]) {
+        if (!t.done) result.push({ id: t.id, text: t.text, dateKey: key })
+      }
+    }
+    return result.sort((a, b) => a.dateKey.localeCompare(b.dateKey))
+  }, [calData, monthKeys])
+
+  function fmtTaskDate(dk: string): string {
+    const [y, m, d] = dk.split('-').map(Number)
+    const dt = new Date(y, m - 1, d)
+    const weekday = dt.toLocaleDateString('en-US', { weekday: 'long' })
+    const monthDay = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    return `${weekday} · ${monthDay}`
+  }
+
   const monthTopSessions = useMemo(() => {
     const result: { actName: string; actColor: string; durationMs: number }[] = []
     for (const key of monthKeys) {
@@ -2099,28 +2123,42 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                     </div>
                   </div>
 
-                  {/* ROW 3 — Total Activities | Total Sessions | Total Tasks */}
+                  {/* ROW 3 — Total Activities | Total Sessions | Pending Tasks */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4">
 
-                    {/* Total Activities */}
+                    {/* Total Activities — reuses Today's Dashboard's Task Breakdown
+                        gradient-pill visual treatment (TASK_GRAD_STRINGS, imported
+                        from DayDashboardModal.tsx), fed with this month's real
+                        actBreakdown/totalMs instead of a single day's tasks. Bar
+                        length is relative to the top activity (matching Task
+                        Breakdown's own behavior); the displayed percentage stays
+                        the activity's true share of the month's total time. */}
                     <div className="rounded-2xl p-3.5" style={card1}>
                       <p className="text-[11px] font-semibold tracking-wide mb-2.5" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Total Activities</p>
                       {actBreakdown.length > 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                          {actBreakdown.map(a => {
-                            const pct = totalMs > 0 ? Math.round((a.ms / totalMs) * 100) : 0
+                          {actBreakdown.map((a, idx) => {
+                            const gradStr  = TASK_GRAD_STRINGS[idx % TASK_GRAD_STRINGS.length]
+                            const barPct   = Math.round((a.ms / (actBreakdown[0]?.ms ?? 1)) * 100)
+                            const totalPct = totalMs > 0 ? Math.round((a.ms / totalMs) * 100) : 0
                             return (
                               <div key={a.name}>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(80px,1fr) 52px 32px', alignItems: 'center', gap: 4, marginBottom: 5 }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
-                                    <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: a.color }} />
-                                    <span className="text-[9px] truncate" style={{ color: isDark ? 'rgba(203,213,225,0.78)' : 'var(--xp-txt2)' }}>{a.name}</span>
-                                  </div>
-                                  <span className="text-[9px] tabular-nums font-semibold text-right" style={{ color: isDark ? 'rgba(255,255,255,0.72)' : 'var(--xp-txt)' }}>{formatMs(a.ms)}</span>
-                                  <span className="text-[8px] tabular-nums text-right" style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>{pct}%</span>
+                                <div className="h-2.5 rounded-full overflow-hidden mb-1.5"
+                                  style={{ background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }}>
+                                  <div className="h-full rounded-full"
+                                    style={{
+                                      width: `${barPct > 0 ? Math.max(barPct, 4) : 0}%`,
+                                      background: gradStr,
+                                      boxShadow: isDark ? '0 0 12px rgba(124,58,237,0.44), 0 1px 0 rgba(255,255,255,0.12) inset' : '0 1px 0 rgba(255,255,255,0.35) inset',
+                                      transition: 'width 1300ms cubic-bezier(0.4, 0, 0.2, 1)',
+                                    }} />
                                 </div>
-                                <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }}>
-                                  <div className="h-full rounded-full" style={{ width: `${pct}%`, background: a.color, transition: 'width 600ms ease' }} />
+                                <div className="flex items-baseline justify-between gap-2">
+                                  <span className="text-[9px] flex-1 min-w-0 leading-snug font-medium truncate" style={{ color: isDark ? 'rgba(203,213,225,0.88)' : 'var(--xp-txt)' }}>{a.name}</span>
+                                  <div className="flex-shrink-0 flex items-baseline gap-0.5">
+                                    <span className="text-[9.5px] font-bold tabular-nums leading-tight" style={{ color: isDark ? 'rgba(203,213,225,0.9)' : 'var(--xp-txt)' }}>{formatMs(a.ms)}</span>
+                                    <span className="text-[8px] tabular-nums leading-tight" style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>({totalPct}%)</span>
+                                  </div>
                                 </div>
                               </div>
                             )
@@ -2163,43 +2201,30 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                       )}
                     </div>
 
-                    {/* Total Tasks */}
-                    <div className="rounded-2xl p-3.5" style={card1}>
-                      <div className="flex items-center justify-between mb-2.5">
-                        <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Total Tasks</p>
-                        {monthTaskStats.totalTasks > 0 && (
-                          <span className="text-[8px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(124,58,237,0.16)', color: '#a78bfa', border: '0.5px solid rgba(124,58,237,0.26)' }}>
-                            {monthTaskStats.completedTasks}/{monthTaskStats.totalTasks} done
-                          </span>
-                        )}
+                    {/* Pending Tasks — real, unfinished Task Manager records for the
+                        selected month (same calData source as monthTaskStats/
+                        Tasks Completed elsewhere on this dashboard), oldest first.
+                        Visibility/reminder only — no completion controls here;
+                        actual task management stays in Task Manager. */}
+                    <div className="rounded-2xl p-3.5 flex flex-col" style={{ ...card1, maxHeight: 240 }}>
+                      <div className="flex items-center justify-between mb-2.5 flex-shrink-0">
+                        <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Pending Tasks</p>
+                        <span className="text-[8px] font-bold px-2 py-0.5 rounded-full" style={{ background: isDark ? 'rgba(124,58,237,0.16)' : 'rgba(124,58,237,0.07)', color: '#a78bfa', border: '0.5px solid rgba(124,58,237,0.26)' }}>
+                          {pendingTasks.length} pending
+                        </span>
                       </div>
-                      {monthTaskStats.totalTasks > 0 ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                          <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                              <p className="text-[9px]" style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>Completion Rate</p>
-                              <p className="text-[9px] font-bold" style={{ color: '#a78bfa' }}>{monthTaskStats.totalTasks > 0 ? Math.round((monthTaskStats.completedTasks / monthTaskStats.totalTasks) * 100) : 0}%</p>
-                            </div>
-                            <div className="h-2 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }}>
-                              <div className="h-full rounded-full" style={{ width: `${monthTaskStats.totalTasks > 0 ? Math.round((monthTaskStats.completedTasks / monthTaskStats.totalTasks) * 100) : 0}%`, background: 'linear-gradient(90deg,#7c3aed 0%,#a855f7 50%,#d946ef 100%)', transition: 'width 600ms ease' }} />
-                            </div>
-                          </div>
-                          {([
-                            { icon: '📋', label: 'Total Tasks', val: String(monthTaskStats.totalTasks) },
-                            { icon: '✅', label: 'Completed', val: String(monthTaskStats.completedTasks), col: '#22c55e' },
-                            { icon: '📅', label: 'Productive Days', val: String(stats.productiveDays) },
-                            { icon: '🎯', label: 'Goals', val: String(stats.goalDays) },
-                            { icon: '🏆', label: 'Milestones', val: String(stats.milestoneDays) },
-                          ] as { icon: string; label: string; val: string; col?: string }[]).map(item => (
-                            <div key={item.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 6, borderBottom: isDark ? '0.5px solid rgba(255,255,255,0.05)' : '0.5px solid var(--xp-bdr)' }}>
-                              <span style={{ fontSize: 9, color: isDark ? 'rgba(148,163,184,0.60)' : 'var(--xp-txt3)' }}>{item.icon} {item.label}</span>
-                              <span style={{ fontSize: 11, fontWeight: 700, color: item.col ?? (isDark ? 'rgba(255,255,255,0.85)' : 'var(--xp-txt)') }}>{item.val}</span>
+                      {pendingTasks.length > 0 ? (
+                        <div className="flex-1 min-h-0 overflow-y-auto" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {pendingTasks.map(t => (
+                            <div key={t.id} style={{ paddingBottom: 6, borderBottom: isDark ? '0.5px solid rgba(255,255,255,0.05)' : '0.5px solid var(--xp-bdr)' }}>
+                              <p className="text-[9.5px] font-medium leading-snug truncate" style={{ color: isDark ? 'rgba(226,232,240,0.90)' : 'var(--xp-txt)' }}>{t.text}</p>
+                              <p className="text-[8px] mt-0.5" style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>{fmtTaskDate(t.dateKey)}</p>
                             </div>
                           ))}
                         </div>
                       ) : (
                         <div className="flex items-center justify-center h-20">
-                          <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No tasks this month</p>
+                          <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No pending tasks this month</p>
                         </div>
                       )}
                     </div>

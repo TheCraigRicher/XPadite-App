@@ -150,7 +150,7 @@ function getActivityIconPath(name: string): string {
 
 // ─── Deterministic task progress-bar gradient palette ─────────────────────────
 
-const TASK_GRAD_STRINGS: string[] = [
+export const TASK_GRAD_STRINGS: string[] = [
   'linear-gradient(90deg, #2563EB 0%, #0EA5E9 52%, #22D3EE 100%)',
   'linear-gradient(90deg, #16A34A 0%, #4ADE80 48%, #A3E635 100%)',
   'linear-gradient(90deg, #7C3AED 0%, #A855F7 50%, #D946EF 100%)',

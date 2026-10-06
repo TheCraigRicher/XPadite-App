@@ -1719,18 +1719,20 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
               {/* ── DASHBOARD VIEW ─────────────────────────────────────────────── */}
               {view === 'dashboard' && (
                 <div className="p-3 sm:p-4 lg:p-5 space-y-3 lg:space-y-4" style={{ background: isDark ? 'rgba(9,4,22,0.99)' : 'var(--xp-bg3)' }}>
-                  {/* ROW 1 — 8 Monthly KPI cards | Performance Analytics (center feature) | Performance Badge.
-                      Left column widened vs. the old compact-list proportions so the
-                      4-col×2-row KPI block has real room, while still aligning cleanly
-                      with the gauge/badge beside it as one top section. */}
-                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1.15fr)_minmax(0,0.8fr)] items-stretch gap-3 lg:gap-4">
+                  {/* ROW 1 — KPI area | Performance Analytics | Performance Badge.
+                      Column ratio and KPI-card styling are now the exact values reused
+                      from Today's Dashboard's own ROW1 (DayDashboardModal.tsx) rather
+                      than independently derived — same 1.52fr/1.36fr/0.70fr split, same
+                      grid-cols-2 sm:grid-cols-3 card grid, same card recipe. */}
+                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.52fr)_minmax(0,1.36fr)_minmax(0,0.70fr)] items-stretch gap-3 lg:gap-4">
 
-                    {/* LEFT: 8 Monthly KPI cards — the exact same premium gradient card
-                        language as Today's Dashboard's own KPI cards (reused verbatim
-                        for 4 of the 8 where the metric matches by name: Total Worked,
-                        Longest Session, Sessions→Total Sessions, Tasks Done→Tasks
-                        Completed), replacing the old compact Monthly Achievement rows. */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 content-start">
+                    {/* LEFT: the 6 primary Monthly KPI cards (Today's Dashboard's exact
+                        dimensions/spacing/3×2 placement) plus one compact combined card
+                        underneath for Tasks Completed + Monthly Wins, sized to the space
+                        naturally left over beneath the 6 cards — never under the gauge or
+                        badge, since it lives inside this same KPI column. */}
+                    <div className="flex flex-col gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 content-start">
                       {([
                         {
                           label: 'Days Worked', icon: '📅',
@@ -1779,47 +1781,75 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                           bg: isDark ? 'linear-gradient(135deg, #0E7490 0%, #0F766E 54%, #0D9488 100%)' : 'linear-gradient(135deg, #06B6D4 0%, #14B8A6 54%, #2DD4BF 100%)',
                           border: isDark ? 'rgba(13,148,136,0.46)' : 'rgba(20,184,166,0.44)', glowRgb: '20,184,166',
                         },
-                        {
-                          label: 'Tasks Completed', icon: '✓',
-                          value: `${monthTaskStats.completedTasks}/${monthTaskStats.totalTasks}`,
-                          sub: monthTaskStats.totalTasks > 0 ? `${Math.round((monthTaskStats.completedTasks / monthTaskStats.totalTasks) * 100)}% complete` : null,
-                          bg: isDark ? 'linear-gradient(135deg, #047857 0%, #15803D 52%, #4D7C0F 100%)' : 'linear-gradient(135deg, #059669 0%, #22C55E 52%, #84CC16 100%)',
-                          border: isDark ? 'rgba(21,128,61,0.46)' : 'rgba(34,197,94,0.44)', glowRgb: '34,197,94',
-                        },
-                        {
-                          label: 'Monthly Wins', icon: '🏅',
-                          value: String(monthlyWinsTotal),
-                          sub: (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                              🎯 {stats.goalDays} · 🏆 {stats.milestoneDays} · 🔥 {stats.hyperDays} · <ProductiveDot color="#ffffff" size={8} /> {stats.productiveDays}
-                            </span>
-                          ),
-                          bg: isDark ? 'linear-gradient(135deg, #78350F 0%, #92400E 50%, #B45309 100%)' : 'linear-gradient(135deg, #D97706 0%, #F59E0B 50%, #FBBF24 100%)',
-                          border: isDark ? 'rgba(180,83,9,0.46)' : 'rgba(217,119,6,0.44)', glowRgb: '245,158,11',
-                        },
-                      ] as { label: string; icon: React.ReactNode; value: string; value2?: string | null; sub: React.ReactNode; bg: string; border: string; glowRgb: string }[]).map(m => (
+                      ] as { label: string; icon: React.ReactNode; value: string; value2?: string | null; sub: string | null; bg: string; border: string; glowRgb: string }[]).map(m => (
                         <div
                           key={m.label}
-                          className="rounded-2xl flex flex-col relative overflow-hidden p-2 xp-kpi-card"
-                          style={{ '--kpi-glow-rgb': m.glowRgb, background: m.bg, border: `0.5px solid ${m.border}`, minHeight: 74 } as React.CSSProperties}
+                          className="rounded-2xl flex flex-col relative overflow-hidden p-2.5 xp-kpi-card"
+                          style={{ '--kpi-glow-rgb': m.glowRgb, background: m.bg, border: `0.5px solid ${m.border}`, minHeight: 80 } as React.CSSProperties}
                         >
                           {/* Glass sheen — smooth top highlight, same recipe as Today's Dashboard */}
                           <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', pointerEvents: 'none', background: 'linear-gradient(165deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 38%, rgba(255,255,255,0) 100%)' }} />
                           {/* Icon tile */}
-                          <div style={{ width: 18, height: 18, borderRadius: 5, marginBottom: 4, flexShrink: 0, background: 'rgba(255,255,255,0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: '#FFFFFF' }}>
+                          <div style={{ width: 20, height: 20, borderRadius: 5, marginBottom: 5, flexShrink: 0, background: 'rgba(255,255,255,0.16)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#FFFFFF' }}>
                             {m.icon}
                           </div>
                           {/* Value(s) */}
-                          <p className="text-[12px] font-bold leading-tight tabular-nums" style={{ color: '#FFFFFF' }}>{m.value}</p>
-                          {m.value2 && <p className="text-[12px] font-bold leading-tight tabular-nums" style={{ color: '#FFFFFF' }}>{m.value2}</p>}
+                          <p className="text-base sm:text-lg font-bold leading-none tabular-nums mb-1" style={{ color: '#FFFFFF' }}>{m.value}</p>
+                          {m.value2 && <p className="text-base sm:text-lg font-bold leading-none tabular-nums mb-1" style={{ color: '#FFFFFF' }}>{m.value2}</p>}
                           {/* Label */}
-                          <p className="text-[7.5px] font-medium mt-auto leading-tight tracking-wide" style={{ color: 'rgba(255,255,255,0.72)' }}>{m.label}</p>
-                          {m.sub && <p className="text-[7px] mt-0.5 font-semibold leading-tight" style={{ color: 'rgba(255,255,255,0.86)' }}>{m.sub}</p>}
+                          <p className="text-[8.5px] font-medium mt-auto leading-tight tracking-wide" style={{ color: 'rgba(255,255,255,0.72)' }}>{m.label}</p>
+                          {/* Sub */}
+                          {m.sub && <p className="text-[8px] mt-0.5 font-semibold" style={{ color: 'rgba(255,255,255,0.86)' }}>{m.sub}</p>}
                         </div>
                       ))}
                     </div>
 
-                    {/* CENTER: Performance Analytics Gauge — the focal point of the top section */}
+                    {/* Compact combined card — Tasks Completed | Monthly Wins — fills just
+                        the space naturally left under the 6 cards above, within this same
+                        KPI column (so it can never extend under the gauge or badge). Each
+                        half keeps that metric's own color identity from before, split by a
+                        subtle divider, rather than one blended background. */}
+                    <div className="rounded-2xl overflow-hidden flex relative xp-kpi-card" style={{ minHeight: 80 } as React.CSSProperties}>
+                      {/* LEFT: Tasks Completed */}
+                      <div className="flex-1 p-2.5 flex flex-col justify-center relative overflow-hidden" style={{ background: isDark ? 'linear-gradient(135deg, #047857 0%, #15803D 52%, #4D7C0F 100%)' : 'linear-gradient(135deg, #059669 0%, #22C55E 52%, #84CC16 100%)' }}>
+                        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'linear-gradient(165deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 38%, rgba(255,255,255,0) 100%)' }} />
+                        <p className="relative text-base sm:text-lg font-bold leading-none tabular-nums mb-1" style={{ color: '#FFFFFF' }}>{monthTaskStats.completedTasks}/{monthTaskStats.totalTasks}</p>
+                        <p className="relative text-[8.5px] font-medium leading-tight tracking-wide" style={{ color: 'rgba(255,255,255,0.72)' }}>Tasks Completed</p>
+                        {monthTaskStats.totalTasks > 0 && (
+                          <p className="relative text-[8px] mt-0.5 font-semibold" style={{ color: 'rgba(255,255,255,0.86)' }}>
+                            {Math.round((monthTaskStats.completedTasks / monthTaskStats.totalTasks) * 100)}% complete
+                          </p>
+                        )}
+                      </div>
+                      {/* Subtle divider */}
+                      <div style={{ width: 1, flexShrink: 0, margin: '12px 0', background: 'rgba(255,255,255,0.35)', position: 'relative', zIndex: 1 }} />
+                      {/* RIGHT: Monthly Wins — breakdown arranged 2-up across the card's own
+                          width instead of stacked, so it stays compact without extra height. */}
+                      <div className="flex-1 p-2.5 flex flex-col justify-center relative overflow-hidden" style={{ background: isDark ? 'linear-gradient(135deg, #78350F 0%, #92400E 50%, #B45309 100%)' : 'linear-gradient(135deg, #D97706 0%, #F59E0B 50%, #FBBF24 100%)' }}>
+                        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', background: 'linear-gradient(165deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 38%, rgba(255,255,255,0) 100%)' }} />
+                        <div className="relative flex items-baseline gap-1.5 mb-1">
+                          <span className="text-base sm:text-lg font-bold leading-none tabular-nums" style={{ color: '#FFFFFF' }}>{monthlyWinsTotal}</span>
+                          <span className="text-[8.5px] font-medium" style={{ color: 'rgba(255,255,255,0.72)' }}>Monthly Wins</span>
+                        </div>
+                        <div className="relative" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 8, rowGap: 2 }}>
+                          {([
+                            { icon: <ProductiveDot color="#ffffff" size={8} />, label: 'Productive Days', value: stats.productiveDays },
+                            { icon: '🔥', label: 'Hyper Productive Days', value: stats.hyperDays },
+                            { icon: '🏆', label: 'Milestones Achieved', value: stats.milestoneDays },
+                            { icon: '🎯', label: 'Goals Accomplished', value: stats.goalDays },
+                          ] as { icon: React.ReactNode; label: string; value: number }[]).map(row => (
+                            <div key={row.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 3, minWidth: 0, fontSize: 7.5, fontWeight: 700, color: 'rgba(255,255,255,0.90)' }}>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500, color: 'rgba(255,255,255,0.78)' }}>{row.icon} {row.label}</span>
+                              <span style={{ flexShrink: 0 }}>{row.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    </div>
+
+                    {/* CENTER: Performance Analytics Gauge — same dimensions/placement as
+                        Today's Dashboard's gauge card (no custom minHeight). */}
                     <div className="rounded-2xl overflow-hidden flex flex-col" style={{ background: isDark ? 'linear-gradient(145deg,rgba(16,7,44,0.99) 0%,rgba(7,3,18,0.99) 100%)' : 'var(--xp-card)', border: isDark ? '0.5px solid rgba(124,58,237,0.35)' : '0.5px solid var(--xp-bdr2)', boxShadow: isDark ? '0 4px 36px rgba(80,0,220,0.22),0 2px 16px rgba(0,0,0,0.55)' : '0 2px 12px rgba(0,0,0,0.08)', minHeight: 280 }}>
                       <GaugeMeter score={monthScore} />
                     </div>

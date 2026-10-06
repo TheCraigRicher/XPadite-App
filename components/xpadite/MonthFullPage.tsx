@@ -23,6 +23,12 @@ const MFP_STYLES = `
   @keyframes xp-from-left{from{opacity:0;transform:translateX(-52px)}to{opacity:1;transform:translateX(0)}}
   @keyframes xp-picker-in{from{opacity:0;transform:translateX(-50%) scale(0.95) translateY(-4px)}to{opacity:1;transform:translateX(-50%) scale(1) translateY(0)}}
 
+  /* Monthly Progress trend-line points — unchanged on mobile; modestly
+     smaller on tablet/desktop only. */
+  @media(min-width:640px){
+    .xp-mfp-week-point{r:4px;}
+  }
+
   @media(max-width:640px){
     .xp-mfp-overlay{bottom:56px!important;overflow:hidden!important;display:flex!important;flex-direction:column!important;padding:0!important;background:rgba(0,0,0,1)!important;}
     .xp-mfp-wrap{flex:1!important;min-height:0!important;padding:0!important;display:flex!important;flex-direction:column!important;align-items:stretch!important;justify-content:flex-start!important;}
@@ -771,6 +777,11 @@ interface WeekBucket {
   // Set only when this week spans two calendar months AND the bucket is in
   // "calendar" mode — chronologically-ordered portions for the hover detail.
   crossMonth: { range: string; ms: number }[] | null
+  // Hasn't started yet (today is before this week's Sunday) — distinct from a
+  // completed week that legitimately totals 0. Drives both the trend line's
+  // stop point and the WIP marker below.
+  isFuture: boolean
+  isCurrent: boolean
 }
 
 type WeekMode = 'calendar' | 'month-only'
@@ -885,7 +896,7 @@ function MonthlyWeeklyTrendChart({ weeks, isDark }: {
   const yMaxMs = yMaxHours * 3_600_000
 
   const W = 520, H = 220
-  const PAD = { top: 40, bottom: 28, left: 32, right: 14 }
+  const PAD = { top: 52, bottom: 28, left: 32, right: 14 }
   const cW = W - PAD.left - PAD.right
   const cH = H - PAD.top - PAD.bottom
   const slotW = cW / n
@@ -893,6 +904,8 @@ function MonthlyWeeklyTrendChart({ weeks, isDark }: {
   const xCenter = (i: number) => PAD.left + i * slotW + slotW / 2
   const yPos = (ms: number) => PAD.top + cH - (ms / yMaxMs) * cH
   const baseY = PAD.top + cH
+  // The trend line/points float above their bar's top rather than sitting on it.
+  const LINE_GAP = 12
 
   const step = yMaxHours <= 16 ? 2 : yMaxHours <= 30 ? 5 : yMaxHours <= 60 ? 10 : 20
   const yTicks: number[] = []
@@ -908,7 +921,14 @@ function MonthlyWeeklyTrendChart({ weeks, isDark }: {
     return 1 - Math.pow(1 - t, 3)
   }
 
-  const linePts = weeks.map((w, i) => ({ x: xCenter(i), y: yPos(w.ms) }))
+  // Last week that has actually begun — the trend line/points stop here, so a
+  // month that's only just started never connects forward through weeks that
+  // haven't happened yet (which would otherwise sit at 0 and read as "0 time").
+  let lastActiveIdx = -1
+  for (let i = 0; i < n; i++) if (!weeks[i].isFuture) lastActiveIdx = i
+
+  const linePts = weeks.map((w, i) => ({ x: xCenter(i), y: yPos(w.ms) - LINE_GAP }))
+  const activePts = lastActiveIdx >= 0 ? linePts.slice(0, lastActiveIdx + 1) : []
 
   // Catmull-Rom → cubic Bézier conversion for a smooth curve through every point.
   function smoothPath(pts: { x: number; y: number }[]): string {
@@ -925,7 +945,7 @@ function MonthlyWeeklyTrendChart({ weeks, isDark }: {
     }
     return d
   }
-  const linePath = smoothPath(linePts)
+  const linePath = smoothPath(activePts)
   const gridCol = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'
   const txtCol  = isDark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.70)'
 
@@ -960,7 +980,8 @@ function MonthlyWeeklyTrendChart({ weeks, isDark }: {
             onMouseEnter={() => setHoverIdx(i)} onMouseLeave={() => setHoverIdx(null)} />
         ))}
 
-        {/* Bars — rise from the baseline, staggered left to right */}
+        {/* Bars — rise from the baseline, staggered left to right. Always
+            fully opaque/solid — no hover-dim on the bar fill itself. */}
         {weeks.map((w, i) => {
           const frac = barFrac(i)
           const fullH = (w.ms / yMaxMs) * cH
@@ -970,25 +991,49 @@ function MonthlyWeeklyTrendChart({ weeks, isDark }: {
           return (
             <rect key={w.label} x={x} y={y} width={barW} height={Math.max(barH, 0)} rx={6}
               fill="url(#mfpWeekBar)" pointerEvents="none"
-              opacity={hoverIdx === null || hoverIdx === i ? 1 : 0.55}
-              style={{ transition: 'opacity 150ms ease' }}
             />
           )
         })}
 
-        {/* Trend line — wipes in left to right */}
-        <g clipPath="url(#mfpWeekLineClip)">
-          <path d={linePath} fill="none" stroke="#ef4444" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
-        </g>
-
-        {/* Points + exact time labels + peak trophy */}
+        {/* WIP — only the current (in-progress) week's bar, only when there's
+            room for the stacked letters so it never overflows or collides. */}
         {weeks.map((w, i) => {
-          const threshold = n > 1 ? (i / (n - 1)) * 0.92 : 0
+          if (!w.isCurrent) return null
+          const fullBarH = (w.ms / yMaxMs) * cH
+          const availH = fullBarH * barFrac(i)
+          const LETTER_H = 11
+          const totalH = 3 * LETTER_H
+          if (availH < totalH + 10 || barW < 16) return null
+          const startY = baseY - availH / 2 - totalH / 2 + LETTER_H * 0.78
+          return (
+            <g key={`wip-${w.label}`} pointerEvents="none" style={{ opacity: barFrac(i) > 0.85 ? 1 : 0, transition: 'opacity 200ms ease' }}>
+              {['W', 'I', 'P'].map((l, li) => (
+                <text key={l} x={xCenter(i)} y={startY + li * LETTER_H} textAnchor="middle" fontSize={9} fontWeight={800}
+                  letterSpacing="0.04em" fill="rgba(255,255,255,0.88)">{l}</text>
+              ))}
+            </g>
+          )
+        })}
+
+        {/* Trend line — wipes in left to right, stops at the last week that
+            has actually begun (never drawn through future weeks). */}
+        {activePts.length > 1 && (
+          <g clipPath="url(#mfpWeekLineClip)">
+            <path d={linePath} fill="none" stroke="#ef4444" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
+          </g>
+        )}
+
+        {/* Points + exact time labels + peak trophy — only for weeks that
+            have begun; floating LINE_GAP above their bar's top. */}
+        {weeks.map((w, i) => {
+          if (w.isFuture) return null
+          const activeN = lastActiveIdx + 1
+          const threshold = activeN > 1 ? (i / (lastActiveIdx || 1)) * 0.92 : 0
           const visible = revealFrac >= threshold
           const p = linePts[i]
           return (
             <g key={w.label} pointerEvents="none" style={{ opacity: visible ? 1 : 0, transition: 'opacity 280ms ease' }}>
-              <circle cx={p.x} cy={p.y} r={5} fill={isDark ? '#1a1030' : '#ffffff'} stroke="#7c3aed" strokeWidth={2.5} />
+              <circle className="xp-mfp-week-point" cx={p.x} cy={p.y} r={5} fill={isDark ? '#1a1030' : '#ffffff'} stroke="#7c3aed" strokeWidth={2.5} />
               <text x={p.x} y={p.y - 11} textAnchor="middle" fontSize={8.5} fontWeight={700} fill="#7c3aed">
                 {formatMs(w.ms)}
               </text>
@@ -1357,9 +1402,19 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
         : `${MONTH_ABBR[a.getMonth()]} ${a.getDate()}–${MONTH_ABBR[b.getMonth()]} ${b.getDate()}`
     }
 
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
     const buckets: WeekBucket[] = []
     let weekNum = 1
     while (cursor <= lastOfMonth) {
+      const weekStart = new Date(cursor)
+      weekStart.setHours(0, 0, 0, 0)
+      const weekEndIncl = new Date(weekStart)
+      weekEndIncl.setDate(weekEndIncl.getDate() + 6)
+      const isFuture  = weekStart > today
+      const isCurrent = !isFuture && weekEndIncl >= today
+
       const inMonth: Date[] = [], before: Date[] = [], after: Date[] = []
       for (let i = 0; i < 7; i++) {
         const d = new Date(cursor)
@@ -1384,7 +1439,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
         crossMonth = parts
       }
 
-      buckets.push({ label: `Week ${weekNum}`, ms, crossMonth })
+      buckets.push({ label: `Week ${weekNum}`, ms, crossMonth, isFuture, isCurrent })
       weekNum++
       cursor.setDate(cursor.getDate() + 7)
     }

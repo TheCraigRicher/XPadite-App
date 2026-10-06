@@ -6,6 +6,7 @@ import { formatMs, formatTime, isProductiveActivity, APP_YEAR, dateKey as makeDa
 import type { Task } from './types'
 import { GaugeMeter } from './GaugeMeter'
 import { useDisplayFirstName } from './useDisplayFirstName'
+import { AICoachMenuIcon } from './AppSidebar'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1599,30 +1600,23 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
             </button>
           )}
           {/* Title — absolutely centered on the full header width at every breakpoint,
-              independent of the Back control's and Export/Close buttons' widths. */}
+              independent of the Back control's and AI Insights pill's width. */}
           <div className="absolute left-1/2 text-center min-w-0 max-w-[55%] sm:max-w-[45%]" style={{ top: '50%', transform: 'translate(-50%,-50%)' }}>
-            <h2 className="text-sm font-bold text-white tracking-wide truncate">Today&apos;s Dashboard</h2>
+            <h2 className="text-sm font-bold text-white tracking-wide truncate">Daily Dashboard</h2>
             <p className="text-[10px] mt-0.5 truncate" style={{ color: 'rgba(167,139,250,0.62)' }}>{dateLabel}</p>
           </div>
-          {/* Export/Close — now the only flow content, pushed to the right since
-              Back/Title are out of flow (absolute). */}
-          <div className="ml-auto flex items-center gap-2">
-            {/* Export button — desktop only */}
-            <button onClick={openExport} data-export-exclude="true"
-              className="hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium hover:opacity-90 transition-opacity flex-shrink-0"
-              style={{ background: 'rgba(167,139,250,0.16)', border: '0.5px solid rgba(167,139,250,0.3)', color: '#c4b5fd' }}
-              title="Export dashboard as PNG"
-              aria-label="Export dashboard">
-              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M8 2v8M5 7l3 3 3-3M2 12v1a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-1"/>
-              </svg>
-              Export
-            </button>
-            {/* Close button — desktop only */}
-            <button onClick={onClose} data-export-exclude="true"
-              className="hidden sm:block text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
-              style={{ background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}>
-              × Close
+          {/* AI Insights — replaces Export/Close, every breakpoint. Reuses the
+              existing "Unlock AI Coach" modal (showAiCoach, already built below
+              but previously never triggered anywhere) and the existing AI Coach
+              icon asset/component (AICoachMenuIcon, imported from AppSidebar.tsx)
+              rather than inventing new AI functionality or a new icon. */}
+          <div className="ml-auto flex items-center">
+            <button onClick={() => setShowAiCoach(true)} data-export-exclude="true"
+              className="flex items-center gap-1.5 text-[10px] sm:text-xs px-2.5 sm:px-3 py-1.5 rounded-full font-semibold hover:opacity-90 transition-opacity flex-shrink-0"
+              style={{ background: 'rgba(255,255,255,0.14)', border: '0.5px solid rgba(255,255,255,0.28)', color: '#ffffff' }}
+              aria-label="AI Insights">
+              <AICoachMenuIcon size={16} />
+              AI Insights
             </button>
           </div>
         </div>

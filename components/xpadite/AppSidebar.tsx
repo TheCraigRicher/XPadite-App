@@ -36,22 +36,28 @@ const ActivityManagerIcon = () => (
   <img src="/Activity%20Manager%20Icon.png" alt="" className="w-5 h-5 inline-block align-middle object-contain" />
 )
 
-// Rendered well above the 20px slot so its visual weight matches the Gallery/
-// Sync emoji icons. The outer span keeps the exact original 20x20 footprint
-// (zero effect on row height or label position); the image is absolutely
-// positioned and centered inside it, so growing it never affects layout —
-// it simply overflows the slot symmetrically, same as the gap it already sat in.
-const AICoachMenuIcon = () => (
-  <span className="relative inline-block w-5 h-5 align-middle flex-shrink-0">
-    {/* eslint-disable-next-line @next/next/no-img-element */}
-    <img
-      src="/AI%20Coach%20Icon.png"
-      alt=""
-      className="absolute top-1/2 left-1/2 w-8 h-8 object-contain"
-      style={{ transform: 'translate(-50%, -50%)' }}
-    />
-  </span>
-)
+// Rendered well above its own footprint so its visual weight matches the
+// Gallery/Sync emoji icons at the default size. The outer span keeps a fixed
+// WxH footprint (zero effect on row height or label position); the image is
+// absolutely positioned and centered inside it, so growing it never affects
+// layout — it simply overflows the slot symmetrically, same as the gap it
+// already sat in. Exported so other surfaces (e.g. a header "AI Insights"
+// pill) can reuse this exact icon/asset at their own size instead of each
+// hand-rolling the same wrapper.
+export function AICoachMenuIcon({ size = 20 }: { size?: number }) {
+  const imgSize = Math.round(size * 1.6)
+  return (
+    <span className="relative inline-block align-middle flex-shrink-0" style={{ width: size, height: size }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/AI%20Coach%20Icon.png"
+        alt=""
+        className="absolute top-1/2 left-1/2 object-contain"
+        style={{ width: imgSize, height: imgSize, transform: 'translate(-50%, -50%)' }}
+      />
+    </span>
+  )
+}
 
 // ─── Menu structure ───────────────────────────────────────────────────────────
 

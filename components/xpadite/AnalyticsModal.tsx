@@ -29,6 +29,7 @@ import { MONTHS, formatMs, dateKey as buildDateKey, hexToRgba, resolveProgressCo
 import { computeRangeStats, getCurrentWeekRange, getCurrentMonthRange } from './AnalyticsPage'
 import { calculateBestStreak } from './productivityEngine'
 import { DayDashboardModal } from './DayDashboardModal'
+import { WeekFullPage } from './WeekFullPage'
 import { MonthFullPage } from './MonthFullPage'
 import { YearFullPage } from './YearFullPage'
 import { ProductiveDot } from './LegendRow'
@@ -444,13 +445,11 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
   const [scope, setScope] = useState<Scope>('today')
   const [todayScopeDate, setTodayScopeDate] = useState(() => new Date())
   const [showPremium, setShowPremium] = useState(false)
-  // Only Today/Monthly/Yearly have an existing dashboard to open — Weekly
-  // stays visual-only (no placeholder dashboard) per scope.
-  const [openDashboard, setOpenDashboard] = useState<'today' | 'monthly' | 'yearly' | null>(null)
+  const [openDashboard, setOpenDashboard] = useState<'today' | 'weekly' | 'monthly' | 'yearly' | null>(null)
 
   function handleTimeframeSelect(id: Timeframe) {
     setSelectedTimeframe(id)
-    if (id === 'today' || id === 'monthly' || id === 'yearly') setOpenDashboard(id)
+    setOpenDashboard(id)
   }
 
   useEffect(() => {
@@ -670,6 +669,29 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
           onClose={() => setOpenDashboard(null)}
           onBack={() => setOpenDashboard(null)}
         />
+      )}
+
+      {/* Weekly Dashboard — built directly on Monthly/Yearly Dashboard's
+          design system (WeekFullPage.tsx), opened into the IDENTICAL
+          backdrop+card shell used by Monthly/Yearly above and by this
+          modal's own main content, so switching between them never changes
+          the outer modal's width/height. */}
+      {openDashboard === 'weekly' && (
+        <div
+          className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[51] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-3 sm:pt-4"
+          style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
+        >
+          <div
+            className="flex flex-col w-full h-full sm:h-auto sm:rounded-2xl sm:shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] sm:mb-6"
+            style={{
+              background: 'var(--xp-bg)',
+              border: isDark ? '0.5px solid rgba(124,58,237,0.22)' : '0.5px solid var(--xp-bdr2)',
+              boxShadow: isDark ? '0 30px 70px rgba(0,0,0,0.75)' : '0 20px 50px rgba(0,0,0,0.12)',
+            }}
+          >
+            <WeekFullPage onClose={() => setOpenDashboard(null)} />
+          </div>
+        </div>
       )}
 
       {/* Monthly Dashboard — the exact existing Expandable Month Modal

@@ -43,6 +43,19 @@ const NextTriangle = () => (
   <svg width="7" height="10" viewBox="0 0 9 12" fill="currentColor" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
 )
 
+// For the current year, defaults to the current month's group (if it has
+// data); for a historical year — or when the current month has none —
+// defaults to the most recent month that does. Returns the position within
+// `months` (not the month number itself) to default-open, or -1 if empty.
+function pickDefaultOpenGroupIdx(months: number[], isCurrentYear: boolean, currentMonthIdx: number): number {
+  if (months.length === 0) return -1
+  if (isCurrentYear) {
+    const idx = months.indexOf(currentMonthIdx)
+    if (idx >= 0) return idx
+  }
+  return months.length - 1
+}
+
 function fmtTaskDate(dk: string): string {
   const [y, m, d] = dk.split('-').map(Number)
   const dt = new Date(y, m - 1, d)
@@ -56,10 +69,13 @@ function fmtTaskDate(dk: string): string {
 // DayModal.tsx) — collapsed by default except `defaultOpen`, triangle rotates
 // 90deg open (the exact collapse affordance already used by DayModal's
 // "Journal notes" section).
-function MonthGroup({ title, defaultOpen, count, isDark, children }: {
+function MonthGroup({ title, summary, defaultOpen, isDark, children }: {
   title: string
+  // Compact inline stats appended to the title after " · " (e.g. "6 pending",
+  // "18 sessions", "5 activities · 168h") so the distribution across the year
+  // is readable without expanding every month.
+  summary?: string
   defaultOpen?: boolean
-  count?: number
   isDark: boolean
   children: React.ReactNode
 }) {
@@ -82,12 +98,10 @@ function MonthGroup({ title, defaultOpen, count, isDark, children }: {
         >▶</span>
         <span className="text-[10px] font-semibold flex-1 min-w-0 truncate" style={{ color: isDark ? 'rgba(255,255,255,0.85)' : 'var(--xp-txt)' }}>
           {title}
+          {summary && (
+            <span style={{ fontWeight: 500, color: isDark ? 'rgba(148,163,184,0.6)' : 'var(--xp-txt3)' }}> · {summary}</span>
+          )}
         </span>
-        {count != null && (
-          <span className="text-[8px] font-bold tabular-nums flex-shrink-0" style={{ color: isDark ? 'rgba(148,163,184,0.5)' : 'var(--xp-txt3)' }}>
-            {count}
-          </span>
-        )}
       </button>
       {open && <div style={{ paddingLeft: 15, paddingBottom: 6 }}>{children}</div>}
     </div>
@@ -104,6 +118,8 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
   const firstName = useDisplayFirstName()
 
   const [currentYear, setCurrentYear] = useState(APP_YEAR)
+  // Blocks navigating into a future year with no historical Analytics data.
+  const isCurrentRealYear = currentYear === new Date().getFullYear()
 
   // ── Data computations (all keyed to currentYear) ───────────────────────────
 
@@ -148,9 +164,57 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
     return map
   }, [allTaskSessions])
 
+  // Total Activities / Total Sessions / Pending Tasks — grouped by month in a
+  // single pass over the year's days (one iteration feeds all three cards,
+  // plus the per-month session/completed-task counts Yearly Progress's
+  // tooltip reuses below rather than re-deriving them).
+  const groupedByMonth = useMemo(() => {
+    const actMaps: Map<string, number>[] = Array.from({ length: 12 }, () => new Map())
+    const sessionsByMonth: SessionRow[][] = Array.from({ length: 12 }, () => [])
+    const pendingByMonth: PendingRow[][] = Array.from({ length: 12 }, () => [])
+    const completedTasksByMonth: number[] = new Array(12).fill(0)
+
+    for (let m = 0; m < 12; m++) {
+      const td = new Date(currentYear, m + 1, 0).getDate()
+      for (let d = 1; d <= td; d++) {
+        const key = dateKey(currentYear, m, d)
+        const day = calData[key]
+        if (!day) continue
+        for (const t of day.tasks) {
+          const act = activities.find(a => a.id === t.actId)
+          for (const s of t.sessions) {
+            if (s.endTs !== null) {
+              const dur = s.endTs - s.startTs
+              if (t.actId) actMaps[m].set(t.actId, (actMaps[m].get(t.actId) ?? 0) + dur)
+              sessionsByMonth[m].push({ actName: act?.name ?? 'Other', actColor: act?.color ?? '#94a3b8', durationMs: dur })
+            }
+          }
+          if (t.done) completedTasksByMonth[m]++
+          else pendingByMonth[m].push({ id: t.id, text: t.text, dateKey: key })
+        }
+      }
+      sessionsByMonth[m].sort((a, b) => b.durationMs - a.durationMs)
+    }
+
+    const activityRows: ActivityRow[][] = actMaps.map(map =>
+      Array.from(map.entries())
+        .map(([actId, ms]) => {
+          const act = activities.find(a => a.id === actId)
+          return { name: act?.name ?? 'Other', color: act?.color ?? '#94a3b8', ms }
+        })
+        .sort((a, b) => b.ms - a.ms)
+    )
+
+    return { activityRows, sessionsByMonth, pendingByMonth, completedTasksByMonth }
+  }, [calData, activities, currentYear])
+
   // Yearly Progress — 12 monthly buckets, feeding the exact same shared
   // bar+curve chart Monthly Dashboard uses (TrendBarChart), rather than a
-  // parallel chart implementation.
+  // parallel chart implementation. Each bucket's own total is real historical
+  // data (including a legitimate 0h for a past month with no sessions); a
+  // month that hasn't started yet is flagged isFuture so the shared chart
+  // excludes it from the trend line/points entirely rather than reading as a
+  // false "zero" — see TrendBarChart's lastActiveIdx/isFuture handling.
   const monthlyBuckets = useMemo((): TrendBucket[] => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
@@ -163,10 +227,23 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
       const monthEnd = new Date(currentYear, m, td)
       const isFuture = monthStart > today
       const isCurrent = !isFuture && monthEnd >= today
-      buckets.push({ label: MONTHS[m].slice(0, 3), ms, crossMonth: null, isFuture, isCurrent })
+      const sessionCount = groupedByMonth.sessionsByMonth[m].length
+      const tasksCompleted = groupedByMonth.completedTasksByMonth[m]
+      buckets.push({
+        label: MONTHS[m].slice(0, 3),
+        ms,
+        crossMonth: null,
+        isFuture,
+        isCurrent,
+        tooltipLabel: `${MONTHS[m]} ${currentYear}`,
+        detail: isFuture ? undefined : [
+          `${sessionCount} session${sessionCount === 1 ? '' : 's'}`,
+          `${tasksCompleted} task${tasksCompleted === 1 ? '' : 's'} completed`,
+        ],
+      })
     }
     return buckets
-  }, [currentYear, dailyMsMap])
+  }, [currentYear, dailyMsMap, groupedByMonth])
 
   const actBreakdown = useMemo((): ActivityRow[] => {
     const actMs = new Map<string, number>()
@@ -204,46 +281,6 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
     return { currentStreak: current, longestStreak: longest }
   }, [calData, yearKeys, currentYear])
 
-  // Total Activities / Total Sessions / Pending Tasks — grouped by month in a
-  // single pass over the year's days (one iteration feeds all three cards).
-  const groupedByMonth = useMemo(() => {
-    const actMaps: Map<string, number>[] = Array.from({ length: 12 }, () => new Map())
-    const sessionsByMonth: SessionRow[][] = Array.from({ length: 12 }, () => [])
-    const pendingByMonth: PendingRow[][] = Array.from({ length: 12 }, () => [])
-
-    for (let m = 0; m < 12; m++) {
-      const td = new Date(currentYear, m + 1, 0).getDate()
-      for (let d = 1; d <= td; d++) {
-        const key = dateKey(currentYear, m, d)
-        const day = calData[key]
-        if (!day) continue
-        for (const t of day.tasks) {
-          const act = activities.find(a => a.id === t.actId)
-          for (const s of t.sessions) {
-            if (s.endTs !== null) {
-              const dur = s.endTs - s.startTs
-              if (t.actId) actMaps[m].set(t.actId, (actMaps[m].get(t.actId) ?? 0) + dur)
-              sessionsByMonth[m].push({ actName: act?.name ?? 'Other', actColor: act?.color ?? '#94a3b8', durationMs: dur })
-            }
-          }
-          if (!t.done) pendingByMonth[m].push({ id: t.id, text: t.text, dateKey: key })
-        }
-      }
-      sessionsByMonth[m].sort((a, b) => b.durationMs - a.durationMs)
-    }
-
-    const activityRows: ActivityRow[][] = actMaps.map(map =>
-      Array.from(map.entries())
-        .map(([actId, ms]) => {
-          const act = activities.find(a => a.id === actId)
-          return { name: act?.name ?? 'Other', color: act?.color ?? '#94a3b8', ms }
-        })
-        .sort((a, b) => b.ms - a.ms)
-    )
-
-    return { activityRows, sessionsByMonth, pendingByMonth }
-  }, [calData, activities, currentYear])
-
   const activityMonthsWithData = groupedByMonth.activityRows
     .map((rows, m) => ({ m, rows }))
     .filter(x => x.rows.length > 0)
@@ -257,6 +294,12 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
   const longestSession = groupedByMonth.sessionsByMonth
     .flat()
     .reduce<SessionRow | null>((best, s) => (!best || s.durationMs > best.durationMs ? s : best), null)
+
+  // Smart default expansion (section 6): never all-open at once.
+  const currentMonthIdx = new Date().getMonth()
+  const activityDefaultOpenIdx = pickDefaultOpenGroupIdx(activityMonthsWithData.map(x => x.m), isCurrentRealYear, currentMonthIdx)
+  const sessionDefaultOpenIdx  = pickDefaultOpenGroupIdx(sessionMonthsWithData.map(x => x.m), isCurrentRealYear, currentMonthIdx)
+  const pendingDefaultOpenIdx  = pickDefaultOpenGroupIdx(pendingMonthsWithData.map(x => x.m), isCurrentRealYear, currentMonthIdx)
 
   // ── Yearly KPI card data (days-worked remaining, vs-last-year deltas, peak
   //    time-of-day window) — all derived from the same calData/sessions this
@@ -406,25 +449,30 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
           aria-label="Back"
         >←</button>
 
-        <div className="absolute left-1/2 text-center min-w-0" style={{ top: '50%', transform: 'translate(-50%,-50%)' }}>
-          <span style={{ display: 'block', fontSize: 16, fontWeight: 700, color: 'white', letterSpacing: '-0.02em', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)', lineHeight: 1.2 }}>
-            Yearly Dashboard
+        {/* Single centered row: ◀  Yearly Dashboard - 2026  ▶ — the year no
+            longer sits on its own line underneath. */}
+        <div className="absolute left-1/2 flex items-center gap-3" style={{ top: '50%', transform: 'translate(-50%,-50%)' }}>
+          <button
+            onClick={() => setCurrentYear(y => y - 1)}
+            aria-label="Previous year"
+            className="flex items-center justify-center rounded-full transition-colors hover:bg-white/10 flex-shrink-0"
+            style={{ width: 22, height: 22, color: 'rgba(255,255,255,0.75)', background: 'transparent', border: 'none', cursor: 'pointer' }}
+          ><PrevTriangle /></button>
+          <span style={{ fontSize: 16, fontWeight: 700, color: 'white', letterSpacing: '-0.02em', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)', lineHeight: 1.2 }}>
+            Yearly Dashboard - {currentYear}
           </span>
-          <div className="flex items-center justify-center gap-2 mt-1">
-            <button
-              onClick={() => setCurrentYear(y => y - 1)}
-              aria-label="Previous year"
-              className="flex items-center justify-center rounded-full transition-colors hover:bg-white/10"
-              style={{ width: 20, height: 20, color: 'rgba(255,255,255,0.75)', background: 'transparent', border: 'none', cursor: 'pointer' }}
-            ><PrevTriangle /></button>
-            <span style={{ fontSize: 11.5, fontWeight: 600, color: 'rgba(255,255,255,0.82)', whiteSpace: 'nowrap' }}>{currentYear}</span>
-            <button
-              onClick={() => setCurrentYear(y => y + 1)}
-              aria-label="Next year"
-              className="flex items-center justify-center rounded-full transition-colors hover:bg-white/10"
-              style={{ width: 20, height: 20, color: 'rgba(255,255,255,0.75)', background: 'transparent', border: 'none', cursor: 'pointer' }}
-            ><NextTriangle /></button>
-          </div>
+          <button
+            onClick={() => setCurrentYear(y => y + 1)}
+            disabled={isCurrentRealYear}
+            aria-label="Next year"
+            className={`flex items-center justify-center rounded-full transition-colors flex-shrink-0 ${isCurrentRealYear ? '' : 'hover:bg-white/10'}`}
+            style={{
+              width: 22, height: 22,
+              color: isCurrentRealYear ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.75)',
+              background: 'transparent', border: 'none',
+              cursor: isCurrentRealYear ? 'default' : 'pointer',
+            }}
+          ><NextTriangle /></button>
         </div>
       </div>
 
@@ -633,13 +681,20 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
               <p className="text-[11px] font-semibold tracking-wide mb-2.5 flex-shrink-0" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Total Activities</p>
               {activityMonthsWithData.length > 0 ? (
                 <div className="flex-1 min-h-0 overflow-y-auto">
-                  {activityMonthsWithData.map(({ m, rows }, groupIdx) => (
-                    <MonthGroup key={m} title={`${MONTHS[m]} ${currentYear}`} defaultOpen={groupIdx === 0} isDark={isDark}>
+                  {activityMonthsWithData.map(({ m, rows }, groupIdx) => {
+                    const monthTotal = rows.reduce((s, r) => s + r.ms, 0)
+                    return (
+                    <MonthGroup
+                      key={m}
+                      title={`${MONTHS[m]} ${currentYear}`}
+                      summary={`${rows.length} activit${rows.length === 1 ? 'y' : 'ies'} · ${formatMs(monthTotal)}`}
+                      defaultOpen={groupIdx === activityDefaultOpenIdx}
+                      isDark={isDark}
+                    >
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                         {rows.map((a, idx) => {
                           const gradStr = TASK_GRAD_STRINGS[idx % TASK_GRAD_STRINGS.length]
                           const barPct = Math.round((a.ms / (rows[0]?.ms ?? 1)) * 100)
-                          const monthTotal = rows.reduce((s, r) => s + r.ms, 0)
                           const totalPct = monthTotal > 0 ? Math.round((a.ms / monthTotal) * 100) : 0
                           return (
                             <div key={a.name}>
@@ -658,7 +713,8 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
                         })}
                       </div>
                     </MonthGroup>
-                  ))}
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="flex items-center justify-center h-20">
@@ -674,7 +730,13 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
               {sessionMonthsWithData.length > 0 ? (
                 <div className="flex-1 min-h-0 overflow-y-auto px-4 py-1">
                   {sessionMonthsWithData.map(({ m, rows }, groupIdx) => (
-                    <MonthGroup key={m} title={`${MONTHS[m]} ${currentYear}`} defaultOpen={groupIdx === 0} isDark={isDark}>
+                    <MonthGroup
+                      key={m}
+                      title={`${MONTHS[m]} ${currentYear}`}
+                      summary={`${rows.length} session${rows.length === 1 ? '' : 's'}`}
+                      defaultOpen={groupIdx === sessionDefaultOpenIdx}
+                      isDark={isDark}
+                    >
                       <div>
                         {rows.slice(0, 8).map((s, i) => {
                           const deep = s.durationMs >= 45 * 60_000
@@ -712,7 +774,13 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
               {pendingMonthsWithData.length > 0 ? (
                 <div className="flex-1 min-h-0 overflow-y-auto">
                   {pendingMonthsWithData.map(({ m, rows }, groupIdx) => (
-                    <MonthGroup key={m} title={`${MONTHS[m]} ${currentYear}`} defaultOpen={groupIdx === 0} isDark={isDark} count={rows.length}>
+                    <MonthGroup
+                      key={m}
+                      title={`${MONTHS[m]} ${currentYear}`}
+                      summary={`${rows.length} pending`}
+                      defaultOpen={groupIdx === pendingDefaultOpenIdx}
+                      isDark={isDark}
+                    >
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {rows.map(t => (
                           <div key={t.id} style={{ paddingBottom: 6, borderBottom: isDark ? '0.5px solid rgba(255,255,255,0.05)' : '0.5px solid var(--xp-bdr)' }}>

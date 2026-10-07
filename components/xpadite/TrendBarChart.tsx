@@ -18,6 +18,13 @@ export interface TrendBucket {
   // blends two different source periods (Monthly's cross-month weeks use
   // this; Daily's hourly buckets never set it).
   crossMonth?: { range: string; ms: number }[] | null
+  // Overrides `label` in the hover/tap tooltip's header only (e.g. "September
+  // 2026" vs. the short axis label "Sep") — the on-chart label stays compact.
+  tooltipLabel?: string
+  // Extra compact lines shown under the tooltip header, alongside crossMonth
+  // if both are set (e.g. Yearly's per-month "47 sessions" / "38 tasks
+  // completed").
+  detail?: string[]
   // Hasn't started/happened yet (e.g. a calendar week before today, or an
   // hour-of-day later than the current time on today) — distinct from a
   // completed bucket that legitimately totals 0. Drives both the trend
@@ -161,11 +168,13 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
         })}
         <line x1={PAD.left} x2={W - PAD.right} y1={baseY} y2={baseY} stroke={isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'} strokeWidth={1} />
 
-        {/* Full-column hover hit areas */}
+        {/* Full-column hover hit areas — desktop hovers, touch devices tap to
+            toggle (mouseenter/mouseleave never fire there). */}
         {buckets.map((w, i) => (
           <rect key={`hit-${w.label}`} x={xCenter(i) - slotW / 2} y={PAD.top} width={slotW} height={cH} fill="transparent"
             style={{ cursor: 'pointer' }}
-            onMouseEnter={() => setHoverIdx(i)} onMouseLeave={() => setHoverIdx(null)} />
+            onMouseEnter={() => setHoverIdx(i)} onMouseLeave={() => setHoverIdx(null)}
+            onClick={() => setHoverIdx(idx => idx === i ? null : i)} />
         ))}
 
         {/* Bars — rise from the baseline, staggered left to right. Always
@@ -240,8 +249,11 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
         ))}
       </svg>
 
-      {/* Cross-month (or other multi-part) breakdown — only when a bucket sets it */}
-      {hoverIdx !== null && buckets[hoverIdx].crossMonth && (
+      {/* Tooltip — cross-month breakdown and/or compact detail lines, only
+          when a bucket sets either. Shown on hover (desktop) or tap (touch,
+          via the hit-rects' onClick above). Absolutely positioned, so it
+          never consumes layout space or changes the chart's own dimensions. */}
+      {hoverIdx !== null && !buckets[hoverIdx].isFuture && (buckets[hoverIdx].crossMonth || buckets[hoverIdx].detail) && (
         <div style={{
           position: 'absolute', left: `${(xCenter(hoverIdx) / W) * 100}%`, transform: 'translateX(-50%)',
           bottom: `${100 - (PAD.top / H) * 100 + 2}%`,
@@ -251,11 +263,16 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
           fontSize: 9, whiteSpace: 'nowrap', zIndex: 5, pointerEvents: 'none',
         }}>
           <div style={{ fontWeight: 700, marginBottom: 2, color: isDark ? 'rgba(255,255,255,0.90)' : 'var(--xp-txt)' }}>
-            {buckets[hoverIdx].label} — {formatMs(buckets[hoverIdx].ms)}
+            {buckets[hoverIdx].tooltipLabel ?? buckets[hoverIdx].label} — {formatMs(buckets[hoverIdx].ms)}
           </div>
-          {buckets[hoverIdx].crossMonth!.map(part => (
+          {buckets[hoverIdx].crossMonth?.map(part => (
             <div key={part.range} style={{ color: isDark ? 'rgba(203,213,225,0.75)' : 'var(--xp-txt2)' }}>
               {part.range} · {formatMs(part.ms)}
+            </div>
+          ))}
+          {buckets[hoverIdx].detail?.map((line, i) => (
+            <div key={i} style={{ color: isDark ? 'rgba(203,213,225,0.75)' : 'var(--xp-txt2)' }}>
+              {line}
             </div>
           ))}
         </div>

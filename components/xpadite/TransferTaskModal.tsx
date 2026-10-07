@@ -2,25 +2,19 @@
 
 // ── Transfer Task (Move / Copy to another date) ─────────────────────────────
 //
-// Data-integrity rule (absolute, never relaxed): a task's already-logged
-// TaskSession history must never be re-attributed to a different day.
-// Analytics/getMonthStats/DayDashboardModal all compute a day's hours by
-// summing calData[dateKey].tasks[].sessions — i.e. attribution is entirely
-// determined by WHICH DAY'S task array physically holds the task object.
-// That means a literal "move" of a task object that already has sessions
-// would silently move its logged hours to the destination day the next time
-// Analytics reads it. Since Analytics' calculation code must not be touched,
-// the only safe way to honor "history stays on the day it happened" is:
+// Move is always a true relocation: the task (and its family, if a parent)
+// is removed from the origin day's task array and the exact same object —
+// id, sessions, done state, and every other property — is inserted into the
+// destination day's task array, unchanged. This applies regardless of how
+// many tasks remain on the origin date or whether the task has logged
+// session history; an origin date correctly becomes empty when its only
+// task is moved. Because Analytics (getMonthStats/DayDashboardModal) sums a
+// day's hours from whichever day's task array physically holds the task's
+// sessions, moving a task with logged time also moves that logged time's
+// Analytics attribution to the destination date — this is intentional.
 //
-//   - Task (and its family, if a parent) has ZERO sessions anywhere → a true
-//     move: remove from origin, insert the same objects, unchanged, on the
-//     destination. Nothing to protect, so this is a plain relocation.
-//   - Task (or any child) already has logged sessions → the origin's task
-//     record is left completely untouched (its history stays fully intact
-//     and correctly attributed), and a FRESH task (new id, zero sessions,
-//     not done) is created on the destination to continue the work there.
-//
-// Copy never touches the origin at all, and always creates fresh task(s).
+// Copy never touches the origin at all, and always creates fresh task(s)
+// (new id, zero sessions, not done) on the destination.
 
 import { useEffect, useMemo, useState } from 'react'
 import { useApp } from './AppContext'
@@ -106,9 +100,8 @@ export function TransferTaskModal({ tasks, dateKey, onClose }: TransferTaskModal
   }, [monthCursor])
 
   // Builds fresh (new-id, zero-session, not-done) copies of one family for
-  // the destination day — the exact same field mapping the single-task copy/
-  // continuation branches always used, factored out so bulk mode applies it
-  // per-family without re-deriving the rules.
+  // the destination day — used by Copy mode, factored out so bulk mode
+  // applies it per-family without re-deriving the rules.
   function buildFreshFamily(members: Task[], rootId: string, seedOffset: number): Task[] {
     const idMap = new Map<string, string>()
     members.forEach((t, i) => idMap.set(t.id, makeTransferId(seedOffset + i)))
@@ -141,22 +134,17 @@ export function TransferTaskModal({ tasks, dateKey, onClose }: TransferTaskModal
       updateDay(selectedKey, prev => ({ ...prev, tasks: [...prev.tasks, ...allFresh] }))
       setToast(isMultiple ? `${tasks.length} tasks copied to ${fmtShort(selectedDate)} ✓` : `Task copied to ${fmtShort(selectedDate)} ✓`)
     } else {
+      // Always a true, lossless relocation — every member of every selected
+      // family (root + children) is removed from the origin and the exact
+      // same objects (id, sessions, done state, every property) land on the
+      // destination, regardless of session history or how many tasks remain
+      // on the origin date afterward. An origin date with its last task
+      // moved away correctly ends up with zero tasks.
       const removeIds = new Set<string>()
       const destAdditions: Task[] = []
-      let anyHistory = false
       families.forEach(({ root, members }) => {
-        const famHasHistory = members.some(t => (t.sessions?.length ?? 0) > 0)
-        if (!famHasHistory) {
-          // No logged time anywhere in this family — a true, lossless relocation.
-          members.forEach(t => removeIds.add(t.id))
-          members.forEach(t => destAdditions.push(t.id === root.id && t.parentTaskId ? { ...t, parentTaskId: undefined } : t))
-        } else {
-          // Already-logged time exists — leave the origin's record (and its
-          // history) exactly as-is, and start a fresh continuation task on
-          // the destination with zero time logged.
-          anyHistory = true
-          destAdditions.push(...buildFreshFamily(members, root.id, destAdditions.length))
-        }
+        members.forEach(t => removeIds.add(t.id))
+        members.forEach(t => destAdditions.push(t.id === root.id && t.parentTaskId ? { ...t, parentTaskId: undefined } : t))
       })
       if (removeIds.size > 0) {
         updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.filter(t => !removeIds.has(t.id)) }))
@@ -164,15 +152,9 @@ export function TransferTaskModal({ tasks, dateKey, onClose }: TransferTaskModal
       if (destAdditions.length > 0) {
         updateDay(selectedKey, prev => ({ ...prev, tasks: [...prev.tasks, ...destAdditions] }))
       }
-      if (!isMultiple) {
-        setToast(anyHistory
-          ? `Continuing on ${fmtShort(selectedDate)} — logged time stays on ${fmtShort(originDate)} ✓`
-          : `Task moved to ${fmtShort(selectedDate)} ✓`)
-      } else {
-        setToast(anyHistory
-          ? `${tasks.length} tasks continued on ${fmtShort(selectedDate)} — logged time stays on ${fmtShort(originDate)} ✓`
-          : `${tasks.length} tasks moved to ${fmtShort(selectedDate)} ✓`)
-      }
+      setToast(isMultiple
+        ? `${tasks.length} tasks moved to ${fmtShort(selectedDate)} ✓`
+        : `Task moved to ${fmtShort(selectedDate)} ✓`)
     }
     onClose()
   }

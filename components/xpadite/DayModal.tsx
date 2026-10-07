@@ -459,7 +459,10 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
     }, 900)
   }
 
-  function validH(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 1 && n <= 12 }
+  // "00" is a legitimate manually-typed hour (equivalent to 12 in h12ToTs's
+  // conversion below, for both AM and PM) — not an empty/unset field, so it
+  // must pass validation like any other in-range hour.
+  function validH(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 0 && n <= 12 }
   function validM(v: string) { const n = parseInt(v, 10); return v.trim() !== '' && !isNaN(n) && n >= 0 && n <= 59 }
 
   // Clicking into an unset (dimmed) Start/End field just activates the

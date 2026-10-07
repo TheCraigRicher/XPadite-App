@@ -93,7 +93,7 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
   const yPos = (ms: number) => PAD.top + cH - (ms / yMaxMs) * cH
   const baseY = PAD.top + cH
   // The trend line/points float above their bar's top rather than sitting on it.
-  const LINE_GAP = 12
+  const LINE_GAP = 16
 
   const step = yMaxHours <= 16 ? 2 : yMaxHours <= 30 ? 5 : yMaxHours <= 60 ? 10 : 20
   const yTicks: number[] = []
@@ -119,49 +119,43 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
   const linePts = buckets.map((w, i) => ({ x: xCenter(i), y: yPos(w.ms) - LINE_GAP }))
   const activePts = lastActiveIdx >= 0 ? linePts.slice(0, lastActiveIdx + 1) : []
 
-  // Per-segment horizontal-tangent cubic Bézier: each segment leaves its
-  // start point and arrives at its end point moving horizontally, which
-  // always produces a genuine flowing S-curve — including between just 2
-  // points, where a Catmull-Rom approach can degenerate to a straight
-  // diagonal when there's no neighboring point for context. Because the
-  // tangent is horizontal on BOTH sides of every point in the list (not just
-  // the two real data points), inserting extra waypoints never introduces a
-  // kink — every point the path passes through stays smooth, which is what
-  // lets the bar-clearance waypoints below just slot in as more points
-  // rather than needing special-cased curve math.
+  // Cardinal-spline-to-Bézier (a tension-damped Catmull-Rom): the tangent at
+  // each point still leans toward its own neighbors (P[i+1]-P[i-1], so the
+  // curve flows in the direction of travel and only flattens naturally at
+  // genuine local peaks/valleys, not forced-horizontal everywhere), but
+  // TENSION scales that tangent down from full Catmull-Rom strength. Full
+  // strength reacts to the magnitude of each jump — a 0h→144h swing produces
+  // a very long tangent, which makes the curve dive in steeply right next to
+  // that point before rounding off, i.e. exactly the tight/aggressive look
+  // this is fixing. Damping the tangent trades a little overshoot-avoidance
+  // for broader, calmer arcs that still rise and fall through the true
+  // values, which is the look this chart wants. Endpoints clamp to their one
+  // neighbor (standard open-curve boundary condition); for exactly 2 points
+  // this has no other point to lean toward and correctly degenerates to a
+  // straight connecting segment.
+  const TENSION = 0.6
   function smoothPath(pts: { x: number; y: number }[]): string {
-    if (pts.length < 2) return ''
+    const count = pts.length
+    if (count < 2) return ''
+    const at = (i: number) => pts[Math.max(0, Math.min(count - 1, i))]
+    const k = TENSION / 6
     let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`
-    for (let i = 0; i < pts.length - 1; i++) {
-      const p1 = pts[i]
-      const p2 = pts[i + 1]
-      const midX = (p1.x + p2.x) / 2
-      d += ` C ${midX.toFixed(1)} ${p1.y.toFixed(1)}, ${midX.toFixed(1)} ${p2.y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+    for (let i = 0; i < count - 1; i++) {
+      const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2)
+      const c1x = p1.x + (p2.x - p0.x) * k
+      const c1y = p1.y + (p2.y - p0.y) * k
+      const c2x = p2.x - (p3.x - p1.x) * k
+      const c2y = p2.y - (p3.y - p1.y) * k
+      d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
     }
     return d
   }
 
-  // Bar-clearance waypoints: for every active bucket with a real bar (ms>0),
-  // replace its single dot-point with three co-height points — just outside
-  // the bar's left edge, the dot itself, just outside the right edge — all
-  // at the dot's own y. Since smoothPath gives every point a horizontal
-  // tangent on both sides, the curve rises to "shoulder" height BEFORE it
-  // reaches the bar's left edge, stays clear of the bar for its full width,
-  // then descends only after clearing the right edge — so the line can never
-  // cut through a bar's rectangle, for any bar height/neighboring value,
-  // without touching the dot's actual data position or the bar's own
-  // geometry. Zero-height buckets (no bar to clear) keep their single point.
-  const BAR_CLEARANCE = 5
-  const pathPts = activePts.flatMap((p, idx) => {
-    const w = buckets[idx]
-    if (w.ms <= 0) return [p]
-    return [
-      { x: p.x - barW / 2 - BAR_CLEARANCE, y: p.y },
-      p,
-      { x: p.x + barW / 2 + BAR_CLEARANCE, y: p.y },
-    ]
-  })
-  const linePath = smoothPath(pathPts)
+  // The bar's own top (not the dot) sits LINE_GAP below the dot's y — see
+  // `linePts` above — so the bar visually terminates below its data point
+  // with clean breathing room by construction; the curve itself connects the
+  // true data points directly and never detours around a bar's geometry.
+  const linePath = smoothPath(activePts)
   const gridCol = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'
   const txtCol  = isDark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.70)'
 

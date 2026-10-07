@@ -354,9 +354,9 @@ export function WeekFullPage({ onClose }: WeekFullPageProps) {
 
   return (
     <div className="w-full h-full flex flex-col overflow-hidden">
-      {/* ── Header — same single-row nav pattern Yearly's header established:
-           arrow-only Back, centered "Weekly Dashboard - <range>" with
-           prev/next week triangles either side. ── */}
+      {/* ── Header — arrow-only Back, plus a centered two-line title: prev/
+           next triangles flanking "Weekly Dashboard" on the first line, the
+           selected date range on its own line below. ── */}
       <div
         className="flex items-center px-4 sm:px-6 py-3.5 sm:py-4 flex-shrink-0 relative min-h-[60px] sm:min-h-[64px]"
         style={{
@@ -372,29 +372,59 @@ export function WeekFullPage({ onClose }: WeekFullPageProps) {
           aria-label="Back"
         >←</button>
 
-        <div className="absolute left-1/2 flex items-center gap-3" style={{ top: '50%', transform: 'translate(-50%,-50%)' }}>
-          <button
-            onClick={() => setWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() - 7); return n })}
-            aria-label="Previous week"
-            className="flex items-center justify-center rounded-full transition-colors hover:bg-white/10 flex-shrink-0"
-            style={{ width: 22, height: 22, color: 'rgba(255,255,255,0.75)', background: 'transparent', border: 'none', cursor: 'pointer' }}
-          ><PrevTriangle /></button>
-          <span style={{ fontSize: 16, fontWeight: 700, color: 'white', letterSpacing: '-0.02em', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)', lineHeight: 1.2 }}>
-            Weekly Dashboard - {fmtWeekRange(weekStart)}
+        {/* Centered nav cluster: prev-triangle / "Weekly Dashboard" /
+            next-triangle sit together in one row, with the date range on its
+            own line below. Because "Weekly Dashboard" is constant text, this
+            row's width — and so the triangles' positions relative to the
+            title and to the header — never changes between weeks; only the
+            date line underneath (outside the flanked row) updates. The whole
+            cluster is centered as a block, so it also never moves regardless
+            of whether the Current Week button (positioned independently, at
+            the header's own right edge) is shown. */}
+        <div className="absolute left-1/2 flex flex-col items-center" style={{ top: '50%', transform: 'translate(-50%,-50%)' }}>
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            <button
+              onClick={() => setWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() - 7); return n })}
+              aria-label="Previous week"
+              className="flex items-center justify-center rounded-full transition-colors hover:bg-white/10 flex-shrink-0"
+              style={{ width: 20, height: 20, color: 'rgba(255,255,255,0.75)', background: 'transparent', border: 'none', cursor: 'pointer' }}
+            ><PrevTriangle /></button>
+            <span style={{ fontSize: 15, fontWeight: 700, color: 'white', letterSpacing: '-0.02em', whiteSpace: 'nowrap', textShadow: '0 1px 4px rgba(0,0,0,0.30)', lineHeight: 1.2 }}>
+              Weekly Dashboard
+            </span>
+            <button
+              onClick={() => setWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() + 7); return n })}
+              disabled={isCurrentWeek}
+              aria-label="Next week"
+              className={`flex items-center justify-center rounded-full transition-colors flex-shrink-0 ${isCurrentWeek ? '' : 'hover:bg-white/10'}`}
+              style={{
+                width: 20, height: 20,
+                color: isCurrentWeek ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.75)',
+                background: 'transparent', border: 'none',
+                cursor: isCurrentWeek ? 'default' : 'pointer',
+              }}
+            ><NextTriangle /></button>
+          </div>
+          <span style={{ fontSize: 10.5, fontWeight: 600, marginTop: 2, color: 'rgba(255,255,255,0.75)', whiteSpace: 'nowrap' }}>
+            {fmtWeekRange(weekStart)}
           </span>
-          <button
-            onClick={() => setWeekStart(d => { const n = new Date(d); n.setDate(d.getDate() + 7); return n })}
-            disabled={isCurrentWeek}
-            aria-label="Next week"
-            className={`flex items-center justify-center rounded-full transition-colors flex-shrink-0 ${isCurrentWeek ? '' : 'hover:bg-white/10'}`}
-            style={{
-              width: 22, height: 22,
-              color: isCurrentWeek ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.75)',
-              background: 'transparent', border: 'none',
-              cursor: isCurrentWeek ? 'default' : 'pointer',
-            }}
-          ><NextTriangle /></button>
         </div>
+
+        {/* Current Week — only shown once the user has navigated away from
+            the current week. Anchored independently at the header's own
+            edge, so it never affects the centered nav cluster's position. */}
+        {!isCurrentWeek && (
+          <button
+            onClick={() => setWeekStart(mondayOf(new Date()))}
+            className="absolute right-4 flex items-center flex-shrink-0 whitespace-nowrap"
+            style={{
+              top: '50%', transform: 'translateY(-50%)',
+              fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 20,
+              background: 'rgba(255,255,255,0.14)', color: '#ffffff', border: '0.5px solid rgba(255,255,255,0.28)',
+              cursor: 'pointer',
+            }}
+          >Current Week</button>
+        )}
       </div>
 
       {/* ── Scrollable body — content-driven height on desktop/tablet (matches

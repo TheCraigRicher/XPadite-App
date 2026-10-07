@@ -123,10 +123,12 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
   // start point and arrives at its end point moving horizontally, which
   // always produces a genuine flowing S-curve — including between just 2
   // points, where a Catmull-Rom approach can degenerate to a straight
-  // diagonal when there's no neighboring point for context. The points
-  // themselves stay at their exact data value; this only shapes the line
-  // connecting them, so it can rise and fall freely without ever looking
-  // sharp/angular.
+  // diagonal when there's no neighboring point for context. Because the
+  // tangent is horizontal on BOTH sides of every point in the list (not just
+  // the two real data points), inserting extra waypoints never introduces a
+  // kink — every point the path passes through stays smooth, which is what
+  // lets the bar-clearance waypoints below just slot in as more points
+  // rather than needing special-cased curve math.
   function smoothPath(pts: { x: number; y: number }[]): string {
     if (pts.length < 2) return ''
     let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`
@@ -138,7 +140,28 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
     }
     return d
   }
-  const linePath = smoothPath(activePts)
+
+  // Bar-clearance waypoints: for every active bucket with a real bar (ms>0),
+  // replace its single dot-point with three co-height points — just outside
+  // the bar's left edge, the dot itself, just outside the right edge — all
+  // at the dot's own y. Since smoothPath gives every point a horizontal
+  // tangent on both sides, the curve rises to "shoulder" height BEFORE it
+  // reaches the bar's left edge, stays clear of the bar for its full width,
+  // then descends only after clearing the right edge — so the line can never
+  // cut through a bar's rectangle, for any bar height/neighboring value,
+  // without touching the dot's actual data position or the bar's own
+  // geometry. Zero-height buckets (no bar to clear) keep their single point.
+  const BAR_CLEARANCE = 5
+  const pathPts = activePts.flatMap((p, idx) => {
+    const w = buckets[idx]
+    if (w.ms <= 0) return [p]
+    return [
+      { x: p.x - barW / 2 - BAR_CLEARANCE, y: p.y },
+      p,
+      { x: p.x + barW / 2 + BAR_CLEARANCE, y: p.y },
+    ]
+  })
+  const linePath = smoothPath(pathPts)
   const gridCol = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'
   const txtCol  = isDark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.70)'
 

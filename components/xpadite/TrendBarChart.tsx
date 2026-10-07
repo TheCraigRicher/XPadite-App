@@ -119,6 +119,21 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
   const linePts = buckets.map((w, i) => ({ x: xCenter(i), y: yPos(w.ms) - LINE_GAP }))
   const activePts = lastActiveIdx >= 0 ? linePts.slice(0, lastActiveIdx + 1) : []
 
+  // Bar clearance, as a constraint on CONTROL POINTS rather than an inserted
+  // waypoint: for any active bucket with a real bar, a segment touching that
+  // bucket's point must keep BOTH of its control points above (comfortably
+  // clear of) that bar's own top edge — not just the one control point
+  // nearest it. Since a cubic Bézier always stays within the convex hull of
+  // its 4 defining points, constraining both control points of a segment to
+  // the taller of its two endpoints' bar-clearance lines keeps the ENTIRE
+  // segment clear of that bar (ascent and descent, not just the apex), and
+  // because control points shape the curve well before it reaches the
+  // endpoint, the curve visibly starts bending upward/outward earlier too.
+  // `null` (no bar at either end) leaves a segment's control points
+  // unconstrained.
+  const CLEARANCE = LINE_GAP + 10
+  const barClearY = activePts.map((_, i) => buckets[i].ms > 0 ? yPos(buckets[i].ms) - CLEARANCE : null)
+
   // Cardinal-spline-to-Bézier (a tension-damped Catmull-Rom): the tangent at
   // each point still leans toward its own neighbors (P[i+1]-P[i-1], so the
   // curve flows in the direction of travel and only flattens naturally at
@@ -133,29 +148,75 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
   // neighbor (standard open-curve boundary condition); for exactly 2 points
   // this has no other point to lean toward and correctly degenerates to a
   // straight connecting segment.
+  //
+  // Consecutive points with the EXACT same value render as a plain straight
+  // segment instead — two equal values have no "direction" for a tangent to
+  // lean into, so the neighbor-based tangent otherwise inherits the
+  // surrounding rise/fall and bows the "flat" segment into a small unwanted
+  // bounce. A straight line between two equal values is already at the
+  // correct (equal) height for both, so it never needs the bar-clearance
+  // treatment either. Also returns the curve's exit direction at its very
+  // last point, for the arrowhead below.
   const TENSION = 0.6
-  function smoothPath(pts: { x: number; y: number }[]): string {
+  function buildSpline(pts: { x: number; y: number }[], clearYs: (number | null)[]): { d: string; endDir: { x: number; y: number } | null } {
     const count = pts.length
-    if (count < 2) return ''
+    if (count < 2) return { d: '', endDir: null }
     const at = (i: number) => pts[Math.max(0, Math.min(count - 1, i))]
     const k = TENSION / 6
     let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`
+    let endDir: { x: number; y: number } | null = null
     for (let i = 0; i < count - 1; i++) {
-      const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2)
+      const p1 = at(i), p2 = at(i + 1)
+      if (p1.y === p2.y) {
+        d += ` L ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+        if (i === count - 2) endDir = { x: p2.x >= p1.x ? 1 : -1, y: 0 }
+        continue
+      }
+      const p0 = at(i - 1), p3 = at(i + 2)
       const c1x = p1.x + (p2.x - p0.x) * k
-      const c1y = p1.y + (p2.y - p0.y) * k
+      let c1y = p1.y + (p2.y - p0.y) * k
       const c2x = p2.x - (p3.x - p1.x) * k
-      const c2y = p2.y - (p3.y - p1.y) * k
+      let c2y = p2.y - (p3.y - p1.y) * k
+      const clear1 = clearYs[i]
+      const clear2 = clearYs[i + 1]
+      const segClear = clear1 != null && clear2 != null ? Math.min(clear1, clear2) : (clear1 ?? clear2)
+      if (segClear != null) {
+        c1y = Math.min(c1y, segClear)
+        c2y = Math.min(c2y, segClear)
+      }
       d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+      if (i === count - 2) {
+        const dx = p2.x - c2x, dy = p2.y - c2y
+        const len = Math.hypot(dx, dy) || 1
+        endDir = { x: dx / len, y: dy / len }
+      }
     }
-    return d
+    return { d, endDir }
   }
 
-  // The bar's own top (not the dot) sits LINE_GAP below the dot's y — see
-  // `linePts` above — so the bar visually terminates below its data point
-  // with clean breathing room by construction; the curve itself connects the
-  // true data points directly and never detours around a bar's geometry.
-  const linePath = smoothPath(activePts)
+  const { d: linePath, endDir } = buildSpline(activePts, barClearY)
+
+  // Arrowhead — a clearly-sized filled triangle whose tip sits exactly
+  // RING_R away from the final point along the curve's own exit tangent,
+  // i.e. touching the outside edge of that point's ring without entering it
+  // (the ring itself, drawn afterward below, covers the plain stroke
+  // underneath).
+  let arrowPolygon: string | null = null
+  if (endDir) {
+    const pLast = activePts[activePts.length - 1]
+    const RING_R = 5, ARROW_LEN = 13, ARROW_W = 9
+    const tipX = pLast.x - endDir.x * RING_R, tipY = pLast.y - endDir.y * RING_R
+    const backX = pLast.x - endDir.x * (RING_R + ARROW_LEN), backY = pLast.y - endDir.y * (RING_R + ARROW_LEN)
+    const px = -endDir.y, py = endDir.x
+    const leftX = backX + px * (ARROW_W / 2), leftY = backY + py * (ARROW_W / 2)
+    const rightX = backX - px * (ARROW_W / 2), rightY = backY - py * (ARROW_W / 2)
+    arrowPolygon = `${tipX.toFixed(1)},${tipY.toFixed(1)} ${leftX.toFixed(1)},${leftY.toFixed(1)} ${rightX.toFixed(1)},${rightY.toFixed(1)}`
+  }
+  // Matches the per-point reveal threshold below evaluated at i=lastActiveIdx
+  // (i/lastActiveIdx*0.92 = 0.92 for any lastActiveIdx>0; the lone-point case
+  // has no "threshold" to reach, so it's visible as soon as anything is).
+  const lastVisible = lastActiveIdx > 0 ? revealFrac >= 0.92 : revealFrac > 0
+
   const gridCol = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'
   const txtCol  = isDark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.70)'
 
@@ -234,8 +295,16 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
             that has actually begun (never drawn through future buckets). */}
         {activePts.length > 1 && (
           <g clipPath={`url(#${uid}-line-clip)`}>
-            <path d={linePath} fill="none" stroke="#ef4444" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
+            <path d={linePath} fill="none" stroke="#ef4444" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
           </g>
+        )}
+
+        {/* Arrowhead — only the final valid point, fades in with it (the
+            point's own ring, drawn below, sits on top and covers the plain
+            stroke underneath, so only the tip-to-ring seam is visible). */}
+        {arrowPolygon && (
+          <polygon points={arrowPolygon} fill="#ef4444" pointerEvents="none"
+            style={{ opacity: lastVisible ? 1 : 0, transition: 'opacity 280ms ease' }} />
         )}
 
         {/* Points + exact time labels + peak trophy — only for buckets that

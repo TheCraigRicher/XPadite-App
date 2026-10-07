@@ -28,7 +28,7 @@ import { PremiumUpgradeModal } from './PremiumUpgradeModal'
 import { MONTHS, formatMs, dateKey as buildDateKey, hexToRgba, resolveProgressColor } from './utils'
 import { computeRangeStats, getCurrentWeekRange, getCurrentMonthRange } from './AnalyticsPage'
 import { calculateBestStreak } from './productivityEngine'
-import { DayDashboardModal } from './DayDashboardModal'
+import { DayFullPage } from './DayFullPage'
 import { WeekFullPage } from './WeekFullPage'
 import { MonthFullPage } from './MonthFullPage'
 import { YearFullPage } from './YearFullPage'
@@ -659,16 +659,29 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
         </div>
       </div>
 
-      {/* Today's Dashboard — the exact existing component (DayDashboardModal),
-          same props/open-close flow AnalyticsPage.tsx itself uses. */}
+      {/* Today's Dashboard — built directly on Monthly Dashboard's design
+          system (DayFullPage.tsx), opened into the IDENTICAL backdrop+card
+          shell used by Weekly/Monthly/Yearly above, so switching between any
+          of them never changes the outer modal's width/height. This is
+          intentionally a different component from DayDashboardModal.tsx
+          (which keeps its own established design for Task Manager's own
+          "Today's Dashboard" entry point, untouched by this). */}
       {openDashboard === 'today' && (
-        <DayDashboardModal
-          dateKey={buildDateKey(today.getFullYear(), today.getMonth(), today.getDate())}
-          month={today.getMonth()}
-          day={today.getDate()}
-          onClose={() => setOpenDashboard(null)}
-          onBack={() => setOpenDashboard(null)}
-        />
+        <div
+          className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[51] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-3 sm:pt-4"
+          style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
+        >
+          <div
+            className="flex flex-col w-full h-full sm:h-auto sm:rounded-2xl sm:shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] sm:mb-6"
+            style={{
+              background: 'var(--xp-bg)',
+              border: isDark ? '0.5px solid rgba(124,58,237,0.22)' : '0.5px solid var(--xp-bdr2)',
+              boxShadow: isDark ? '0 30px 70px rgba(0,0,0,0.75)' : '0 20px 50px rgba(0,0,0,0.12)',
+            }}
+          >
+            <DayFullPage onClose={() => setOpenDashboard(null)} />
+          </div>
+        </div>
       )}
 
       {/* Weekly Dashboard — built directly on Monthly/Yearly Dashboard's

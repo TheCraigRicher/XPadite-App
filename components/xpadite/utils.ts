@@ -199,6 +199,21 @@ export function getMonthStats(data: CalendarData, year: number, month: number) {
   return { productiveDays, hyperDays, milestoneDays, goalDays, completionRate, totalTasks, completedTasks, totalDays }
 }
 
+/** Same shape/logic as getMonthStats, scoped to a full calendar year instead of one month. */
+export function getYearStats(data: CalendarData, year: number) {
+  const prefix = `${year}-`
+  const keys = Object.keys(data).filter(k => k.startsWith(prefix))
+  const totalDays = (new Date(year, 1, 29).getMonth() === 1) ? 366 : 365
+  const productiveDays = keys.filter(k => data[k]?.productive || data[k]?.hyper || data[k]?.milestone || data[k]?.goal).length
+  const hyperDays = keys.filter(k => data[k]?.hyper).length
+  const milestoneDays = keys.filter(k => data[k]?.milestone).length
+  const goalDays = keys.filter(k => data[k]?.goal).length
+  const completionRate = totalDays > 0 ? Math.round((productiveDays / totalDays) * 100) : 0
+  const totalTasks = keys.reduce((s, k) => s + (data[k]?.tasks?.length ?? 0), 0)
+  const completedTasks = keys.reduce((s, k) => s + (data[k]?.tasks?.filter(t => t.done).length ?? 0), 0)
+  return { productiveDays, hyperDays, milestoneDays, goalDays, completionRate, totalTasks, completedTasks, totalDays }
+}
+
 export function getDayOfYear(): number {
   const now = new Date()
   const start = new Date(now.getFullYear(), 0, 0)

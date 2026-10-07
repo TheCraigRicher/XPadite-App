@@ -30,6 +30,7 @@ import { computeRangeStats, getCurrentWeekRange, getCurrentMonthRange } from './
 import { calculateBestStreak } from './productivityEngine'
 import { DayDashboardModal } from './DayDashboardModal'
 import { MonthFullPage } from './MonthFullPage'
+import { YearFullPage } from './YearFullPage'
 import { ProductiveDot } from './LegendRow'
 import type { CalendarData } from './types'
 
@@ -443,13 +444,13 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
   const [scope, setScope] = useState<Scope>('today')
   const [todayScopeDate, setTodayScopeDate] = useState(() => new Date())
   const [showPremium, setShowPremium] = useState(false)
-  // Only Today/Monthly have an existing dashboard to open — Weekly/Yearly
-  // stay visual-only (no placeholder dashboards) per scope.
-  const [openDashboard, setOpenDashboard] = useState<'today' | 'monthly' | null>(null)
+  // Only Today/Monthly/Yearly have an existing dashboard to open — Weekly
+  // stays visual-only (no placeholder dashboard) per scope.
+  const [openDashboard, setOpenDashboard] = useState<'today' | 'monthly' | 'yearly' | null>(null)
 
   function handleTimeframeSelect(id: Timeframe) {
     setSelectedTimeframe(id)
-    if (id === 'today' || id === 'monthly') setOpenDashboard(id)
+    if (id === 'today' || id === 'monthly' || id === 'yearly') setOpenDashboard(id)
   }
 
   useEffect(() => {
@@ -491,10 +492,14 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
   return (
     <>
       {/* Outside-click intentionally does not close this modal — Analytics
-          only closes via its own explicit close/navigation controls. */}
+          only closes via its own explicit close/navigation controls. Hidden
+          (not unmounted, so its own scroll position/state survive) whenever
+          a nested dashboard is open — otherwise this card's own height (which
+          can differ from the nested dashboard's) peeks out from behind/below
+          the nested overlay's semi-transparent backdrop. */}
       <div
         className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-50 flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-3 sm:pt-4"
-        style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
+        style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)', display: openDashboard ? 'none' : undefined }}
       >
         <div
           className="flex flex-col w-full h-full sm:h-auto sm:rounded-2xl sm:shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] sm:mb-6"
@@ -698,6 +703,29 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
               onClose={() => setOpenDashboard(null)}
               onDayDoubleClick={onDayDoubleClick}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Yearly Dashboard — built directly on Monthly Dashboard's design
+          system (YearFullPage.tsx), opened into the IDENTICAL backdrop+card
+          shell used by Monthly above and by this modal's own main content,
+          so switching between them never changes the outer modal's
+          width/height. */}
+      {openDashboard === 'yearly' && (
+        <div
+          className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[51] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-3 sm:pt-4"
+          style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
+        >
+          <div
+            className="flex flex-col w-full h-full sm:h-auto sm:rounded-2xl sm:shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] sm:mb-6"
+            style={{
+              background: 'var(--xp-bg)',
+              border: isDark ? '0.5px solid rgba(124,58,237,0.22)' : '0.5px solid var(--xp-bdr2)',
+              boxShadow: isDark ? '0 30px 70px rgba(0,0,0,0.75)' : '0 20px 50px rgba(0,0,0,0.12)',
+            }}
+          >
+            <YearFullPage onClose={() => setOpenDashboard(null)} />
           </div>
         </div>
       )}

@@ -526,21 +526,6 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               <button
-                onClick={() => setShowPremium(true)}
-                className="hidden sm:flex items-center gap-1.5 text-[10.5px] font-bold px-3 py-1.5 rounded-full transition-opacity hover:opacity-85"
-                style={{ background: '#ffffff', color: '#7c3aed', boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
-              >
-                ✨ AI Insight
-              </button>
-              <button
-                onClick={() => setShowPremium(true)}
-                className="sm:hidden flex items-center justify-center rounded-full transition-opacity hover:opacity-85"
-                style={{ width: 26, height: 26, background: '#ffffff', color: '#7c3aed', fontSize: 12 }}
-                aria-label="AI Insight"
-              >
-                ✨
-              </button>
-              <button
                 onClick={onClose}
                 aria-label="Close Analytics"
                 className="flex items-center justify-center rounded-full flex-shrink-0 transition-opacity hover:opacity-75"

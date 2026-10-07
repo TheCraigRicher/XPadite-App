@@ -117,94 +117,80 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
   let lastActiveIdx = -1
   for (let i = 0; i < n; i++) if (!buckets[i].isFuture) lastActiveIdx = i
 
+  // Every point floats a flat LINE_GAP above its own bar's top — simple,
+  // uniform point-level clearance (requirement: "the point should float
+  // slightly above the bar"). The CONNECTING LINE's own collision risk
+  // (a straight segment from a low/zero point into a much taller point can
+  // cut across that tall point's own bar well before reaching it) is a
+  // separate problem, handled per-segment below.
   const linePts = buckets.map((w, i) => ({ x: xCenter(i), y: yPos(w.ms) - LINE_GAP }))
   const activePts = lastActiveIdx >= 0 ? linePts.slice(0, lastActiveIdx + 1) : []
 
-  // Bar clearance — a light touch, not a curve-reshaping system: for any
-  // active bucket with a real bar, the ONE control point nearest that
-  // bucket's own point is nudged up if it would otherwise sit at/below the
-  // bar's top edge. This only prevents genuine overlap at the point the
-  // curve is actually passing closest to the bar; it deliberately does NOT
-  // force both control points of a segment to a shared threshold (that
-  // produced tight, pinched-looking peaks/valleys instead of the broad
-  // natural spline this chart wants). `null` (no bar) leaves a point's
-  // neighboring control points unconstrained.
-  const CLEARANCE = LINE_GAP + 8
-  const barClearY = activePts.map((_, i) => buckets[i].ms > 0 ? yPos(buckets[i].ms) - CLEARANCE : null)
-
-  // One unified tangent per point — not a per-segment "straight OR curved"
-  // branch — is what makes the whole trajectory read as a single seamless
-  // line. A point's tangent is the blend of its incoming and outgoing chord
-  // DIRECTIONS (unit vectors, not raw deltas), scaled to a moderate fraction
-  // of whichever adjacent segment is shorter:
-  //  - Through a run of equal or steadily-progressing values, the incoming
-  //    and outgoing chords point the same way, so the blended tangent does
-  //    too — the resulting Bézier control points land back on the straight
-  //    chord, so the segment IS a straight line, not an approximation of one.
-  //  - At a genuine local peak/valley, the chords point in different
-  //    directions, so the blend rounds through it with moderate width.
-  // Because the SAME tangent value is used on both sides of every point
-  // (as both a segment's exit tangent and the next segment's entry tangent),
-  // there is never a mismatch exactly at a point — no kinks, no hooks.
-  const ROUND_FRACTION = 0.38
-  function tangentAt(pts: { x: number; y: number }[], i: number): { x: number; y: number } {
-    const count = pts.length
-    const cur = pts[i]
-    const prev = i > 0 ? pts[i - 1] : cur
-    const next = i < count - 1 ? pts[i + 1] : cur
-    const dInX = cur.x - prev.x, dInY = cur.y - prev.y
-    const dOutX = next.x - cur.x, dOutY = next.y - cur.y
-    const lenIn = Math.hypot(dInX, dInY) || 1
-    const lenOut = Math.hypot(dOutX, dOutY) || 1
-    const ux = dInX / lenIn + dOutX / lenOut
-    const uy = dInY / lenIn + dOutY / lenOut
-    const ulen = Math.hypot(ux, uy)
-    if (ulen < 1e-6) return { x: 0, y: 0 } // exact reversal with no net direction — flat tangent
-    const scale = ROUND_FRACTION * Math.min(lenIn, lenOut)
-    return { x: (ux / ulen) * scale, y: (uy / ulen) * scale }
+  // Collision-aware routing: a segment stays a plain straight line UNLESS it
+  // would actually cross a bar's safety zone, in which case ONE waypoint is
+  // inserted at the exact point the segment first enters that zone, pinned
+  // to the bar's safe height — the minimal deviation that clears it, after
+  // which the path continues straight to the real point. This never moves a
+  // point's own (true) position, only what the connecting line does on its
+  // way past a bar it isn't meant to touch.
+  const SAFE_MARGIN = 6
+  function barSafeY(bucketIdx: number): number | null {
+    const ms = buckets[bucketIdx]?.ms
+    if (!ms || ms <= 0) return null
+    return yPos(ms) - SAFE_MARGIN
+  }
+  // For bucket `bucketIdx`'s bar, find where segment p1→p2 (straight line)
+  // first dips below (i.e. numerically below, visually behind) that bar's
+  // safe height within the bar's own horizontal span — the single waypoint
+  // needed to clear it, or null if this segment never gets that close.
+  function waypointFor(bucketIdx: number, p1: { x: number; y: number }, p2: { x: number; y: number }): { x: number; y: number } | null {
+    const safeY = barSafeY(bucketIdx)
+    if (safeY == null || p1.x === p2.x) return null
+    const cx = xCenter(bucketIdx)
+    const xLo = cx - barW / 2, xHi = cx + barW / 2
+    const segXLo = Math.min(p1.x, p2.x), segXHi = Math.max(p1.x, p2.x)
+    const overlapLo = Math.max(xLo, segXLo), overlapHi = Math.min(xHi, segXHi)
+    if (overlapLo > overlapHi) return null
+    const yAt = (x: number) => p1.y + (p2.y - p1.y) * ((x - p1.x) / (p2.x - p1.x))
+    const yLo = yAt(overlapLo), yHi = yAt(overlapHi)
+    // Whichever edge of the overlap the line reaches first (coming from
+    // whichever endpoint is lower/further from this bar) is where it's
+    // closest to violating the safe height.
+    const worstX = yLo >= yHi ? overlapLo : overlapHi
+    const worstY = Math.max(yLo, yHi)
+    return worstY > safeY ? { x: worstX, y: safeY } : null
   }
 
-  // Consecutive points with the EXACT same value always render as a plain
-  // straight segment (the tangent formula above already produces this
-  // naturally, but this is a cheap, exact guarantee rather than relying on
-  // floating-point convergence). The FINAL segment is always a plain
-  // straight line too, regardless of what precedes it — the trajectory's
-  // last approach must read as a clean, uncurled shot into the final point,
-  // not a lingering curve from whatever peak/valley came before it. Also
-  // returns the curve's exit direction at its very last point, for the
-  // arrowhead below.
-  function buildSpline(pts: { x: number; y: number }[], clearYs: (number | null)[]): { d: string; endDir: { x: number; y: number } | null } {
+  // ONE continuous red trend line, built from plain straight segments —
+  // point → line → point, exactly like a conventional line chart. No
+  // spline, no Bézier control points, no curvature; a segment only bends
+  // (via the single inserted waypoint above) when it would otherwise cross
+  // a bar it has nothing to do with. Also returns the final segment's
+  // direction, for the arrowhead below.
+  function buildPolyline(pts: { x: number; y: number }[]): { d: string; endDir: { x: number; y: number } | null } {
     const count = pts.length
     if (count < 2) return { d: '', endDir: null }
-    const tangents = pts.map((_, i) => tangentAt(pts, i))
     let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`
     let endDir: { x: number; y: number } | null = null
     for (let i = 0; i < count - 1; i++) {
       const p1 = pts[i], p2 = pts[i + 1]
-      const isLastSeg = i === count - 2
-      if (p1.y === p2.y || isLastSeg) {
-        d += ` L ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
-        if (isLastSeg) {
-          const dx = p2.x - p1.x, dy = p2.y - p1.y
-          const len = Math.hypot(dx, dy) || 1
-          endDir = { x: dx / len, y: dy / len }
-        }
-        continue
+      const w1 = waypointFor(i, p1, p2)
+      const w2 = waypointFor(i + 1, p1, p2)
+      const waypoints = [w1, w2].filter((w): w is { x: number; y: number } => w !== null)
+      waypoints.sort((a, b) => (p1.x <= p2.x ? a.x - b.x : b.x - a.x))
+      for (const w of waypoints) d += ` L ${w.x.toFixed(1)} ${w.y.toFixed(1)}`
+      d += ` L ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+      if (i === count - 2) {
+        const from = waypoints.length > 0 ? waypoints[waypoints.length - 1] : p1
+        const dx = p2.x - from.x, dy = p2.y - from.y
+        const len = Math.hypot(dx, dy) || 1
+        endDir = { x: dx / len, y: dy / len }
       }
-      const c1x = p1.x + tangents[i].x
-      let c1y = p1.y + tangents[i].y
-      const c2x = p2.x - tangents[i + 1].x
-      let c2y = p2.y - tangents[i + 1].y
-      const clear1 = clearYs[i]
-      const clear2 = clearYs[i + 1]
-      if (clear1 != null) c1y = Math.min(c1y, clear1)
-      if (clear2 != null) c2y = Math.min(c2y, clear2)
-      d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
     }
     return { d, endDir }
   }
 
-  const { d: linePath, endDir } = buildSpline(activePts, barClearY)
+  const { d: linePath, endDir } = buildPolyline(activePts)
 
   // Arrowhead — OPEN chevron (two strokes meeting at the tip, not a filled
   // triangle): wing → tip → wing, drawn as a stroked polyline so it reads as
@@ -230,13 +216,6 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
 
   const gridCol = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'
   const txtCol  = isDark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.70)'
-
-  // Large-square vertical gridlines, spaced to match the horizontal
-  // gridlines' own pixel spacing so the cells read as roughly square rather
-  // than a dense technical grid.
-  const rowPx = yTicks.length > 0 ? cH / yTicks.length : cH
-  const vLines: number[] = []
-  for (let x = PAD.left + rowPx; x < W - PAD.right; x += rowPx) vLines.push(x)
 
   return (
     <div style={{ position: 'relative' }}>
@@ -267,9 +246,6 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
           <rect x={PAD.left} y={PAD.top} width={cW} height={cH} fill={`url(#${uid}-plot-bg)`} pointerEvents="none" />
         )}
 
-        {vLines.map(x => (
-          <line key={`v-${x}`} x1={x} x2={x} y1={PAD.top} y2={baseY} stroke={gridCol} strokeWidth={1} />
-        ))}
         {yTicks.map(h => {
           const y = yPos(h * 3_600_000)
           return (

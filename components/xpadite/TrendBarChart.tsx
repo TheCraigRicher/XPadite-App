@@ -42,6 +42,7 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
   // unlikely to ever be mounted together) never collide on SVG def ids.
   const uid = useId().replace(/[:]/g, '')
   const pointClass = `xp-trend-point-${uid}`
+  const dotClass = `xp-trend-dot-${uid}`
 
   // Lazy initial value (not an effect) so the reduced-motion case never needs
   // a synchronous setState inside the effect below — it just skips starting
@@ -119,98 +120,108 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
   const linePts = buckets.map((w, i) => ({ x: xCenter(i), y: yPos(w.ms) - LINE_GAP }))
   const activePts = lastActiveIdx >= 0 ? linePts.slice(0, lastActiveIdx + 1) : []
 
-  // Bar clearance, as a constraint on CONTROL POINTS rather than an inserted
-  // waypoint: for any active bucket with a real bar, a segment touching that
-  // bucket's point must keep BOTH of its control points above (comfortably
-  // clear of) that bar's own top edge — not just the one control point
-  // nearest it. Since a cubic Bézier always stays within the convex hull of
-  // its 4 defining points, constraining both control points of a segment to
-  // the taller of its two endpoints' bar-clearance lines keeps the ENTIRE
-  // segment clear of that bar (ascent and descent, not just the apex), and
-  // because control points shape the curve well before it reaches the
-  // endpoint, the curve visibly starts bending upward/outward earlier too.
-  // `null` (no bar at either end) leaves a segment's control points
-  // unconstrained.
-  const CLEARANCE = LINE_GAP + 10
+  // Bar clearance — a light touch, not a curve-reshaping system: for any
+  // active bucket with a real bar, the ONE control point nearest that
+  // bucket's own point is nudged up if it would otherwise sit at/below the
+  // bar's top edge. This only prevents genuine overlap at the point the
+  // curve is actually passing closest to the bar; it deliberately does NOT
+  // force both control points of a segment to a shared threshold (that
+  // produced tight, pinched-looking peaks/valleys instead of the broad
+  // natural spline this chart wants). `null` (no bar) leaves a point's
+  // neighboring control points unconstrained.
+  const CLEARANCE = LINE_GAP + 8
   const barClearY = activePts.map((_, i) => buckets[i].ms > 0 ? yPos(buckets[i].ms) - CLEARANCE : null)
 
-  // Cardinal-spline-to-Bézier (a tension-damped Catmull-Rom): the tangent at
-  // each point still leans toward its own neighbors (P[i+1]-P[i-1], so the
-  // curve flows in the direction of travel and only flattens naturally at
-  // genuine local peaks/valleys, not forced-horizontal everywhere), but
-  // TENSION scales that tangent down from full Catmull-Rom strength. Full
-  // strength reacts to the magnitude of each jump — a 0h→144h swing produces
-  // a very long tangent, which makes the curve dive in steeply right next to
-  // that point before rounding off, i.e. exactly the tight/aggressive look
-  // this is fixing. Damping the tangent trades a little overshoot-avoidance
-  // for broader, calmer arcs that still rise and fall through the true
-  // values, which is the look this chart wants. Endpoints clamp to their one
-  // neighbor (standard open-curve boundary condition); for exactly 2 points
-  // this has no other point to lean toward and correctly degenerates to a
-  // straight connecting segment.
-  //
-  // Consecutive points with the EXACT same value render as a plain straight
-  // segment instead — two equal values have no "direction" for a tangent to
-  // lean into, so the neighbor-based tangent otherwise inherits the
-  // surrounding rise/fall and bows the "flat" segment into a small unwanted
-  // bounce. A straight line between two equal values is already at the
-  // correct (equal) height for both, so it never needs the bar-clearance
-  // treatment either. Also returns the curve's exit direction at its very
-  // last point, for the arrowhead below.
-  const TENSION = 0.6
+  // One unified tangent per point — not a per-segment "straight OR curved"
+  // branch — is what makes the whole trajectory read as a single seamless
+  // line. A point's tangent is the blend of its incoming and outgoing chord
+  // DIRECTIONS (unit vectors, not raw deltas), scaled to a moderate fraction
+  // of whichever adjacent segment is shorter:
+  //  - Through a run of equal or steadily-progressing values, the incoming
+  //    and outgoing chords point the same way, so the blended tangent does
+  //    too — the resulting Bézier control points land back on the straight
+  //    chord, so the segment IS a straight line, not an approximation of one.
+  //  - At a genuine local peak/valley, the chords point in different
+  //    directions, so the blend rounds through it with moderate width.
+  // Because the SAME tangent value is used on both sides of every point
+  // (as both a segment's exit tangent and the next segment's entry tangent),
+  // there is never a mismatch exactly at a point — no kinks, no hooks.
+  const ROUND_FRACTION = 0.38
+  function tangentAt(pts: { x: number; y: number }[], i: number): { x: number; y: number } {
+    const count = pts.length
+    const cur = pts[i]
+    const prev = i > 0 ? pts[i - 1] : cur
+    const next = i < count - 1 ? pts[i + 1] : cur
+    const dInX = cur.x - prev.x, dInY = cur.y - prev.y
+    const dOutX = next.x - cur.x, dOutY = next.y - cur.y
+    const lenIn = Math.hypot(dInX, dInY) || 1
+    const lenOut = Math.hypot(dOutX, dOutY) || 1
+    const ux = dInX / lenIn + dOutX / lenOut
+    const uy = dInY / lenIn + dOutY / lenOut
+    const ulen = Math.hypot(ux, uy)
+    if (ulen < 1e-6) return { x: 0, y: 0 } // exact reversal with no net direction — flat tangent
+    const scale = ROUND_FRACTION * Math.min(lenIn, lenOut)
+    return { x: (ux / ulen) * scale, y: (uy / ulen) * scale }
+  }
+
+  // Consecutive points with the EXACT same value always render as a plain
+  // straight segment (the tangent formula above already produces this
+  // naturally, but this is a cheap, exact guarantee rather than relying on
+  // floating-point convergence). The FINAL segment is always a plain
+  // straight line too, regardless of what precedes it — the trajectory's
+  // last approach must read as a clean, uncurled shot into the final point,
+  // not a lingering curve from whatever peak/valley came before it. Also
+  // returns the curve's exit direction at its very last point, for the
+  // arrowhead below.
   function buildSpline(pts: { x: number; y: number }[], clearYs: (number | null)[]): { d: string; endDir: { x: number; y: number } | null } {
     const count = pts.length
     if (count < 2) return { d: '', endDir: null }
-    const at = (i: number) => pts[Math.max(0, Math.min(count - 1, i))]
-    const k = TENSION / 6
+    const tangents = pts.map((_, i) => tangentAt(pts, i))
     let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`
     let endDir: { x: number; y: number } | null = null
     for (let i = 0; i < count - 1; i++) {
-      const p1 = at(i), p2 = at(i + 1)
-      if (p1.y === p2.y) {
+      const p1 = pts[i], p2 = pts[i + 1]
+      const isLastSeg = i === count - 2
+      if (p1.y === p2.y || isLastSeg) {
         d += ` L ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
-        if (i === count - 2) endDir = { x: p2.x >= p1.x ? 1 : -1, y: 0 }
+        if (isLastSeg) {
+          const dx = p2.x - p1.x, dy = p2.y - p1.y
+          const len = Math.hypot(dx, dy) || 1
+          endDir = { x: dx / len, y: dy / len }
+        }
         continue
       }
-      const p0 = at(i - 1), p3 = at(i + 2)
-      const c1x = p1.x + (p2.x - p0.x) * k
-      let c1y = p1.y + (p2.y - p0.y) * k
-      const c2x = p2.x - (p3.x - p1.x) * k
-      let c2y = p2.y - (p3.y - p1.y) * k
+      const c1x = p1.x + tangents[i].x
+      let c1y = p1.y + tangents[i].y
+      const c2x = p2.x - tangents[i + 1].x
+      let c2y = p2.y - tangents[i + 1].y
       const clear1 = clearYs[i]
       const clear2 = clearYs[i + 1]
-      const segClear = clear1 != null && clear2 != null ? Math.min(clear1, clear2) : (clear1 ?? clear2)
-      if (segClear != null) {
-        c1y = Math.min(c1y, segClear)
-        c2y = Math.min(c2y, segClear)
-      }
+      if (clear1 != null) c1y = Math.min(c1y, clear1)
+      if (clear2 != null) c2y = Math.min(c2y, clear2)
       d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
-      if (i === count - 2) {
-        const dx = p2.x - c2x, dy = p2.y - c2y
-        const len = Math.hypot(dx, dy) || 1
-        endDir = { x: dx / len, y: dy / len }
-      }
     }
     return { d, endDir }
   }
 
   const { d: linePath, endDir } = buildSpline(activePts, barClearY)
 
-  // Arrowhead — a clearly-sized filled triangle whose tip sits exactly
-  // RING_R away from the final point along the curve's own exit tangent,
-  // i.e. touching the outside edge of that point's ring without entering it
-  // (the ring itself, drawn afterward below, covers the plain stroke
-  // underneath).
-  let arrowPolygon: string | null = null
+  // Arrowhead — OPEN chevron (two strokes meeting at the tip, not a filled
+  // triangle): wing → tip → wing, drawn as a stroked polyline so it reads as
+  // a natural continuation of the line itself rather than a separate solid
+  // shape. The tip sits exactly RING_R away from the final point along the
+  // curve's own exit tangent, i.e. touching the outside edge of that
+  // point's ring without entering it.
+  let arrowPoints: string | null = null
   if (endDir) {
     const pLast = activePts[activePts.length - 1]
-    const RING_R = 5, ARROW_LEN = 13, ARROW_W = 9
+    const RING_R = 3.5, ARROW_LEN = 9, ARROW_W = 7
     const tipX = pLast.x - endDir.x * RING_R, tipY = pLast.y - endDir.y * RING_R
     const backX = pLast.x - endDir.x * (RING_R + ARROW_LEN), backY = pLast.y - endDir.y * (RING_R + ARROW_LEN)
     const px = -endDir.y, py = endDir.x
     const leftX = backX + px * (ARROW_W / 2), leftY = backY + py * (ARROW_W / 2)
     const rightX = backX - px * (ARROW_W / 2), rightY = backY - py * (ARROW_W / 2)
-    arrowPolygon = `${tipX.toFixed(1)},${tipY.toFixed(1)} ${leftX.toFixed(1)},${leftY.toFixed(1)} ${rightX.toFixed(1)},${rightY.toFixed(1)}`
+    arrowPoints = `${leftX.toFixed(1)},${leftY.toFixed(1)} ${tipX.toFixed(1)},${tipY.toFixed(1)} ${rightX.toFixed(1)},${rightY.toFixed(1)}`
   }
   // Matches the per-point reveal threshold below evaluated at i=lastActiveIdx
   // (i/lastActiveIdx*0.92 = 0.92 for any lastActiveIdx>0; the lone-point case
@@ -220,10 +231,17 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
   const gridCol = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'
   const txtCol  = isDark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.70)'
 
+  // Large-square vertical gridlines, spaced to match the horizontal
+  // gridlines' own pixel spacing so the cells read as roughly square rather
+  // than a dense technical grid.
+  const rowPx = yTicks.length > 0 ? cH / yTicks.length : cH
+  const vLines: number[] = []
+  for (let x = PAD.left + rowPx; x < W - PAD.right; x += rowPx) vLines.push(x)
+
   return (
     <div style={{ position: 'relative' }}>
-      {/* Point radius: unchanged on mobile, modestly smaller on tablet/desktop. */}
-      <style>{`@media (min-width: 640px) { .${pointClass} { r: 4px; } }`}</style>
+      {/* Point sizes: unchanged on mobile, modestly smaller on tablet/desktop. */}
+      <style>{`@media (min-width: 640px) { .${pointClass} { r: 2.8px; } .${dotClass} { r: 1.1px; } }`}</style>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block', overflow: 'visible' }}>
         <defs>
           <linearGradient id={`${uid}-bar`} x1="0" y1="0" x2="0" y2="1">
@@ -233,8 +251,25 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
           <clipPath id={`${uid}-line-clip`}>
             <rect x={0} y={0} width={W * revealFrac} height={H} />
           </clipPath>
+          {/* Subtle airy plot-area tint — white at the top fading to a very
+              translucent blue toward the baseline. Light mode only; the
+              chart's own dark-mode background already handles contrast
+              there, and this specific gradient is a light-UI treatment. */}
+          {!isDark && (
+            <linearGradient id={`${uid}-plot-bg`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#FFFFFF" stopOpacity={0} />
+              <stop offset="100%" stopColor="#1A79BF" stopOpacity={0.08} />
+            </linearGradient>
+          )}
         </defs>
 
+        {!isDark && (
+          <rect x={PAD.left} y={PAD.top} width={cW} height={cH} fill={`url(#${uid}-plot-bg)`} pointerEvents="none" />
+        )}
+
+        {vLines.map(x => (
+          <line key={`v-${x}`} x1={x} x2={x} y1={PAD.top} y2={baseY} stroke={gridCol} strokeWidth={1} />
+        ))}
         {yTicks.map(h => {
           const y = yPos(h * 3_600_000)
           return (
@@ -291,24 +326,30 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
           )
         })}
 
-        {/* Trend line — wipes in left to right, stops at the last bucket
-            that has actually begun (never drawn through future buckets). */}
+        {/* Trend line — ONE continuous spline, computed first and in full;
+            the point markers below are a separate layer drawn on top and
+            never feed back into this path. Wipes in left to right, stops at
+            the last bucket that has actually begun (never drawn through
+            future buckets). */}
         {activePts.length > 1 && (
           <g clipPath={`url(#${uid}-line-clip)`}>
-            <path d={linePath} fill="none" stroke="#ef4444" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
+            <path d={linePath} fill="none" stroke="#ef4444" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
           </g>
         )}
 
-        {/* Arrowhead — only the final valid point, fades in with it (the
-            point's own ring, drawn below, sits on top and covers the plain
-            stroke underneath, so only the tip-to-ring seam is visible). */}
-        {arrowPolygon && (
-          <polygon points={arrowPolygon} fill="#ef4444" pointerEvents="none"
+        {/* Arrowhead — open chevron (two strokes, not a filled shape) at
+            only the final valid point, fades in with it. */}
+        {arrowPoints && (
+          <polyline points={arrowPoints} fill="none" stroke="#ef4444" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none"
             style={{ opacity: lastVisible ? 1 : 0, transition: 'opacity 280ms ease' }} />
         )}
 
         {/* Points + exact time labels + peak trophy — only for buckets that
-            have begun; floating LINE_GAP above their bar's top. */}
+            have begun; floating LINE_GAP above their bar's top. A thin
+            purple ring (with a background-colored gap, hiding the spline
+            passing directly underneath) plus a small solid center dot,
+            layered on top of the finished spline — the spline itself is
+            never reshaped around them. */}
         {buckets.map((w, i) => {
           const threshold = lastActiveIdx > 0 ? (i / lastActiveIdx) * 0.92 : 0
           const visible = revealFrac >= threshold
@@ -316,7 +357,8 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
           if (w.isFuture) return null
           return (
             <g key={w.label} pointerEvents="none" style={{ opacity: visible ? 1 : 0, transition: 'opacity 280ms ease' }}>
-              <circle className={pointClass} cx={p.x} cy={p.y} r={5} fill={isDark ? '#1a1030' : '#ffffff'} stroke="#7c3aed" strokeWidth={2.5} />
+              <circle className={pointClass} cx={p.x} cy={p.y} r={3.5} fill={isDark ? '#1a1030' : '#ffffff'} stroke="#7c3aed" strokeWidth={1.5} />
+              <circle className={dotClass} cx={p.x} cy={p.y} r={1.3} fill="#7c3aed" />
               <text x={p.x} y={p.y - 11} textAnchor="middle" fontSize={8.5} fontWeight={700} fill="#7c3aed">
                 {formatMs(w.ms)}
               </text>

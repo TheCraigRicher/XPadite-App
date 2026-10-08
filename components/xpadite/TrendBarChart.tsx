@@ -117,77 +117,78 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
   let lastActiveIdx = -1
   for (let i = 0; i < n; i++) if (!buckets[i].isFuture) lastActiveIdx = i
 
-  // Every point floats a flat LINE_GAP above its own bar's top — simple,
-  // uniform point-level clearance (requirement: "the point should float
-  // slightly above the bar"). The CONNECTING LINE's own collision risk
-  // (a straight segment from a low/zero point into a much taller point can
-  // cut across that tall point's own bar well before reaching it) is a
-  // separate problem, handled per-segment below.
-  const linePts = buckets.map((w, i) => ({ x: xCenter(i), y: yPos(w.ms) - LINE_GAP }))
-  const activePts = lastActiveIdx >= 0 ? linePts.slice(0, lastActiveIdx + 1) : []
-
-  // Collision-aware routing: a segment stays a plain straight line UNLESS it
-  // would actually cross a bar's safety zone, in which case ONE waypoint is
-  // inserted at the exact point the segment first enters that zone, pinned
-  // to the bar's safe height — the minimal deviation that clears it, after
-  // which the path continues straight to the real point. This never moves a
-  // point's own (true) position, only what the connecting line does on its
-  // way past a bar it isn't meant to touch.
+  // Every positive point floats a flat LINE_GAP above its own bar's top.
+  // Genuine zero-value buckets are pinned exactly at the baseline and never
+  // moved — a zero reading must never be visually lifted into looking
+  // non-zero. The connecting line is then drawn as PLAIN STRAIGHT SEGMENTS,
+  // point to point, with no inserted bends or routing waypoints. Instead,
+  // where a straight segment arriving from (or leaving to) a much lower
+  // neighbor would otherwise cut across this point's own bar before
+  // reaching it, the point itself is lifted further above its natural
+  // LINE_GAP position until the straight segment clears that bar's safe
+  // height — "straight, elevated," never "routed around."
   const SAFE_MARGIN = 6
   function barSafeY(bucketIdx: number): number | null {
     const ms = buckets[bucketIdx]?.ms
     if (!ms || ms <= 0) return null
     return yPos(ms) - SAFE_MARGIN
   }
-  // For bucket `bucketIdx`'s bar, find where segment p1→p2 (straight line)
-  // first dips below (i.e. numerically below, visually behind) that bar's
-  // safe height within the bar's own horizontal span — the single waypoint
-  // needed to clear it, or null if this segment never gets that close.
-  function waypointFor(bucketIdx: number, p1: { x: number; y: number }, p2: { x: number; y: number }): { x: number; y: number } | null {
-    const safeY = barSafeY(bucketIdx)
-    if (safeY == null || p1.x === p2.x) return null
-    const cx = xCenter(bucketIdx)
-    const xLo = cx - barW / 2, xHi = cx + barW / 2
-    const segXLo = Math.min(p1.x, p2.x), segXHi = Math.max(p1.x, p2.x)
-    const overlapLo = Math.max(xLo, segXLo), overlapHi = Math.min(xHi, segXHi)
-    if (overlapLo > overlapHi) return null
-    const yAt = (x: number) => p1.y + (p2.y - p1.y) * ((x - p1.x) / (p2.x - p1.x))
-    const yLo = yAt(overlapLo), yHi = yAt(overlapHi)
-    // Whichever edge of the overlap the line reaches first (coming from
-    // whichever endpoint is lower/further from this bar) is where it's
-    // closest to violating the safe height.
-    const worstX = yLo >= yHi ? overlapLo : overlapHi
-    const worstY = Math.max(yLo, yHi)
-    return worstY > safeY ? { x: worstX, y: safeY } : null
+
+  interface LinePt { x: number; y: number; pinned: boolean }
+  const linePts: LinePt[] = buckets.map((w, i) => (
+    !w.ms || w.ms <= 0
+      ? { x: xCenter(i), y: baseY, pinned: true }
+      : { x: xCenter(i), y: yPos(w.ms) - LINE_GAP, pinned: false }
+  ))
+
+  // For point `i`'s own bar, given a (possibly still-settling) neighbor
+  // `nb`, the highest point `i` is allowed to sit at (smallest y) so the
+  // straight segment between them stays at/above the bar's safe height
+  // across the bar's own horizontal span — checked at whichever span edge
+  // the segment reaches first coming from the neighbor's side.
+  function requiredY(i: number, nb: LinePt): number | null {
+    const safeY = barSafeY(i)
+    if (safeY == null) return null
+    const mine = linePts[i]
+    const edgeX = nb.x < mine.x ? xCenter(i) - barW / 2 : xCenter(i) + barW / 2
+    const dx = mine.x - nb.x
+    if (dx === 0) return null
+    const t = (edgeX - nb.x) / dx
+    if (t <= 0 || t > 1) return null
+    return (safeY - nb.y * (1 - t)) / t
   }
+
+  // Relaxation pass: lifting one point can, in rare cascades, tighten what
+  // an adjacent point now needs too, so iterate until nothing moves —
+  // bounded by the bucket count, always small here (7, 8 or 12 points).
+  const MIN_Y = 4
+  for (let pass = 0; pass < n; pass++) {
+    let changed = false
+    for (let i = 0; i < n; i++) {
+      if (linePts[i].pinned) continue
+      let y = linePts[i].y
+      if (i > 0) { const r = requiredY(i, linePts[i - 1]); if (r != null) y = Math.min(y, r) }
+      if (i < n - 1) { const r = requiredY(i, linePts[i + 1]); if (r != null) y = Math.min(y, r) }
+      y = Math.max(y, MIN_Y)
+      if (y < linePts[i].y - 0.01) { linePts[i] = { ...linePts[i], y }; changed = true }
+    }
+    if (!changed) break
+  }
+
+  const activePts = lastActiveIdx >= 0 ? linePts.slice(0, lastActiveIdx + 1) : []
 
   // ONE continuous red trend line, built from plain straight segments —
   // point → line → point, exactly like a conventional line chart. No
-  // spline, no Bézier control points, no curvature; a segment only bends
-  // (via the single inserted waypoint above) when it would otherwise cross
-  // a bar it has nothing to do with. Also returns the final segment's
-  // direction, for the arrowhead below.
-  function buildPolyline(pts: { x: number; y: number }[]): { d: string; endDir: { x: number; y: number } | null } {
-    const count = pts.length
-    if (count < 2) return { d: '', endDir: null }
+  // spline, no Bézier control points, no routing waypoints. Also returns
+  // the final segment's direction, for the arrowhead below.
+  function buildPolyline(pts: LinePt[]): { d: string; endDir: { x: number; y: number } | null } {
+    if (pts.length < 2) return { d: '', endDir: null }
     let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`
-    let endDir: { x: number; y: number } | null = null
-    for (let i = 0; i < count - 1; i++) {
-      const p1 = pts[i], p2 = pts[i + 1]
-      const w1 = waypointFor(i, p1, p2)
-      const w2 = waypointFor(i + 1, p1, p2)
-      const waypoints = [w1, w2].filter((w): w is { x: number; y: number } => w !== null)
-      waypoints.sort((a, b) => (p1.x <= p2.x ? a.x - b.x : b.x - a.x))
-      for (const w of waypoints) d += ` L ${w.x.toFixed(1)} ${w.y.toFixed(1)}`
-      d += ` L ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
-      if (i === count - 2) {
-        const from = waypoints.length > 0 ? waypoints[waypoints.length - 1] : p1
-        const dx = p2.x - from.x, dy = p2.y - from.y
-        const len = Math.hypot(dx, dy) || 1
-        endDir = { x: dx / len, y: dy / len }
-      }
-    }
-    return { d, endDir }
+    for (let i = 1; i < pts.length; i++) d += ` L ${pts[i].x.toFixed(1)} ${pts[i].y.toFixed(1)}`
+    const a = pts[pts.length - 2], b = pts[pts.length - 1]
+    const dx = b.x - a.x, dy = b.y - a.y
+    const len = Math.hypot(dx, dy) || 1
+    return { d, endDir: { x: dx / len, y: dy / len } }
   }
 
   const { d: linePath, endDir } = buildPolyline(activePts)
@@ -226,6 +227,13 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
           <linearGradient id={`${uid}-bar`} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#a855f7" />
             <stop offset="100%" stopColor="#6d28d9" />
+          </linearGradient>
+          {/* Trajectory gradient — flows chronologically left→right (start
+              date to end date), independent of each point's own y, so it
+              never shifts with the line's vertical position. */}
+          <linearGradient id={`${uid}-trend`} gradientUnits="userSpaceOnUse" x1={PAD.left} y1="0" x2={W - PAD.right} y2="0">
+            <stop offset="0%" stopColor="#9253E6" />
+            <stop offset="100%" stopColor="#BB00FF" />
           </linearGradient>
           <clipPath id={`${uid}-line-clip`}>
             <rect x={0} y={0} width={W * revealFrac} height={H} />
@@ -309,14 +317,14 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
             future buckets). */}
         {activePts.length > 1 && (
           <g clipPath={`url(#${uid}-line-clip)`}>
-            <path d={linePath} fill="none" stroke="#ef4444" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
+            <path d={linePath} fill="none" stroke={`url(#${uid}-trend)`} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />
           </g>
         )}
 
         {/* Arrowhead — open chevron (two strokes, not a filled shape) at
             only the final valid point, fades in with it. */}
         {arrowPoints && (
-          <polyline points={arrowPoints} fill="none" stroke="#ef4444" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none"
+          <polyline points={arrowPoints} fill="none" stroke={`url(#${uid}-trend)`} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none"
             style={{ opacity: lastVisible ? 1 : 0, transition: 'opacity 280ms ease' }} />
         )}
 

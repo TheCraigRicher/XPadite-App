@@ -22,7 +22,7 @@
 // lg:max-w-[1296px]) so this modal matches the rest of the analytics/
 // dashboard family.
 
-import { useEffect, useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useApp } from './AppContext'
 import { PremiumUpgradeModal } from './PremiumUpgradeModal'
 import { formatMs, dateKey as buildDateKey, isProductiveActivity } from './utils'
@@ -212,59 +212,313 @@ function BaselineState({ text }: { text: string }) {
   )
 }
 
-// ─── Performance Pulse ──────────────────────────────────────────────────────
-// Recent momentum: last 7 COMPLETED days vs the previous 7 completed days
-// (today is excluded from both windows since its data is necessarily
-// partial, which would distort a same-day comparison).
+// ─── Performance Index ──────────────────────────────────────────────────────
+// A single deterministic 0-100 score blending consistency, intensity,
+// achievement and task completion for a selected period — built entirely
+// from the SAME day-level flags (productive/hyper/milestone/goal) and
+// `daySummaries` aggregation every other section already uses, so there is
+// no separate/duplicated data pipeline.
 
-interface PulseMetric { dir: Dir; pct: number | null }
-interface PulseData {
-  ready: boolean
-  productiveTime?: PulseMetric
-  deepWork?: PulseMetric
-  taskCompletion?: PulseMetric
-  consistency?: PulseMetric & { curPct: number }
-  momentum?: string
+type PerfPeriod = '7d' | '30d' | 'year'
+const PERF_PERIOD_LABEL: Record<PerfPeriod, string> = { '7d': 'Last 7 Days', '30d': 'Last 30 Days', year: 'This Year' }
+const PERF_PERIOD_PREV_LABEL: Record<PerfPeriod, string> = { '7d': 'previous 7 days', '30d': 'previous 30 days', year: 'previous year' }
+
+interface PerfTier { emoji: string; label: string; color: string }
+const PERF_TIERS: { min: number; tier: PerfTier }[] = [
+  { min: 90, tier: { emoji: '👑', label: 'Elite Mode', color: '#9253E6' } },
+  { min: 75, tier: { emoji: '🔥', label: 'High Performance', color: '#f97316' } },
+  { min: 60, tier: { emoji: '🚀', label: 'Strong Momentum', color: '#22c55e' } },
+  { min: 40, tier: { emoji: '📈', label: 'Building Momentum', color: '#eab308' } },
+  { min: 0, tier: { emoji: '🌱', label: 'Getting Started', color: '#94a3b8' } },
+]
+function perfTierFor(score: number): PerfTier {
+  return (PERF_TIERS.find(t => score >= t.min) ?? PERF_TIERS[PERF_TIERS.length - 1]).tier
 }
 
-function PulseRow({ icon, label, metric, isDark }: { icon: string; label: string; metric: PulseMetric; isDark: boolean }) {
-  const text = metric.pct === null ? `${dirArrow(metric.dir)} New` : `${dirArrow(metric.dir)} ${Math.abs(metric.pct)}%`
+// Current period + its previous equivalent window, for the "vs previous
+// period" comparison. Year uses Jan 1 → today vs. the same Jan 1 → same
+// month/day a year earlier, so both windows cover an equal elapsed span.
+function perfPeriodRanges(period: PerfPeriod, today: Date): { curStart: Date; curEnd: Date; prevStart: Date; prevEnd: Date } {
+  const todayMid = new Date(today); todayMid.setHours(0, 0, 0, 0)
+  if (period === '30d') {
+    const curEnd = todayMid, curStart = addDays(todayMid, -29)
+    const prevEnd = addDays(curStart, -1), prevStart = addDays(prevEnd, -29)
+    return { curStart, curEnd, prevStart, prevEnd }
+  }
+  if (period === 'year') {
+    const curStart = new Date(todayMid.getFullYear(), 0, 1)
+    const prevStart = new Date(todayMid.getFullYear() - 1, 0, 1)
+    const prevEnd = new Date(todayMid.getFullYear() - 1, todayMid.getMonth(), todayMid.getDate())
+    return { curStart, curEnd: todayMid, prevStart, prevEnd }
+  }
+  const curEnd = todayMid, curStart = addDays(todayMid, -6)
+  const prevEnd = addDays(curStart, -1), prevStart = addDays(prevEnd, -6)
+  return { curStart, curEnd, prevStart, prevEnd }
+}
+
+interface PerfAggregate {
+  prodDays: number; hyperDays: number; milestoneDays: number; goalDays: number
+  completed: number; total: number; longestMs: number; totalDays: number; daysWithData: number
+}
+// `earliestDate` clamps the window's start to the user's actual first
+// tracked day — so a brand-new account measured over "This Year" is scored
+// against the days it could possibly have been active, not against months
+// that predate the account and would otherwise read as "missed".
+function perfAggregate(
+  daySummaries: Map<string, { prodFlag: boolean; hyperFlag: boolean; milestoneFlag: boolean; goalFlag: boolean; completedTasks: number; totalTasks: number; ms: number }>,
+  start: Date, end: Date, earliestDate: Date | null,
+): PerfAggregate {
+  const effectiveStart = earliestDate && earliestDate > start ? earliestDate : start
+  if (effectiveStart > end) return { prodDays: 0, hyperDays: 0, milestoneDays: 0, goalDays: 0, completed: 0, total: 0, longestMs: 0, totalDays: 0, daysWithData: 0 }
+  let prodDays = 0, hyperDays = 0, milestoneDays = 0, goalDays = 0, completed = 0, total = 0, longestMs = 0, daysWithData = 0
+  for (let d = new Date(effectiveStart); d <= end; d = addDays(d, 1)) {
+    const s = daySummaries.get(buildDateKey(d.getFullYear(), d.getMonth(), d.getDate()))
+    if (!s) continue
+    daysWithData++
+    if (s.prodFlag) prodDays++
+    if (s.hyperFlag) hyperDays++
+    if (s.milestoneFlag) milestoneDays++
+    if (s.goalFlag) goalDays++
+    completed += s.completedTasks
+    total += s.totalTasks
+    if (s.ms > longestMs) longestMs = s.ms
+  }
+  return { prodDays, hyperDays, milestoneDays, goalDays, completed, total, longestMs, totalDays: keysInRange(effectiveStart, end).length, daysWithData }
+}
+
+// Normalizes each dimension to 0–1 before weighting, and caps the "longest
+// day" dimension at 6 hours of full credit, so one extreme metric (above
+// all, marathon hours) cannot dominate the score on its own. A dimension
+// with no legitimate data (e.g. no tasks existed in the period) is omitted
+// and its weight redistributed across the rest, rather than fabricated.
+function perfScore(agg: PerfAggregate): number | null {
+  if (agg.daysWithData === 0 || agg.totalDays === 0) return null
+  const HOURS_CAP_MS = 6 * 3_600_000
+  const dims: { weight: number; value: number }[] = [
+    { weight: 0.30, value: Math.min(1, (agg.prodDays + agg.hyperDays + agg.milestoneDays + agg.goalDays) / agg.totalDays) },
+    { weight: 0.15, value: Math.min(1, agg.hyperDays / agg.totalDays) },
+    { weight: 0.20, value: Math.min(1, (agg.milestoneDays + agg.goalDays) / agg.totalDays) },
+    { weight: 0.15, value: Math.min(1, agg.longestMs / HOURS_CAP_MS) },
+  ]
+  if (agg.total > 0) dims.push({ weight: 0.20, value: Math.min(1, agg.completed / agg.total) })
+  const totalWeight = dims.reduce((s, d) => s + d.weight, 0)
+  if (totalWeight === 0) return null
+  const raw = dims.reduce((s, d) => s + d.weight * d.value, 0) / totalWeight
+  return Math.max(0, Math.min(100, Math.round(raw * 100)))
+}
+
+interface PerfMetrics {
+  productiveDays: number; hyperDays: number; milestoneDays: number; goalDays: number
+  longestMs: number; completedTasks: number; totalTasks: number
+}
+interface PerformanceIndexData {
+  ready: boolean
+  score?: number
+  tier?: PerfTier
+  delta?: { dir: Dir; pct: number | null } | null
+  metrics?: PerfMetrics
+}
+
+function PeriodSelector({ period, onChange }: { period: PerfPeriod; onChange: (p: PerfPeriod) => void }) {
+  const [open, setOpen] = useState(false)
   return (
-    <div className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5" style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(124,58,237,0.045)' }}>
-      <span className="flex items-center gap-2 text-[11.5px] font-medium min-w-0" style={{ color: 'var(--xp-txt)' }}>
-        <span style={{ fontSize: 13, flexShrink: 0 }}>{icon}</span>
-        <span className="truncate">{label}</span>
-      </span>
-      <span className="text-[11.5px] font-bold flex-shrink-0 tabular-nums" style={{ color: dirColor(metric.dir, isDark) }}>{text}</span>
+    <div className="relative flex-shrink-0">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1 text-[10.5px] font-bold px-2.5 py-1 rounded-full"
+        style={{ background: 'rgba(124,58,237,0.10)', color: '#7c3aed', border: '0.5px solid rgba(124,58,237,0.25)' }}
+      >
+        {PERF_PERIOD_LABEL[period]}
+        <span style={{ fontSize: 8 }}>▾</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 z-20 rounded-xl overflow-hidden" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)', minWidth: 132 }}>
+            {(Object.keys(PERF_PERIOD_LABEL) as PerfPeriod[]).map(p => (
+              <button
+                key={p}
+                onClick={() => { onChange(p); setOpen(false) }}
+                className="block w-full text-left text-[11px] px-3 py-2"
+                style={{ color: p === period ? '#7c3aed' : 'var(--xp-txt)', background: p === period ? 'rgba(124,58,237,0.08)' : 'transparent', fontWeight: p === period ? 700 : 500 }}
+              >
+                {PERF_PERIOD_LABEL[p]}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
 
-function PerformancePulseCard({ data, isDark }: { data: PulseData; isDark: boolean }) {
-  if (!data.ready || !data.productiveTime || !data.deepWork || !data.taskCompletion || !data.consistency) {
+// Large circular score gauge — animates the ring fill and the numeric
+// count-up together from 0, and fires `onComplete` once the animation
+// settles (Elite Mode's celebration waits for this so it never overlaps the
+// count-up). Respects reduced-motion by jumping straight to the final value.
+function PerformanceRing({ score, tier, emphasize, onComplete }: { score: number; tier: PerfTier; emphasize: boolean; onComplete?: () => void }) {
+  const uid = useId().replace(/[:]/g, '')
+  const SIZE = 148, SW = 12
+  const r = (SIZE - SW) / 2
+  const c = 2 * Math.PI * r
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const [anim, setAnim] = useState(() => (reduceMotion ? score : 0))
+  const onCompleteRef = useRef(onComplete)
+  useEffect(() => { onCompleteRef.current = onComplete })
+
+  // Every `setAnim`/completion call below runs inside a requestAnimationFrame
+  // callback (never synchronously in the effect body itself), so re-running
+  // this effect when `score` changes (e.g. switching periods) animates to
+  // the new value in place rather than needing a remount.
+  useEffect(() => {
+    let cancelled = false
+    let fired = false
+    function fireComplete() { if (!fired) { fired = true; onCompleteRef.current?.() } }
+    if (reduceMotion) {
+      const raf = requestAnimationFrame(() => { if (!cancelled) { setAnim(score); fireComplete() } })
+      return () => { cancelled = true; cancelAnimationFrame(raf) }
+    }
+    const DURATION = 1300
+    const start = performance.now()
+    let raf = 0
+    function tick(now: number) {
+      const t = Math.min((now - start) / DURATION, 1)
+      setAnim(score * (1 - Math.pow(1 - t, 3)))
+      if (t < 1) raf = requestAnimationFrame(tick)
+      else { setAnim(score); fireComplete() }
+    }
+    raf = requestAnimationFrame(tick)
+    return () => { cancelled = true; cancelAnimationFrame(raf) }
+  }, [score, reduceMotion])
+
+  const offset = c * (1 - anim / 100)
+  return (
+    <div className="relative flex-shrink-0" style={{ width: SIZE, height: SIZE }}>
+      <style>{`@keyframes xp-perf-emphasize { 0% { transform: scale(1); } 40% { transform: scale(1.14); } 100% { transform: scale(1); } }`}</style>
+      <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
+        <defs>
+          <linearGradient id={`${uid}-ring`} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#a78bfa" />
+            <stop offset="100%" stopColor="#5b21b6" />
+          </linearGradient>
+        </defs>
+        <circle cx={SIZE / 2} cy={SIZE / 2} r={r} fill="none" stroke="rgba(124,58,237,0.14)" strokeWidth={SW} />
+        <circle
+          cx={SIZE / 2} cy={SIZE / 2} r={r} fill="none" stroke={`url(#${uid}-ring)`} strokeWidth={SW}
+          strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
+          transform={`rotate(-90 ${SIZE / 2} ${SIZE / 2})`}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ animation: emphasize ? 'xp-perf-emphasize 700ms ease' : undefined }}>
+        <span className="text-[30px] font-extrabold tabular-nums leading-none" style={{ color: 'var(--xp-txt)' }}>{Math.round(anim)}%</span>
+        <span className="text-[10px] font-bold mt-1.5 text-center px-2" style={{ color: tier.color }}>{tier.emoji} {tier.label}</span>
+      </div>
+    </div>
+  )
+}
+
+function PerfMetricRow({ icon, label, value }: { icon: string; label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-xl px-3 py-2" style={{ background: 'rgba(124,58,237,0.045)' }}>
+      <span className="flex items-center gap-2 text-[11px] font-medium min-w-0" style={{ color: 'var(--xp-txt)' }}>
+        <span style={{ fontSize: 13, flexShrink: 0 }}>{icon}</span>
+        <span className="truncate">{label}</span>
+      </span>
+      <span className="text-[11.5px] font-bold flex-shrink-0 tabular-nums" style={{ color: 'var(--xp-txt)' }}>{value}</span>
+    </div>
+  )
+}
+
+// A tasteful, localized burst confined to the card itself (not full-screen)
+// — reuses the exact same `xp-confetti` keyframe/particle technique already
+// established for DayModal.tsx's own ConfettiPop, rather than inventing a
+// second confetti system.
+function PerfConfettiBurst({ onDone }: { onDone: () => void }) {
+  useEffect(() => { const t = setTimeout(onDone, 1500); return () => clearTimeout(t) }, [onDone])
+  // Randomized once per mount via a lazy initializer (not recomputed on
+  // re-render), the standard way to keep a one-time random value out of the
+  // render body itself.
+  const [particles] = useState(() => {
+    const COLORS = ['#f97316', '#9253E6', '#22d3ee', '#4ade80', '#fbbf24', '#f472b6', '#a78bfa', '#34d399', '#fb7185', '#60a5fa']
+    return Array.from({ length: 22 }, (_, i) => {
+      const angle = (i / 22) * 360 + (Math.random() * 20 - 10)
+      const dist = 55 + Math.random() * 65
+      const rad = (angle * Math.PI) / 180
+      return { color: COLORS[i % COLORS.length], tx: Math.cos(rad) * dist, ty: Math.sin(rad) * dist - 15, rot: Math.random() * 540 - 270, size: 4 + Math.random() * 5, delay: Math.random() * 0.15, isRect: i % 3 !== 0 }
+    })
+  })
+  return (
+    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: 16 }}>
+      {particles.map((p, i) => (
+        <div key={i} style={{ position: 'absolute', width: p.size, height: p.isRect ? p.size * 2.2 : p.size, borderRadius: p.isRect ? 2 : '50%', background: p.color, ['--tx' as string]: `${p.tx}px`, ['--ty' as string]: `${p.ty}px`, ['--rot' as string]: `${p.rot}deg`, animation: `xp-confetti 1.3s ${p.delay}s cubic-bezier(0.2,0.8,0.4,1) forwards` } as React.CSSProperties} />
+      ))}
+    </div>
+  )
+}
+
+function PerformanceIndexCard({ data, period, onPeriodChange, pendingCelebration, onCelebrated, isDark }: {
+  data: PerformanceIndexData
+  period: PerfPeriod
+  onPeriodChange: (p: PerfPeriod) => void
+  pendingCelebration: boolean
+  onCelebrated: () => void
+  isDark: boolean
+}) {
+  const [showConfetti, setShowConfetti] = useState(false)
+  const [emphasize, setEmphasize] = useState(false)
+
+  function handleGaugeComplete() {
+    if (!pendingCelebration) return
+    onCelebrated()
+    setEmphasize(true)
+    setShowConfetti(true)
+    setTimeout(() => setEmphasize(false), 750)
+    setTimeout(() => setShowConfetti(false), 1700)
+  }
+
+  if (!data.ready || data.score === undefined || !data.tier || !data.metrics) {
     return (
-      <SectionCard icon="⚡" title="Performance Pulse" subtitle="Your current productivity momentum">
-        <BaselineState text="Keep using XPadite and your 7-day momentum will appear here." />
+      <SectionCard
+        icon="⚡" title="Performance Index" subtitle="Your productivity & achievement performance"
+        right={<PeriodSelector period={period} onChange={onPeriodChange} />}
+      >
+        <BaselineState text="Keep using XPadite and your Performance Index will appear here." />
       </SectionCard>
     )
   }
-  const headline = data.productiveTime
-  const headlineText = headline.pct === null ? 'New' : `${Math.abs(headline.pct)}%`
+
+  const m = data.metrics
+  const longestLabel = m.longestMs > 0 ? formatMs(m.longestMs) : '—'
+  const tasksLabel = m.totalTasks > 0 ? `${m.completedTasks} / ${m.totalTasks}` : '—'
+
   return (
-    <SectionCard icon="⚡" title="Performance Pulse" subtitle="Your current productivity momentum">
-      <div className="flex items-center gap-2 mb-1">
-        <span className="text-[20px] font-extrabold tabular-nums" style={{ color: dirColor(headline.dir, isDark) }}>
-          {dirArrow(headline.dir)} {headlineText}
-        </span>
+    <SectionCard
+      icon="⚡" title="Performance Index" subtitle="Your productivity & achievement performance"
+      right={<PeriodSelector period={period} onChange={onPeriodChange} />}
+    >
+      <div className="relative">
+        {showConfetti && <PerfConfettiBurst onDone={() => setShowConfetti(false)} />}
+        <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-5">
+          <div className="flex flex-col items-center flex-shrink-0">
+            <PerformanceRing score={data.score} tier={data.tier} emphasize={emphasize} onComplete={handleGaugeComplete} />
+            <p className="text-[10.5px] font-semibold mt-2" style={{ color: 'var(--xp-txt2)' }}>Performance Score</p>
+            {data.delta && (
+              <p className="text-[10px] font-bold mt-0.5 tabular-nums text-center" style={{ color: dirColor(data.delta.dir, isDark) }}>
+                {data.delta.pct === null ? `${dirArrow(data.delta.dir)} New` : `${dirArrow(data.delta.dir)} ${Math.abs(data.delta.pct)}%`}
+                <span className="font-normal ml-1" style={{ color: 'var(--xp-txt3)' }}>vs {PERF_PERIOD_PREV_LABEL[period]}</span>
+              </p>
+            )}
+          </div>
+          <div className="flex flex-col gap-1.5 w-full min-w-0">
+            <PerfMetricRow icon="🟣" label="Productive Days" value={String(m.productiveDays)} />
+            <PerfMetricRow icon="🔥" label="Hyper Productive Days" value={String(m.hyperDays)} />
+            <PerfMetricRow icon="🏆" label="Milestones Accomplished" value={String(m.milestoneDays)} />
+            <PerfMetricRow icon="🎯" label="Goals Achieved" value={String(m.goalDays)} />
+            <PerfMetricRow icon="⏱️" label="Longest Hours Worked" value={longestLabel} />
+            <PerfMetricRow icon="✅" label="Total Tasks Finished" value={tasksLabel} />
+          </div>
+        </div>
       </div>
-      <p className="text-[11px] font-semibold mb-3" style={{ color: 'var(--xp-txt)' }}>{data.momentum}</p>
-      <div className="flex flex-col gap-1.5">
-        <PulseRow icon="📈" label="Productive Time" metric={data.productiveTime} isDark={isDark} />
-        <PulseRow icon="🗓" label="Consistency" metric={data.consistency} isDark={isDark} />
-        <PulseRow icon="🧠" label="Deep Work" metric={data.deepWork} isDark={isDark} />
-        <PulseRow icon="✅" label="Task Completion" metric={data.taskCompletion} isDark={isDark} />
-      </div>
-      <p className="text-[9.5px] mt-2.5" style={{ color: 'var(--xp-txt3)' }}>vs previous 7 days</p>
     </SectionCard>
   )
 }
@@ -339,8 +593,13 @@ function MiniTrendChart({ weeks, isDark }: { weeks: { label: string; ms: number 
   // Unique per instance so multiple charts never collide on this def id.
   const uid = useId().replace(/[:]/g, '')
   const maxMs = Math.max(...weeks.map(w => w.ms), 1)
-  const W = 680, H = 110
-  const PAD = { top: 10, bottom: 16, left: 4, right: 4 }
+  // Extra top padding (vs. the original 10px) so a lifted final point plus
+  // its full arrowhead always has headroom and is never clipped by the
+  // SVG's own top edge — cH (and therefore bar/point scaling) is kept
+  // identical by growing H by the same amount, so nothing about the data
+  // geometry itself shifts, only the blank space reserved above it.
+  const W = 680, H = 126
+  const PAD = { top: 26, bottom: 16, left: 4, right: 4 }
   const cW = W - PAD.left - PAD.right
   const cH = H - PAD.top - PAD.bottom
   const slotW = cW / weeks.length
@@ -348,55 +607,87 @@ function MiniTrendChart({ weeks, isDark }: { weeks: { label: string; ms: number 
   const xCenter = (i: number) => PAD.left + i * slotW + slotW / 2
   const yPos = (ms: number) => PAD.top + cH - (ms / maxMs) * cH
   const baseY = PAD.top + cH
-  // Clean, intentional clearance between each point and its own bar's top —
-  // scaled down from the detailed dashboards' own gap to suit this chart's
-  // smaller footprint, while still reading as a clear floating gap.
+  // Clean, intentional clearance between each positive point and its own
+  // bar's top — scaled down from the detailed dashboards' own gap to suit
+  // this chart's smaller footprint, while still reading as a clear floating
+  // gap. Genuine zero-value weeks are pinned exactly at the baseline and
+  // never lifted, so a zero reading is never visually misrepresented as
+  // non-zero.
   const POINT_GAP = 10
-  const pts = weeks.map((w, i) => ({ x: xCenter(i), y: yPos(w.ms) - POINT_GAP }))
-
-  // Collision-avoidance — the same technique TrendBarChart.tsx uses: a
-  // straight segment stays straight UNLESS it would cross a bar's safety
-  // zone, in which case a single waypoint is inserted at the exact point it
-  // first enters that zone, pinned to the bar's safe height, so an
-  // intermediate tall bar can never be cut through by a segment connecting
-  // two other elevated points.
   const SAFE_MARGIN = 5
+
+  interface MiniPt { x: number; y: number; pinned: boolean }
+  const pts: MiniPt[] = weeks.map((w, i) => (
+    !w.ms || w.ms <= 0
+      ? { x: xCenter(i), y: baseY, pinned: true }
+      : { x: xCenter(i), y: yPos(w.ms) - POINT_GAP, pinned: false }
+  ))
+
+  // The connecting line is drawn as plain straight point-to-point segments
+  // only — no inserted bends. Where a straight segment arriving from (or
+  // leaving to) a much lower neighbor would otherwise cut across this
+  // point's own bar before reaching it, the point itself is lifted further
+  // above its natural POINT_GAP position until the segment clears that
+  // bar's safe height (mirrors TrendBarChart.tsx's same approach).
   function barSafeY(i: number): number | null {
     const ms = weeks[i]?.ms
     if (!ms || ms <= 0) return null
     return yPos(ms) - SAFE_MARGIN
   }
-  function waypointFor(barIdx: number, p1: { x: number; y: number }, p2: { x: number; y: number }): { x: number; y: number } | null {
-    const safeY = barSafeY(barIdx)
-    if (safeY == null || p1.x === p2.x) return null
-    const cx = xCenter(barIdx)
-    const xLo = cx - barW / 2, xHi = cx + barW / 2
-    const segXLo = Math.min(p1.x, p2.x), segXHi = Math.max(p1.x, p2.x)
-    const overlapLo = Math.max(xLo, segXLo), overlapHi = Math.min(xHi, segXHi)
-    if (overlapLo > overlapHi) return null
-    const yAt = (x: number) => p1.y + (p2.y - p1.y) * ((x - p1.x) / (p2.x - p1.x))
-    const yLo = yAt(overlapLo), yHi = yAt(overlapHi)
-    const worstX = yLo >= yHi ? overlapLo : overlapHi
-    const worstY = Math.max(yLo, yHi)
-    return worstY > safeY ? { x: worstX, y: safeY } : null
+  function requiredY(i: number, nb: MiniPt): number | null {
+    const safeY = barSafeY(i)
+    if (safeY == null) return null
+    const mine = pts[i]
+    const edgeX = nb.x < mine.x ? xCenter(i) - barW / 2 : xCenter(i) + barW / 2
+    const dx = mine.x - nb.x
+    if (dx === 0) return null
+    const t = (edgeX - nb.x) / dx
+    if (t <= 0 || t > 1) return null
+    return (safeY - nb.y * (1 - t)) / t
+  }
+  // Leaves enough room above this floor for the arrowhead (~8px tall) to
+  // still clear the SVG's own top edge (y=0) even in the rare case a point
+  // gets clamped all the way down to it.
+  const MIN_Y = 14
+  for (let pass = 0; pass < weeks.length; pass++) {
+    let changed = false
+    for (let i = 0; i < weeks.length; i++) {
+      if (pts[i].pinned) continue
+      let y = pts[i].y
+      if (i > 0) { const r = requiredY(i, pts[i - 1]); if (r != null) y = Math.min(y, r) }
+      if (i < weeks.length - 1) { const r = requiredY(i, pts[i + 1]); if (r != null) y = Math.min(y, r) }
+      y = Math.max(y, MIN_Y)
+      if (y < pts[i].y - 0.01) { pts[i] = { ...pts[i], y }; changed = true }
+    }
+    if (!changed) break
   }
 
   let linePath = ''
   if (pts.length > 1) {
     linePath = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`
-    for (let i = 0; i < pts.length - 1; i++) {
-      const p1 = pts[i], p2 = pts[i + 1]
-      const w1 = waypointFor(i, p1, p2)
-      const w2 = waypointFor(i + 1, p1, p2)
-      const waypoints = [w1, w2].filter((w): w is { x: number; y: number } => w !== null)
-      waypoints.sort((a, b) => (p1.x <= p2.x ? a.x - b.x : b.x - a.x))
-      for (const w of waypoints) linePath += ` L ${w.x.toFixed(1)} ${w.y.toFixed(1)}`
-      linePath += ` L ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
-    }
+    for (let i = 1; i < pts.length; i++) linePath += ` L ${pts[i].x.toFixed(1)} ${pts[i].y.toFixed(1)}`
+  }
+
+  // Open-chevron arrowhead at the final point, continuing naturally from the
+  // last segment's own direction — the same treatment TrendBarChart.tsx
+  // uses, scaled down to this chart's smaller marker size.
+  let arrowPoints: string | null = null
+  if (pts.length > 1) {
+    const a = pts[pts.length - 2], b = pts[pts.length - 1]
+    const dx = b.x - a.x, dy = b.y - a.y
+    const len = Math.hypot(dx, dy) || 1
+    const dirX = dx / len, dirY = dy / len
+    const RING_R = 2, ARROW_LEN = 6, ARROW_W = 5
+    const tipX = b.x - dirX * RING_R, tipY = b.y - dirY * RING_R
+    const backX = b.x - dirX * (RING_R + ARROW_LEN), backY = b.y - dirY * (RING_R + ARROW_LEN)
+    const px = -dirY, py = dirX
+    const leftX = backX + px * (ARROW_W / 2), leftY = backY + py * (ARROW_W / 2)
+    const rightX = backX - px * (ARROW_W / 2), rightY = backY - py * (ARROW_W / 2)
+    arrowPoints = `${leftX.toFixed(1)},${leftY.toFixed(1)} ${tipX.toFixed(1)},${tipY.toFixed(1)} ${rightX.toFixed(1)},${rightY.toFixed(1)}`
   }
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block', overflow: 'visible' }}>
       <defs>
         {/* Same signature purple bar gradient every detailed dashboard's
             Progress chart uses (TrendBarChart.tsx), reused exactly here
@@ -405,6 +696,12 @@ function MiniTrendChart({ weeks, isDark }: { weeks: { label: string; ms: number 
         <linearGradient id={`${uid}-bar`} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#a855f7" />
           <stop offset="100%" stopColor="#6d28d9" />
+        </linearGradient>
+        {/* Trajectory gradient — flows chronologically left→right, same
+            start/end colors as TrendBarChart.tsx's own trend line. */}
+        <linearGradient id={`${uid}-trend`} gradientUnits="userSpaceOnUse" x1={PAD.left} y1="0" x2={W - PAD.right} y2="0">
+          <stop offset="0%" stopColor="#9253E6" />
+          <stop offset="100%" stopColor="#BB00FF" />
         </linearGradient>
       </defs>
       <line x1={PAD.left} x2={W - PAD.right} y1={baseY} y2={baseY} stroke={isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)'} strokeWidth={1} />
@@ -415,8 +712,9 @@ function MiniTrendChart({ weeks, isDark }: { weeks: { label: string; ms: number 
             fill={`url(#${uid}-bar)`} />
         )
       })}
-      {linePath && <path d={linePath} fill="none" stroke="#ef4444" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />}
-      {pts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={2} fill="#ef4444" />)}
+      {linePath && <path d={linePath} fill="none" stroke={`url(#${uid}-trend)`} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />}
+      {pts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={2} fill={`url(#${uid}-trend)`} />)}
+      {arrowPoints && <polyline points={arrowPoints} fill="none" stroke={`url(#${uid}-trend)`} strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" />}
       {weeks.map((w, i) => (
         <text key={`l-${i}`} x={xCenter(i)} y={H - 2} textAnchor="middle" fontSize={7.5} fontWeight={600} fill={isDark ? 'rgba(226,232,240,0.55)' : 'var(--xp-txt3)'}>{w.label}</text>
       ))}
@@ -578,7 +876,14 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
   const daySummaries = useMemo(() => {
     const map = new Map<string, {
       key: string; date: Date; ms: number; sessions: number; deepMs: number
-      completedTasks: number; totalTasks: number; productive: boolean; actMs: Map<string, number>
+      completedTasks: number; totalTasks: number; productive: boolean
+      // Individual day-level flags (DayData.productive/hyper/milestone/goal
+      // are mutually exclusive — a day is tagged as at most one of these),
+      // kept separately alongside the combined `productive` above so the
+      // Performance Index can count each one on its own rather than only
+      // "was this day flagged at all".
+      prodFlag: boolean; hyperFlag: boolean; milestoneFlag: boolean; goalFlag: boolean
+      actMs: Map<string, number>
     }>()
     for (const key of Object.keys(calData)) {
       const day = calData[key]
@@ -599,46 +904,65 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
         key, date: parseDateKey(key), ms, sessions, deepMs, completedTasks,
         totalTasks: day.tasks.length,
         productive: !!(day.productive || day.hyper || day.milestone || day.goal),
+        prodFlag: !!day.productive, hyperFlag: !!day.hyper, milestoneFlag: !!day.milestone, goalFlag: !!day.goal,
         actMs,
       })
     }
     return map
   }, [calData, activities])
 
-  // ── Performance Pulse ──────────────────────────────────────────────────────
-  const performancePulse = useMemo((): PulseData => {
-    const todayMid = new Date(today); todayMid.setHours(0, 0, 0, 0)
+  // ── Performance Index ───────────────────────────────────────────────────────
+  const [perfPeriod, setPerfPeriod] = useState<PerfPeriod>('7d')
+
+  const performanceIndex = useMemo((): PerformanceIndexData => {
     if (daySummaries.size < 7) return { ready: false }
+    const sortedKeys = Array.from(daySummaries.keys()).sort()
+    const earliestDate = sortedKeys.length ? parseDateKey(sortedKeys[0]) : null
+    const { curStart, curEnd, prevStart, prevEnd } = perfPeriodRanges(perfPeriod, today)
 
-    function sumRange(start: Date, end: Date) {
-      let ms = 0, deepMs = 0, completed = 0, productiveDays = 0
-      for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
-        const s = daySummaries.get(buildDateKey(d.getFullYear(), d.getMonth(), d.getDate()))
-        if (s) { ms += s.ms; deepMs += s.deepMs; completed += s.completedTasks; if (s.productive) productiveDays++ }
+    const curAgg = perfAggregate(daySummaries, curStart, curEnd, earliestDate)
+    const score = perfScore(curAgg)
+    if (score === null) return { ready: false }
+
+    const prevAgg = perfAggregate(daySummaries, prevStart, prevEnd, earliestDate)
+    const prevScore = perfScore(prevAgg)
+    const delta = prevScore !== null ? pctChange(score, prevScore) : null
+
+    return {
+      ready: true, score, tier: perfTierFor(score), delta,
+      metrics: {
+        productiveDays: curAgg.prodDays, hyperDays: curAgg.hyperDays, milestoneDays: curAgg.milestoneDays, goalDays: curAgg.goalDays,
+        longestMs: curAgg.longestMs, completedTasks: curAgg.completed, totalTasks: curAgg.total,
+      },
+    }
+  }, [daySummaries, today, perfPeriod])
+
+  // Elite Mode celebration — only on a genuine NEW entrance into Elite Mode
+  // for the currently-selected period, not every time this modal happens to
+  // reopen while already Elite (or when switching between periods that
+  // happen to both read Elite). Persisted per period in localStorage so the
+  // gate survives remounts; it resets automatically once that period's score
+  // drops back below Elite, so a later re-entrance can celebrate again.
+  const [pendingEliteCelebration, setPendingEliteCelebration] = useState(false)
+  useEffect(() => {
+    if (!performanceIndex.ready || !performanceIndex.tier) return
+    const isElite = performanceIndex.tier.label === 'Elite Mode'
+    const storageKey = `xp9-elite-state-${perfPeriod}`
+    let newEntrance = false
+    try {
+      const prevState = localStorage.getItem(storageKey)
+      if (isElite) {
+        if (prevState !== 'elite') { localStorage.setItem(storageKey, 'elite'); newEntrance = true }
+      } else if (prevState === 'elite') {
+        localStorage.setItem(storageKey, 'non-elite')
       }
-      return { ms, deepMs, completed, productiveDays }
-    }
-
-    const last7 = sumRange(addDays(todayMid, -7), addDays(todayMid, -1))
-    const prev7 = sumRange(addDays(todayMid, -14), addDays(todayMid, -8))
-
-    const productiveTime = pctChange(last7.ms, prev7.ms)
-    const deepWork = pctChange(last7.deepMs, prev7.deepMs)
-    const taskCompletion = pctChange(last7.completed, prev7.completed)
-    const curPct = Math.round((last7.productiveDays / 7) * 100)
-    const prevPct = Math.round((prev7.productiveDays / 7) * 100)
-    const diff = curPct - prevPct
-    const consistency = { dir: (Math.abs(diff) < 5 ? 'flat' : diff > 0 ? 'up' : 'down') as Dir, pct: Math.abs(diff) < 5 ? 0 : diff, curPct }
-
-    let score = 0
-    for (const m of [productiveTime, consistency, deepWork, taskCompletion]) {
-      if (m.dir === 'up') score++
-      else if (m.dir === 'down') score--
-    }
-    const momentum = score >= 3 ? 'Strong Momentum' : score >= 1 ? 'Building Momentum' : score === 0 ? 'Steady' : 'Slowing Down'
-
-    return { ready: true, productiveTime, deepWork, taskCompletion, consistency, momentum }
-  }, [daySummaries, today])
+    } catch { /* localStorage unavailable — celebration just won't persist across sessions */ }
+    if (!newEntrance) return
+    // Deferred a frame so this never fires setState synchronously within the
+    // effect body itself.
+    const raf = requestAnimationFrame(() => setPendingEliteCelebration(true))
+    return () => cancelAnimationFrame(raf)
+  }, [performanceIndex.ready, performanceIndex.tier, perfPeriod])
 
   // ── Personal Records ───────────────────────────────────────────────────────
   const personalRecords = useMemo((): RecordsData | null => {
@@ -888,7 +1212,11 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
 
               <div className="flex flex-col gap-3">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  <PerformancePulseCard data={performancePulse} isDark={isDark} />
+                  <PerformanceIndexCard
+                    data={performanceIndex} period={perfPeriod} onPeriodChange={setPerfPeriod}
+                    pendingCelebration={pendingEliteCelebration} onCelebrated={() => setPendingEliteCelebration(false)}
+                    isDark={isDark}
+                  />
                   <PersonalRecordsCard data={personalRecords} isDark={isDark} />
                 </div>
 

@@ -572,7 +572,7 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
                   </div>
                   <div className="relative" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 8, rowGap: 2 }}>
                     {([
-                      { icon: <ProductiveDot color="#ffffff" size={8} />, label: 'Productive Days', value: stats.productiveDays },
+                      { icon: <ProductiveDot color={progressColor} size={8} />, label: 'Productive Days', value: stats.productiveDays },
                       { icon: '🔥', label: 'Hyper Productive Days', value: stats.hyperDays },
                       { icon: '🏆', label: 'Milestones Achieved', value: stats.milestoneDays },
                       { icon: '🎯', label: 'Goals Accomplished', value: stats.goalDays },
@@ -677,7 +677,7 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
               holds more data than a single month would. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4">
 
-            <div className="rounded-2xl p-3.5 flex flex-col" style={{ ...card1, maxHeight: 280 }}>
+            <div className="rounded-2xl p-3.5 flex flex-col" style={{ ...card1, height: 280 }}>
               <p className="text-[11px] font-semibold tracking-wide mb-2.5 flex-shrink-0" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Total Activities</p>
               {activityMonthsWithData.length > 0 ? (
                 <div className="flex-1 min-h-0 overflow-y-auto">
@@ -717,13 +717,13 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
                   })}
                 </div>
               ) : (
-                <div className="flex items-center justify-center h-20">
+                <div className="flex-1 flex items-center justify-center">
                   <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No activity data this year</p>
                 </div>
               )}
             </div>
 
-            <div className="rounded-2xl overflow-hidden flex flex-col" style={{ ...card2, maxHeight: 280 }}>
+            <div className="rounded-2xl overflow-hidden flex flex-col" style={{ ...card2, height: 280 }}>
               <div className="px-4 py-2.5 flex-shrink-0" style={{ borderBottom: isDark ? '0.5px solid rgba(124,58,237,0.12)' : '0.5px solid rgba(0,0,0,0.08)' }}>
                 <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Total Sessions</p>
               </div>
@@ -758,13 +758,13 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
                   ))}
                 </div>
               ) : (
-                <div className="px-4 py-6 text-center">
+                <div className="flex-1 flex items-center justify-center">
                   <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No sessions recorded this year</p>
                 </div>
               )}
             </div>
 
-            <div className="rounded-2xl p-3.5 flex flex-col" style={{ ...card1, maxHeight: 280 }}>
+            <div className="rounded-2xl p-3.5 flex flex-col" style={{ ...card1, height: 280 }}>
               <div className="flex items-center justify-between mb-2.5 flex-shrink-0">
                 <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Pending Tasks</p>
                 <span className="text-[8px] font-bold px-2 py-0.5 rounded-full" style={{ background: isDark ? 'rgba(124,58,237,0.16)' : 'rgba(124,58,237,0.07)', color: '#a78bfa', border: '0.5px solid rgba(124,58,237,0.26)' }}>
@@ -793,7 +793,7 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
                   ))}
                 </div>
               ) : (
-                <div className="flex items-center justify-center h-20">
+                <div className="flex-1 flex items-center justify-center">
                   <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No pending tasks this year</p>
                 </div>
               )}

@@ -309,8 +309,103 @@ function shiftDigits(raw: string, maxLen = 2): string {
   return digits.length > maxLen ? digits.slice(digits.length - maxLen) : digits
 }
 
+// ─── Adjust Time — vertical scroll-wheel stepping ──────────────────────────────
+// Empty/unset or "00" treated as a 12 baseline (matching validH's own
+// 00-equals-12 convention elsewhere in this file) so a first scroll from an
+// unset Hour field starts from a sensible place rather than NaN.
+function stepHour(cur: string, dir: 1 | -1): string {
+  const n = parseInt(cur, 10)
+  const base = cur.trim() === '' || isNaN(n) || n === 0 ? 12 : n
+  const zeroBased = ((base - 1) + dir + 12) % 12
+  return String(zeroBased + 1)
+}
+function stepMinute(cur: string, dir: 1 | -1): string {
+  const n = parseInt(cur, 10)
+  const base = cur.trim() === '' || isNaN(n) ? 0 : n
+  return String((base + dir + 60) % 60).padStart(2, '0')
+}
+
+function WheelChevron({ dir }: { dir: 'up' | 'down' }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ width: 11, height: 11 }}>
+      <polyline points={dir === 'up' ? '6 15 12 9 18 15' : '6 9 12 15 18 9'} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+// A compact vertical scroll-wheel: desktop mouse-wheel, touch/mouse drag, and
+// tappable chevrons all drive the same one-step-at-a-time `onStep` callback —
+// no separate state of its own, so it can never drift from the field it's
+// adjusting. Wheel/drag deltas are accumulated and only converted to a step
+// once they cross a fixed threshold, so one deliberate gesture = one unit,
+// not a proportional/accelerating jump.
+function VerticalWheel({ onStep, isDark, ariaLabel }: { onStep: (dir: 1 | -1) => void; isDark: boolean; ariaLabel: string }) {
+  const [pressed, setPressed] = useState(false)
+  const accumRef = useRef(0)
+  const draggingRef = useRef(false)
+  const lastYRef = useRef(0)
+
+  const WHEEL_STEP_PX = 40
+  const DRAG_STEP_PX = 22
+
+  function handleWheel(e: React.WheelEvent) {
+    e.preventDefault()
+    accumRef.current += e.deltaY
+    while (accumRef.current <= -WHEEL_STEP_PX) { onStep(1); accumRef.current += WHEEL_STEP_PX }
+    while (accumRef.current >= WHEEL_STEP_PX) { onStep(-1); accumRef.current -= WHEEL_STEP_PX }
+  }
+  function handlePointerDown(e: React.PointerEvent) {
+    draggingRef.current = true
+    lastYRef.current = e.clientY
+    accumRef.current = 0
+    setPressed(true)
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+  }
+  function handlePointerMove(e: React.PointerEvent) {
+    if (!draggingRef.current) return
+    e.preventDefault()
+    const dy = e.clientY - lastYRef.current
+    lastYRef.current = e.clientY
+    accumRef.current += dy
+    while (accumRef.current <= -DRAG_STEP_PX) { onStep(1); accumRef.current += DRAG_STEP_PX }
+    while (accumRef.current >= DRAG_STEP_PX) { onStep(-1); accumRef.current -= DRAG_STEP_PX }
+  }
+  function handlePointerUp() { draggingRef.current = false; accumRef.current = 0; setPressed(false) }
+
+  return (
+    <div
+      role="group" aria-label={ariaLabel}
+      onWheel={handleWheel}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center',
+        width: 26, flexShrink: 0, borderRadius: 8, cursor: 'ns-resize', userSelect: 'none',
+        touchAction: 'none', overscrollBehavior: 'contain',
+        background: pressed ? 'rgba(124,58,237,0.14)' : (isDark ? 'rgba(124,58,237,0.07)' : 'rgba(124,58,237,0.05)'),
+        border: `1px solid ${pressed ? '#7c3aed' : 'var(--xp-bdr2)'}`,
+        transition: 'background 120ms ease, border-color 120ms ease',
+      }}
+    >
+      <button type="button" onClick={() => onStep(1)} aria-label={`${ariaLabel} increase`}
+        className="hover:opacity-70 active:scale-90"
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3px 0', border: 'none', background: 'transparent', color: '#7c3aed', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'transform 100ms ease' }}>
+        <WheelChevron dir="up" />
+      </button>
+      <span style={{ textAlign: 'center', fontSize: 8, lineHeight: 1, color: '#7c3aed', opacity: 0.5 }}>⋮</span>
+      <button type="button" onClick={() => onStep(-1)} aria-label={`${ariaLabel} decrease`}
+        className="hover:opacity-70 active:scale-90"
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3px 0', border: 'none', background: 'transparent', color: '#7c3aed', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', transition: 'transform 100ms ease' }}>
+        <WheelChevron dir="down" />
+      </button>
+    </div>
+  )
+}
+
 function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setActivePicker, prefix,
-  manualMode, rawH, rawM, onRawH, onRawM, hInvalid, mInvalid, onFirstFocus, pulse }: {
+  manualMode, rawH, rawM, onRawH, onRawM, hInvalid, mInvalid, onFirstFocus, pulse, selectedField, onSelectField }: {
   label: string; h: string; m: string; ap: string
   onH: (v: string) => void; onM: (v: string) => void; onAP: (v: string) => void
   isDark: boolean
@@ -325,12 +420,18 @@ function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setAct
   // Briefly true right after "Set Current Time" fills this row, for a subtle
   // purple acknowledgement that fades back out — see handleSetCurrentStart/End.
   pulse?: boolean
+  // Which of this row's own 3 fields the scroll-wheel currently targets —
+  // independent per Start/End row, purely a UI selection (not persisted,
+  // not part of the saved time itself).
+  selectedField?: 'H' | 'M' | 'AP'
+  onSelectField?: (f: 'H' | 'M' | 'AP') => void
 }) {
   const inputBase: React.CSSProperties = {
     borderRadius: 8, textAlign: 'center', fontSize: 12, fontWeight: 500,
     background: 'var(--xp-bg3)', color: 'var(--xp-txt)', outline: 'none',
     padding: '7px 8px', WebkitAppearance: 'none', MozAppearance: 'textfield',
   }
+  const selRing = (field: 'H' | 'M' | 'AP') => selectedField === field ? '0 0 0 2px rgba(124,58,237,0.38)' : 'none'
   return (
     <div style={{ display: 'flex', justifyContent: 'center' }}>
       <div>
@@ -344,8 +445,8 @@ function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setAct
       }}>
         {manualMode ? (
           <input type="text" inputMode="numeric" value={rawH ?? h} onChange={e => onRawH?.(shiftDigits(e.target.value))}
-            onFocus={onFirstFocus} placeholder="00"
-            style={{ ...inputBase, width: 56, border: `1px solid ${hInvalid ? '#ef4444' : 'var(--xp-bdr2)'}` }} />
+            onFocus={() => { onFirstFocus?.(); onSelectField?.('H') }} placeholder="00"
+            style={{ ...inputBase, width: 56, border: `1px solid ${hInvalid ? '#ef4444' : 'var(--xp-bdr2)'}`, boxShadow: selRing('H') }} />
         ) : (
           <CompactDropdown value={h} options={ADJUST_HOURS} onChange={onH} isDark={isDark} width={56}
             isOpen={activePicker === `${prefix}H`} onOpenChange={o => setActivePicker(o ? `${prefix}H` : null)} />
@@ -353,14 +454,16 @@ function TimeRow({ label, h, m, ap, onH, onM, onAP, isDark, activePicker, setAct
         <span style={{ color: 'var(--xp-txt3)', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>:</span>
         {manualMode ? (
           <input type="text" inputMode="numeric" value={rawM ?? m} onChange={e => onRawM?.(shiftDigits(e.target.value))}
-            onFocus={onFirstFocus} placeholder="00"
-            style={{ ...inputBase, width: 62, border: `1px solid ${mInvalid ? '#ef4444' : 'var(--xp-bdr2)'}` }} />
+            onFocus={() => { onFirstFocus?.(); onSelectField?.('M') }} placeholder="00"
+            style={{ ...inputBase, width: 62, border: `1px solid ${mInvalid ? '#ef4444' : 'var(--xp-bdr2)'}`, boxShadow: selRing('M') }} />
         ) : (
           <CompactDropdown value={m} options={ADJUST_MINUTES} onChange={onM} isDark={isDark} width={62}
             isOpen={activePicker === `${prefix}M`} onOpenChange={o => setActivePicker(o ? `${prefix}M` : null)} />
         )}
-        <CompactDropdown value={ap} options={ADJUST_AMPM} onChange={onAP} isDark={isDark} width={60}
-          isOpen={activePicker === `${prefix}AP`} onOpenChange={o => setActivePicker(o ? `${prefix}AP` : null)} />
+        <div onPointerDown={() => onSelectField?.('AP')} style={{ borderRadius: 8, boxShadow: selRing('AP') }}>
+          <CompactDropdown value={ap} options={ADJUST_AMPM} onChange={onAP} isDark={isDark} width={60}
+            isOpen={activePicker === `${prefix}AP`} onOpenChange={o => setActivePicker(o ? `${prefix}AP` : null)} />
+        </div>
       </div>
       </div>
     </div>
@@ -412,6 +515,20 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   const [endM,    setEndM]    = useState(endInit.m)
   const [endAP,   setEndAP]   = useState(endInit.ap)
   const [activePicker, setActivePicker] = useState<string | null>(null)
+
+  // Scroll-wheel field selection — independent per row, defaults to Hour.
+  const [startField, setStartField] = useState<'H' | 'M' | 'AP'>('H')
+  const [endField,   setEndField]   = useState<'H' | 'M' | 'AP'>('H')
+  function handleStartWheelStep(dir: 1 | -1) {
+    if (startField === 'H') setStartH(v => stepHour(v, dir))
+    else if (startField === 'M') setStartM(v => stepMinute(v, dir))
+    else setStartAP(v => (v === 'AM' ? 'PM' : 'AM'))
+  }
+  function handleEndWheelStep(dir: 1 | -1) {
+    if (endField === 'H') setEndH(v => stepHour(v, dir))
+    else if (endField === 'M') setEndM(v => stepMinute(v, dir))
+    else setEndAP(v => (v === 'AM' ? 'PM' : 'AM'))
+  }
 
   // Hover emphasis for the "Set Current Time" buttons — same purple
   // outline/glow treatment as the Settings Language/Time Zone SelectMenu
@@ -539,7 +656,9 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
                 hInvalid={startH !== '' && startH !== '00' && !validH(startH)} mInvalid={startM !== '' && !validM(startM)}
                 onFirstFocus={handleStartFirstFocus}
                 pulse={startPulse}
+                selectedField={startField} onSelectField={setStartField}
               />
+              <VerticalWheel onStep={handleStartWheelStep} isDark={isDark} ariaLabel="Start time" />
               <button type="button" onClick={handleResetStart}
                 className="text-xs font-bold px-4 py-2 rounded-full text-white flex-shrink-0"
                 style={{ background: '#7c3aed' }}>
@@ -556,7 +675,9 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
                 hInvalid={endH !== '' && endH !== '00' && !validH(endH)} mInvalid={endM !== '' && !validM(endM)}
                 onFirstFocus={handleEndFirstFocus}
                 pulse={endPulse}
+                selectedField={endField} onSelectField={setEndField}
               />
+              <VerticalWheel onStep={handleEndWheelStep} isDark={isDark} ariaLabel="End time" />
               <button type="button" onClick={handleResetEnd}
                 className="text-xs font-bold px-4 py-2 rounded-full text-white flex-shrink-0"
                 style={{ background: '#7c3aed' }}>

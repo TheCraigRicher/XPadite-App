@@ -268,6 +268,10 @@ export function DayFullPage({ onClose }: DayFullPageProps) {
   const BDR = isDark ? 'rgba(124,58,237,0.22)' : 'rgba(0,0,0,0.09)'
   const card1: React.CSSProperties = { background: S1, border: `0.5px solid ${BDR}`, boxShadow: isDark ? '0 2px 20px rgba(0,0,0,0.42)' : '0 1px 10px rgba(0,0,0,0.07)' }
   const card2: React.CSSProperties = { background: S2, border: `0.5px solid ${BDR}`, boxShadow: isDark ? '0 2px 18px rgba(0,0,0,0.38)' : '0 1px 6px rgba(0,0,0,0.05)' }
+  // Shared FIXED (not max) height for Total Activities / Total Sessions /
+  // Pending Tasks — the three cards' outer boxes must always align exactly,
+  // never grow or shrink with their own content; each scrolls internally.
+  const ROW3_CARD_H = 240
 
   return (
     <div className="w-full h-full flex flex-col overflow-hidden">
@@ -425,7 +429,7 @@ export function DayFullPage({ onClose }: DayFullPageProps) {
                   </div>
                   <div className="relative" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 8, rowGap: 2 }}>
                     {([
-                      { icon: <ProductiveDot color="#ffffff" size={8} />, label: 'Productive', value: dayStats.productive ? 'Yes' : 'No' },
+                      { icon: <ProductiveDot color={progressColor} size={8} />, label: 'Productive', value: dayStats.productive ? 'Yes' : 'No' },
                       { icon: '🔥', label: 'Hyper Productive', value: dayStats.hyper ? 'Yes' : 'No' },
                       { icon: '🏆', label: 'Milestone', value: dayStats.milestone ? 'Yes' : 'No' },
                       { icon: '🎯', label: 'Goal', value: dayStats.goal ? 'Yes' : 'No' },
@@ -529,10 +533,10 @@ export function DayFullPage({ onClose }: DayFullPageProps) {
               volume never needs the Yearly-style month-group accordion. */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4">
 
-            <div className="rounded-2xl p-3.5" style={card1}>
-              <p className="text-[11px] font-semibold tracking-wide mb-2.5" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Total Activities</p>
+            <div className="rounded-2xl p-3.5 flex flex-col" style={{ ...card1, height: ROW3_CARD_H }}>
+              <p className="text-[11px] font-semibold tracking-wide mb-2.5 flex-shrink-0" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Total Activities</p>
               {dayStats.actBreakdown.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div className="flex-1 min-h-0 overflow-y-auto" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {dayStats.actBreakdown.map((a, idx) => {
                     const gradStr  = TASK_GRAD_STRINGS[idx % TASK_GRAD_STRINGS.length]
                     const barPct   = Math.round((a.ms / (dayStats.actBreakdown[0]?.ms ?? 1)) * 100)
@@ -554,18 +558,18 @@ export function DayFullPage({ onClose }: DayFullPageProps) {
                   })}
                 </div>
               ) : (
-                <div className="flex items-center justify-center h-20">
+                <div className="flex-1 flex items-center justify-center">
                   <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No activity data this day</p>
                 </div>
               )}
             </div>
 
-            <div className="rounded-2xl overflow-hidden" style={card2}>
-              <div className="px-4 py-2.5" style={{ borderBottom: isDark ? '0.5px solid rgba(124,58,237,0.12)' : '0.5px solid rgba(0,0,0,0.08)' }}>
+            <div className="rounded-2xl overflow-hidden flex flex-col" style={{ ...card2, height: ROW3_CARD_H }}>
+              <div className="px-4 py-2.5 flex-shrink-0" style={{ borderBottom: isDark ? '0.5px solid rgba(124,58,237,0.12)' : '0.5px solid rgba(0,0,0,0.08)' }}>
                 <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Total Sessions</p>
               </div>
               {dayStats.sessions.length > 0 ? (
-                <div>
+                <div className="flex-1 min-h-0 overflow-y-auto">
                   {dayStats.sessions.slice(0, 8).map((s, i) => {
                     const deep = s.durationMs >= 45 * 60_000
                     return (
@@ -583,13 +587,13 @@ export function DayFullPage({ onClose }: DayFullPageProps) {
                   })}
                 </div>
               ) : (
-                <div className="px-4 py-6 text-center">
+                <div className="flex-1 flex items-center justify-center">
                   <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No sessions recorded this day</p>
                 </div>
               )}
             </div>
 
-            <div className="rounded-2xl p-3.5 flex flex-col" style={{ ...card1, maxHeight: 240 }}>
+            <div className="rounded-2xl p-3.5 flex flex-col" style={{ ...card1, height: ROW3_CARD_H }}>
               <div className="flex items-center justify-between mb-2.5 flex-shrink-0">
                 <p className="text-[11px] font-semibold tracking-wide" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Pending Tasks</p>
                 <span className="text-[8px] font-bold px-2 py-0.5 rounded-full" style={{ background: isDark ? 'rgba(124,58,237,0.16)' : 'rgba(124,58,237,0.07)', color: '#a78bfa', border: '0.5px solid rgba(124,58,237,0.26)' }}>
@@ -605,7 +609,7 @@ export function DayFullPage({ onClose }: DayFullPageProps) {
                   ))}
                 </div>
               ) : (
-                <div className="flex items-center justify-center h-20">
+                <div className="flex-1 flex items-center justify-center">
                   <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>No pending tasks this day</p>
                 </div>
               )}

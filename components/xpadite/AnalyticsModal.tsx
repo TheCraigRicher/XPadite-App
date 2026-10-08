@@ -25,13 +25,14 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useApp } from './AppContext'
 import { PremiumUpgradeModal } from './PremiumUpgradeModal'
-import { formatMs, dateKey as buildDateKey, isProductiveActivity } from './utils'
+import { formatMs, dateKey as buildDateKey, isProductiveActivity, resolveProgressColor } from './utils'
 import { calculateBestStreak } from './productivityEngine'
 import { AICoachMenuIcon } from './AppSidebar'
 import { DayFullPage } from './DayFullPage'
 import { WeekFullPage } from './WeekFullPage'
 import { MonthFullPage } from './MonthFullPage'
 import { YearFullPage } from './YearFullPage'
+import { LegendRow, ProductiveDot } from './LegendRow'
 
 type Timeframe = 'today' | 'weekly' | 'monthly' | 'yearly'
 type Dir = 'up' | 'down' | 'flat'
@@ -158,7 +159,7 @@ function TimeframeCard({ def, selected, onSelect }: {
       onClick={onSelect}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="text-left rounded-2xl p-4 sm:p-5 flex flex-col justify-center min-h-[92px] sm:min-h-[112px]"
+      className="text-left rounded-2xl p-4 sm:p-5 flex flex-col justify-center min-h-[92px] sm:min-h-[112px] lg:min-h-[140px]"
       style={{
         // Permanent rich gradient — always visible, never a hover-only effect.
         background: def.bg,
@@ -417,11 +418,11 @@ function PerformanceRing({ score, tier, emphasize, onComplete }: { score: number
   )
 }
 
-function PerfMetricRow({ icon, label, value }: { icon: string; label: string; value: string }) {
+function PerfMetricRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-2 rounded-xl px-3 py-2" style={{ background: 'rgba(124,58,237,0.045)' }}>
       <span className="flex items-center gap-2 text-[11px] font-medium min-w-0" style={{ color: 'var(--xp-txt)' }}>
-        <span style={{ fontSize: 13, flexShrink: 0 }}>{icon}</span>
+        <span className="flex items-center justify-center" style={{ fontSize: 13, flexShrink: 0 }}>{icon}</span>
         <span className="truncate">{label}</span>
       </span>
       <span className="text-[11.5px] font-bold flex-shrink-0 tabular-nums" style={{ color: 'var(--xp-txt)' }}>{value}</span>
@@ -456,13 +457,14 @@ function PerfConfettiBurst({ onDone }: { onDone: () => void }) {
   )
 }
 
-function PerformanceIndexCard({ data, period, onPeriodChange, pendingCelebration, onCelebrated, isDark }: {
+function PerformanceIndexCard({ data, period, onPeriodChange, pendingCelebration, onCelebrated, isDark, progressColor }: {
   data: PerformanceIndexData
   period: PerfPeriod
   onPeriodChange: (p: PerfPeriod) => void
   pendingCelebration: boolean
   onCelebrated: () => void
   isDark: boolean
+  progressColor: string
 }) {
   const [showConfetti, setShowConfetti] = useState(false)
   const [emphasize, setEmphasize] = useState(false)
@@ -510,7 +512,7 @@ function PerformanceIndexCard({ data, period, onPeriodChange, pendingCelebration
             )}
           </div>
           <div className="flex flex-col gap-1.5 w-full min-w-0">
-            <PerfMetricRow icon="🟣" label="Productive Days" value={String(m.productiveDays)} />
+            <PerfMetricRow icon={<ProductiveDot color={progressColor} size={14} />} label="Productive Days" value={String(m.productiveDays)} />
             <PerfMetricRow icon="🔥" label="Hyper Productive Days" value={String(m.hyperDays)} />
             <PerfMetricRow icon="🏆" label="Milestones Accomplished" value={String(m.milestoneDays)} />
             <PerfMetricRow icon="🎯" label="Goals Achieved" value={String(m.goalDays)} />
@@ -589,19 +591,43 @@ function PersonalRecordsCard({ data, isDark }: { data: RecordsData | null; isDar
 // detailed Monthly/Weekly Progress chart (no tooltips, no trophy, no bar-
 // clearance routing): just enough to answer "am I trending up or down?"
 
+// Below the `sm` breakpoint (640px) — the same mobile/tablet boundary used
+// throughout this file's own Tailwind classes. The initial value is read
+// synchronously (SSR-safe) via the lazy useState initializer; only later
+// genuine viewport changes (resize/rotate) flow through the matchMedia
+// listener, so this never calls setState synchronously inside the effect
+// body itself.
+function useIsMobileViewport(): boolean {
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(max-width: 639px)')
+    const onChange = () => setIsMobile(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  return isMobile
+}
+
 function MiniTrendChart({ weeks, isDark }: { weeks: { label: string; ms: number }[]; isDark: boolean }) {
   // Unique per instance so multiple charts never collide on this def id.
   const uid = useId().replace(/[:]/g, '')
   const maxMs = Math.max(...weeks.map(w => w.ms), 1)
+  const isMobile = useIsMobileViewport()
   // Extra top padding (vs. the original 10px) so a lifted final point plus
   // its full arrowhead always has headroom and is never clipped by the
   // SVG's own top edge — cH (and therefore bar/point scaling) is kept
   // identical by growing H by the same amount, so nothing about the data
   // geometry itself shifts, only the blank space reserved above it.
-  const W = 680, H = 126
+  const W = 680
   const PAD = { top: 26, bottom: 16, left: 4, right: 4 }
+  // Mobile-only: the plotting area itself (not the label padding) grows
+  // ~60% taller — a real increase in drawable vertical space, not a CSS
+  // stretch, so bars/line/labels stay correctly proportioned, just spread
+  // across more room. Desktop/tablet keep the original 84px plot height.
+  const cH = isMobile ? 134 : 84
+  const H = PAD.top + cH + PAD.bottom
   const cW = W - PAD.left - PAD.right
-  const cH = H - PAD.top - PAD.bottom
   const slotW = cW / weeks.length
   const barW = Math.max(10, slotW * 0.42)
   const xCenter = (i: number) => PAD.left + i * slotW + slotW / 2
@@ -833,7 +859,8 @@ function NextTargetCard({ target, onOpenPremium, isDark }: { target: { label: st
 // ─── AnalyticsModal (main export) ──────────────────────────────────────────────
 
 export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => void; onDayDoubleClick?: (key: string, month: number, day: number) => void }) {
-  const { isDark, calData, activities } = useApp()
+  const { isDark, calData, activities, progressColor: _rawProgressColor } = useApp()
+  const progressColor = resolveProgressColor(_rawProgressColor, isDark)
 
   // Freeze the page behind this modal at every breakpoint (not just desktop)
   // so neither wheel/trackpad nor touch-scroll-through can ever expose the
@@ -1216,6 +1243,11 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
               ))}
             </div>
 
+            {/* Shared Analytics icon legend — the same LegendRow already used
+                on the main Calendar page, shown once here (not duplicated
+                inside any individual dashboard). */}
+            <LegendRow />
+
             {/* Executive summary — real data, derived from daySummaries above */}
             <div>
               <h3 className="text-[12px] font-bold tracking-wide uppercase mb-3" style={{ color: 'var(--xp-txt3)' }}>Your Performance at a Glance</h3>
@@ -1225,7 +1257,7 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
                   <PerformanceIndexCard
                     data={performanceIndex} period={perfPeriod} onPeriodChange={setPerfPeriod}
                     pendingCelebration={pendingEliteCelebration} onCelebrated={() => setPendingEliteCelebration(false)}
-                    isDark={isDark}
+                    isDark={isDark} progressColor={progressColor}
                   />
                   <PersonalRecordsCard data={personalRecords} isDark={isDark} />
                 </div>

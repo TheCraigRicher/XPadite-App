@@ -79,6 +79,13 @@ export function LegendRow() {
           <span>Milestone</span>
         </div>
       </Tip>
+
+      <Tip content="Goals Accomplished — you achieved a target you set for yourself">
+        <div className="flex items-center gap-1.5 text-xs cursor-default">
+          <span className="text-base leading-none">🎯</span>
+          <span>Goals Accomplished</span>
+        </div>
+      </Tip>
     </div>
   )
 }

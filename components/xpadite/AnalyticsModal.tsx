@@ -793,7 +793,7 @@ function ProgressRing({ pct, size = 64 }: { pct: number; size?: number }) {
   )
 }
 
-function NextTargetCard({ target, onOpenPremium }: { target: { label: string; progressPct: number } | null; onOpenPremium: () => void }) {
+function NextTargetCard({ target, onOpenPremium, isDark }: { target: { label: string; progressPct: number } | null; onOpenPremium: () => void; isDark: boolean }) {
   return (
     <SectionCard icon="🎯" title="Next Target" subtitle="Your next milestone within reach">
       <div className="flex items-center gap-3 mb-3">
@@ -808,10 +808,20 @@ function NextTargetCard({ target, onOpenPremium }: { target: { label: string; pr
           </p>
         )}
       </div>
+      {/* Gradient/rounding/shadow/border reused exactly from PremiumUpgradeModal.tsx's
+          own "Upgrade to Pro" button — the "Unlock AI Insights" modal this
+          button opens — so both read as the same CTA. Width narrows and
+          centers on tablet/desktop; mobile keeps its original full-width
+          size/placement and only picks up the new gradient. */}
       <button
         onClick={onOpenPremium}
-        className="flex items-center justify-center gap-1.5 w-full text-[11.5px] font-bold py-2 rounded-xl transition-opacity hover:opacity-90"
-        style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)', color: '#ffffff', boxShadow: '0 2px 10px rgba(124,58,237,0.30)' }}
+        className="flex items-center justify-center gap-1.5 text-[11.5px] font-bold py-2 rounded-2xl transition-opacity hover:opacity-90 w-full sm:w-[60%] sm:mx-auto lg:w-[210px]"
+        style={{
+          background: 'linear-gradient(135deg, #6d28d9 0%, #7c3aed 50%, #a855f7 100%)',
+          color: '#ffffff',
+          boxShadow: isDark ? '0 6px 24px rgba(124,58,237,0.50)' : '0 4px 14px rgba(124,58,237,0.32)',
+          border: '0.5px solid rgba(167,139,250,0.30)',
+        }}
       >
         <AICoachMenuIcon size={15} />
         AI Insight
@@ -1224,7 +1234,7 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   <XPaditeInsightsCard insights={xpaditeInsights} />
-                  <NextTargetCard target={nextTarget} onOpenPremium={() => setShowPremium(true)} />
+                  <NextTargetCard target={nextTarget} onOpenPremium={() => setShowPremium(true)} isDark={isDark} />
                 </div>
               </div>
             </div>

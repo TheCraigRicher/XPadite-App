@@ -1251,8 +1251,13 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
 
             {/* Shared Analytics icon legend — the same LegendRow already used
                 on the main Calendar page, shown once here (not duplicated
-                inside any individual dashboard). */}
-            <LegendRow compactMobile />
+                inside any individual dashboard). mt-4 adds extra mobile-only
+                breathing room above the legend (on top of the flex column's
+                own gap-5) without touching the gap below it, so the legend→
+                "Your Performance at a Glance" spacing stays exactly as-is. */}
+            <div className="mt-4 sm:mt-0">
+              <LegendRow compactMobile />
+            </div>
 
             {/* Executive summary — real data, derived from daySummaries above */}
             <div>

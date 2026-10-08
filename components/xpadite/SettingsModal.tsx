@@ -61,26 +61,41 @@ const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
 
 // ── Plan popup data ────────────────────────────────────────────────────────
 
-const PRO_CORE_FEATURES = [
-  'Productivity Calendar & history',
-  'Productive / Hyper-Productive / Milestone tracking',
-  'Streak tracking',
-  'Performance Analytics — Today, Weekly, Monthly, Yearly',
-  'Full Task Manager',
-  'Task timers & session history',
-  'Activities',
-  'Planner / Journal Notes',
-  'Notifications & Reminders',
-  'Gallery / Photos',
-  'Calendar & meeting integrations',
-  'Sharing features',
+// `comingSoon` items render with a clock indicator instead of a checkmark —
+// they're genuinely not available yet, so they must never look like an
+// already-shipped feature. AI_FEATURES stays a separate list (shown as
+// included, no checkmark distinction needed, for Premium plans; shown as
+// excluded with a red X for Pro/LTD/3-Year plans) — unchanged mechanism,
+// only PRO_CORE_FEATURES' own contents/order/comingSoon flags changed.
+type Feature = { label: string; comingSoon?: boolean }
+
+const PRO_CORE_FEATURES: Feature[] = [
+  { label: 'Activity Time Tracker & Planner' },
+  { label: 'Productivity Calendar & History' },
+  { label: 'Productive / Hyper-Productive / Milestone Tracking' },
+  { label: 'Streak Tracking' },
+  { label: 'Performance Analytics — Today, Weekly, Monthly, Yearly' },
+  { label: 'Goal Manager — Coming Soon', comingSoon: true },
+  { label: 'Full Task Manager' },
+  { label: 'Task Timers & Session History' },
+  { label: 'Activity Manager' },
+  { label: 'Planner / Journal Notes' },
+  { label: 'Mind Mapping Canvas' },
+  { label: 'Notifications & Reminders' },
+  { label: 'Gallery / Photos' },
+  { label: 'Calendar & Meeting Integrations' },
+  { label: 'Sharing Features' },
+  { label: 'Beautiful UI Color Theme Customization' },
+  { label: 'Free Daily Motivational Quotes' },
+  { label: 'New Updates with Every Feature Release' },
+  { label: 'More Features Coming Soon — Included in Your Plan!', comingSoon: true },
 ]
 
-const AI_FEATURES = [
-  'XPadite AI Coach',
-  'AI-powered productivity insights',
-  'AI plan & journal-to-task conversion',
-  'AI-powered Motivate Me',
+const AI_FEATURES: Feature[] = [
+  { label: 'XPadite AI Coach' },
+  { label: 'AI-powered productivity insights' },
+  { label: 'AI plan & journal-to-task conversion' },
+  { label: 'AI-powered Motivate Me' },
 ]
 
 type PlanConfig = {
@@ -102,8 +117,8 @@ type PlanConfig = {
   // V2-only plans (Premium Monthly/Yearly) — CTA renders inert/greyed with
   // "Coming Soon" messaging instead of a working purchase action.
   ctaDisabled?: boolean
-  includedFeatures: string[]
-  excludedFeatures: string[]
+  includedFeatures: Feature[]
+  excludedFeatures: Feature[]
   note?: string
 }
 
@@ -192,7 +207,7 @@ export const PLAN_CONFIGS: Record<string, PlanConfig> = {
     subtitle: "Own XPadite Pro for life with a single payment. Limited to the first 100 customers for this offer.",
     badge: 'Limited Offer',
     badgeIcon: '💎',
-    price: '$199',
+    price: '$249',
     priceLabel: 'one-time payment',
     headerGradient: 'linear-gradient(135deg, #0789A8 0%, #21D0E3 100%)',
     accentColor: '#0789A8',
@@ -511,14 +526,23 @@ export function PlanPopup({ planId, isDark, onClose }: {
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <div style={{
                   width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
-                  background: cfg.accentGlow,
+                  background: feat.comingSoon ? 'rgba(217,119,6,0.12)' : cfg.accentGlow,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke={cfg.accentColor} strokeWidth="2.8" style={{ width: 11, height: 11 }}>
-                    <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  {feat.comingSoon ? (
+                    /* Coming-soon clock — never a checkmark, so an unfinished
+                       feature never reads as already available. */
+                    <svg viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2.4" style={{ width: 11, height: 11 }}>
+                      <circle cx="12" cy="12" r="9" />
+                      <polyline points="12 7 12 12 15.5 14" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" fill="none" stroke={cfg.accentColor} strokeWidth="2.8" style={{ width: 11, height: 11 }}>
+                      <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
                 </div>
-                <span style={{ fontSize: 12.5, color: textPrimary, lineHeight: 1.4, flex: 1 }}>{feat}</span>
+                <span style={{ fontSize: 12.5, color: feat.comingSoon ? textSecondary : textPrimary, lineHeight: 1.4, flex: 1 }}>{feat.label}</span>
               </div>
             ))}
 
@@ -537,7 +561,7 @@ export function PlanPopup({ planId, isDark, onClose }: {
                         <line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" />
                       </svg>
                     </div>
-                    <span style={{ fontSize: 12.5, color: textSecondary, lineHeight: 1.4, flex: 1 }}>{feat}</span>
+                    <span style={{ fontSize: 12.5, color: textSecondary, lineHeight: 1.4, flex: 1 }}>{feat.label}</span>
                   </div>
                 ))}
               </>
@@ -1106,7 +1130,7 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
                       <p style={{ fontSize: 10, color: 'rgba(26,18,0,0.62)', marginTop: 4, lineHeight: 1.3 }}>One-Time Payment</p>
                       <p style={{ fontSize: 9.5, color: 'rgba(26,18,0,0.68)', marginTop: 3, lineHeight: 1.3 }}>Save $70.97 vs. yearly</p>
                       <p style={{ fontSize: 10.5, color: 'rgba(26,18,0,0.75)', marginTop: 5 }}>Upgrade</p>
-                      <p style={{ fontSize: 9.5, color: 'rgba(26,18,0,0.55)', marginTop: 3, lineHeight: 1.3 }}>First 100 Customers</p>
+                      <p style={{ fontSize: 9.5, color: 'rgba(26,18,0,0.55)', marginTop: 3, lineHeight: 1.3 }}>Only for the First 100 Customers</p>
                     </div>
 
                     {/* Lifetime Pro — cyan */}
@@ -1119,7 +1143,7 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
                       <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Lifetime Pro $249</p>
                       <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.72)', marginTop: 4, lineHeight: 1.3 }}>One-Time Payment</p>
                       <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.72)', marginTop: 6 }}>Upgrade</p>
-                      <p style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.58)', marginTop: 3, lineHeight: 1.3 }}>First 100 Customers</p>
+                      <p style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.58)', marginTop: 3, lineHeight: 1.3 }}>Only for the First 100 Customers</p>
                     </div>
 
                   </div>

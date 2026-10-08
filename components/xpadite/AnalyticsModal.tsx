@@ -1249,16 +1249,6 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
               ))}
             </div>
 
-            {/* Shared Analytics icon legend — the same LegendRow already used
-                on the main Calendar page, shown once here (not duplicated
-                inside any individual dashboard). mt-4 adds extra mobile-only
-                breathing room above the legend (on top of the flex column's
-                own gap-5) without touching the gap below it, so the legend→
-                "Your Performance at a Glance" spacing stays exactly as-is. */}
-            <div className="mt-4 sm:mt-0">
-              <LegendRow compactMobile />
-            </div>
-
             {/* Executive summary — real data, derived from daySummaries above */}
             <div>
               <h3 className="text-[12px] font-bold tracking-wide uppercase mb-3" style={{ color: 'var(--xp-txt3)' }}>Your Performance at a Glance</h3>
@@ -1280,6 +1270,18 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
                   <NextTargetCard target={nextTarget} onOpenPremium={() => setShowPremium(true)} isDark={isDark} />
                 </div>
               </div>
+            </div>
+
+            {/* Shared Analytics icon legend — the same LegendRow already used
+                on the main Calendar page. Moved to the very end of the main
+                content as understated supporting information, not a
+                prominent section of its own — no card/colored background,
+                just extra top margin (mt-2, on top of the flex column's own
+                gap-5) for subtle separation from Next Target/XPadite
+                Insights above it. compactMobile still drives the 3+2 mobile
+                arrangement / centered desktop-tablet row, unchanged. */}
+            <div className="mt-2">
+              <LegendRow compactMobile />
             </div>
           </div>
         </div>

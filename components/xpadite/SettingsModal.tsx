@@ -99,6 +99,9 @@ type PlanConfig = {
   ctaLabel: string
   ctaBg: string
   ctaGlow: string
+  // V2-only plans (Premium Monthly/Yearly) — CTA renders inert/greyed with
+  // "Coming Soon" messaging instead of a working purchase action.
+  ctaDisabled?: boolean
   includedFeatures: string[]
   excludedFeatures: string[]
   note?: string
@@ -108,74 +111,79 @@ export const PLAN_CONFIGS: Record<string, PlanConfig> = {
   'pro-monthly': {
     title: 'Pro Plan',
     subtitle: 'Everything you need to plan, execute and track your progress.',
-    badge: 'Current Plan',
-    badgeIcon: '✓',
-    price: '$7',
+    // No real subscription state exists anywhere in the app yet, so this
+    // never claims to be the user's "Current Plan" — that was previously
+    // hardcoded true regardless of actual status.
+    badge: 'Monthly Plan',
+    badgeIcon: '📅',
+    price: '$10',
     priceLabel: '/ month',
-    headerGradient: 'linear-gradient(135deg, #6b7280 0%, #9ca3af 55%, #d1d5db 100%)',
-    accentColor: '#6b7280',
-    accentGlow: 'rgba(107,114,128,0.20)',
-    interiorLight: '#f9fafb',
-    interiorDark: '#111318',
+    headerGradient: 'linear-gradient(135deg, #C321FF 0%, #71009B 100%)',
+    accentColor: '#C321FF',
+    accentGlow: 'rgba(195,33,255,0.20)',
+    interiorLight: '#fdf4ff',
+    interiorDark: '#1a0322',
     ctaLabel: 'Get Pro Monthly',
-    ctaBg: 'linear-gradient(135deg, #6b7280 0%, #9ca3af 55%, #d1d5db 100%)',
-    ctaGlow: 'rgba(107,114,128,0.40)',
+    ctaBg: 'linear-gradient(135deg, #C321FF 0%, #71009B 100%)',
+    ctaGlow: 'rgba(195,33,255,0.42)',
     includedFeatures: PRO_CORE_FEATURES,
     excludedFeatures: AI_FEATURES,
   },
   'pro-yearly': {
     title: 'Pro Plan',
     subtitle: 'Everything you need to plan, execute and track your progress.',
-    badge: 'Save 29%',
+    badge: 'Save 25%',
     badgeIcon: '⭐',
-    price: '$59.99',
+    price: '$89.99',
     priceLabel: '/ year',
-    savings: 'Save $24 vs monthly',
-    headerGradient: 'linear-gradient(135deg, #4c1d95 0%, #6d28d9 45%, #7c3aed 100%)',
-    accentColor: '#7c3aed',
-    accentGlow: 'rgba(124,58,237,0.22)',
-    interiorLight: '#fdf9ff',
-    interiorDark: '#100a22',
+    savings: 'Save $30.01/year',
+    headerGradient: 'linear-gradient(135deg, #9146FF 0%, #5D20BF 100%)',
+    accentColor: '#9146FF',
+    accentGlow: 'rgba(145,70,255,0.22)',
+    interiorLight: '#f8f4ff',
+    interiorDark: '#140a26',
     ctaLabel: 'Get Pro Yearly',
-    ctaBg: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
-    ctaGlow: 'rgba(124,58,237,0.44)',
+    ctaBg: 'linear-gradient(135deg, #9146FF 0%, #5D20BF 100%)',
+    ctaGlow: 'rgba(145,70,255,0.44)',
     includedFeatures: PRO_CORE_FEATURES,
     excludedFeatures: AI_FEATURES,
   },
   'premium-monthly': {
     title: 'Premium Plan',
     subtitle: 'Everything in Pro, powered up with XPadite AI.',
-    badge: 'Best Value',
-    badgeIcon: '✦',
-    price: '$10',
+    badge: 'Coming in V2',
+    badgeIcon: '🚧',
+    price: '$15',
     priceLabel: '/ month',
-    headerGradient: 'linear-gradient(135deg, #14532d 0%, #15803d 45%, #22c55e 100%)',
-    accentColor: '#16a34a',
-    accentGlow: 'rgba(22,163,74,0.22)',
-    interiorLight: '#f0fdf4',
-    interiorDark: '#071a10',
-    ctaLabel: 'Get Premium Monthly',
-    ctaBg: 'linear-gradient(135deg, #15803d 0%, #22c55e 100%)',
-    ctaGlow: 'rgba(22,163,74,0.40)',
+    headerGradient: 'linear-gradient(135deg, #19C95C 0%, #128440 100%)',
+    accentColor: '#19C95C',
+    accentGlow: 'rgba(25,201,92,0.20)',
+    interiorLight: '#f0fdf6',
+    interiorDark: '#06190e',
+    ctaLabel: 'Coming Soon in V2',
+    ctaBg: 'linear-gradient(135deg, #19C95C 0%, #128440 100%)',
+    ctaGlow: 'rgba(25,201,92,0.40)',
+    ctaDisabled: true,
     includedFeatures: [...PRO_CORE_FEATURES, ...AI_FEATURES],
     excludedFeatures: [],
   },
   'premium-yearly': {
     title: 'Premium Plan',
     subtitle: 'Everything in Pro, powered up with XPadite AI.',
-    badge: 'Save 25%',
-    badgeIcon: '✦',
-    price: '$89.99',
+    badge: 'Coming in V2',
+    badgeIcon: '🚧',
+    price: '$119',
     priceLabel: '/ year',
-    savings: 'Save $30 vs monthly',
-    headerGradient: 'linear-gradient(135deg, #b45309 0%, #d97706 45%, #f59e0b 75%, #fbbf24 100%)',
-    accentColor: '#b45309',
-    accentGlow: 'rgba(180,83,9,0.18)',
-    interiorLight: '#fffbeb',
-    interiorDark: '#1c0f00',
-    ctaLabel: 'Get Premium Yearly',
-    ctaBg: 'linear-gradient(135deg, #b45309 0%, #d97706 55%, #fbbf24 100%)',
-    ctaGlow: 'rgba(217,119,6,0.48)',
+    savings: 'Save $61/year',
+    headerGradient: 'linear-gradient(135deg, #AE4505 0%, #FFC326 100%)',
+    accentColor: '#AE4505',
+    accentGlow: 'rgba(174,69,5,0.20)',
+    interiorLight: '#fff8ec',
+    interiorDark: '#1f1200',
+    ctaLabel: 'Coming Soon in V2',
+    ctaBg: 'linear-gradient(135deg, #AE4505 0%, #FFC326 100%)',
+    ctaGlow: 'rgba(174,69,5,0.42)',
+    ctaDisabled: true,
     includedFeatures: [...PRO_CORE_FEATURES, ...AI_FEATURES],
     excludedFeatures: [],
   },
@@ -186,14 +194,14 @@ export const PLAN_CONFIGS: Record<string, PlanConfig> = {
     badgeIcon: '💎',
     price: '$199',
     priceLabel: 'one-time payment',
-    headerGradient: 'linear-gradient(135deg, #0c4a6e 0%, #0891b2 45%, #22d3ee 100%)',
-    accentColor: '#0891b2',
-    accentGlow: 'rgba(6,182,212,0.22)',
+    headerGradient: 'linear-gradient(135deg, #0789A8 0%, #21D0E3 100%)',
+    accentColor: '#0789A8',
+    accentGlow: 'rgba(7,137,168,0.22)',
     interiorLight: '#ecfeff',
     interiorDark: '#031a22',
     ctaLabel: 'Get Lifetime Pro',
-    ctaBg: 'linear-gradient(135deg, #0891b2 0%, #22d3ee 100%)',
-    ctaGlow: 'rgba(6,182,212,0.38)',
+    ctaBg: 'linear-gradient(135deg, #0789A8 0%, #21D0E3 100%)',
+    ctaGlow: 'rgba(7,137,168,0.38)',
     includedFeatures: PRO_CORE_FEATURES,
     excludedFeatures: AI_FEATURES,
     note: 'Limited to the first 100 customers for this offer. AI features are not included and require a separate Premium subscription.',
@@ -203,16 +211,17 @@ export const PLAN_CONFIGS: Record<string, PlanConfig> = {
     subtitle: 'Three full years of XPadite Pro with a single one-time payment. Limited to the first 100 customers for this offer.',
     badge: 'Limited Offer',
     badgeIcon: '⚡',
-    price: '$119',
+    price: '$199',
     priceLabel: 'one-time payment',
-    headerGradient: 'linear-gradient(135deg, #92720a 0%, #c9a200 45%, #f0e15d 100%)',
-    accentColor: '#92720a',
-    accentGlow: 'rgba(146,114,10,0.18)',
+    savings: 'Save $70.97 vs. yearly',
+    headerGradient: 'linear-gradient(135deg, #D3A700 0%, #FFF02D 100%)',
+    accentColor: '#D3A700',
+    accentGlow: 'rgba(211,167,0,0.20)',
     interiorLight: '#fffef0',
     interiorDark: '#1a1500',
     ctaLabel: 'Get 3-Year Pro',
-    ctaBg: 'linear-gradient(135deg, #92720a 0%, #c9a200 100%)',
-    ctaGlow: 'rgba(146,114,10,0.40)',
+    ctaBg: 'linear-gradient(135deg, #D3A700 0%, #FFF02D 100%)',
+    ctaGlow: 'rgba(211,167,0,0.40)',
     includedFeatures: PRO_CORE_FEATURES,
     excludedFeatures: AI_FEATURES,
     note: 'Limited to the first 100 customers for this offer. AI features are not included and require a separate Premium subscription.',
@@ -543,12 +552,19 @@ export function PlanPopup({ planId, isDark, onClose }: {
           background: isDark ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.95)',
           borderTop: `1px solid ${divider}`,
         }}>
-          <button className="xp-plan-cta" style={{
-            width: '100%', padding: '14px 20px', borderRadius: 14, cursor: 'pointer',
-            background: cfg.ctaBg, border: 'none', color: 'white',
-            fontSize: 14.5, fontWeight: 700, letterSpacing: '0.01em',
-            boxShadow: `0 4px 20px ${cfg.ctaGlow}`,
-          }}>
+          <button
+            className={cfg.ctaDisabled ? undefined : 'xp-plan-cta'}
+            disabled={cfg.ctaDisabled}
+            style={{
+              width: '100%', padding: '14px 20px', borderRadius: 14,
+              cursor: cfg.ctaDisabled ? 'not-allowed' : 'pointer',
+              background: cfg.ctaDisabled ? (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)') : cfg.ctaBg,
+              border: 'none', color: cfg.ctaDisabled ? textSecondary : 'white',
+              fontSize: 14.5, fontWeight: 700, letterSpacing: '0.01em',
+              boxShadow: cfg.ctaDisabled ? 'none' : `0 4px 20px ${cfg.ctaGlow}`,
+              opacity: cfg.ctaDisabled ? 0.75 : 1,
+            }}
+          >
             {cfg.ctaLabel}
           </button>
           {cfg.note && (
@@ -1025,85 +1041,85 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
                 <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 20px 22px 36px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
 
-                    {/* Pro Monthly — light gray */}
+                    {/* Pro Monthly — magenta → deep purple */}
                     <div className="xp-plan-card" onClick={() => setActivePlanPopup('pro-monthly')} style={{
-                      background: 'linear-gradient(135deg, #6b7280 0%, #9ca3af 60%, #d1d5db 100%)',
+                      background: 'linear-gradient(135deg, #C321FF 0%, #71009B 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
-                      boxShadow: '0 4px 18px rgba(107,114,128,0.34)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
+                      boxShadow: '0 4px 18px rgba(195,33,255,0.34)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 104,
                       transition: 'transform 160ms ease, box-shadow 160ms ease, filter 160ms ease', cursor: 'pointer',
                     }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Monthly Plan $7</p>
-                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.88)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" style={{ width: 11, height: 11, flexShrink: 0 }}>
-                          <polyline points="20 6 9 17 4 12" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                        Current Plan
-                      </p>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Monthly Plan $10</p>
+                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.80)', marginTop: 6 }}>Upgrade</p>
                     </div>
 
                     {/* Pro Yearly — purple */}
                     <div className="xp-plan-card xp-plan-purple" onClick={() => setActivePlanPopup('pro-yearly')} style={{
-                      background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
+                      background: 'linear-gradient(135deg, #9146FF 0%, #5D20BF 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
-                      boxShadow: '0 4px 18px rgba(124,58,237,0.32)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
+                      boxShadow: '0 4px 18px rgba(145,70,255,0.32)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 104,
                     }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Yearly Plan $59.99</p>
-                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.65)', marginTop: 6 }}>Upgrade</p>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Yearly Plan $89.99</p>
+                      <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.80)', marginTop: 5, lineHeight: 1.3 }}>Save $30.01/year</p>
+                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.65)', marginTop: 5 }}>Upgrade</p>
                     </div>
 
-                    {/* Premium Monthly — green */}
+                    {/* Premium Monthly — green — V2, not yet purchasable */}
                     <div className="xp-plan-card xp-plan-green" onClick={() => setActivePlanPopup('premium-monthly')} style={{
-                      background: 'linear-gradient(135deg, #22c55e 0%, #15803d 100%)',
+                      background: 'linear-gradient(135deg, #19C95C 0%, #128440 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
-                      boxShadow: '0 4px 18px rgba(22,163,74,0.30)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
+                      boxShadow: '0 4px 18px rgba(25,201,92,0.30)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 104,
                     }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Premium Monthly Plan $10</p>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Premium Monthly Plan $15</p>
                       <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.70)', marginTop: 6 }}>Upgrade</p>
+                      <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.58)', marginTop: 4, lineHeight: 1.3 }}>(In V2 Coming Soon)</p>
                     </div>
 
-                    {/* Premium Yearly — true gold */}
+                    {/* Premium Yearly — orange → amber gold — V2, not yet purchasable */}
                     <div className="xp-plan-card" onClick={() => setActivePlanPopup('premium-yearly')} style={{
-                      background: 'linear-gradient(135deg, #92400e 0%, #d97706 50%, #fbbf24 100%)',
+                      background: 'linear-gradient(135deg, #AE4505 0%, #FFC326 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
-                      boxShadow: '0 4px 18px rgba(217,119,6,0.42)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
+                      boxShadow: '0 4px 18px rgba(174,69,5,0.38)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 104,
                       transition: 'transform 160ms ease, box-shadow 160ms ease, filter 160ms ease', cursor: 'pointer',
                     }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Premium Yearly Plan $89.99</p>
-                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.75)', marginTop: 6 }}>Upgrade</p>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Premium Yearly Plan $119</p>
+                      <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.82)', marginTop: 5, lineHeight: 1.3 }}>Save $61/year</p>
+                      <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.75)', marginTop: 5 }}>Upgrade</p>
+                      <p style={{ fontSize: 9, color: 'rgba(255,255,255,0.62)', marginTop: 4, lineHeight: 1.3 }}>(In V2 Coming Soon)</p>
                     </div>
 
                   </div>
 
                   <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
 
-                    {/* 3-Year Pro — yellow */}
+                    {/* 3-Year Pro — gold → bright yellow */}
                     <div className="xp-plan-card xp-plan-yellow" onClick={() => setActivePlanPopup('3year-pro')} style={{
-                      background: 'linear-gradient(135deg, #c9a200 0%, #e8cc00 55%, #f0e15d 100%)',
+                      background: 'linear-gradient(135deg, #D3A700 0%, #FFF02D 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
-                      boxShadow: '0 4px 18px rgba(200,162,0,0.38)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
+                      boxShadow: '0 4px 18px rgba(211,167,0,0.38)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 104,
                     }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: '#1a1200', lineHeight: 1.4 }}>3-Year Pro $119</p>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: '#1a1200', lineHeight: 1.4 }}>3-Year Pro $199</p>
                       <p style={{ fontSize: 10, color: 'rgba(26,18,0,0.62)', marginTop: 4, lineHeight: 1.3 }}>One-Time Payment</p>
-                      <p style={{ fontSize: 9.5, color: 'rgba(26,18,0,0.55)', marginTop: 2, lineHeight: 1.3 }}>First 100 Customers</p>
-                      <p style={{ fontSize: 10.5, color: 'rgba(26,18,0,0.75)', marginTop: 6 }}>Upgrade</p>
+                      <p style={{ fontSize: 9.5, color: 'rgba(26,18,0,0.68)', marginTop: 3, lineHeight: 1.3 }}>Save $70.97 vs. yearly</p>
+                      <p style={{ fontSize: 10.5, color: 'rgba(26,18,0,0.75)', marginTop: 5 }}>Upgrade</p>
+                      <p style={{ fontSize: 9.5, color: 'rgba(26,18,0,0.55)', marginTop: 3, lineHeight: 1.3 }}>First 100 Customers</p>
                     </div>
 
                     {/* Lifetime Pro — cyan */}
                     <div className="xp-plan-card xp-plan-cyan" onClick={() => setActivePlanPopup('ltd')} style={{
-                      background: 'linear-gradient(135deg, #0891b2 0%, #22d3ee 100%)',
+                      background: 'linear-gradient(135deg, #0789A8 0%, #21D0E3 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
-                      boxShadow: '0 4px 18px rgba(6,182,212,0.28)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 90,
+                      boxShadow: '0 4px 18px rgba(7,137,168,0.30)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 104,
                     }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Lifetime Pro $199</p>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Lifetime Pro $249</p>
                       <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.72)', marginTop: 4, lineHeight: 1.3 }}>One-Time Payment</p>
-                      <p style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.58)', marginTop: 2, lineHeight: 1.3 }}>First 100 Customers</p>
                       <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.72)', marginTop: 6 }}>Upgrade</p>
+                      <p style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.58)', marginTop: 3, lineHeight: 1.3 }}>First 100 Customers</p>
                     </div>
 
                   </div>

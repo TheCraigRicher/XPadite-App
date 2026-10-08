@@ -1046,7 +1046,7 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
                       background: 'linear-gradient(135deg, #C321FF 0%, #71009B 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(195,33,255,0.34)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 104,
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 112,
                       transition: 'transform 160ms ease, box-shadow 160ms ease, filter 160ms ease', cursor: 'pointer',
                     }}>
                       <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Monthly Plan $10</p>
@@ -1058,7 +1058,7 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
                       background: 'linear-gradient(135deg, #9146FF 0%, #5D20BF 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(145,70,255,0.32)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 104,
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 112,
                     }}>
                       <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Yearly Plan $89.99</p>
                       <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.80)', marginTop: 5, lineHeight: 1.3 }}>Save $30.01/year</p>
@@ -1070,7 +1070,7 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
                       background: 'linear-gradient(135deg, #19C95C 0%, #128440 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(25,201,92,0.30)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 104,
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 112,
                     }}>
                       <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Premium Monthly Plan $15</p>
                       <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.70)', marginTop: 6 }}>Upgrade</p>
@@ -1082,7 +1082,7 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
                       background: 'linear-gradient(135deg, #AE4505 0%, #FFC326 100%)',
                       borderRadius: 14, padding: '20px 16px', textAlign: 'center',
                       boxShadow: '0 4px 18px rgba(174,69,5,0.38)',
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 104,
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 112,
                       transition: 'transform 160ms ease, box-shadow 160ms ease, filter 160ms ease', cursor: 'pointer',
                     }}>
                       <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Premium Yearly Plan $119</p>

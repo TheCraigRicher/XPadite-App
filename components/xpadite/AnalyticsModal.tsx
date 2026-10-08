@@ -1,70 +1,62 @@
 'use client'
 
 // ── Analytics modal — front-end + real data wiring ────────────────────────────
-// The 4 timeframe cards are the dashboard hub: Today opens the existing
-// DayDashboardModal (its own overlay, sized to match this modal's own card);
-// Monthly opens the existing MonthFullPage (from MonthFullPage.tsx) directly
-// embedded in this modal's own container via its `embedded` prop — Weekly and
-// Yearly still only toggle a local selected state since those dashboards
-// aren't built yet. The Overview section below is driven by real XPadite data
-// via the SAME range-stats engine AnalyticsPage.tsx already uses
-// (computeRangeStats, exported from there) and the streak functions from
-// productivityEngine.ts (also used by StatsRow) — no parallel calculation
-// system.
+// The 4 timeframe cards are the dashboard hub: each opens its own FullPage
+// component (DayFullPage/WeekFullPage/MonthFullPage/YearFullPage), embedded
+// in this modal's own container. Below them sits a compact, data-driven
+// EXECUTIVE SUMMARY of the user's real analytics — Performance Pulse,
+// Personal Records, Progress Trend, XPadite Insights, Next Target — rather
+// than a duplicate of the detailed dashboards' own stats. Every number here
+// is derived from the SAME `calData` source (and the same productive-
+// session/deep-work conventions) the four detailed dashboards already use —
+// see `daySummaries` below, the one per-day aggregation every section reads
+// from, so there's a single source of truth rather than five parallel
+// calculations.
 //
 // Body scroll is locked locally (below) with the stronger position:fixed
 // technique at every breakpoint — not the shared useLockBodyScroll, whose
 // mobile branch doesn't fully stop iOS scroll-through once nested dashboards
 // add their own scrollable regions. Reuses established XPadite patterns: the
-// signature purple/lavender gradient header, the same solid-triangle date-nav glyphs
-// used in DayModal/SendToOptionsModal, PremiumUpgradeModal for "AI Insight",
-// and DayDashboardModal's exact responsive modal-sizing classes (mobile
-// full-bleed → sm:max-w-[640px] → lg:max-w-[1296px]) so this modal matches
-// the rest of the analytics/dashboard family.
+// signature purple/lavender gradient header and DayDashboardModal's exact
+// responsive modal-sizing classes (mobile full-bleed → sm:max-w-[640px] →
+// lg:max-w-[1296px]) so this modal matches the rest of the analytics/
+// dashboard family.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useApp } from './AppContext'
 import { PremiumUpgradeModal } from './PremiumUpgradeModal'
-import { MONTHS, formatMs, dateKey as buildDateKey, hexToRgba, resolveProgressColor } from './utils'
-import { computeRangeStats, getCurrentWeekRange, getCurrentMonthRange } from './AnalyticsPage'
+import { formatMs, dateKey as buildDateKey, isProductiveActivity } from './utils'
 import { calculateBestStreak } from './productivityEngine'
+import { AICoachMenuIcon } from './AppSidebar'
 import { DayFullPage } from './DayFullPage'
 import { WeekFullPage } from './WeekFullPage'
 import { MonthFullPage } from './MonthFullPage'
 import { YearFullPage } from './YearFullPage'
-import { ProductiveDot } from './LegendRow'
-import type { CalendarData } from './types'
 
 type Timeframe = 'today' | 'weekly' | 'monthly' | 'yearly'
-type Scope = 'today' | 'week' | 'month' | 'year'
+type Dir = 'up' | 'down' | 'flat'
 
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const SCOPES: Scope[] = ['today', 'week', 'month', 'year']
-const SCOPE_META: Record<Scope, { dropdownLabel: string; heading: string }> = {
-  today: { dropdownLabel: 'Today',      heading: "Today's Overview" },
-  week:  { dropdownLabel: 'This Week',  heading: "This Week's Overview" },
-  month: { dropdownLabel: 'This Month', heading: "This Month's Overview" },
-  year:  { dropdownLabel: 'This Year',  heading: "This Year's Overview" },
+// ─── Date helpers ───────────────────────────────────────────────────────────
+
+function parseDateKey(k: string): Date {
+  const [y, m, d] = k.split('-').map(Number)
+  return new Date(y, m - 1, d)
 }
-
-// Same solid-triangle glyphs used for day-nav arrows elsewhere (DayModal's
-// header, SendToOptionsModal's month nav) — duplicated locally per the
-// existing convention rather than extracting a shared one-off primitive.
-const PrevTriangle = () => (
-  <svg width="7" height="10" viewBox="0 0 9 12" fill="currentColor" aria-hidden="true"><path d="M9 0 L0 6 L9 12 Z" /></svg>
-)
-const NextTriangle = () => (
-  <svg width="7" height="10" viewBox="0 0 9 12" fill="currentColor" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
-)
-const ChevronGlyph = ({ open }: { open: boolean }) => (
-  <svg viewBox="0 0 16 16" fill="none" width="8" height="8" aria-hidden="true" style={{ flexShrink: 0, transition: 'transform 150ms ease', transform: open ? 'rotate(180deg)' : 'none' }}>
-    <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-)
-
-// ─── Key-list / duration helpers (mirror the exact conventions already
-// established in AnalyticsPage.tsx / DayDashboardModal.tsx) ───────────────────
-
+function addDays(d: Date, n: number): Date {
+  const r = new Date(d)
+  r.setDate(r.getDate() + n)
+  return r
+}
+// Monday→Sunday week definition — the same convention established for the
+// Weekly Dashboard (WeekFullPage.tsx) and AnalyticsPage.tsx's
+// getCurrentWeekRange, so "a week" means the same thing everywhere.
+function mondayOf(d: Date): Date {
+  const offset = d.getDay() === 0 ? 6 : d.getDay() - 1
+  const m = new Date(d)
+  m.setDate(d.getDate() - offset)
+  m.setHours(0, 0, 0, 0)
+  return m
+}
 function keysInRange(start: Date, end: Date): string[] {
   const keys: string[] = []
   const cur = new Date(start); cur.setHours(0, 0, 0, 0)
@@ -72,75 +64,62 @@ function keysInRange(start: Date, end: Date): string[] {
   while (cur <= e) { keys.push(buildDateKey(cur.getFullYear(), cur.getMonth(), cur.getDate())); cur.setDate(cur.getDate() + 1) }
   return keys
 }
-
 function getSessionDurationMs(startTs: number, endTs: number): number {
   let d = endTs - startTs
   if (d < 0) d += 86_400_000
   return Math.max(d, 0)
 }
 
-// Hour-of-day histogram (ms per hour, 0–23) across every session in range —
-// no existing source aggregates by hour-of-day (computeRangeStats aggregates
-// per-day), so this is a genuinely new view, built with the identical
-// session-iteration/duration-clamping pattern computeRangeStats already uses.
-function computeHourlyBreakdown(calData: CalendarData, start: Date, end: Date): number[] {
-  const buckets = new Array(24).fill(0) as number[]
-  const cursor = new Date(start); cursor.setHours(0, 0, 0, 0)
-  const e = new Date(end); e.setHours(23, 59, 59, 999)
-  while (cursor <= e) {
-    const k = buildDateKey(cursor.getFullYear(), cursor.getMonth(), cursor.getDate())
-    calData[k]?.tasks?.forEach(t => {
-      ;(t.sessions ?? []).forEach(s => {
-        if (s.endTs !== null) {
-          const dur = getSessionDurationMs(s.startTs, s.endTs)
-          if (dur > 0 && dur < 86_400_000) buckets[new Date(s.startTs).getHours()] += dur
-        }
-      })
-    })
-    cursor.setDate(cursor.getDate() + 1)
+// ─── Change-direction helpers ───────────────────────────────────────────────
+// A small neutral tolerance keeps noisy/negligible differences from reading
+// as a meaningful improvement or decline; prev<=0 is handled explicitly so a
+// comparison against zero never produces Infinity/NaN.
+
+function pctChange(cur: number, prev: number, tolerancePct = 3): { dir: Dir; pct: number | null } {
+  if (prev <= 0) {
+    if (cur <= 0) return { dir: 'flat', pct: 0 }
+    return { dir: 'up', pct: null } // "New" — no previous baseline to ratio against
   }
-  return buckets
+  const raw = ((cur - prev) / prev) * 100
+  if (Math.abs(raw) < tolerancePct) return { dir: 'flat', pct: Math.round(raw) }
+  return { dir: raw > 0 ? 'up' : 'down', pct: Math.round(raw) }
+}
+function dirArrow(dir: Dir): string { return dir === 'up' ? '↑' : dir === 'down' ? '↓' : '→' }
+function dirColor(dir: Dir, isDark: boolean): string {
+  if (dir === 'up') return isDark ? '#4ade80' : '#16a34a'
+  if (dir === 'down') return isDark ? '#f87171' : '#dc2626'
+  return 'var(--xp-txt3)'
 }
 
-// Deep Work Hours: the single task with the highest cumulative tracked time
-// within the selected period. Each calendar day stores its own independent
-// Task objects (own id, own sessions) — there's no cross-day recurring-task
-// id in the data model — so "the same task across multiple days" is grouped
-// by its trimmed/lower-cased text, the only stable identity available, before
-// summing that group's session durations (same clamping as computeRangeStats).
-function computeDeepWorkMs(calData: CalendarData, start: Date, end: Date): number {
-  const totals = new Map<string, number>()
-  const cursor = new Date(start); cursor.setHours(0, 0, 0, 0)
-  const e = new Date(end); e.setHours(23, 59, 59, 999)
-  while (cursor <= e) {
-    const k = buildDateKey(cursor.getFullYear(), cursor.getMonth(), cursor.getDate())
-    calData[k]?.tasks?.forEach(t => {
-      const key = t.text.trim().toLowerCase()
-      if (!key) return
-      const ms = (t.sessions ?? [])
-        .filter(s => s.endTs !== null)
-        .reduce((sum, s) => sum + getSessionDurationMs(s.startTs, s.endTs!), 0)
-      if (ms > 0) totals.set(key, (totals.get(key) ?? 0) + ms)
-    })
-    cursor.setDate(cursor.getDate() + 1)
+// Dominant 2-hour focus window across a flat session list — a lighter,
+// single-window version of the same time-of-day bucket algorithm the
+// detailed dashboards' "Peak Performance Time" KPI already uses.
+function computePeakWindow(sessions: { startTs: number; endTs: number }[]): string | null {
+  if (sessions.length < 3) return null
+  const BUCKET_HOURS = 2
+  const NUM_BUCKETS = 24 / BUCKET_HOURS
+  const counts = new Array(NUM_BUCKETS).fill(0) as number[]
+  const durations = new Array(NUM_BUCKETS).fill(0) as number[]
+  for (const s of sessions) {
+    const bucket = Math.floor(new Date(s.startTs).getHours() / BUCKET_HOURS)
+    counts[bucket] += 1
+    durations[bucket] += getSessionDurationMs(s.startTs, s.endTs)
   }
-  return totals.size > 0 ? Math.max(...totals.values()) : 0
-}
-
-function getScopeRange(scope: Scope, todayScopeDate: Date, today: Date): { start: Date; end: Date } {
-  if (scope === 'today') { const d = new Date(todayScopeDate); d.setHours(0, 0, 0, 0); return { start: d, end: d } }
-  if (scope === 'week') { const { start, end } = getCurrentWeekRange(); return { start, end } }
-  if (scope === 'month') { const { start, end } = getCurrentMonthRange(); return { start, end } }
-  return { start: new Date(today.getFullYear(), 0, 1), end: new Date(today.getFullYear(), 11, 31) }
-}
-
-function fmtShort(d: Date): string { return `${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}` }
-
-function scopePeriodLabel(scope: Scope, todayScopeDate: Date, today: Date): string {
-  if (scope === 'today') return `${DAY_NAMES[todayScopeDate.getDay()]}, ${MONTHS[todayScopeDate.getMonth()].slice(0, 3)} ${todayScopeDate.getDate()}, ${todayScopeDate.getFullYear()}`
-  if (scope === 'week') { const { start, end } = getCurrentWeekRange(); return `${fmtShort(start)} – ${fmtShort(end)}, ${start.getFullYear()}` }
-  if (scope === 'month') return `${MONTHS[today.getMonth()]} ${today.getFullYear()}`
-  return String(today.getFullYear())
+  const maxCount = Math.max(...counts, 1)
+  const maxDur = Math.max(...durations, 1)
+  const scores = counts.map((c, i) => (c / maxCount) * 0.5 + (durations[i] / maxDur) * 0.5)
+  let topIdx = 0
+  for (let i = 1; i < NUM_BUCKETS; i++) if (scores[i] > scores[topIdx]) topIdx = i
+  if (scores[topIdx] === 0) return null
+  function fmtHour(h: number): string {
+    const hh = ((h % 24) + 24) % 24
+    const period = hh < 12 ? 'AM' : 'PM'
+    let h12 = hh % 12
+    if (h12 === 0) h12 = 12
+    return `${h12} ${period}`
+  }
+  const start = topIdx * BUCKET_HOURS
+  return `${fmtHour(start)}–${fmtHour(start + BUCKET_HOURS)}`
 }
 
 // ─── Timeframe cards ───────────────────────────────────────────────────────────
@@ -179,7 +158,7 @@ function TimeframeCard({ def, selected, onSelect }: {
       onClick={onSelect}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="text-left rounded-2xl p-4"
+      className="text-left rounded-2xl p-4 sm:p-5 flex flex-col justify-center min-h-[92px] sm:min-h-[112px]"
       style={{
         // Permanent rich gradient — always visible, never a hover-only effect.
         background: def.bg,
@@ -202,221 +181,351 @@ function TimeframeCard({ def, selected, onSelect }: {
   )
 }
 
-// ─── Overview scope dropdown (replaces the old static "Today" pill) ──────────
-// Mirrors StatsRow.tsx's ScopePill/DropdownOption visual language (pill
-// trigger + chevron, absolute dropdown panel, checkmark on the selection) —
-// simplified to 4 flat options since this picker has no date drilldown.
-
-function OverviewScopeDropdown({ scope, onChange }: { scope: Scope; onChange: (s: Scope) => void }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    function onDown(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
-  }, [open])
-
-  return (
-    <div ref={ref} className="relative flex-shrink-0">
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1 rounded-full transition-opacity hover:opacity-90"
-        style={{ background: '#7c3aed', color: '#ffffff', border: 'none', cursor: 'pointer' }}
-      >
-        {SCOPE_META[scope].dropdownLabel}
-        <ChevronGlyph open={open} />
-      </button>
-      {open && (
-        <div
-          className="absolute right-0 top-full mt-1.5 z-50 rounded-xl overflow-hidden py-1"
-          style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr)', minWidth: 148, boxShadow: '0 8px 32px rgba(0,0,0,0.16), 0 2px 8px rgba(0,0,0,0.10)' }}
-        >
-          {SCOPES.map(s => (
-            <button
-              key={s}
-              onClick={() => { onChange(s); setOpen(false) }}
-              className="w-full text-left px-3 py-1.5 text-[11px] flex items-center justify-between"
-              style={{
-                color: scope === s ? '#7c3aed' : 'var(--xp-txt)',
-                background: scope === s ? 'rgba(124,58,237,0.08)' : 'transparent',
-                fontWeight: scope === s ? 600 : 400,
-              }}
-            >
-              {SCOPE_META[s].dropdownLabel}
-              {scope === s && <span style={{ color: '#7c3aed', fontSize: 11 }}>✓</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Overview stat cards ───────────────────────────────────────────────────────
-// Icon sits in a boxed tinted container on desktop (lg+, unchanged); on
-// tablet/mobile the same icon renders bare, no container — item 8.
-
-function OverviewStat({ icon, tint, value, label }: { icon: React.ReactNode; tint: string; value: string; label: string }) {
-  return (
-    <div className="rounded-2xl p-3.5 flex items-center gap-3" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr)', boxShadow: '0 1px 8px rgba(0,0,0,0.05)' }}>
-      <div className="hidden lg:flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 36, height: 36, background: tint, fontSize: 16 }}>
-        {icon}
-      </div>
-      <div className="flex lg:hidden items-center justify-center flex-shrink-0" style={{ width: 36, height: 36, fontSize: 18 }}>
-        {icon}
-      </div>
-      <div className="min-w-0">
-        <p className="text-[15px] font-extrabold leading-none" style={{ color: 'var(--xp-txt)' }}>{value}</p>
-        <p className="text-[9.5px] mt-1 leading-snug" style={{ color: 'var(--xp-txt3)' }}>{label}</p>
-      </div>
-    </div>
-  )
-}
-
-// ─── XPadite productive/streak markers ─────────────────────────────────────
-function StreakMarker({ color }: { color: string }) {
-  const dot = { width: 9, height: 9, borderRadius: '50%', background: color, boxShadow: `0 0 0 1.5px ${hexToRgba(color, 0.3)}` } as const
-  const bar = { width: 9, height: 2, background: color } as const
-  return (
-    <div className="flex items-center flex-shrink-0">
-      <div style={dot} /><div style={bar} /><div style={dot} /><div style={bar} /><div style={dot} />
-    </div>
-  )
-}
-
-// ─── Donut chart (Productive vs Non-Productive, built from real actBreakdown) ─
-
-function Donut({ segments, size = 128, strokeWidth = 20 }: { segments: { color: string; pct: number }[]; size?: number; strokeWidth?: number }) {
-  const r = (size - strokeWidth) / 2
-  const c = 2 * Math.PI * r
-  const arcs = segments.reduce<{ color: string; len: number; offset: number }[]>((acc, seg) => {
-    const len = (seg.pct) * c
-    const offset = acc.length > 0 ? acc[acc.length - 1].offset + acc[acc.length - 1].len : 0
-    return [...acc, { color: seg.color, len, offset }]
-  }, [])
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--xp-bdr2)" strokeWidth={strokeWidth} opacity={0.35} />
-      <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
-        {arcs.map((a, i) => (
-          <circle key={i} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={a.color} strokeWidth={strokeWidth} strokeDasharray={`${a.len} ${c - a.len}`} strokeDashoffset={-a.offset} />
-        ))}
-      </g>
-    </svg>
-  )
-}
-
-// ─── Hourly breakdown bar chart (real per-hour totals for the selected scope) ─
-
-const HOURLY_WINDOW = Array.from({ length: 16 }, (_, i) => i + 6) // 6am–9pm
-const HOUR_TICK_LABELS = ['6AM', '9AM', '12PM', '3PM', '6PM', '9PM']
-
-function HourlyBarChart({ buckets, isDark }: { buckets: number[]; isDark: boolean }) {
-  const windowed = HOURLY_WINDOW.map(h => buckets[h])
-  const peakMs = Math.max(...windowed, 0)
-  const maxMs = peakMs > 0 ? peakMs * 1.15 : 3_600_000
-  const W = 600, H = 170, padL = 30, padB = 20, padT = 8, padR = 6
-  const plotW = W - padL - padR, plotH = H - padT - padB
-  const slotW = plotW / windowed.length
-  const barW = Math.max(6, slotW * 0.55)
-  const gridLine = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'
-  const ticks = [0, maxMs / 2, maxMs]
-
-  if (peakMs === 0) {
-    return <p className="text-[11px] py-6 text-center" style={{ color: 'var(--xp-txt3)' }}>No sessions recorded</p>
-  }
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ height: H, display: 'block' }}>
-      {ticks.map((v, i) => {
-        const y = padT + plotH - (v / maxMs) * plotH
-        return (
-          <g key={i}>
-            <line x1={padL} x2={W - padR} y1={y} y2={y} stroke={gridLine} strokeWidth={1} />
-            <text x={padL - 6} y={y + 3} textAnchor="end" fontSize="9" fill="var(--xp-txt3)">{v === 0 ? '0' : formatMs(v)}</text>
-          </g>
-        )
-      })}
-      {windowed.map((v, i) => {
-        const x = padL + slotW * i + (slotW - barW) / 2
-        const h = (v / maxMs) * plotH
-        const y = padT + plotH - h
-        return <rect key={i} x={x} y={y} width={barW} height={h} rx={3} fill="#7c3aed" opacity={v > 0 ? 0.85 : 0.12} />
-      })}
-      {HOUR_TICK_LABELS.map((lbl, idx) => {
-        const pos = idx / (HOUR_TICK_LABELS.length - 1)
-        const x = padL + pos * plotW
-        return <text key={lbl} x={x} y={H - 4} textAnchor="middle" fontSize="9" fill="var(--xp-txt3)">{lbl}</text>
-      })}
-    </svg>
-  )
-}
-
 // ─── Section card wrapper ──────────────────────────────────────────────────────
 
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function SectionCard({ icon, title, subtitle, right, children }: {
+  icon: string; title: string; subtitle?: string; right?: React.ReactNode; children: React.ReactNode
+}) {
   return (
     <div className="rounded-2xl p-4" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr)', boxShadow: '0 1px 8px rgba(0,0,0,0.05)' }}>
-      <p className="text-[12px] font-bold mb-3" style={{ color: 'var(--xp-txt)' }}>{title}</p>
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <div className="flex items-start gap-2 min-w-0">
+          <span style={{ fontSize: 16, lineHeight: 1.2, flexShrink: 0 }}>{icon}</span>
+          <div className="min-w-0">
+            <p className="text-[13px] font-bold" style={{ color: 'var(--xp-txt)' }}>{title}</p>
+            {subtitle && <p className="text-[10px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>{subtitle}</p>}
+          </div>
+        </div>
+        {right}
+      </div>
       {children}
     </div>
   )
 }
 
-// ─── Bottom summary cards ──────────────────────────────────────────────────────
-
-function SummaryCard({ icon, iconBg, title, value, sub }: {
-  icon: string; iconBg: string; title: string; value: string; sub: string
-}) {
+function BaselineState({ text }: { text: string }) {
   return (
-    <button
-      className="w-full flex items-center gap-3 rounded-2xl p-4 text-left transition-colors hover:bg-black/5"
-      style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr)', boxShadow: '0 1px 8px rgba(0,0,0,0.05)' }}
-    >
-      <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 40, height: 40, background: iconBg, fontSize: 17 }}>
-        {icon}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-[10.5px] font-medium" style={{ color: 'var(--xp-txt3)' }}>{title}</p>
-        <p className="text-[14px] font-bold truncate" style={{ color: 'var(--xp-txt)' }}>{value}</p>
-        <p className="text-[10.5px]" style={{ color: 'var(--xp-txt3)' }}>{sub}</p>
-      </div>
-      <span style={{ color: 'var(--xp-txt3)', fontSize: 18, flexShrink: 0 }}>›</span>
-    </button>
+    <div className="py-5 text-center">
+      <p className="text-[11px] font-semibold" style={{ color: 'var(--xp-txt2)' }}>Building your baseline</p>
+      <p className="text-[10px] mt-1 leading-relaxed" style={{ color: 'var(--xp-txt3)' }}>{text}</p>
+    </div>
   )
 }
 
-// ─── Legend ─────────────────────────────────────────────────────────────────
+// ─── Performance Pulse ──────────────────────────────────────────────────────
+// Recent momentum: last 7 COMPLETED days vs the previous 7 completed days
+// (today is excluded from both windows since its data is necessarily
+// partial, which would distort a same-day comparison).
 
-function AnalyticsLegend({ progressColor }: { progressColor: string }) {
-  const items: { icon: React.ReactNode; label: string }[] = [
-    { icon: <ProductiveDot color={progressColor} size={13} />, label: 'Productive' },
-    { icon: <span style={{ fontSize: 11 }}>🔥</span>, label: 'Hyper productive' },
-    { icon: <StreakMarker color={progressColor} />, label: 'Streak' },
-    { icon: <span style={{ fontSize: 11 }}>🏆</span>, label: 'Milestone' },
-    { icon: <span style={{ fontSize: 11 }}>🎯</span>, label: 'Goals Accomplished' },
-  ]
+interface PulseMetric { dir: Dir; pct: number | null }
+interface PulseData {
+  ready: boolean
+  productiveTime?: PulseMetric
+  deepWork?: PulseMetric
+  taskCompletion?: PulseMetric
+  consistency?: PulseMetric & { curPct: number }
+  momentum?: string
+}
+
+function PulseRow({ icon, label, metric, isDark }: { icon: string; label: string; metric: PulseMetric; isDark: boolean }) {
+  const text = metric.pct === null ? `${dirArrow(metric.dir)} New` : `${dirArrow(metric.dir)} ${Math.abs(metric.pct)}%`
   return (
-    <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 pt-1 pb-2">
-      {items.map(item => (
-        <span key={item.label} className="flex items-center gap-1.5 text-[10.5px]" style={{ color: 'var(--xp-txt3)' }}>
-          {item.icon}
-          {item.label}
-        </span>
-      ))}
+    <div className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5" style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(124,58,237,0.045)' }}>
+      <span className="flex items-center gap-2 text-[11.5px] font-medium min-w-0" style={{ color: 'var(--xp-txt)' }}>
+        <span style={{ fontSize: 13, flexShrink: 0 }}>{icon}</span>
+        <span className="truncate">{label}</span>
+      </span>
+      <span className="text-[11.5px] font-bold flex-shrink-0 tabular-nums" style={{ color: dirColor(metric.dir, isDark) }}>{text}</span>
     </div>
+  )
+}
+
+function PerformancePulseCard({ data, isDark }: { data: PulseData; isDark: boolean }) {
+  if (!data.ready || !data.productiveTime || !data.deepWork || !data.taskCompletion || !data.consistency) {
+    return (
+      <SectionCard icon="⚡" title="Performance Pulse" subtitle="Your current productivity momentum">
+        <BaselineState text="Keep using XPadite and your 7-day momentum will appear here." />
+      </SectionCard>
+    )
+  }
+  const headline = data.productiveTime
+  const headlineText = headline.pct === null ? 'New' : `${Math.abs(headline.pct)}%`
+  return (
+    <SectionCard icon="⚡" title="Performance Pulse" subtitle="Your current productivity momentum">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-[20px] font-extrabold tabular-nums" style={{ color: dirColor(headline.dir, isDark) }}>
+          {dirArrow(headline.dir)} {headlineText}
+        </span>
+      </div>
+      <p className="text-[11px] font-semibold mb-3" style={{ color: 'var(--xp-txt)' }}>{data.momentum}</p>
+      <div className="flex flex-col gap-1.5">
+        <PulseRow icon="📈" label="Productive Time" metric={data.productiveTime} isDark={isDark} />
+        <PulseRow icon="🗓" label="Consistency" metric={data.consistency} isDark={isDark} />
+        <PulseRow icon="🧠" label="Deep Work" metric={data.deepWork} isDark={isDark} />
+        <PulseRow icon="✅" label="Task Completion" metric={data.taskCompletion} isDark={isDark} />
+      </div>
+      <p className="text-[9.5px] mt-2.5" style={{ color: 'var(--xp-txt3)' }}>vs previous 7 days</p>
+    </SectionCard>
+  )
+}
+
+// ─── Personal Records ───────────────────────────────────────────────────────
+
+interface RecordsData {
+  bestDay: { ms: number; date: Date } | null
+  bestWeek: { ms: number; monday: Date } | null
+  longestStreak: number
+  bestActName: string | null
+  bestActPct: number
+}
+
+function RecordTile({ icon, bg, label, value, sub }: { icon: string; bg: string; label: string; value: string; sub: string | null }) {
+  return (
+    <div className="rounded-xl p-3" style={{ background: bg }}>
+      <span style={{ fontSize: 16 }}>{icon}</span>
+      <p className="text-[9.5px] font-medium mt-1" style={{ color: 'var(--xp-txt3)' }}>{label}</p>
+      <p className="text-[14px] font-extrabold mt-0.5 truncate" style={{ color: 'var(--xp-txt)' }}>{value}</p>
+      {sub && <p className="text-[9px] mt-0.5 truncate" style={{ color: 'var(--xp-txt3)' }}>{sub}</p>}
+    </div>
+  )
+}
+
+function PersonalRecordsCard({ data, isDark }: { data: RecordsData | null; isDark: boolean }) {
+  if (!data || (!data.bestDay && !data.bestWeek && data.longestStreak === 0 && !data.bestActName)) {
+    return (
+      <SectionCard icon="🏆" title="Personal Records" subtitle="Your best achievements across all time">
+        <BaselineState text="Track a few productive days and your all-time records will show up here." />
+      </SectionCard>
+    )
+  }
+  return (
+    <SectionCard icon="🏆" title="Personal Records" subtitle="Your best achievements across all time">
+      <div className="grid grid-cols-2 gap-2">
+        <RecordTile
+          icon="🔥" bg={isDark ? 'rgba(249,115,22,0.10)' : 'rgba(249,115,22,0.08)'}
+          label="Best Day Ever"
+          value={data.bestDay ? formatMs(data.bestDay.ms) : '—'}
+          sub={data.bestDay ? data.bestDay.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null}
+        />
+        <RecordTile
+          icon="📅" bg={isDark ? 'rgba(59,130,246,0.10)' : 'rgba(59,130,246,0.08)'}
+          label="Best Week Ever"
+          value={data.bestWeek ? formatMs(data.bestWeek.ms) : '—'}
+          sub={data.bestWeek ? `Week of ${data.bestWeek.monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : null}
+        />
+        <RecordTile
+          icon="⚡" bg={isDark ? 'rgba(234,179,8,0.10)' : 'rgba(234,179,8,0.08)'}
+          label="Longest Streak"
+          value={data.longestStreak > 0 ? `${data.longestStreak} day${data.longestStreak === 1 ? '' : 's'}` : '—'}
+          sub={null}
+        />
+        <RecordTile
+          icon="🎯" bg={isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.08)'}
+          label="Most Productive Activity"
+          value={data.bestActName ?? '—'}
+          sub={data.bestActName ? `${data.bestActPct}% of total time` : null}
+        />
+      </div>
+    </SectionCard>
+  )
+}
+
+// ─── Progress Trend ─────────────────────────────────────────────────────────
+// A lightweight 12-completed-week bird's-eye view — intentionally NOT the
+// detailed Monthly/Weekly Progress chart (no tooltips, no trophy, no bar-
+// clearance routing): just enough to answer "am I trending up or down?"
+
+function MiniTrendChart({ weeks, isDark }: { weeks: { label: string; ms: number }[]; isDark: boolean }) {
+  // Unique per instance so multiple charts never collide on this def id.
+  const uid = useId().replace(/[:]/g, '')
+  const maxMs = Math.max(...weeks.map(w => w.ms), 1)
+  const W = 680, H = 110
+  const PAD = { top: 10, bottom: 16, left: 4, right: 4 }
+  const cW = W - PAD.left - PAD.right
+  const cH = H - PAD.top - PAD.bottom
+  const slotW = cW / weeks.length
+  const barW = Math.max(10, slotW * 0.42)
+  const xCenter = (i: number) => PAD.left + i * slotW + slotW / 2
+  const yPos = (ms: number) => PAD.top + cH - (ms / maxMs) * cH
+  const baseY = PAD.top + cH
+  // Clean, intentional clearance between each point and its own bar's top —
+  // scaled down from the detailed dashboards' own gap to suit this chart's
+  // smaller footprint, while still reading as a clear floating gap.
+  const POINT_GAP = 10
+  const pts = weeks.map((w, i) => ({ x: xCenter(i), y: yPos(w.ms) - POINT_GAP }))
+
+  // Collision-avoidance — the same technique TrendBarChart.tsx uses: a
+  // straight segment stays straight UNLESS it would cross a bar's safety
+  // zone, in which case a single waypoint is inserted at the exact point it
+  // first enters that zone, pinned to the bar's safe height, so an
+  // intermediate tall bar can never be cut through by a segment connecting
+  // two other elevated points.
+  const SAFE_MARGIN = 5
+  function barSafeY(i: number): number | null {
+    const ms = weeks[i]?.ms
+    if (!ms || ms <= 0) return null
+    return yPos(ms) - SAFE_MARGIN
+  }
+  function waypointFor(barIdx: number, p1: { x: number; y: number }, p2: { x: number; y: number }): { x: number; y: number } | null {
+    const safeY = barSafeY(barIdx)
+    if (safeY == null || p1.x === p2.x) return null
+    const cx = xCenter(barIdx)
+    const xLo = cx - barW / 2, xHi = cx + barW / 2
+    const segXLo = Math.min(p1.x, p2.x), segXHi = Math.max(p1.x, p2.x)
+    const overlapLo = Math.max(xLo, segXLo), overlapHi = Math.min(xHi, segXHi)
+    if (overlapLo > overlapHi) return null
+    const yAt = (x: number) => p1.y + (p2.y - p1.y) * ((x - p1.x) / (p2.x - p1.x))
+    const yLo = yAt(overlapLo), yHi = yAt(overlapHi)
+    const worstX = yLo >= yHi ? overlapLo : overlapHi
+    const worstY = Math.max(yLo, yHi)
+    return worstY > safeY ? { x: worstX, y: safeY } : null
+  }
+
+  let linePath = ''
+  if (pts.length > 1) {
+    linePath = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p1 = pts[i], p2 = pts[i + 1]
+      const w1 = waypointFor(i, p1, p2)
+      const w2 = waypointFor(i + 1, p1, p2)
+      const waypoints = [w1, w2].filter((w): w is { x: number; y: number } => w !== null)
+      waypoints.sort((a, b) => (p1.x <= p2.x ? a.x - b.x : b.x - a.x))
+      for (const w of waypoints) linePath += ` L ${w.x.toFixed(1)} ${w.y.toFixed(1)}`
+      linePath += ` L ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+    }
+  }
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+      <defs>
+        {/* Same signature purple bar gradient every detailed dashboard's
+            Progress chart uses (TrendBarChart.tsx), reused exactly here
+            rather than approximated, so every Analytics bar graph shares
+            one consistent purple visual language. */}
+        <linearGradient id={`${uid}-bar`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#a855f7" />
+          <stop offset="100%" stopColor="#6d28d9" />
+        </linearGradient>
+      </defs>
+      <line x1={PAD.left} x2={W - PAD.right} y1={baseY} y2={baseY} stroke={isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)'} strokeWidth={1} />
+      {weeks.map((w, i) => {
+        const h = (w.ms / maxMs) * cH
+        return (
+          <rect key={i} x={xCenter(i) - barW / 2} y={baseY - h} width={barW} height={Math.max(h, 0)} rx={3}
+            fill={`url(#${uid}-bar)`} />
+        )
+      })}
+      {linePath && <path d={linePath} fill="none" stroke="#ef4444" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />}
+      {pts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={2} fill="#ef4444" />)}
+      {weeks.map((w, i) => (
+        <text key={`l-${i}`} x={xCenter(i)} y={H - 2} textAnchor="middle" fontSize={7.5} fontWeight={600} fill={isDark ? 'rgba(226,232,240,0.55)' : 'var(--xp-txt3)'}>{w.label}</text>
+      ))}
+    </svg>
+  )
+}
+
+function ProgressTrendCard({ data, isDark }: { data: { weeks: { label: string; ms: number }[]; status: Dir; hasEnoughData: boolean; totalMs: number }; isDark: boolean }) {
+  if (data.totalMs === 0) {
+    return (
+      <SectionCard icon="📈" title="Progress Trend" subtitle="Your productivity trend over recent weeks">
+        <BaselineState text="Complete a few weeks of tracked time to see your broader trend here." />
+      </SectionCard>
+    )
+  }
+  const statusText = data.status === 'up' ? 'Improving' : data.status === 'down' ? 'Declining' : 'Stable'
+  return (
+    <SectionCard
+      icon="📈" title="Progress Trend" subtitle="Your productivity trend over the last 12 weeks"
+      right={
+        data.hasEnoughData ? (
+          <span className="flex items-center gap-1 text-[10.5px] font-bold flex-shrink-0" style={{ color: dirColor(data.status, isDark) }}>
+            {dirArrow(data.status)} {statusText}
+          </span>
+        ) : undefined
+      }
+    >
+      <MiniTrendChart weeks={data.weeks} isDark={isDark} />
+      {!data.hasEnoughData && (
+        <p className="text-[9.5px] mt-1" style={{ color: 'var(--xp-txt3)' }}>More weeks of data will sharpen this trend.</p>
+      )}
+    </SectionCard>
+  )
+}
+
+// ─── XPadite Insights ───────────────────────────────────────────────────────
+// Deterministic, calculated-from-data observations — NOT the AI Insight
+// feature (that lives inside Next Target below, same existing handler).
+
+function XPaditeInsightsCard({ insights }: { insights: string[] }) {
+  return (
+    <SectionCard icon="💡" title="XPadite Insights" subtitle="Patterns detected in your activity">
+      {insights.length === 0 ? (
+        <BaselineState text="Keep tracking and XPadite will start surfacing useful patterns here." />
+      ) : (
+        <div className="flex flex-col gap-2">
+          {insights.map((text, i) => (
+            <div key={i} className="flex items-start gap-2 rounded-xl px-3 py-2.5" style={{ background: 'rgba(124,58,237,0.06)' }}>
+              <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>✨</span>
+              <p className="text-[11px] leading-snug" style={{ color: 'var(--xp-txt)' }}>{text}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </SectionCard>
+  )
+}
+
+// ─── Next Target ────────────────────────────────────────────────────────────
+
+function ProgressRing({ pct, size = 64 }: { pct: number; size?: number }) {
+  const sw = 6
+  const r = (size - sw) / 2
+  const c = 2 * Math.PI * r
+  const offset = c * (1 - pct / 100)
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flexShrink: 0 }}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(34,197,94,0.18)" strokeWidth={sw} />
+      <circle
+        cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#22c55e" strokeWidth={sw}
+        strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+      />
+      <text x={size / 2} y={size / 2 + 4} textAnchor="middle" fontSize={14}>🏆</text>
+    </svg>
+  )
+}
+
+function NextTargetCard({ target, onOpenPremium }: { target: { label: string; progressPct: number } | null; onOpenPremium: () => void }) {
+  return (
+    <SectionCard icon="🎯" title="Next Target" subtitle="Your next milestone within reach">
+      <div className="flex items-center gap-3 mb-3">
+        {target ? (
+          <>
+            <ProgressRing pct={target.progressPct} />
+            <p className="text-[12.5px] font-semibold leading-snug flex-1 min-w-0" style={{ color: 'var(--xp-txt)' }}>{target.label}</p>
+          </>
+        ) : (
+          <p className="text-[11px] leading-relaxed" style={{ color: 'var(--xp-txt3)' }}>
+            Keep building your history — a personal target will appear here once there&apos;s enough data to aim at.
+          </p>
+        )}
+      </div>
+      <button
+        onClick={onOpenPremium}
+        className="flex items-center justify-center gap-1.5 w-full text-[11.5px] font-bold py-2 rounded-xl transition-opacity hover:opacity-90"
+        style={{ background: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)', color: '#ffffff', boxShadow: '0 2px 10px rgba(124,58,237,0.30)' }}
+      >
+        <AICoachMenuIcon size={15} />
+        AI Insight
+      </button>
+    </SectionCard>
   )
 }
 
 // ─── AnalyticsModal (main export) ──────────────────────────────────────────────
 
 export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => void; onDayDoubleClick?: (key: string, month: number, day: number) => void }) {
-  const { isDark, calData, activities, progressColor: rawProgressColor } = useApp()
-  const progressColor = resolveProgressColor(rawProgressColor, isDark)
+  const { isDark, calData, activities } = useApp()
 
   // Freeze the page behind this modal at every breakpoint (not just desktop)
   // so neither wheel/trackpad nor touch-scroll-through can ever expose the
@@ -442,8 +551,6 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
   }, [])
 
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('today')
-  const [scope, setScope] = useState<Scope>('today')
-  const [todayScopeDate, setTodayScopeDate] = useState(() => new Date())
   const [showPremium, setShowPremium] = useState(false)
   const [openDashboard, setOpenDashboard] = useState<'today' | 'weekly' | 'monthly' | 'yearly' | null>(null)
 
@@ -463,30 +570,259 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
   }, [onClose, showPremium])
 
   const today = useMemo(() => new Date(), [])
-  function shiftTodayScopeDay(delta: number) {
-    setTodayScopeDate(d => { const n = new Date(d); n.setDate(n.getDate() + delta); return n })
-  }
 
-  const range = useMemo(() => getScopeRange(scope, todayScopeDate, today), [scope, todayScopeDate, today])
-  const periodLabel = useMemo(() => scopePeriodLabel(scope, todayScopeDate, today), [scope, todayScopeDate, today])
+  // ── Day-level aggregation — the single data source every section below
+  // derives from (productive time, sessions, deep work, completed tasks,
+  // per-activity totals), reusing the exact productive-session/deep-work
+  // conventions already established across Day/Week/Month/YearFullPage. ──
+  const daySummaries = useMemo(() => {
+    const map = new Map<string, {
+      key: string; date: Date; ms: number; sessions: number; deepMs: number
+      completedTasks: number; totalTasks: number; productive: boolean; actMs: Map<string, number>
+    }>()
+    for (const key of Object.keys(calData)) {
+      const day = calData[key]
+      let ms = 0, sessions = 0, deepMs = 0, completedTasks = 0
+      const actMs = new Map<string, number>()
+      for (const t of day.tasks) {
+        if (t.done) completedTasks++
+        for (const s of t.sessions) {
+          if (s.endTs !== null && isProductiveActivity(activities, t.actId)) {
+            const dur = getSessionDurationMs(s.startTs, s.endTs)
+            ms += dur; sessions++
+            if (dur >= 45 * 60_000) deepMs += dur
+            if (t.actId) actMs.set(t.actId, (actMs.get(t.actId) ?? 0) + dur)
+          }
+        }
+      }
+      map.set(key, {
+        key, date: parseDateKey(key), ms, sessions, deepMs, completedTasks,
+        totalTasks: day.tasks.length,
+        productive: !!(day.productive || day.hyper || day.milestone || day.goal),
+        actMs,
+      })
+    }
+    return map
+  }, [calData, activities])
 
-  const stats = useMemo(() => computeRangeStats(calData, activities, range.start, range.end), [calData, activities, range])
-  const bestStreak = useMemo(() => calculateBestStreak(calData, keysInRange(range.start, range.end)), [calData, range])
-  const hourlyBuckets = useMemo(() => computeHourlyBreakdown(calData, range.start, range.end), [calData, range])
-  const deepWorkMs = useMemo(() => computeDeepWorkMs(calData, range.start, range.end), [calData, range])
+  // ── Performance Pulse ──────────────────────────────────────────────────────
+  const performancePulse = useMemo((): PulseData => {
+    const todayMid = new Date(today); todayMid.setHours(0, 0, 0, 0)
+    if (daySummaries.size < 7) return { ready: false }
 
-  // Top 5 activities + an "Other" bucket for the rest, mirroring the same
-  // cap AnalyticsPage.tsx's ActivityBars already uses (.slice(0, 6)).
-  const donutSegments = useMemo(() => {
-    const top = stats.actBreakdown.slice(0, 5)
-    const restMs = stats.actBreakdown.slice(5).reduce((s, a) => s + a.ms, 0)
-    const withOther = restMs > 0
-      ? [...top, { actId: '__other', name: 'Other', color: '#9ca3af', ms: restMs, pct: stats.totalMs > 0 ? restMs / stats.totalMs : 0 }]
-      : top
-    return withOther
-  }, [stats])
+    function sumRange(start: Date, end: Date) {
+      let ms = 0, deepMs = 0, completed = 0, productiveDays = 0
+      for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
+        const s = daySummaries.get(buildDateKey(d.getFullYear(), d.getMonth(), d.getDate()))
+        if (s) { ms += s.ms; deepMs += s.deepMs; completed += s.completedTasks; if (s.productive) productiveDays++ }
+      }
+      return { ms, deepMs, completed, productiveDays }
+    }
 
-  const topActivity = stats.actBreakdown[0] ?? null
+    const last7 = sumRange(addDays(todayMid, -7), addDays(todayMid, -1))
+    const prev7 = sumRange(addDays(todayMid, -14), addDays(todayMid, -8))
+
+    const productiveTime = pctChange(last7.ms, prev7.ms)
+    const deepWork = pctChange(last7.deepMs, prev7.deepMs)
+    const taskCompletion = pctChange(last7.completed, prev7.completed)
+    const curPct = Math.round((last7.productiveDays / 7) * 100)
+    const prevPct = Math.round((prev7.productiveDays / 7) * 100)
+    const diff = curPct - prevPct
+    const consistency = { dir: (Math.abs(diff) < 5 ? 'flat' : diff > 0 ? 'up' : 'down') as Dir, pct: Math.abs(diff) < 5 ? 0 : diff, curPct }
+
+    let score = 0
+    for (const m of [productiveTime, consistency, deepWork, taskCompletion]) {
+      if (m.dir === 'up') score++
+      else if (m.dir === 'down') score--
+    }
+    const momentum = score >= 3 ? 'Strong Momentum' : score >= 1 ? 'Building Momentum' : score === 0 ? 'Steady' : 'Slowing Down'
+
+    return { ready: true, productiveTime, deepWork, taskCompletion, consistency, momentum }
+  }, [daySummaries, today])
+
+  // ── Personal Records ───────────────────────────────────────────────────────
+  const personalRecords = useMemo((): RecordsData | null => {
+    if (daySummaries.size === 0) return null
+
+    let bestDay: { ms: number; date: Date } | null = null
+    for (const s of daySummaries.values()) if (s.ms > 0 && (!bestDay || s.ms > bestDay.ms)) bestDay = { ms: s.ms, date: s.date }
+
+    const weekTotals = new Map<string, { ms: number; monday: Date }>()
+    for (const s of daySummaries.values()) {
+      const monday = mondayOf(s.date)
+      const wk = buildDateKey(monday.getFullYear(), monday.getMonth(), monday.getDate())
+      const entry = weekTotals.get(wk) ?? { ms: 0, monday }
+      entry.ms += s.ms
+      weekTotals.set(wk, entry)
+    }
+    let bestWeek: { ms: number; monday: Date } | null = null
+    for (const w of weekTotals.values()) if (w.ms > 0 && (!bestWeek || w.ms > bestWeek.ms)) bestWeek = w
+
+    const sortedKeys = Array.from(daySummaries.keys()).sort()
+    const earliest = sortedKeys[0] ? parseDateKey(sortedKeys[0]) : today
+    const longestStreak = calculateBestStreak(calData, keysInRange(earliest, today))
+
+    const actTotals = new Map<string, number>()
+    for (const s of daySummaries.values()) for (const [actId, ms] of s.actMs) actTotals.set(actId, (actTotals.get(actId) ?? 0) + ms)
+    let bestActId: string | null = null, bestActMs = 0, totalActMs = 0
+    for (const [actId, ms] of actTotals) { totalActMs += ms; if (ms > bestActMs) { bestActMs = ms; bestActId = actId } }
+    const bestAct = bestActId ? activities.find(a => a.id === bestActId) ?? null : null
+
+    return {
+      bestDay, bestWeek, longestStreak,
+      bestActName: bestAct?.name ?? null,
+      bestActPct: totalActMs > 0 ? Math.round((bestActMs / totalActMs) * 100) : 0,
+    }
+  }, [daySummaries, calData, activities, today])
+
+  // ── Progress Trend — last 12 COMPLETED weeks ───────────────────────────────
+  const progressTrend = useMemo(() => {
+    const todayMid = new Date(today); todayMid.setHours(0, 0, 0, 0)
+    const lastCompletedSunday = addDays(mondayOf(todayMid), -1)
+    const weeks: { label: string; ms: number }[] = []
+    for (let i = 11; i >= 0; i--) {
+      const sunday = addDays(lastCompletedSunday, -7 * i)
+      const monday = addDays(sunday, -6)
+      let ms = 0
+      for (let d = new Date(monday); d <= sunday; d = addDays(d, 1)) {
+        ms += daySummaries.get(buildDateKey(d.getFullYear(), d.getMonth(), d.getDate()))?.ms ?? 0
+      }
+      weeks.push({ label: `W${12 - i}`, ms })
+    }
+    const nonZeroWeeks = weeks.filter(w => w.ms > 0).length
+    const recentAvg = weeks.slice(8, 12).reduce((s, w) => s + w.ms, 0) / 4
+    const earlierAvg = weeks.slice(0, 4).reduce((s, w) => s + w.ms, 0) / 4
+    let status: Dir = 'flat'
+    if (earlierAvg > 0) {
+      const diffPct = ((recentAvg - earlierAvg) / earlierAvg) * 100
+      status = Math.abs(diffPct) < 10 ? 'flat' : diffPct > 0 ? 'up' : 'down'
+    } else if (recentAvg > 0) status = 'up'
+    return { weeks, status, hasEnoughData: nonZeroWeeks >= 4, totalMs: weeks.reduce((s, w) => s + w.ms, 0) }
+  }, [daySummaries, today])
+
+  // ── XPadite Insights — top 3 deterministic observations ────────────────────
+  const xpaditeInsights = useMemo(() => {
+    const todayMid = new Date(today); todayMid.setHours(0, 0, 0, 0)
+    const candidates: { text: string; priority: number }[] = []
+
+    const recentSessions: { startTs: number; endTs: number }[] = []
+    for (let d = addDays(todayMid, -13); d <= todayMid; d = addDays(d, 1)) {
+      const day = calData[buildDateKey(d.getFullYear(), d.getMonth(), d.getDate())]
+      day?.tasks.forEach(t => t.sessions.forEach(s => {
+        if (s.endTs !== null && isProductiveActivity(activities, t.actId)) recentSessions.push({ startTs: s.startTs, endTs: s.endTs })
+      }))
+    }
+    const window = computePeakWindow(recentSessions)
+    if (window) candidates.push({ text: `Your strongest focus window is ${window}.`, priority: 1 })
+
+    if (daySummaries.size >= 10) {
+      const dowMs = new Array(7).fill(0) as number[]
+      for (let d = addDays(todayMid, -55); d <= todayMid; d = addDays(d, 1)) {
+        const s = daySummaries.get(buildDateKey(d.getFullYear(), d.getMonth(), d.getDate()))
+        if (s) dowMs[d.getDay()] += s.ms
+      }
+      let topDow = 0
+      for (let i = 1; i < 7; i++) if (dowMs[i] > dowMs[topDow]) topDow = i
+      if (dowMs[topDow] > 0) {
+        const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+        candidates.push({ text: `${names[topDow]} has been your strongest day recently.`, priority: 2 })
+      }
+    }
+
+    const weekStart = mondayOf(todayMid)
+    const weekAct = new Map<string, number>()
+    for (let d = new Date(weekStart); d <= todayMid; d = addDays(d, 1)) {
+      const s = daySummaries.get(buildDateKey(d.getFullYear(), d.getMonth(), d.getDate()))
+      if (s) for (const [actId, ms] of s.actMs) weekAct.set(actId, (weekAct.get(actId) ?? 0) + ms)
+    }
+    let topActId: string | null = null, topActMs = 0
+    for (const [actId, ms] of weekAct) if (ms > topActMs) { topActMs = ms; topActId = actId }
+    if (topActId) {
+      const act = activities.find(a => a.id === topActId)
+      if (act) candidates.push({ text: `${act.name} led your productive time this week.`, priority: 3 })
+    }
+
+    if (daySummaries.size >= 7) {
+      function sumSessions(start: Date, end: Date) {
+        let ms = 0, count = 0
+        for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
+          const s = daySummaries.get(buildDateKey(d.getFullYear(), d.getMonth(), d.getDate()))
+          if (s) { ms += s.ms; count += s.sessions }
+        }
+        return { ms, count }
+      }
+      const last7 = sumSessions(addDays(todayMid, -7), addDays(todayMid, -1))
+      const prev7 = sumSessions(addDays(todayMid, -14), addDays(todayMid, -8))
+      if (last7.count >= 3 && prev7.count >= 3) {
+        const change = pctChange(last7.ms / last7.count, prev7.ms / prev7.count, 8)
+        if (change.dir !== 'flat' && change.pct !== null) {
+          candidates.push({ text: `Your average session was ${Math.abs(change.pct)}% ${change.dir === 'up' ? 'longer' : 'shorter'} than last week.`, priority: 4 })
+        }
+      }
+    }
+
+    return candidates.sort((a, b) => a.priority - b.priority).slice(0, 3).map(c => c.text)
+  }, [calData, activities, daySummaries, today])
+
+  // ── Next Target — closest meaningful personal record ───────────────────────
+  const nextTarget = useMemo(() => {
+    const todayMid = new Date(today); todayMid.setHours(0, 0, 0, 0)
+    const todayKey = buildDateKey(todayMid.getFullYear(), todayMid.getMonth(), todayMid.getDate())
+    const todaySummary = daySummaries.get(todayKey)
+    const todayMs = todaySummary?.ms ?? 0
+    const todayCompleted = todaySummary?.completedTasks ?? 0
+
+    const candidates: { label: string; remainingFrac: number }[] = []
+    const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+    const weekday = todayMid.getDay()
+    let bestWeekdayMs = 0
+    for (const s of daySummaries.values()) {
+      if (s.key === todayKey) continue
+      if (s.date.getDay() === weekday && s.ms > bestWeekdayMs) bestWeekdayMs = s.ms
+    }
+    if (bestWeekdayMs > 0) {
+      const remaining = bestWeekdayMs - todayMs
+      if (remaining > 0) candidates.push({ label: `${formatMs(remaining)} to beat your best ${names[weekday]}`, remainingFrac: remaining / bestWeekdayMs })
+    }
+
+    if (personalRecords?.bestWeek && personalRecords.bestWeek.ms > 0) {
+      const curWeekStart = mondayOf(todayMid)
+      let curWeekMs = 0
+      for (let d = new Date(curWeekStart); d <= todayMid; d = addDays(d, 1)) {
+        curWeekMs += daySummaries.get(buildDateKey(d.getFullYear(), d.getMonth(), d.getDate()))?.ms ?? 0
+      }
+      const remaining = personalRecords.bestWeek.ms - curWeekMs
+      if (remaining > 0) candidates.push({ label: `${formatMs(remaining)} to beat your best week`, remainingFrac: remaining / personalRecords.bestWeek.ms })
+    }
+
+    let bestDailyTasks = 0
+    for (const s of daySummaries.values()) { if (s.key === todayKey) continue; if (s.completedTasks > bestDailyTasks) bestDailyTasks = s.completedTasks }
+    if (bestDailyTasks > 0) {
+      const remaining = bestDailyTasks - todayCompleted
+      if (remaining > 0) candidates.push({ label: `${remaining} task${remaining === 1 ? '' : 's'} to beat your daily task record`, remainingFrac: remaining / bestDailyTasks })
+    }
+
+    if (personalRecords && personalRecords.longestStreak > 0) {
+      const sortedKeys = Array.from(daySummaries.keys()).sort()
+      let current = 0
+      for (let i = sortedKeys.length - 1; i >= 0; i--) {
+        if (daySummaries.get(sortedKeys[i])!.productive) current++
+        else break
+      }
+      if (current > 0 && current < personalRecords.longestStreak) {
+        const remaining = personalRecords.longestStreak - current
+        candidates.push({ label: `${remaining} more productive day${remaining === 1 ? '' : 's'} to extend your longest streak`, remainingFrac: remaining / personalRecords.longestStreak })
+      } else if (current > 0 && current >= personalRecords.longestStreak) {
+        candidates.push({ label: '1 more productive day to set a new streak record', remainingFrac: 1 / (current + 1) })
+      }
+    }
+
+    if (candidates.length === 0) return null
+    candidates.sort((a, b) => a.remainingFrac - b.remainingFrac)
+    const best = candidates[0]
+    return { label: best.label, progressPct: Math.max(0, Math.min(100, Math.round((1 - best.remainingFrac) * 100))) }
+  }, [daySummaries, personalRecords, today])
 
   return (
     <>
@@ -546,100 +882,24 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
               ))}
             </div>
 
-            {/* Overview heading + scope dropdown + date nav */}
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <h3 className="text-[14px] font-bold" style={{ color: 'var(--xp-txt)' }}>{SCOPE_META[scope].heading}</h3>
-              <div className="flex items-center gap-2">
-                {scope === 'today' && (
-                  <>
-                    <button
-                      onClick={() => shiftTodayScopeDay(-1)}
-                      aria-label="Previous day"
-                      className="flex items-center justify-center rounded-full transition-colors hover:bg-black/5"
-                      style={{ width: 24, height: 24, color: 'var(--xp-txt3)', background: 'var(--xp-bg3)', border: 'none', cursor: 'pointer' }}
-                    >
-                      <PrevTriangle />
-                    </button>
-                    <span className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt)' }}>{periodLabel}</span>
-                    <button
-                      onClick={() => shiftTodayScopeDay(1)}
-                      aria-label="Next day"
-                      className="flex items-center justify-center rounded-full transition-colors hover:bg-black/5"
-                      style={{ width: 24, height: 24, color: 'var(--xp-txt3)', background: 'var(--xp-bg3)', border: 'none', cursor: 'pointer' }}
-                    >
-                      <NextTriangle />
-                    </button>
-                  </>
-                )}
-                {scope !== 'today' && (
-                  <span className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt)' }}>{periodLabel}</span>
-                )}
-                <OverviewScopeDropdown scope={scope} onChange={setScope} />
+            {/* Executive summary — real data, derived from daySummaries above */}
+            <div>
+              <h3 className="text-[12px] font-bold tracking-wide uppercase mb-3" style={{ color: 'var(--xp-txt3)' }}>Your Performance at a Glance</h3>
+
+              <div className="flex flex-col gap-3">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <PerformancePulseCard data={performancePulse} isDark={isDark} />
+                  <PersonalRecordsCard data={personalRecords} isDark={isDark} />
+                </div>
+
+                <ProgressTrendCard data={progressTrend} isDark={isDark} />
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <XPaditeInsightsCard insights={xpaditeInsights} />
+                  <NextTargetCard target={nextTarget} onOpenPremium={() => setShowPremium(true)} />
+                </div>
               </div>
             </div>
-
-            {/* Overview stat cards — real data for the selected scope */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <OverviewStat icon={<ProductiveDot color={progressColor} />} tint={hexToRgba(progressColor, 0.10)} value={String(stats.productiveDays)} label="Productive Days" />
-              <OverviewStat icon="🔥" tint="rgba(249,115,22,0.10)" value={String(stats.hyperDays)} label="Hyper Productive Days" />
-              <OverviewStat icon={<StreakMarker color={progressColor} />} tint={hexToRgba(progressColor, 0.10)} value={`${bestStreak} day${bestStreak === 1 ? '' : 's'}`} label="Longest Streak" />
-              <OverviewStat icon="⏱" tint="rgba(59,130,246,0.10)" value={formatMs(stats.totalMs)} label="Total Tracked Time" />
-              <OverviewStat icon="✅" tint="rgba(34,197,94,0.10)" value={String(stats.completedTasks)} label="Tasks Completed" />
-              <OverviewStat icon="🏆" tint="rgba(234,179,8,0.12)" value={String(stats.milestoneDays)} label="Milestones Achieved" />
-              <OverviewStat icon="🎯" tint="rgba(20,184,166,0.10)" value={String(stats.goalDays)} label="Goals Accomplished" />
-              <OverviewStat icon="🧠" tint="rgba(124,58,237,0.10)" value={deepWorkMs > 0 ? formatMs(deepWorkMs) : '—'} label="Deep Work Hours" />
-            </div>
-
-            {/* Analytics visuals — donut + hourly breakdown, real data */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Panel title="Productive vs Non-Productive">
-                {stats.totalMs === 0 ? (
-                  <p className="text-[11px] py-6 text-center" style={{ color: 'var(--xp-txt3)' }}>No sessions recorded</p>
-                ) : (
-                  <div className="flex items-center gap-4">
-                    <div className="relative flex-shrink-0" style={{ width: 128, height: 128 }}>
-                      <Donut segments={donutSegments.map(s => ({ color: s.color, pct: s.pct }))} />
-                      <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className="text-[16px] font-extrabold" style={{ color: 'var(--xp-txt)' }}>{formatMs(stats.totalMs)}</span>
-                        <span className="text-[9px]" style={{ color: 'var(--xp-txt3)' }}>Total Time</span>
-                      </div>
-                    </div>
-                    <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-                      {donutSegments.map(seg => (
-                        <div key={seg.actId} className="flex items-center gap-2">
-                          <span className="rounded-full flex-shrink-0" style={{ width: 8, height: 8, background: seg.color }} />
-                          <span className="text-[11px] flex-1 min-w-0 truncate" style={{ color: 'var(--xp-txt2)' }}>{seg.name}</span>
-                          <span className="text-[11px] font-semibold" style={{ color: 'var(--xp-txt)' }}>{Math.round(seg.pct * 100)}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </Panel>
-
-              <Panel title="Hourly Breakdown">
-                <HourlyBarChart buckets={hourlyBuckets} isDark={isDark} />
-              </Panel>
-            </div>
-
-            {/* Bottom summary cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <SummaryCard
-                icon="🚀" iconBg="rgba(16,185,129,0.14)"
-                title="Most Productive Activity"
-                value={topActivity ? topActivity.name : '—'}
-                sub={topActivity ? `${Math.round(topActivity.pct * 100)}% of total time` : 'No activity data yet'}
-              />
-              <SummaryCard
-                icon="✅" iconBg="rgba(59,130,246,0.14)"
-                title="Tasks Completed"
-                value={stats.completedTasks.toLocaleString()}
-                sub="Tasks Completed"
-              />
-            </div>
-
-            {/* Legend / key */}
-            <AnalyticsLegend progressColor={progressColor} />
           </div>
         </div>
       </div>

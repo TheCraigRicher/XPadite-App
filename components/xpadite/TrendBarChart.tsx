@@ -94,7 +94,7 @@ export function TrendBarChart({ buckets, isDark, emptyMessage = 'No focus sessio
   const yPos = (ms: number) => PAD.top + cH - (ms / yMaxMs) * cH
   const baseY = PAD.top + cH
   // The trend line/points float above their bar's top rather than sitting on it.
-  const LINE_GAP = 16
+  const LINE_GAP = 20
 
   const step = yMaxHours <= 16 ? 2 : yMaxHours <= 30 ? 5 : yMaxHours <= 60 ? 10 : 20
   const yTicks: number[] = []

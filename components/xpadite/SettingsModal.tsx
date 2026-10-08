@@ -75,7 +75,7 @@ const PRO_CORE_FEATURES: Feature[] = [
   { label: 'Productive / Hyper-Productive / Milestone Tracking' },
   { label: 'Streak Tracking' },
   { label: 'Performance Analytics — Today, Weekly, Monthly, Yearly' },
-  { label: 'Full Task Manager' },
+  { label: 'Advanced Task Manager' },
   { label: 'Task Timers & Session History' },
   { label: 'Activity Manager' },
   { label: 'Planner / Journal Notes' },

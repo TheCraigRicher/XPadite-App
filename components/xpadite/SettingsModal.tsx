@@ -204,7 +204,7 @@ export const PLAN_CONFIGS: Record<string, PlanConfig> = {
   },
   'ltd': {
     title: 'Lifetime Pro',
-    subtitle: "Own XPadite Pro for life with a single payment. Limited to the first 100 customers for this offer.",
+    subtitle: "Own XPadite Pro for life with a single payment. Limited ONLY to the first 100 customers for this offer.",
     badge: 'Limited Offer',
     badgeIcon: '💎',
     price: '$249',
@@ -219,11 +219,11 @@ export const PLAN_CONFIGS: Record<string, PlanConfig> = {
     ctaGlow: 'rgba(7,137,168,0.38)',
     includedFeatures: PRO_CORE_FEATURES,
     excludedFeatures: AI_FEATURES,
-    note: 'Limited to the first 100 customers for this offer. AI features are not included and require a separate Premium subscription.',
+    note: 'Limited ONLY to the first 100 customers for this offer. AI features are not included and require a separate Premium subscription.',
   },
   '3year-pro': {
     title: '3-Year Pro',
-    subtitle: 'Three full years of XPadite Pro with a single one-time payment. Limited to the first 100 customers for this offer.',
+    subtitle: 'Three full years of XPadite Pro with a single one-time payment. Limited ONLY to the first 100 customers for this offer.',
     badge: 'Limited Offer',
     badgeIcon: '⚡',
     price: '$199',
@@ -239,7 +239,7 @@ export const PLAN_CONFIGS: Record<string, PlanConfig> = {
     ctaGlow: 'rgba(211,167,0,0.40)',
     includedFeatures: PRO_CORE_FEATURES,
     excludedFeatures: AI_FEATURES,
-    note: 'Limited to the first 100 customers for this offer. AI features are not included and require a separate Premium subscription.',
+    note: 'Limited ONLY to the first 100 customers for this offer. AI features are not included and require a separate Premium subscription.',
   },
 }
 

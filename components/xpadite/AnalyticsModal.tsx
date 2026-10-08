@@ -535,9 +535,13 @@ interface RecordsData {
   bestActPct: number
 }
 
-function RecordTile({ icon, bg, label, value, sub }: { icon: string; bg: string; label: string; value: string; sub: string | null }) {
+function RecordTile({ icon, bg, label, value, sub, index }: { icon: string; bg: string; label: string; value: string; sub: string | null; index: number }) {
+  // xp-fade-up/xp-stagger-N are the existing, already prefers-reduced-motion-
+  // aware entrance classes (app/globals.css) — reused as-is, not reinvented.
+  // xp-record-tile (defined once in PersonalRecordsCard below) adds the
+  // hover lift+shadow (desktop) / press scale (touch) micro-interactions.
   return (
-    <div className="rounded-xl p-3" style={{ background: bg }}>
+    <div className={`rounded-xl p-3 xp-fade-up xp-stagger-${index + 1} xp-record-tile`} style={{ background: bg }}>
       <span style={{ fontSize: 16 }}>{icon}</span>
       <p className="text-[9.5px] font-medium mt-1" style={{ color: 'var(--xp-txt3)' }}>{label}</p>
       <p className="text-[14px] font-extrabold mt-0.5 truncate" style={{ color: 'var(--xp-txt)' }}>{value}</p>
@@ -556,27 +560,47 @@ function PersonalRecordsCard({ data, isDark }: { data: RecordsData | null; isDar
   }
   return (
     <SectionCard icon="🏆" title="Personal Records" subtitle="Your best achievements across all time">
+      {/* Hover lift+shadow only where real hover exists (desktop mouse);
+          touch/tablet gets a press scale-down instead — never both, and
+          reduced-motion disables all of it. Scoped locally since the
+          existing shared .xp-hover-card is deliberately shadow-only (no
+          lift) for its other, unrelated call sites elsewhere in the app. */}
+      <style>{`
+        @media (hover: hover) and (pointer: fine) {
+          .xp-record-tile { transition: transform 200ms ease, box-shadow 200ms ease; }
+          .xp-record-tile:hover { transform: translateY(-2.5px); box-shadow: 0 6px 18px rgba(0,0,0,0.14); }
+          .xp-dark .xp-record-tile:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.45); }
+        }
+        @media (hover: none), (pointer: coarse) {
+          .xp-record-tile { transition: transform 150ms ease; }
+          .xp-record-tile:active { transform: scale(0.98); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .xp-record-tile { transition: none !important; }
+          .xp-record-tile:hover, .xp-record-tile:active { transform: none !important; box-shadow: inherit !important; }
+        }
+      `}</style>
       <div className="grid grid-cols-2 gap-2">
         <RecordTile
-          icon="🔥" bg={isDark ? 'rgba(249,115,22,0.10)' : 'rgba(249,115,22,0.08)'}
+          index={0} icon="🔥" bg={isDark ? 'rgba(249,115,22,0.10)' : 'rgba(249,115,22,0.08)'}
           label="Best Day Ever"
           value={data.bestDay ? formatMs(data.bestDay.ms) : '—'}
           sub={data.bestDay ? data.bestDay.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null}
         />
         <RecordTile
-          icon="📅" bg={isDark ? 'rgba(59,130,246,0.10)' : 'rgba(59,130,246,0.08)'}
+          index={1} icon="📅" bg={isDark ? 'rgba(59,130,246,0.10)' : 'rgba(59,130,246,0.08)'}
           label="Best Week Ever"
           value={data.bestWeek ? formatMs(data.bestWeek.ms) : '—'}
           sub={data.bestWeek ? `Week of ${data.bestWeek.monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : null}
         />
         <RecordTile
-          icon="⚡" bg={isDark ? 'rgba(234,179,8,0.10)' : 'rgba(234,179,8,0.08)'}
+          index={2} icon="⚡" bg={isDark ? 'rgba(234,179,8,0.10)' : 'rgba(234,179,8,0.08)'}
           label="Longest Streak"
           value={data.longestStreak > 0 ? `${data.longestStreak} day${data.longestStreak === 1 ? '' : 's'}` : '—'}
           sub={null}
         />
         <RecordTile
-          icon="🎯" bg={isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.08)'}
+          index={3} icon="🎯" bg={isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.08)'}
           label="Most Productive Activity"
           value={data.bestActName ?? '—'}
           sub={data.bestActName ? `${data.bestActPct}% of total time` : null}
@@ -614,6 +638,67 @@ function MiniTrendChart({ weeks, isDark }: { weeks: { label: string; ms: number 
   const uid = useId().replace(/[:]/g, '')
   const maxMs = Math.max(...weeks.map(w => w.ms), 1)
   const isMobile = useIsMobileViewport()
+
+  // Scroll-triggered entrance — bars rise, then the trend line draws
+  // in, points reveal as it passes them, and the arrow fades in at the
+  // very end. `barRaw`/`lineFrac` are plain 0-1 progress values; bar
+  // easing+stagger is applied per-bar in render (mirrors TrendBarChart.tsx's
+  // own barFrac design), line easing is applied once here since there's
+  // only one line. Starts the first time ~25% of this chart enters the
+  // Analytics modal's own scroll container, then never retriggers — this
+  // component remounts fresh (resetting this state) only when the whole
+  // Analytics modal is closed and reopened, so "reset only on reopen" falls
+  // out of normal React unmount/remount, no extra bookkeeping needed.
+  const reduceMotion = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const [barRaw, setBarRaw] = useState(() => (reduceMotion ? 1 : 0))
+  const [lineFrac, setLineFrac] = useState(() => (reduceMotion ? 1 : 0))
+  const svgRef = useRef<SVGSVGElement>(null)
+  const startedRef = useRef(reduceMotion)
+
+  useEffect(() => {
+    if (reduceMotion) return
+    const el = svgRef.current
+    if (!el) return
+    const BAR_DURATION = 850
+    const LINE_DELAY = 300
+    const LINE_DURATION = 1200
+    const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3)
+    const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+    let raf = 0
+    function run() {
+      const start = performance.now()
+      function tick(now: number) {
+        const elapsed = now - start
+        const barT = Math.min(elapsed / BAR_DURATION, 1)
+        setBarRaw(easeOutCubic(barT))
+        const lineRaw = Math.min(Math.max(elapsed - LINE_DELAY, 0) / LINE_DURATION, 1)
+        setLineFrac(easeInOutCubic(lineRaw))
+        if (barT < 1 || lineRaw < 1) raf = requestAnimationFrame(tick)
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!startedRef.current && entry.isIntersecting && entry.intersectionRatio >= 0.25) {
+          startedRef.current = true
+          io.disconnect()
+          run()
+        }
+      }
+    }, { threshold: [0, 0.25, 0.5, 1] })
+    io.observe(el)
+    return () => { io.disconnect(); cancelAnimationFrame(raf) }
+  }, [reduceMotion])
+
+  // Per-bar stagger — same shape as TrendBarChart.tsx's barFrac: each bar's
+  // own ease-out starts a little later than the previous one, left to right.
+  function perBarFrac(i: number): number {
+    const n = weeks.length
+    const stagger = n > 1 ? 0.35 / n : 0
+    const localStart = i * stagger
+    const t = Math.max(0, Math.min((barRaw - localStart) / Math.max(1 - localStart, 0.01), 1))
+    return 1 - Math.pow(1 - t, 3)
+  }
   // Extra top padding (vs. the original 10px) so a lifted final point plus
   // its full arrowhead always has headroom and is never clipped by the
   // SVG's own top edge — cH (and therefore bar/point scaling) is kept
@@ -713,7 +798,7 @@ function MiniTrendChart({ weeks, isDark }: { weeks: { label: string; ms: number 
   }
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block', overflow: 'visible' }}>
+    <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block', overflow: 'visible' }}>
       <defs>
         {/* Same signature purple bar gradient every detailed dashboard's
             Progress chart uses (TrendBarChart.tsx), reused exactly here
@@ -729,18 +814,38 @@ function MiniTrendChart({ weeks, isDark }: { weeks: { label: string; ms: number 
           <stop offset="0%" stopColor="#9253E6" />
           <stop offset="100%" stopColor="#BB00FF" />
         </linearGradient>
+        {/* Progressive line reveal — same clip-width technique
+            TrendBarChart.tsx uses, driven by lineFrac instead of mount. */}
+        <clipPath id={`${uid}-line-clip`}>
+          <rect x={0} y={0} width={W * lineFrac} height={H} />
+        </clipPath>
       </defs>
       <line x1={PAD.left} x2={W - PAD.right} y1={baseY} y2={baseY} stroke={isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)'} strokeWidth={1} />
       {weeks.map((w, i) => {
-        const h = (w.ms / maxMs) * cH
+        const fullH = Math.max((w.ms / maxMs) * cH, 0)
+        const shownH = fullH * perBarFrac(i)
         return (
-          <rect key={i} x={xCenter(i) - barW / 2} y={baseY - h} width={barW} height={Math.max(h, 0)} rx={3}
+          <rect key={i} x={xCenter(i) - barW / 2} y={baseY - shownH} width={barW} height={shownH} rx={3}
             fill={`url(#${uid}-bar)`} />
         )
       })}
-      {linePath && <path d={linePath} fill="none" stroke={`url(#${uid}-trend)`} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />}
-      {pts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={2} fill={`url(#${uid}-trend)`} />)}
-      {arrowPoints && <polyline points={arrowPoints} fill="none" stroke={`url(#${uid}-trend)`} strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" />}
+      {linePath && (
+        <g clipPath={`url(#${uid}-line-clip)`}>
+          <path d={linePath} fill="none" stroke={`url(#${uid}-trend)`} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+        </g>
+      )}
+      {pts.map((p, i) => {
+        const threshold = pts.length > 1 ? i / (pts.length - 1) : 0
+        const visible = lineFrac >= threshold
+        return (
+          <circle key={i} cx={p.x} cy={p.y} r={2} fill={`url(#${uid}-trend)`}
+            style={{ opacity: visible ? 1 : 0, transition: 'opacity 220ms ease' }} />
+        )
+      })}
+      {arrowPoints && (
+        <polyline points={arrowPoints} fill="none" stroke={`url(#${uid}-trend)`} strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round"
+          style={{ opacity: lineFrac >= 0.98 ? 1 : 0, transition: 'opacity 260ms ease' }} />
+      )}
       {weeks.map((w, i) => (
         <text key={`l-${i}`} x={xCenter(i)} y={H - 2} textAnchor="middle" fontSize={7.5} fontWeight={600} fill={isDark ? 'rgba(226,232,240,0.55)' : 'var(--xp-txt3)'}>{w.label}</text>
       ))}

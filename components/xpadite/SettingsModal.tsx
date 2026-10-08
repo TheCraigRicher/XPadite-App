@@ -75,7 +75,6 @@ const PRO_CORE_FEATURES: Feature[] = [
   { label: 'Productive / Hyper-Productive / Milestone Tracking' },
   { label: 'Streak Tracking' },
   { label: 'Performance Analytics — Today, Weekly, Monthly, Yearly' },
-  { label: 'Goal Manager — Coming Soon', comingSoon: true },
   { label: 'Full Task Manager' },
   { label: 'Task Timers & Session History' },
   { label: 'Activity Manager' },
@@ -88,6 +87,7 @@ const PRO_CORE_FEATURES: Feature[] = [
   { label: 'Beautiful UI Color Theme Customization' },
   { label: 'Free Daily Motivational Quotes' },
   { label: 'New Updates with Every Feature Release' },
+  { label: 'Goal Manager — Coming Soon', comingSoon: true },
   { label: 'More Features Coming Soon — Included in Your Plan!', comingSoon: true },
 ]
 

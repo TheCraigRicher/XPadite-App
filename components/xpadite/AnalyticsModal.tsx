@@ -159,7 +159,7 @@ function TimeframeCard({ def, selected, onSelect }: {
       onClick={onSelect}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="text-left rounded-2xl p-4 sm:p-5 flex flex-col justify-center min-h-[92px] sm:min-h-[112px] lg:min-h-[140px]"
+      className="text-left rounded-2xl p-4 sm:p-5 flex flex-col justify-center min-h-[92px] sm:min-h-[112px] lg:min-h-[140px] min-w-0"
       style={{
         // Permanent rich gradient — always visible, never a hover-only effect.
         background: def.bg,
@@ -188,7 +188,7 @@ function SectionCard({ icon, title, subtitle, right, children }: {
   icon: string; title: string; subtitle?: string; right?: React.ReactNode; children: React.ReactNode
 }) {
   return (
-    <div className="rounded-2xl p-4" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr)', boxShadow: '0 1px 8px rgba(0,0,0,0.05)' }}>
+    <div className="rounded-2xl p-4 w-full min-w-0" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr)', boxShadow: '0 1px 8px rgba(0,0,0,0.05)' }}>
       <div className="flex items-start justify-between gap-2 mb-3">
         <div className="flex items-start gap-2 min-w-0">
           <span style={{ fontSize: 16, lineHeight: 1.2, flexShrink: 0 }}>{icon}</span>
@@ -1233,8 +1233,14 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
             </div>
           </div>
 
-          {/* Scrollable body */}
-          <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 flex flex-col gap-5">
+          {/* Scrollable body — overflow-x-hidden is load-bearing on mobile:
+              per the CSS overflow spec, an element with overflow-y:auto and
+              no overflow-x set computes overflow-x to 'auto' too, so any
+              descendant that's even slightly wider than the viewport (e.g.
+              an SVG chart's intentional overflow:visible arrowhead, or a
+              flex/grid item's min-content sizing) made this whole body
+              horizontally swipeable. */}
+          <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 sm:px-6 py-5 flex flex-col gap-5">
 
             {/* Timeframe cards */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 sm:gap-5">
@@ -1246,7 +1252,7 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
             {/* Shared Analytics icon legend — the same LegendRow already used
                 on the main Calendar page, shown once here (not duplicated
                 inside any individual dashboard). */}
-            <LegendRow />
+            <LegendRow compactMobile />
 
             {/* Executive summary — real data, derived from daySummaries above */}
             <div>

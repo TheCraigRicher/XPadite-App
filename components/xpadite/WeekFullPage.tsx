@@ -23,7 +23,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useApp } from './AppContext'
 import { GaugeMeter } from './GaugeMeter'
-import { dateKey, MONTHS, formatMs, resolveProgressColor } from './utils'
+import { dateKey, MONTHS, formatMs, resolveProgressColor, isProductiveActivity, todayKeyInTz } from './utils'
+import { calculateCurrentStreak, calculateBestStreak } from './productivityEngine'
 import { useDisplayFirstName } from './useDisplayFirstName'
 import { AchievementBanner, PERFORMANCE_TIERS, getTaskPerformanceLevel, DonutChart, TASK_GRAD_STRINGS } from './DayDashboardModal'
 import { ProductiveDot } from './LegendRow'
@@ -58,6 +59,28 @@ function mondayOf(d: Date): Date {
   return m
 }
 
+// "Today" per the user's configured timezone (not the browser's local
+// clock), matching MonthFullPage.tsx's isToday(..., effectiveTimezone).
+function todayDateInTz(tz: string): Date {
+  const [y, m, d] = todayKeyInTz(tz).split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+// For all-time streak calculations below — a gap-free chronological key list
+// from a day string like "2026-01-05" through an end Date, matching the same
+// helper AnalyticsModal.tsx's own Personal Records uses.
+function parseDateKeyLocal(k: string): Date {
+  const [y, m, d] = k.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+function keysInRange(start: Date, end: Date): string[] {
+  const keys: string[] = []
+  const cur = new Date(start); cur.setHours(0, 0, 0, 0)
+  const e = new Date(end); e.setHours(0, 0, 0, 0)
+  while (cur <= e) { keys.push(dateKey(cur.getFullYear(), cur.getMonth(), cur.getDate())); cur.setDate(cur.getDate() + 1) }
+  return keys
+}
+
 function fmtWeekRange(monday: Date): string {
   const sunday = new Date(monday)
   sunday.setDate(monday.getDate() + 6)
@@ -73,13 +96,14 @@ interface WeekFullPageProps {
 }
 
 export function WeekFullPage({ onClose }: WeekFullPageProps) {
-  const { calData, activities, isDark, progressColor: _rawColor } = useApp()
+  const { calData, activities, isDark, progressColor: _rawColor, effectiveTimezone } = useApp()
   const progressColor = resolveProgressColor(_rawColor, isDark)
   const firstName = useDisplayFirstName()
 
-  const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
+  const [weekStart, setWeekStart] = useState(() => mondayOf(todayDateInTz(effectiveTimezone)))
   // Blocks navigating into a completely future week with no historical data.
-  const isCurrentWeek = weekStart.getTime() === mondayOf(new Date()).getTime()
+  // Timezone-aware (not the browser's raw local clock).
+  const isCurrentWeek = weekStart.getTime() === mondayOf(todayDateInTz(effectiveTimezone)).getTime()
 
   const weekDates = useMemo(
     () => Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(weekStart.getDate() + i); return d }),
@@ -91,18 +115,22 @@ export function WeekFullPage({ onClose }: WeekFullPageProps) {
   )
 
   // calData is the authoritative session source — see file header comment.
+  // Productive-only, matching DayFullPage.tsx/AnalyticsModal.tsx's own gate —
+  // non-productive activities (e.g. Break/Meal) never count toward Total
+  // Worked, Peak Performance Time, or the vs-previous-week comparison.
   const allTaskSessions = useMemo(() => {
     const result: { dateKey: string; startTs: number; endTs: number }[] = []
     for (const key of Object.keys(calData)) {
       const day = calData[key]
       for (const task of (day?.tasks ?? [])) {
+        if (!isProductiveActivity(activities, task.actId)) continue
         for (const s of (task.sessions ?? [])) {
           if (s.endTs !== null) result.push({ dateKey: key, startTs: s.startTs, endTs: s.endTs })
         }
       }
     }
     return result
-  }, [calData])
+  }, [calData, activities])
 
   const weekKeySet = useMemo(() => new Set(weekKeys), [weekKeys])
   const weekSessions = useMemo(
@@ -118,8 +146,7 @@ export function WeekFullPage({ onClose }: WeekFullPageProps) {
   // chart buckets, the activity/session/pending aggregations, and the
   // streak/productive-day flags below, all from the same calData reads.
   const dayData = useMemo(() => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+    const today = todayDateInTz(effectiveTimezone)
     return weekDates.map((d, i) => {
       const key = weekKeys[i]
       const day = calData[key]
@@ -131,12 +158,14 @@ export function WeekFullPage({ onClose }: WeekFullPageProps) {
       if (day) {
         for (const t of day.tasks) {
           const act = activities.find(a => a.id === t.actId)
-          for (const s of t.sessions) {
-            if (s.endTs !== null) {
-              const dur = s.endTs - s.startTs
-              ms += dur
-              if (t.actId) actMs.set(t.actId, (actMs.get(t.actId) ?? 0) + dur)
-              sessions.push({ actName: act?.name ?? 'Other', actColor: act?.color ?? '#94a3b8', durationMs: dur })
+          if (isProductiveActivity(activities, t.actId)) {
+            for (const s of t.sessions) {
+              if (s.endTs !== null) {
+                const dur = s.endTs - s.startTs
+                ms += dur
+                if (t.actId) actMs.set(t.actId, (actMs.get(t.actId) ?? 0) + dur)
+                sessions.push({ actName: act?.name ?? 'Other', actColor: act?.color ?? '#94a3b8', durationMs: dur })
+              }
             }
           }
           if (t.done) completedCount++
@@ -155,7 +184,7 @@ export function WeekFullPage({ onClose }: WeekFullPageProps) {
         hyper: !!day?.hyper, milestone: !!day?.milestone, goal: !!day?.goal,
       }
     })
-  }, [weekDates, weekKeys, calData, activities])
+  }, [weekDates, weekKeys, calData, activities, effectiveTimezone])
 
   // Weekly Progress — 7 daily buckets, feeding the exact same shared
   // bar+curve chart Monthly/Yearly Dashboard use (TrendBarChart), rather
@@ -214,10 +243,7 @@ export function WeekFullPage({ onClose }: WeekFullPageProps) {
     totalDays: 7,
   }), [dayData])
 
-  const todayKey = useMemo(() => {
-    const t = new Date()
-    return dateKey(t.getFullYear(), t.getMonth(), t.getDate())
-  }, [])
+  const todayKey = useMemo(() => todayKeyInTz(effectiveTimezone), [effectiveTimezone])
   const todayIdxInWeek = weekKeys.indexOf(todayKey)
 
   const daysRemaining = useMemo(() => {
@@ -237,14 +263,21 @@ export function WeekFullPage({ onClose }: WeekFullPageProps) {
     return { totalMs: pTotalMs, sessionCount: pSessions.length }
   }, [allTaskSessions, weekStart])
 
+  // All-time streaks (matching Calendar/Analytics Hub's own definitions) —
+  // NOT capped to the 7 visible days. "Current Streak" is evaluated as of
+  // today when viewing the current week, or as of that week's own Sunday
+  // when browsing a past week (preserving this card's existing per-week
+  // framing); "Longest Streak" is the genuine all-time record, via the same
+  // full-history helpers productivityEngine.ts/AnalyticsModal.tsx use.
   const { currentStreak, longestStreak } = useMemo(() => {
-    let longest = 0, run = 0
-    for (const d of dayData) { if (d.productive) { run++; if (run > longest) longest = run } else run = 0 }
-    const lastIdx = isCurrentWeek && todayIdxInWeek >= 0 ? todayIdxInWeek : 6
-    let current = 0
-    for (let i = lastIdx; i >= 0; i--) { if (dayData[i].productive) current++; else break }
+    const today = todayDateInTz(effectiveTimezone)
+    const refDate = isCurrentWeek ? today : weekDates[6]
+    const current = calculateCurrentStreak(calData, refDate)
+    const sortedKeys = Object.keys(calData).sort()
+    const earliest = sortedKeys[0] ? parseDateKeyLocal(sortedKeys[0]) : today
+    const longest = calculateBestStreak(calData, keysInRange(earliest, today))
     return { currentStreak: current, longestStreak: longest }
-  }, [dayData, isCurrentWeek, todayIdxInWeek])
+  }, [calData, isCurrentWeek, weekDates, effectiveTimezone])
 
   // Peak Performance Time — identical 2-hour time-of-day bucket algorithm
   // Monthly/Yearly Dashboard use, fed this week's sessions instead.
@@ -419,7 +452,7 @@ export function WeekFullPage({ onClose }: WeekFullPageProps) {
             edge, so it never affects the centered nav cluster's position. */}
         {!isCurrentWeek && (
           <button
-            onClick={() => setWeekStart(mondayOf(new Date()))}
+            onClick={() => setWeekStart(mondayOf(todayDateInTz(effectiveTimezone)))}
             className="absolute right-4 flex items-center flex-shrink-0 whitespace-nowrap"
             style={{
               top: '50%', transform: 'translateY(-50%)',

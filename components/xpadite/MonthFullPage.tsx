@@ -8,8 +8,9 @@ import { addGalleryItem } from './GalleryModal'
 import type { GalleryItem } from './GalleryModal'
 import {
   dateKey, isToday, DAY_HEADERS, MONTHS, APP_YEAR, getMonthStats, formatMs,
-  hexToRgba, resolveProgressColor,
+  hexToRgba, resolveProgressColor, isProductiveActivity,
 } from './utils'
+import { calculateCurrentStreak } from './productivityEngine'
 import { useUpcomingReminderDates } from './useUpcomingReminderDates'
 import { useDisplayFirstName } from './useDisplayFirstName'
 import { AchievementBanner, PERFORMANCE_TIERS, getTaskPerformanceLevel, DonutChart, TASK_GRAD_STRINGS } from './DayDashboardModal'
@@ -1127,12 +1128,17 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
   // a calendar week reaching into an adjacent month, or switching to a past
   // month, still aggregates from real data), for the computations below that
   // previously read the incomplete `sessions` array instead.
+  // Productive-only, matching DayFullPage.tsx/AnalyticsModal.tsx's own gate —
+  // non-productive activities (e.g. Break/Meal) never count toward Total
+  // Worked, Monthly Progress, Peak Performance Time, or the vs-previous-
+  // month comparison.
   const allTaskSessions = useMemo(() => {
     const result: { dateKey: string; startTs: number; endTs: number }[] = []
     for (const key of Object.keys(calData)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const day = calData[key] as any
       for (const task of (day?.tasks ?? [])) {
+        if (!isProductiveActivity(activities, task.actId)) continue
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         for (const s of (task.sessions ?? []) as any[]) {
           if (s.endTs !== null) result.push({ dateKey: key, startTs: s.startTs, endTs: s.endTs })
@@ -1140,7 +1146,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
       }
     }
     return result
-  }, [calData])
+  }, [calData, activities])
 
   const monthKeys = useMemo(() => {
     const s = new Set<string>()
@@ -1241,6 +1247,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
       const day = calData[key] as any
       if (!day) continue
       ;(day.tasks ?? []).forEach((t: any) => {
+        if (!isProductiveActivity(activities, t.actId)) return
         ;((t.sessions ?? []) as any[]).filter((s: any) => s.endTs !== null).forEach((s: any) => {
           if (t.actId) actMs.set(t.actId, (actMs.get(t.actId) ?? 0) + (s.endTs - s.startTs))
         })
@@ -1252,6 +1259,11 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
     }).sort((a, b) => b.ms - a.ms).slice(0, 7)
   }, [calData, monthKeys, activities])
 
+  // "Longest Streak" stays scoped to the viewed month (consistent with
+  // StatsRow.tsx's own month-view fallback). "Current Streak" now uses the
+  // full-history-aware calculateCurrentStreak instead of stopping at day 1
+  // of the month — a real streak that began in the previous month no longer
+  // gets truncated/undercounted here.
   const { currentStreak, longestStreak } = useMemo(() => {
     const td = new Date(APP_YEAR, currentMonth + 1, 0).getDate()
     type D = { productive?: boolean; hyper?: boolean; milestone?: boolean; goal?: boolean }
@@ -1259,9 +1271,9 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
     let longest = 0, run = 0
     for (let d = 1; d <= td; d++) { if (isProd(dateKey(APP_YEAR, currentMonth, d))) { run++; if (run > longest) longest = run } else run = 0 }
     const now = new Date()
-    const last = currentMonth === now.getMonth() && APP_YEAR === now.getFullYear() ? Math.min(now.getDate(), td) : td
-    let current = 0
-    for (let d = last; d >= 1; d--) { if (isProd(dateKey(APP_YEAR, currentMonth, d))) current++; else break }
+    const isCurrentCalMonth = currentMonth === now.getMonth() && APP_YEAR === now.getFullYear()
+    const refDate = isCurrentCalMonth ? now : new Date(APP_YEAR, currentMonth, td)
+    const current = calculateCurrentStreak(calData, refDate)
     return { currentStreak: current, longestStreak: longest }
   }, [calData, currentMonth])
 
@@ -1311,6 +1323,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
       if (!day) continue
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       for (const task of (day.tasks ?? [])) {
+        if (!isProductiveActivity(activities, task.actId)) continue
         const act = activities.find(a => a.id === task.actId)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         for (const s of (task.sessions ?? [])) {

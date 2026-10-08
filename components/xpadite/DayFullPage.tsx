@@ -24,7 +24,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useApp } from './AppContext'
 import { GaugeMeter } from './GaugeMeter'
-import { dateKey, formatMs, resolveProgressColor, isProductiveActivity } from './utils'
+import { dateKey, formatMs, resolveProgressColor, isProductiveActivity, todayKeyInTz, nowHourInTz, isToday as isTodayDate } from './utils'
 import { useDisplayFirstName } from './useDisplayFirstName'
 import { AchievementBanner, PERFORMANCE_TIERS, getTaskPerformanceLevel, DonutChart, TASK_GRAD_STRINGS } from './DayDashboardModal'
 import { ProductiveDot } from './LegendRow'
@@ -46,10 +46,12 @@ const NextTriangle = () => (
   <svg width="7" height="10" viewBox="0 0 9 12" fill="currentColor" aria-hidden="true"><path d="M0 0 L9 6 L0 12 Z" /></svg>
 )
 
-function startOfDay(d: Date): Date {
-  const n = new Date(d)
-  n.setHours(0, 0, 0, 0)
-  return n
+// "Today" per the user's configured timezone (not the browser's local
+// clock) — a plain local-midnight Date for calendar-math/display purposes,
+// matching MonthFullPage.tsx's isToday(..., effectiveTimezone) convention.
+function todayDateInTz(tz: string): Date {
+  const [y, m, d] = todayKeyInTz(tz).split('-').map(Number)
+  return new Date(y, m - 1, d)
 }
 
 function fmtDayLabel(d: Date): string {
@@ -67,13 +69,14 @@ interface DayFullPageProps {
 }
 
 export function DayFullPage({ onClose }: DayFullPageProps) {
-  const { calData, activities, isDark, progressColor: _rawColor } = useApp()
+  const { calData, activities, isDark, progressColor: _rawColor, effectiveTimezone } = useApp()
   const progressColor = resolveProgressColor(_rawColor, isDark)
   const firstName = useDisplayFirstName()
 
-  const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()))
-  // Blocks navigating into a future date with no historical data.
-  const isToday = selectedDate.getTime() === startOfDay(new Date()).getTime()
+  const [selectedDate, setSelectedDate] = useState(() => todayDateInTz(effectiveTimezone))
+  // Blocks navigating into a future date with no historical data. Timezone-
+  // aware (not the browser's raw local clock), matching MonthFullPage.tsx.
+  const isToday = isTodayDate(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), effectiveTimezone)
   const selectedKey = dateKey(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate())
 
   // ── Data computations (all keyed to selectedDate) ──────────────────────────
@@ -147,8 +150,12 @@ export function DayFullPage({ onClose }: DayFullPageProps) {
   // same shared bar+curve chart Monthly/Weekly/Yearly Dashboard use
   // (TrendBarChart), rather than a parallel chart implementation.
   const hourlyBuckets = useMemo((): TrendBucket[] => {
-    const now = new Date()
-    const currentHour = now.getHours()
+    // "Now"/"today" per the user's configured timezone, not the browser's
+    // raw local clock — only the determination of which bucket is current/
+    // future changes; a session's own hour-of-day bucketing below is
+    // unchanged (still its own recorded wall-clock time).
+    const currentHour = nowHourInTz(effectiveTimezone)
+    const todayDate = todayDateInTz(effectiveTimezone)
     return HOUR_LABELS.map((label, i) => {
       const startHour = i * 3
       const endHour = startHour + 3
@@ -158,7 +165,7 @@ export function DayFullPage({ onClose }: DayFullPageProps) {
         const h = new Date(s.startTs).getHours()
         if (h >= startHour && h < endHour) { ms += s.durationMs; sessionCount++ }
       }
-      const isFuture = isToday ? startHour > currentHour : selectedDate > now
+      const isFuture = isToday ? startHour > currentHour : selectedDate > todayDate
       const isCurrent = isToday && currentHour >= startHour && currentHour < endHour
       return {
         label, ms, crossMonth: null, isFuture, isCurrent,
@@ -166,7 +173,7 @@ export function DayFullPage({ onClose }: DayFullPageProps) {
         detail: isFuture ? undefined : [`${sessionCount} session${sessionCount === 1 ? '' : 's'}`],
       }
     })
-  }, [dayStats.sessions, isToday, selectedDate])
+  }, [dayStats.sessions, isToday, selectedDate, effectiveTimezone])
 
   // Peak Performance Time — identical 2-hour time-of-day bucket algorithm
   // Monthly/Weekly/Yearly Dashboard use, fed this day's sessions.
@@ -324,7 +331,7 @@ export function DayFullPage({ onClose }: DayFullPageProps) {
 
         {!isToday && (
           <button
-            onClick={() => setSelectedDate(startOfDay(new Date()))}
+            onClick={() => setSelectedDate(todayDateInTz(effectiveTimezone))}
             className="absolute right-4 flex items-center flex-shrink-0 whitespace-nowrap"
             style={{
               top: '50%', transform: 'translateY(-50%)',

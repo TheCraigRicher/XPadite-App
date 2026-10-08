@@ -827,17 +827,21 @@ export function DayDashboardModal({ dateKey, month, day, onClose, onBack }: DayD
     ).sort((a, b) => a.startTs - b.startTs)
 
     const totalMs        = allSessions.reduce((s, x) => s + getSessionDurationMs(x.startTs, x.endTs!), 0)
-    const longestMs      = allSessions.reduce((mx, s) => Math.max(mx, getSessionDurationMs(s.startTs, s.endTs!)), 0)
     const sessionCount   = allSessions.length
     const completedTasks = dayData.tasks.filter(t => t.done).length
     const totalTasks     = dayData.tasks.length
-    const deepWorkMs     = allSessions
-      .filter(s => getSessionDurationMs(s.startTs, s.endTs!) >= 45 * 60_000)
-      .reduce((s, x) => s + getSessionDurationMs(x.startTs, x.endTs!), 0)
 
-    // Productive sessions only — Meal/Break are excluded from focus/productivity metrics
+    // Productive sessions only — Meal/Break are excluded from focus/productivity
+    // metrics. Longest Session and Deep Work are productivity metrics (feed the
+    // day score and "personal best" check below), so — unlike totalMs/
+    // actBreakdown, which intentionally show ALL tracked time — they must be
+    // derived from productiveSessions, matching DayFullPage.tsx/AnalyticsModal.tsx.
     const productiveSessions = allSessions.filter(s => isProductiveActivity(activities, s.actId))
     const productiveMs = productiveSessions.reduce((s, x) => s + getSessionDurationMs(x.startTs, x.endTs!), 0)
+    const longestMs = productiveSessions.reduce((mx, s) => Math.max(mx, getSessionDurationMs(s.startTs, s.endTs!)), 0)
+    const deepWorkMs = productiveSessions
+      .filter(s => getSessionDurationMs(s.startTs, s.endTs!) >= 45 * 60_000)
+      .reduce((s, x) => s + getSessionDurationMs(x.startTs, x.endTs!), 0)
 
     let score = 0
     if (completedTasks > 0) score += 20

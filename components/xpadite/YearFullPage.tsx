@@ -23,7 +23,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useApp } from './AppContext'
 import { GaugeMeter } from './GaugeMeter'
-import { dateKey, MONTHS, APP_YEAR, getYearStats, getDayOfYear, formatMs, resolveProgressColor } from './utils'
+import { dateKey, MONTHS, APP_YEAR, getYearStats, getDayOfYear, formatMs, resolveProgressColor, isProductiveActivity } from './utils'
 import { useDisplayFirstName } from './useDisplayFirstName'
 import { AchievementBanner, PERFORMANCE_TIERS, getTaskPerformanceLevel, DonutChart, TASK_GRAD_STRINGS } from './DayDashboardModal'
 import { ProductiveDot } from './LegendRow'
@@ -126,18 +126,23 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
   const stats = useMemo(() => getYearStats(calData, currentYear), [calData, currentYear])
 
   // calData is the authoritative session source — see file header comment.
+  // Productive-only, matching DayFullPage.tsx/AnalyticsModal.tsx's own gate —
+  // non-productive activities (e.g. Break/Meal) never count toward Total
+  // Worked, Yearly Progress, Peak Performance Time, or the vs-previous-year
+  // comparison.
   const allTaskSessions = useMemo(() => {
     const result: { dateKey: string; startTs: number; endTs: number }[] = []
     for (const key of Object.keys(calData)) {
       const day = calData[key]
       for (const task of (day?.tasks ?? [])) {
+        if (!isProductiveActivity(activities, task.actId)) continue
         for (const s of (task.sessions ?? [])) {
           if (s.endTs !== null) result.push({ dateKey: key, startTs: s.startTs, endTs: s.endTs })
         }
       }
     }
     return result
-  }, [calData])
+  }, [calData, activities])
 
   const yearKeys = useMemo(() => {
     const s = new Set<string>()
@@ -182,11 +187,13 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
         if (!day) continue
         for (const t of day.tasks) {
           const act = activities.find(a => a.id === t.actId)
-          for (const s of t.sessions) {
-            if (s.endTs !== null) {
-              const dur = s.endTs - s.startTs
-              if (t.actId) actMaps[m].set(t.actId, (actMaps[m].get(t.actId) ?? 0) + dur)
-              sessionsByMonth[m].push({ actName: act?.name ?? 'Other', actColor: act?.color ?? '#94a3b8', durationMs: dur })
+          if (isProductiveActivity(activities, t.actId)) {
+            for (const s of t.sessions) {
+              if (s.endTs !== null) {
+                const dur = s.endTs - s.startTs
+                if (t.actId) actMaps[m].set(t.actId, (actMaps[m].get(t.actId) ?? 0) + dur)
+                sessionsByMonth[m].push({ actName: act?.name ?? 'Other', actColor: act?.color ?? '#94a3b8', durationMs: dur })
+              }
             }
           }
           if (t.done) completedTasksByMonth[m]++
@@ -251,6 +258,7 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
       const day = calData[key]
       if (!day) continue
       for (const t of day.tasks) {
+        if (!isProductiveActivity(activities, t.actId)) continue
         for (const s of t.sessions) {
           if (s.endTs !== null && t.actId) actMs.set(t.actId, (actMs.get(t.actId) ?? 0) + (s.endTs - s.startTs))
         }
@@ -311,17 +319,33 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
     return Math.max(stats.totalDays - getDayOfYear(), 0)
   }, [currentYear, stats.totalDays])
 
+  // For the current (partially-elapsed) real year, "vs last year" compares
+  // against the SAME elapsed span of the previous year (Jan 1 through
+  // today's day-of-year) — not the full prior year — so pacing ahead of
+  // last year is never misread as a decline just because this year isn't
+  // over yet. A fully-elapsed past year still compares against the full
+  // previous year. Mirrors AnalyticsModal.tsx's own perfPeriodRanges('year').
   const prevYear = useMemo(() => {
     const py = currentYear - 1
     const pKeys = new Set<string>()
-    for (let m = 0; m < 12; m++) {
-      const td = new Date(py, m + 1, 0).getDate()
-      for (let d = 1; d <= td; d++) pKeys.add(dateKey(py, m, d))
+    if (isCurrentRealYear) {
+      const cutoff = new Date(py, 0, 1)
+      cutoff.setDate(cutoff.getDate() + getDayOfYear() - 1)
+      const cur = new Date(py, 0, 1)
+      while (cur <= cutoff) {
+        pKeys.add(dateKey(cur.getFullYear(), cur.getMonth(), cur.getDate()))
+        cur.setDate(cur.getDate() + 1)
+      }
+    } else {
+      for (let m = 0; m < 12; m++) {
+        const td = new Date(py, m + 1, 0).getDate()
+        for (let d = 1; d <= td; d++) pKeys.add(dateKey(py, m, d))
+      }
     }
     const pSessions = allTaskSessions.filter(s => pKeys.has(s.dateKey))
     const pTotalMs = pSessions.reduce((sum, s) => sum + (s.endTs - s.startTs), 0)
     return { totalMs: pTotalMs, sessionCount: pSessions.length }
-  }, [allTaskSessions, currentYear])
+  }, [allTaskSessions, currentYear, isCurrentRealYear])
 
   // Peak Performance Time — identical 2-hour time-of-day bucket algorithm
   // Monthly Dashboard uses, fed this year's sessions instead of one month's.

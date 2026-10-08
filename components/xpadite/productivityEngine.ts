@@ -210,6 +210,11 @@ export function calculateTotalMs(
       const tasks = calData[key]?.tasks
       if (!tasks) continue
       for (const task of tasks) {
+        // Clock-in-linked tasks are excluded: their time is already counted
+        // via the matching WorkSession above (`completed`) — summing both
+        // would double-count the same interval. Mirrors DayModal.tsx's own
+        // totalFocusMsToday, the established correct pattern for this.
+        if (task.linkedSessionId) continue
         for (const s of task.sessions) {
           if (s.endTs !== null) taskMs += s.endTs - s.startTs
         }

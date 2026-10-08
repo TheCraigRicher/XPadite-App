@@ -91,6 +91,24 @@ export function nowH12InTz(tz: string): { h: string; m: string; ap: string } {
   return { h: String(h12), m: String(d.getMinutes()).padStart(2, '0'), ap: hours < 12 ? 'AM' : 'PM' }
 }
 
+// Current hour-of-day (0-23) as it reads in an arbitrary IANA zone, same
+// Intl-based technique as todayKeyInTz/nowH12InTz — used to determine which
+// hourly bucket is "now" for the Daily Progress chart's current-hour marker.
+export function nowHourInTz(tz?: string): number {
+  if (tz) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz, hour: 'numeric', hour12: false,
+      }).formatToParts(new Date())
+      const h = parts.find(p => p.type === 'hour')?.value
+      if (h) return Number(h) % 24
+    } catch {
+      // fall through to system-local below
+    }
+  }
+  return new Date().getHours()
+}
+
 // `tz` is optional and backward-compatible: existing call sites that don't
 // pass it keep today's exact system-local behavior. Callers that know the
 // user's effective timezone preference can opt in explicitly.

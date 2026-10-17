@@ -25,6 +25,7 @@ import { SettingsModal } from './SettingsModal'
 import { WhatsNewModal } from './WhatsNewModal'
 import { MobileBottomNav } from './MobileBottomNav'
 import { ProfileModal } from './ProfileModal'
+import { BillingProvider, TrialExpiredGate } from './BillingContext'
 import { ActivityManagerModal } from './ActivityManagerModal'
 import { dateKey, todayKey, APP_YEAR } from './utils'
 import { YearShareModal } from './YearProgressShare'
@@ -1280,6 +1281,13 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
         />
       )}
 
+      {/* Trial ended with no paid entitlement: productivity UI is covered, but Settings
+          (plans/upgrade) and Profile (account, sign-out) open above it. Data is untouched. */}
+      <TrialExpiredGate
+        onViewPlans={() => { setProfileOpen(false); setSettingsOpen(true) }}
+        onOpenProfile={() => { setSettingsOpen(false); setProfileOpen(true) }}
+      />
+
       {whatsNewOpen && <WhatsNewModal onClose={() => setWhatsNewOpen(false)} />}
 
       {profileOpen && (
@@ -1389,7 +1397,9 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
 export function XpaditeApp({ email }: XpaditeAppProps) {
   return (
     <AppProvider email={email}>
-      <ThemedApp email={email} />
+      <BillingProvider>
+        <ThemedApp email={email} />
+      </BillingProvider>
     </AppProvider>
   )
 }

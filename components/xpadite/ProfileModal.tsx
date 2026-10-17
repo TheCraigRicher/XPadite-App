@@ -6,6 +6,7 @@ import { useApp } from './AppContext'
 import { createClient } from '@/lib/supabase/client'
 import { useLockBodyScroll } from './useLockBodyScroll'
 import { PLAN_CONFIGS } from './SettingsModal'
+import { useBilling, describeStatus } from './BillingContext'
 
 // The same fixed brand-purple gradient the Task Manager (DayModal) header
 // already uses — the established XPadite premium-header treatment, reused
@@ -213,6 +214,10 @@ export function ProfileModal({
   })
   const [activeSecurityModal, setActiveSecurityModal] = useState<'email' | 'password' | 'delete' | null>(null)
   const [planOpen, setPlanOpen] = useState(false)
+  const billing = useBilling()
+  const billingInfo = billing?.status
+    ? { ...describeStatus(billing.status), badge: billing.status.state === 'paid' ? 'Pro' : billing.status.state === 'trial' ? 'Trial' : 'Expired' }
+    : null
   const [planInfoTarget, setPlanInfoTarget] = useState<string | null>(null)
 
   // Backdrop click never closes Profile — it only gives a brief, subtle
@@ -792,14 +797,14 @@ export function ProfileModal({
             >
               <div className="text-left">
                 <p className="text-[11px] font-semibold" style={{ color: 'var(--xp-txt)' }}>Current Plan</p>
-                <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>XPadite Free</p>
+                <p className="text-[10px]" style={{ color: 'var(--xp-txt3)' }}>{billingInfo ? `${billingInfo.title} · ${billingInfo.detail}` : 'XPadite Free'}</p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <span
                   className="text-[10px] font-semibold px-2.5 py-1 rounded-full"
                   style={{ background: 'rgba(124,58,237,0.15)', color: '#a78bfa' }}
                 >
-                  Free
+                  {billingInfo ? billingInfo.badge : 'Free'}
                 </span>
                 <span
                   style={{ color: 'var(--xp-txt3)', transition: 'transform 200ms', transform: planOpen ? 'rotate(180deg)' : 'none' }}

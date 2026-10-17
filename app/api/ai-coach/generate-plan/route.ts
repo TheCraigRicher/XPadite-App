@@ -1,3 +1,4 @@
+import { paywallResponse } from '@/lib/billing/guard'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getOpenAI, AI_PLAN_MODEL, MAX_CONTEXT_MESSAGES } from '@/lib/ai/client'
@@ -12,6 +13,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const blocked = await paywallResponse(user)
+  if (blocked) return blocked
 
   // 2. Rate limit (separate tighter limit for plan generation)
   if (!checkRateLimit(`plan:${user.id}`, PLAN_RATE_LIMIT)) {

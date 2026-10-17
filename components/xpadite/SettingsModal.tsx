@@ -7,6 +7,8 @@ import { exportLocalData } from '@/lib/data-backup'
 import { resolveProgressColor, detectBrowserTimezone } from './utils'
 import { useLockBodyScroll } from './useLockBodyScroll'
 import { SUPPORTED_LOCALES, t } from './i18n'
+import { useBilling, BillingSummary } from './BillingContext'
+import { isBillingPlanKey } from '@/lib/billing/plans'
 
 const PROGRESS_COLORS: { name: string; value: string; darkCheck?: boolean }[] = [
   { name: 'Green',            value: '#16a34a' },
@@ -408,9 +410,32 @@ export function PlanPopup({ planId, isDark, onClose }: {
   onClose: () => void
 }) {
   const cfg = PLAN_CONFIGS[planId]
+  const billing = useBilling()
+  const [checkoutBusy, setCheckoutBusy] = useState(false)
+  const [checkoutError, setCheckoutError] = useState<string | null>(null)
   if (!cfg) return null
 
-  const popupBg    = isDark ? cfg.interiorDark : '#ffffff'
+  // Real checkout applies only to the four V1 plans; Premium V2 stays inert (ctaDisabled).
+  const purchasable = !cfg.ctaDisabled && isBillingPlanKey(planId) && !!billing
+  const owned = billing?.status
+  const alreadyThisPlan = !!owned && owned.state === 'paid' && owned.plan === planId
+  const hasLifetime = !!owned?.lifetime
+  const ctaBlocked = cfg.ctaDisabled || !purchasable || alreadyThisPlan || hasLifetime || checkoutBusy
+  const ctaText = alreadyThisPlan ? 'Your current plan'
+    : hasLifetime ? 'You have Lifetime Pro'
+    : checkoutBusy ? 'Opening secure checkout…'
+    : cfg.ctaLabel
+
+  async function handleCta() {
+    if (!billing || !isBillingPlanKey(planId) || ctaBlocked) return
+    setCheckoutBusy(true)
+    setCheckoutError(null)
+    const err = await billing.startCheckout(planId)
+    // On success the page navigates to Stripe; only reset when something went wrong.
+    if (err) { setCheckoutError(err); setCheckoutBusy(false) }
+  }
+
+  const popupBg   = isDark ? cfg.interiorDark : '#ffffff'
   const bodyBg     = isDark ? cfg.interiorDark : cfg.interiorLight
   const textPrimary   = isDark ? 'rgba(255,255,255,0.90)' : '#111827'
   const textSecondary = isDark ? 'rgba(255,255,255,0.42)' : '#6b7280'
@@ -577,20 +602,26 @@ export function PlanPopup({ planId, isDark, onClose }: {
           borderTop: `1px solid ${divider}`,
         }}>
           <button
-            className={cfg.ctaDisabled ? undefined : 'xp-plan-cta'}
-            disabled={cfg.ctaDisabled}
+            className={ctaBlocked ? undefined : 'xp-plan-cta'}
+            disabled={ctaBlocked}
+            onClick={handleCta}
             style={{
               width: '100%', padding: '14px 20px', borderRadius: 14,
-              cursor: cfg.ctaDisabled ? 'not-allowed' : 'pointer',
+              cursor: cfg.ctaDisabled ? 'not-allowed' : ctaBlocked ? 'default' : 'pointer',
               background: cfg.ctaDisabled ? (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)') : cfg.ctaBg,
               border: 'none', color: cfg.ctaDisabled ? textSecondary : 'white',
               fontSize: 14.5, fontWeight: 700, letterSpacing: '0.01em',
               boxShadow: cfg.ctaDisabled ? 'none' : `0 4px 20px ${cfg.ctaGlow}`,
-              opacity: cfg.ctaDisabled ? 0.75 : 1,
+              opacity: cfg.ctaDisabled ? 0.75 : ctaBlocked ? 0.8 : 1,
             }}
           >
-            {cfg.ctaLabel}
+            {ctaText}
           </button>
+          {checkoutError && (
+            <p role="alert" style={{ textAlign: 'center', fontSize: 11.5, color: '#ef4444', marginTop: 10, lineHeight: 1.4 }}>
+              {checkoutError}
+            </p>
+          )}
           {cfg.note && (
             <p style={{ textAlign: 'center', fontSize: 10.5, color: textSecondary, marginTop: 10, lineHeight: 1.5 }}>
               {cfg.note}
@@ -1063,6 +1094,7 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
 
               {openPlan && (
                 <div style={{ borderTop: `1px solid ${dividerColor}`, padding: '18px 20px 22px 36px' }}>
+                  <BillingSummary isDark={isDark} />
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
 
                     {/* Pro Monthly — magenta → deep purple */}

@@ -1,3 +1,4 @@
+import { paywallResponse } from '@/lib/billing/guard'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
@@ -98,6 +99,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (authErr || !user?.email) {
     return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
   }
+  const blocked = await paywallResponse(user)
+  if (blocked) return blocked
 
   let body: { imageBase64?: string; dateLabel?: string; stats?: { totalMs: number; completedTasks: number; totalTasks: number; score: number } | null }
   try {

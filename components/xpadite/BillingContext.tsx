@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useApp } from './AppContext'
 import type { BillingStatus } from '@/lib/billing/types'
 import type { BillingPlanKey } from '@/lib/billing/plans'
+import { parsePlan } from '@/lib/billing/intent'
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 // Client view of the SERVER-computed billing status (/api/billing/status).
@@ -59,6 +60,7 @@ export function describeStatus(s: BillingStatus | null): { title: string; detail
     return { title, detail: 'Active' }
   }
   if (s.state === 'trial') {
+    if (!s.trialEndsAt) return { title: 'Free Trial', detail: '5 days, starting at launch' }
     const d = daysLeft(s.trialEndsAt)
     return { title: 'Free Trial', detail: `${d} day${d === 1 ? '' : 's'} left` }
   }
@@ -159,7 +161,90 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo(() => ({ status, refresh, startCheckout, openPortal }), [status, refresh, startCheckout, openPortal])
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+  return (
+    <Ctx.Provider value={value}>
+      {children}
+      <PurchaseIntent />
+    </Ctx.Provider>
+  )
+}
+
+// ─── Website purchase hand-off ────────────────────────────────────────────────
+// A visitor who picked a plan on the Website arrives as /app?plan=<key> (the plan survives sign-up, email
+// verification and sign-in — see lib/billing/intent.ts). Once signed in and the SERVER-computed billing status has
+// loaded, this starts the Stripe Checkout for that plan. It never grants access (only the webhook / server-side
+// Stripe verification does), and it never trusts the URL for anything but choosing which allowlisted Checkout to open.
+
+const INTENT_GUARD_KEY = 'xp-checkout-intent'
+const INTENT_GUARD_MS = 2 * 60 * 1000 // a refresh/back within this window never opens a second Checkout for the same plan
+
+function PurchaseIntent() {
+  const { setToast } = useApp()
+  const billing = useBilling()
+  const raw = useRef<string | null | undefined>(undefined) // undefined = URL not read yet
+  const done = useRef(false)
+
+  // Read the plan once, then strip it from the address bar so a refresh cannot re-trigger it.
+  useEffect(() => {
+    if (raw.current !== undefined) return
+    const params = new URLSearchParams(window.location.search)
+    raw.current = params.get('plan')
+    if (params.has('plan')) {
+      params.delete('plan')
+      const qs = params.toString()
+      window.history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''))
+    }
+  }, [])
+
+  const status = billing?.status ?? null
+  const startCheckout = billing?.startCheckout
+  useEffect(() => {
+    if (done.current || raw.current === undefined || raw.current === null || !status || !startCheckout) return
+    done.current = true
+    const plan = parsePlan(raw.current)
+    if (!plan) {
+      setToast(`~That plan link is not valid
+Choose a plan from Settings → Subscription Plan.`)
+      return
+    }
+
+    // Already-owned / overlapping situations: say so instead of opening a Checkout that cannot help.
+    if (status.lifetime) {
+      setToast(`~You already have Lifetime Pro
+Nothing more to buy — enjoy XPadite!`)
+      return
+    }
+    const isSubPlan = plan === 'pro-monthly' || plan === 'pro-yearly'
+    if (status.state === 'paid' && status.plan === plan && isSubPlan) {
+      setToast(`~You're already on ${planLabel(plan)}
+Manage it from Settings → Subscription Plan.`)
+      return
+    }
+    if (status.state === 'paid' && status.plan === '3year-pro' && plan === '3year-pro') {
+      setToast(`~You already have 3-Year Pro
+Your access is active.`)
+      return
+    }
+
+    // Duplicate-session guard (refresh, back button, StrictMode remount, double redirect).
+    try {
+      const prev = JSON.parse(sessionStorage.getItem(INTENT_GUARD_KEY) || 'null') as { plan?: string; at?: number } | null
+      if (prev?.plan === plan && typeof prev.at === 'number' && Date.now() - prev.at < INTENT_GUARD_MS) return
+      sessionStorage.setItem(INTENT_GUARD_KEY, JSON.stringify({ plan, at: Date.now() }))
+    } catch { /* storage blocked: the URL was already stripped, so a refresh still cannot repeat this */ }
+
+    setToast(`~Opening secure checkout
+${planLabel(plan)} — taking you to Stripe…`)
+    void startCheckout(plan).then((err) => {
+      if (!err) return // redirecting to Stripe
+      try { sessionStorage.removeItem(INTENT_GUARD_KEY) } catch { /* ignore */ }
+      // Server messages are already user-friendly (sold out, already subscribed, in progress, …).
+      setToast(`~Couldn't start checkout
+${err}`)
+    })
+  }, [status, startCheckout, setToast])
+
+  return null
 }
 
 // ─── Settings → Subscription Plan summary ─────────────────────────────────────
@@ -212,7 +297,13 @@ export function BillingSummary({ isDark }: { isDark: boolean }) {
 // fully usable on top). It is never a dead end: plans, Profile (with sign-out)
 // are one tap away, and all user data is preserved untouched.
 
-export function TrialExpiredGate({ onViewPlans, onOpenProfile }: { onViewPlans: () => void; onOpenProfile: () => void }) {
+export function TrialExpiredGate({ onViewPlans, onOpenProfile, onOpenHelp, priceLine }: {
+  onViewPlans: () => void
+  onOpenProfile: () => void
+  onOpenHelp: () => void
+  /** One-line CA$ price summary built from PLAN_CONFIGS by the caller. */
+  priceLine?: string
+}) {
   const billing = useBilling()
   const s = billing?.status
   if (!s || s.hasAccess) return null
@@ -235,6 +326,9 @@ export function TrialExpiredGate({ onViewPlans, onOpenProfile }: { onViewPlans: 
           Your 5-day trial is over. All of your tasks, journals and data are safe —
           choose an XPadite Pro plan to pick up exactly where you left off.
         </p>
+        {priceLine && (
+          <p style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--xp-txt2)', marginBottom: 18, fontWeight: 600 }}>{priceLine}</p>
+        )}
         <button
           onClick={onViewPlans}
           style={{
@@ -255,6 +349,16 @@ export function TrialExpiredGate({ onViewPlans, onOpenProfile }: { onViewPlans: 
           }}
         >
           Account &amp; Profile
+        </button>
+        <button
+          onClick={onOpenHelp}
+          style={{
+            width: '100%', marginTop: 10, padding: '12px 20px', borderRadius: 14, cursor: 'pointer',
+            fontSize: 13, fontWeight: 600, color: 'var(--xp-txt)', background: 'transparent',
+            border: '1px solid rgba(124,58,237,0.25)',
+          }}
+        >
+          Help &amp; Support
         </button>
       </div>
     </div>

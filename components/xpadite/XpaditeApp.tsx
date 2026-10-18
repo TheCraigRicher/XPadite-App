@@ -25,6 +25,7 @@ import { SettingsModal } from './SettingsModal'
 import { WhatsNewModal } from './WhatsNewModal'
 import { MobileBottomNav } from './MobileBottomNav'
 import { ProfileModal } from './ProfileModal'
+import { PLAN_CONFIGS } from './SettingsModal'
 import { BillingProvider, TrialExpiredGate } from './BillingContext'
 import { ActivityManagerModal } from './ActivityManagerModal'
 import { dateKey, todayKey, APP_YEAR } from './utils'
@@ -1286,6 +1287,8 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
       <TrialExpiredGate
         onViewPlans={() => { setProfileOpen(false); setSettingsOpen(true) }}
         onOpenProfile={() => { setSettingsOpen(false); setProfileOpen(true) }}
+        onOpenHelp={() => { setSettingsOpen(false); setProfileOpen(false); setHelpOpen(true) }}
+        priceLine={`Pro Monthly ${PLAN_CONFIGS['pro-monthly'].price}/mo · Yearly ${PLAN_CONFIGS['pro-yearly'].price}/yr · 3-Year ${PLAN_CONFIGS['3year-pro'].price} · Lifetime ${PLAN_CONFIGS['ltd'].price}`}
       />
 
       {whatsNewOpen && <WhatsNewModal onClose={() => setWhatsNewOpen(false)} />}

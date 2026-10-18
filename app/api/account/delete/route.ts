@@ -29,6 +29,7 @@
 import { NextResponse } from 'next/server'
 import { createClient as createServiceClient } from '@supabase/supabase-js'
 import { createClient as createServerClient } from '@/lib/supabase/server'
+import { cancelBillingForAccountDeletion } from '@/lib/billing/sync'
 
 export async function DELETE() {
   // 1. Identify the caller from their own session cookie.
@@ -48,6 +49,19 @@ export async function DELETE() {
   const admin = createServiceClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
+
+  // 2b. Stop recurring billing FIRST. If any Stripe subscription cannot be confirmed
+  // cancelled, abort — never delete the account while charges could continue.
+  // (No-op for users who never started billing.) Payment records are retained
+  // (detached from the user by FK) for tax/accounting/dispute purposes.
+  try {
+    await cancelBillingForAccountDeletion(admin, user.id)
+  } catch (err) {
+    console.error('[Account Delete] Could not cancel Stripe billing; account NOT deleted:', err instanceof Error ? err.message : err)
+    return NextResponse.json({
+      error: 'We could not cancel your active subscription, so your account has not been deleted and you have not been charged anything extra. Please try again in a few minutes, or contact support and we will cancel it for you.',
+    }, { status: 502 })
+  }
 
   // 3. Resolve and remove the avatar Storage object, if any — read scoped to
   // this verified user's own id, never a path from the request.

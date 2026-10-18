@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { parsePlan, planQuery } from '@/lib/billing/intent'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { XpaditeLogo } from '@/components/auth/XpaditeLogo'
@@ -24,7 +25,18 @@ const LockIcon = () => (
   </svg>
 )
 
+// useSearchParams needs a Suspense boundary; the page itself renders exactly as before.
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
+  )
+}
+
+function LoginForm() {
+  // Plan chosen on the Website — validated against the server allowlist, then carried into /app to start Checkout.
+  const plan = parsePlan(useSearchParams().get('plan'))
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [rememberMe, setRememberMe] = useState(false)
@@ -47,7 +59,7 @@ export default function LoginPage() {
         return
       }
 
-      router.push('/app')
+      router.push(`/app${planQuery(plan)}`)
       router.refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Network error — could not reach authentication server.')
@@ -159,7 +171,7 @@ export default function LoginPage() {
             {/* Sign up link */}
             <p className="mt-6 text-center text-sm text-gray-500">
               Don&apos;t have an account?{' '}
-              <Link href="/signup"
+              <Link href={`/signup${planQuery(plan)}`}
                 className="text-violet-700 hover:text-violet-900 font-semibold transition-colors duration-150">
                 Sign up
               </Link>

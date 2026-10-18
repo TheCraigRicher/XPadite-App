@@ -1,4 +1,4 @@
-import { paywallResponse } from '@/lib/billing/guard'
+import { aiAccessResponse, paywallResponse } from '@/lib/billing/guard'
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getOpenAI, AI_PLAN_MODEL, MAX_CONTEXT_MESSAGES } from '@/lib/ai/client'
@@ -13,6 +13,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // AI is Premium V2 only: neither the trial nor any Pro plan grants it (server-enforced, fails closed).
+  const aiBlocked = aiAccessResponse(user)
+  if (aiBlocked) return aiBlocked
   const blocked = await paywallResponse(user)
   if (blocked) return blocked
 

@@ -1,34 +1,51 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { TRIAL_DAYS, type BillingPlanKey } from './plans'
+import { getBillingLaunchAt, isPaywallDisabled } from './config'
 import type { BillingStatus } from './types'
+
+// Server-only. Keep in step with public.billing_has_access() in migration 016.
 
 const ACCESS_SUB_STATUSES = new Set(['active', 'trialing', 'past_due'])
 
+/** Verified account-activation time: email confirmation (also set for Google OAuth), else creation. */
+export function activationTime(user: Pick<User, 'email_confirmed_at' | 'created_at'>): Date {
+  return new Date(user.email_confirmed_at ?? user.created_at)
+}
+
+/**
+ * Trial window: 5 days from max(account activation, billing launch). Existing
+ * accounts therefore get a fresh trial starting at launch; new accounts start
+ * at verified activation. Both timestamps are immutable, so repeat logins or
+ * reinstalls never reset it. Returns null while no valid launch date exists.
+ */
+export function trialEndsAt(user: Pick<User, 'email_confirmed_at' | 'created_at'>): Date | null {
+  const launch = getBillingLaunchAt()
+  if (!launch) return null
+  const start = Math.max(activationTime(user).getTime(), launch.getTime())
+  return new Date(start + TRIAL_DAYS * 86_400_000)
+}
+
 /**
  * Computes the user's access from stored (webhook-verified) billing rows plus
- * the trial window (profiles.created_at + 5 days). The checkout success URL
- * never feeds into this — only rows written from verified Stripe state can
- * grant paid access.
+ * the trial window. The checkout success URL never feeds into this — only rows
+ * written from verified Stripe state can grant paid access.
  *
  * The best entitlement wins, so a repeat/duplicate purchase can never shorten
  * or remove another valid entitlement: lifetime > longest-running 3-year/subscription.
  */
 export async function getBillingStatus(
   admin: SupabaseClient,
-  userId: string,
-  fallbackCreatedAt?: string,
+  user: Pick<User, 'id' | 'email_confirmed_at' | 'created_at'>,
 ): Promise<BillingStatus> {
   const nowMs = Date.now()
 
-  const [profileRes, subsRes, purchasesRes, customerRes] = await Promise.all([
-    admin.from('profiles').select('created_at').eq('id', userId).maybeSingle(),
-    admin.from('billing_subscriptions').select('plan_key,status,current_period_end,cancel_at_period_end').eq('user_id', userId),
-    admin.from('billing_purchases').select('plan_key,status,access_expires_at').eq('user_id', userId).eq('status', 'paid'),
-    admin.from('billing_customers').select('stripe_customer_id').eq('user_id', userId).maybeSingle(),
+  const [subsRes, purchasesRes, customerRes] = await Promise.all([
+    admin.from('billing_subscriptions').select('plan_key,status,current_period_end,cancel_at_period_end').eq('user_id', user.id),
+    admin.from('billing_purchases').select('plan_key,status,access_expires_at').eq('user_id', user.id).eq('status', 'paid'),
+    admin.from('billing_customers').select('stripe_customer_id').eq('user_id', user.id).maybeSingle(),
   ])
 
-  const createdAt = (profileRes.data as { created_at?: string } | null)?.created_at ?? fallbackCreatedAt ?? new Date(nowMs).toISOString()
-  const trialEndsMs = new Date(createdAt).getTime() + TRIAL_DAYS * 86_400_000
+  const trialEnd = trialEndsAt(user)
 
   let lifetime = false
   let plan: BillingPlanKey | null = null
@@ -58,20 +75,34 @@ export async function getBillingStatus(
   }
 
   const paid = lifetime || plan !== null
-  const inTrial = nowMs < trialEndsMs
-  const paywallDisabled = process.env.BILLING_PAYWALL_DISABLED === 'true'
+  const enforcementActive = trialEnd !== null && !isPaywallDisabled()
+  // Without an enforced paywall, unpaid users count as "in trial" (never locked out).
+  const inTrial = !enforcementActive || nowMs < trialEnd!.getTime()
   const state: BillingStatus['state'] = paid ? 'paid' : inTrial ? 'trial' : 'expired'
 
   return {
-    hasAccess: state !== 'expired' || paywallDisabled,
+    hasAccess: state !== 'expired',
     state,
     plan,
     lifetime,
     accessEndsAt: !lifetime && endsMs ? new Date(endsMs).toISOString() : null,
-    trialEndsAt: new Date(trialEndsMs).toISOString(),
+    trialEndsAt: trialEnd ? trialEnd.toISOString() : null,
     pastDue,
     cancelAtPeriodEnd,
     hasStripeCustomer: !!(customerRes.data as { stripe_customer_id?: string } | null)?.stripe_customer_id,
-    paywallDisabled,
+    enforcementActive,
   }
+}
+
+/**
+ * Premium V2 AI entitlement. No Pro plan (Monthly/Yearly/3-Year/Lifetime) and
+ * not the free trial confers AI access — Premium V2 is "coming soon" and is not
+ * sold. Until it ships, only user ids explicitly listed in
+ * AI_COACH_ALLOWED_USER_IDS (comma-separated; internal testing) pass. When
+ * Premium V2 billing exists, its entitlement check belongs here.
+ */
+export function hasAiEntitlement(userId: string): boolean {
+  const allowed = (process.env.AI_COACH_ALLOWED_USER_IDS ?? '')
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
+  return allowed.includes(userId.toLowerCase())
 }

@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/billing/admin'
+import { syncBillingConfig } from '@/lib/billing/config'
 import { getBillingStatus } from '@/lib/billing/entitlement'
 import { getStripe } from '@/lib/billing/stripe'
 import { grantFromCheckoutSession } from '@/lib/billing/sync'
@@ -24,6 +25,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const admin = createAdminClient()
+    await syncBillingConfig(admin)
 
     const sessionId = new URL(req.url).searchParams.get('session_id')
     if (sessionId && /^cs_[A-Za-z0-9_]+$/.test(sessionId)) {
@@ -38,7 +40,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const status = await getBillingStatus(admin, user.id, user.created_at)
+    const status = await getBillingStatus(admin, user)
     return NextResponse.json(status, { headers: { 'Cache-Control': 'no-store' } })
   } catch (err) {
     console.error('[Billing] status failed:', err instanceof Error ? err.message : 'unknown error')

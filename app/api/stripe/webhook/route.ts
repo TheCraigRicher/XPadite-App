@@ -8,6 +8,10 @@
  *    so retries and out-of-order delivery converge.
  *  - A handler failure returns 500 so Stripe retries the delivery.
  *
+ * Required events: checkout.session.{completed,async_payment_succeeded,async_payment_failed,expired},
+ * customer.subscription.{created,updated,deleted}, invoice.{paid,payment_failed},
+ * charge.refunded, charge.dispute.closed (charge.dispute.created is optional — recording only).
+ *
  * Authenticated by Stripe's signature, not a user session — excluded from
  * login redirects because lib/supabase/middleware.ts only guards /app.
  */
@@ -19,7 +23,8 @@ import { getStripe } from '@/lib/billing/stripe'
 import {
   expireCheckoutSession,
   grantFromCheckoutSession,
-  revokePurchaseByPaymentIntent,
+  handleChargeRefunded,
+  handleDispute,
   subscriptionIdFromInvoice,
   syncSubscription,
 } from '@/lib/billing/sync'
@@ -96,15 +101,15 @@ async function handleEvent(admin: ReturnType<typeof createAdminClient>, event: S
       return
     }
 
-    case 'charge.refunded': {
-      const charge = event.data.object as Stripe.Charge
-      // Only a full refund revokes a one-time purchase.
-      if (charge.refunded) await revokePurchaseByPaymentIntent(admin, charge.payment_intent, 'refunded')
+    case 'charge.refunded':
+      // Full refund → revoke + release slot. Partial → flagged for manual review only.
+      await handleChargeRefunded(admin, event.data.object as Stripe.Charge)
       return
-    }
 
     case 'charge.dispute.created':
-      await revokePurchaseByPaymentIntent(admin, (event.data.object as Stripe.Dispute).payment_intent, 'disputed')
+    case 'charge.dispute.closed':
+      // Driven by Stripe's current dispute state: only a LOST dispute revokes access.
+      await handleDispute(admin, (event.data.object as Stripe.Dispute).id)
       return
 
     default:

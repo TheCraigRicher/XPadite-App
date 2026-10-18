@@ -10,10 +10,11 @@ export interface BillingStatus {
   lifetime: boolean
   /** End of paid access (period end / 3-year expiry); null for lifetime or no paid access. */
   accessEndsAt: string | null
-  trialEndsAt: string
+  /** null until BILLING_LAUNCH_AT is configured (trials start at launch). */
+  trialEndsAt: string | null
   pastDue: boolean
   cancelAtPeriodEnd: boolean
   hasStripeCustomer: boolean
-  /** Kill switch (BILLING_PAYWALL_DISABLED=true) — access granted even when expired. */
-  paywallDisabled: boolean
+  /** false when the launch date is unset/invalid or the kill switch is on — nobody is locked out. */
+  enforcementActive: boolean
 }

@@ -12,9 +12,21 @@ export function getStripe(): Stripe {
   return cached
 }
 
-/** true when the configured secret key is a live-mode key. */
+/**
+ * Stripe mode of the configured secret key. Recognises standard (sk_) and
+ * restricted (rk_) keys, live and test. Anything else is unsupported and fails
+ * closed (null) rather than guessing a mode.
+ */
+export function stripeKeyMode(): 'live' | 'test' | null {
+  const key = process.env.STRIPE_SECRET_KEY ?? ''
+  if (/^(sk|rk)_live_/.test(key)) return 'live'
+  if (/^(sk|rk)_test_/.test(key)) return 'test'
+  return null
+}
+
+/** true when the configured secret key is a live-mode key (sk_live_ or rk_live_). */
 export function isLiveKey(): boolean {
-  return (process.env.STRIPE_SECRET_KEY ?? '').startsWith('sk_live_')
+  return stripeKeyMode() === 'live'
 }
 
 export function getPriceId(planKey: BillingPlanKey): string {
@@ -39,6 +51,7 @@ export function planKeyForPriceId(priceId: string): BillingPlanKey | null {
  */
 export async function verifyPlanPrice(planKey: BillingPlanKey): Promise<string> {
   const def = BILLING_PLANS[planKey]
+  if (stripeKeyMode() === null) throw new Error('STRIPE_SECRET_KEY is not a supported Stripe key type')
   const priceId = getPriceId(planKey)
   const price = await getStripe().prices.retrieve(priceId)
 
@@ -50,4 +63,31 @@ export async function verifyPlanPrice(planKey: BillingPlanKey): Promise<string> 
   if ((def.mode === 'subscription') !== isRecurring) throw new Error(`Price for ${planKey} has the wrong billing type`)
   if (def.interval && price.recurring?.interval !== def.interval) throw new Error(`Price for ${planKey} has the wrong interval`)
   return priceId
+}
+
+let portalCheck: { id: string; at: number } | null = null
+
+/**
+ * Returns a Customer Portal configuration id that has plan switching/downgrades
+ * DISABLED (cancellation and payment-method management remain allowed).
+ * Uses STRIPE_PORTAL_CONFIGURATION_ID, or the account's default configuration,
+ * and refuses (throws) if subscription updates are enabled — so unapproved
+ * upgrade / proration / plan-switching workflows can never be exposed. This
+ * only READS Stripe settings; it never changes them.
+ */
+export async function getVerifiedPortalConfigurationId(): Promise<string> {
+  if (portalCheck && Date.now() - portalCheck.at < 5 * 60_000) return portalCheck.id
+  const stripe = getStripe()
+  const explicit = process.env.STRIPE_PORTAL_CONFIGURATION_ID
+  const config = explicit
+    ? await stripe.billingPortal.configurations.retrieve(explicit)
+    : (await stripe.billingPortal.configurations.list({ is_default: true, limit: 1 })).data[0]
+  if (!config) throw new Error('No Customer Portal configuration found — create one in the Stripe Dashboard')
+  if (!config.active) throw new Error('Customer Portal configuration is not active')
+  if (config.livemode !== isLiveKey()) throw new Error('Customer Portal configuration is in a different Stripe mode than the API key')
+  if (config.features.subscription_update.enabled) {
+    throw new Error('Customer Portal allows subscription switching — disable "Customers can switch plans" in the Dashboard')
+  }
+  portalCheck = { id: config.id, at: Date.now() }
+  return config.id
 }

@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { parsePlan, planQuery } from '@/lib/billing/intent'
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -27,10 +28,14 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
+  // A plan chosen on the Website (?plan=<key>) is kept across these redirects — only if it is a valid allowlisted key.
+  const plan = parsePlan(request.nextUrl.searchParams.get('plan'))
+
   // Redirect unauthenticated users away from protected routes
   if (!user && request.nextUrl.pathname.startsWith('/app')) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
+    url.search = planQuery(plan)
     return NextResponse.redirect(url)
   }
 
@@ -38,6 +43,7 @@ export async function updateSession(request: NextRequest) {
   if (user && (request.nextUrl.pathname === '/login' || request.nextUrl.pathname === '/signup')) {
     const url = request.nextUrl.clone()
     url.pathname = '/app'
+    url.search = planQuery(plan)
     return NextResponse.redirect(url)
   }
 

@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { parsePlan, planQuery } from "@/lib/billing/intent";
 import { createClient } from "@/lib/supabase/client";
 import { XpaditeLogo } from "@/components/auth/XpaditeLogo";
 import { MarketingPanel } from "@/components/auth/MarketingPanel";
@@ -77,7 +79,19 @@ const containerStyle = {
   boxShadow: "0 40px 80px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.06)",
 };
 
+// useSearchParams needs a Suspense boundary; the page itself renders exactly as before.
 export default function SignUpPage() {
+  return (
+    <Suspense fallback={null}>
+      <SignUpForm />
+    </Suspense>
+  );
+}
+
+function SignUpForm() {
+  // Plan chosen on the Website (/signup?plan=<key>) — validated against the server allowlist.
+  const plan = parsePlan(useSearchParams().get("plan"));
+  const loginHref = `/login${planQuery(plan)}`;
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -108,7 +122,8 @@ export default function SignUpPage() {
         email,
         password,
         options: {
-          data: { full_name: fullName },
+          // The chosen plan is stored on the account so it survives email verification even on another device/browser.
+          data: { full_name: fullName, ...(plan ? { pending_plan: plan, pending_plan_at: Date.now() } : {}) },
           emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
       });
@@ -198,7 +213,7 @@ export default function SignUpPage() {
               <div className="mt-8">
                 <GradientButton>
                   <Link
-                    href="/login"
+                    href={loginHref}
                     className="w-full h-full flex items-center justify-center gap-1.5"
                   >
                     ← Back to sign in
@@ -367,7 +382,7 @@ export default function SignUpPage() {
             <p className="mt-5 text-center text-sm text-gray-500">
               Already have an Account?{" "}
               <Link
-                href="/login"
+                href={loginHref}
                 className="text-violet-700 hover:text-violet-900 font-semibold transition-colors duration-150"
               >
                 Login

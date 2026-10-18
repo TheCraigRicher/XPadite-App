@@ -133,7 +133,7 @@ export const PLAN_CONFIGS: Record<string, PlanConfig> = {
     // hardcoded true regardless of actual status.
     badge: 'Monthly Plan',
     badgeIcon: '📅',
-    price: '$10',
+    price: 'CA$10',
     priceLabel: '/ month',
     headerGradient: 'linear-gradient(135deg, #C321FF 0%, #71009B 100%)',
     accentColor: '#C321FF',
@@ -151,9 +151,9 @@ export const PLAN_CONFIGS: Record<string, PlanConfig> = {
     subtitle: 'Everything you need to plan, execute and track your progress.',
     badge: 'Save 25%',
     badgeIcon: '⭐',
-    price: '$89.99',
+    price: 'CA$89.99',
     priceLabel: '/ year',
-    savings: 'Save $30.01/year',
+    savings: 'Save CA$30.01/year',
     headerGradient: 'linear-gradient(135deg, #9146FF 0%, #5D20BF 100%)',
     accentColor: '#9146FF',
     accentGlow: 'rgba(145,70,255,0.22)',
@@ -209,7 +209,7 @@ export const PLAN_CONFIGS: Record<string, PlanConfig> = {
     subtitle: "Own XPadite Pro for life with a single payment. Limited ONLY to the first 100 customers for this offer.",
     badge: 'Limited Offer',
     badgeIcon: '💎',
-    price: '$249',
+    price: 'CA$249',
     priceLabel: 'one-time payment',
     headerGradient: 'linear-gradient(135deg, #0789A8 0%, #21D0E3 100%)',
     accentColor: '#0789A8',
@@ -228,9 +228,9 @@ export const PLAN_CONFIGS: Record<string, PlanConfig> = {
     subtitle: 'Three full years of XPadite Pro with a single one-time payment. Limited ONLY to the first 100 customers for this offer.',
     badge: 'Limited Offer',
     badgeIcon: '⚡',
-    price: '$199',
+    price: 'CA$199',
     priceLabel: 'one-time payment',
-    savings: 'Save $70.97 vs. yearly',
+    savings: 'Save CA$70.97 vs. yearly',
     headerGradient: 'linear-gradient(135deg, #D3A700 0%, #FFF02D 100%)',
     accentColor: '#D3A700',
     accentGlow: 'rgba(211,167,0,0.20)',
@@ -1105,7 +1105,7 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 112,
                       transition: 'transform 160ms ease, box-shadow 160ms ease, filter 160ms ease', cursor: 'pointer',
                     }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Monthly Plan $10</p>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Monthly Plan CA$10</p>
                       <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.80)', marginTop: 6 }}>Upgrade</p>
                     </div>
 
@@ -1116,8 +1116,8 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
                       boxShadow: '0 4px 18px rgba(145,70,255,0.32)',
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 112,
                     }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Yearly Plan $89.99</p>
-                      <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.80)', marginTop: 5, lineHeight: 1.3 }}>Save $30.01/year</p>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Pro Yearly Plan CA$89.99</p>
+                      <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.80)', marginTop: 5, lineHeight: 1.3 }}>Save CA$30.01/year</p>
                       <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.65)', marginTop: 5 }}>Upgrade</p>
                     </div>
 
@@ -1158,9 +1158,9 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
                       boxShadow: '0 4px 18px rgba(211,167,0,0.38)',
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 104,
                     }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: '#1a1200', lineHeight: 1.4 }}>3-Year Pro $199</p>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: '#1a1200', lineHeight: 1.4 }}>3-Year Pro CA$199</p>
                       <p style={{ fontSize: 10, color: 'rgba(26,18,0,0.62)', marginTop: 4, lineHeight: 1.3 }}>One-Time Payment</p>
-                      <p style={{ fontSize: 9.5, color: 'rgba(26,18,0,0.68)', marginTop: 3, lineHeight: 1.3 }}>Save $70.97 vs. yearly</p>
+                      <p style={{ fontSize: 9.5, color: 'rgba(26,18,0,0.68)', marginTop: 3, lineHeight: 1.3 }}>Save CA$70.97 vs. yearly</p>
                       <p style={{ fontSize: 10.5, color: 'rgba(26,18,0,0.75)', marginTop: 5 }}>Upgrade</p>
                       <p style={{ fontSize: 9.5, color: 'rgba(26,18,0,0.55)', marginTop: 3, lineHeight: 1.3 }}>Only for the First 100 Customers</p>
                     </div>
@@ -1172,7 +1172,7 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
                       boxShadow: '0 4px 18px rgba(7,137,168,0.30)',
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 104,
                     }}>
-                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Lifetime Pro $249</p>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: 'white', lineHeight: 1.4 }}>Lifetime Pro CA$249</p>
                       <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.72)', marginTop: 4, lineHeight: 1.3 }}>One-Time Payment</p>
                       <p style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.72)', marginTop: 6 }}>Upgrade</p>
                       <p style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.58)', marginTop: 3, lineHeight: 1.3 }}>Only for the First 100 Customers</p>

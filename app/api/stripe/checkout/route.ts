@@ -102,9 +102,9 @@ export async function POST(req: NextRequest) {
       }
       const hold = Array.isArray(held) ? held[0] : null
       if (!hold) return NextResponse.json({ error: 'Sorry — this limited offer is sold out.', code: 'sold_out' }, { status: 409 })
-      reservationId = hold.id as string
+      reservationId = hold.hold_id as string
 
-      sessionExpiresAt = Math.floor(new Date(hold.reserved_until as string).getTime() / 1000) - SESSION_MARGIN_SECONDS
+      sessionExpiresAt = Math.floor(new Date(hold.hold_until as string).getTime() / 1000) - SESSION_MARGIN_SECONDS
       if (sessionExpiresAt - Math.floor(Date.now() / 1000) < STRIPE_MIN_SESSION_SECONDS) {
         throw new Error('Hold lifetime too short for a Checkout Session') // hold is released in catch
       }

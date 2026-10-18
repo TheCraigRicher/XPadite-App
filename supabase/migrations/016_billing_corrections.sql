@@ -166,13 +166,16 @@ drop function if exists public.billing_reserve_offer(uuid, text, text, integer, 
 
 -- A slot is taken by: paid, confirmed-lost-dispute ('disputed'), or a live hold.
 -- refunded / expired / review rows do not hold a slot.
+-- OUT columns are named hold_* so they cannot collide with billing_purchases columns
+-- inside the function body (plpgsql would raise "column reference is ambiguous").
+drop function if exists public.billing_reserve_offer_v2(uuid, text, text, integer, integer);
 create or replace function public.billing_reserve_offer_v2(
   p_user_id   uuid,
   p_plan_key  text,
   p_price_id  text,
   p_cap       integer,
   p_hold_mins integer default 40
-) returns table (id uuid, reserved_until timestamptz)
+) returns table (hold_id uuid, hold_until timestamptz)
 language plpgsql
 security definer
 set search_path = public

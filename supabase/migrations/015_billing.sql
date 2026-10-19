@@ -3,8 +3,8 @@
 -- Stripe billing: customer mapping, subscriptions, one-time purchases
 -- (3-Year / Lifetime), and webhook idempotency.
 --
--- Additive only — no existing table is altered. The 5-day free trial keeps
--- using profiles.created_at (no new trial column).
+-- Additive only — no existing table is altered. (The 5-day trial needs no table here;
+-- it is computed from the account's verified activation time — see 016.)
 --
 -- SECURITY MODEL
 --   * Every table has RLS enabled. Users may SELECT their own rows only.
@@ -12,6 +12,10 @@
 --     key, which bypasses RLS) can write billing data. A user can therefore
 --     never grant themselves access from the browser.
 --   * billing_webhook_events has no policies at all (service role only).
+--   * TABLE PRIVILEGES are set explicitly (section 5b). Supabase's default privileges
+--     can hand anon/authenticated ALL rights (incl. TRUNCATE, which RLS does not
+--     govern) on every new table; those are revoked here, leaving authenticated
+--     SELECT-only on the three user-readable tables and service_role full access.
 --   * No card data is stored — only Stripe IDs, statuses and dates.
 --
 -- HOW TO APPLY: Supabase Dashboard → SQL Editor → paste → Run. Idempotent.
@@ -100,12 +104,38 @@ create policy "billing_subscriptions_select_own"
 create policy "billing_purchases_select_own"
   on public.billing_purchases for select using (auth.uid() = user_id);
 
+-- ─── 5b. Table privileges (least privilege) ─────────────────────────────────
+-- REVOKE ALL removes SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+-- (and MAINTAIN on PG17) from the API roles, whether they came from Supabase's
+-- default privileges or an earlier grant. Then only what is needed is granted back.
+revoke all on public.billing_customers, public.billing_subscriptions,
+              public.billing_purchases, public.billing_webhook_events from anon, authenticated;
+
+-- Users may read their OWN rows (RLS select-own policies above); nothing else, ever.
+grant select on public.billing_customers, public.billing_subscriptions,
+                public.billing_purchases to authenticated;
+-- billing_webhook_events: no API-role access at all.
+
+-- The server (Stripe webhook, checkout, status, account deletion) uses the service role.
+grant all on public.billing_customers, public.billing_subscriptions,
+             public.billing_purchases, public.billing_webhook_events to service_role;
+
 -- ─── 6. Atomic limited-offer reservation ────────────────────────────────────
--- Counts spots (paid purchases + unexpired pending reservations of OTHER
--- users) under an advisory lock so two simultaneous checkouts cannot both take
--- the last spot. Refunded / disputed / expired rows free their spot.
--- Returns the reservation id, or NULL if the offer is sold out.
--- Callable by the service role only.
+-- NOTE: 016_billing_corrections replaces this with billing_reserve_offer_v2 (the one
+-- the App calls) and drops this function. It is kept correct, with an unchanged
+-- signature, so that it is safe in the window between 015 and 016 and so 016's
+-- DROP FUNCTION still matches it. Semantics are identical to v2:
+--   * one lock per offer → concurrent checkouts cannot oversell either offer, and the
+--     3-Year and Lifetime offers are counted separately (cap is per p_plan_key);
+--   * a live hold is NEVER deleted or replaced (the old version deleted the user's
+--     previous pending row while its Stripe session could still be paid) —
+--     a second attempt raises 'hold_exists' and the caller retires the old session first;
+--   * a customer who already owns the plan (paid, lost-dispute, or paid-but-flagged
+--     'review') cannot reserve another allocation → 'already_owned';
+--   * a slot is taken by paid + lost-dispute ('disputed') + live holds;
+--     refunded / expired / review rows do not hold a slot;
+--   * holds past reserved_until (or with no reserved_until) are expired first.
+-- Returns the reservation id, or NULL when sold out. Callable by the service role only.
 create or replace function public.billing_reserve_offer(
   p_user_id   uuid,
   p_plan_key  text,
@@ -123,15 +153,25 @@ declare
 begin
   perform pg_advisory_xact_lock(hashtext('billing_offer_' || p_plan_key));
 
-  -- Drop this user's own stale/pending hold for the same plan (retry case).
-  delete from public.billing_purchases
-   where user_id = p_user_id and plan_key = p_plan_key and status = 'pending';
+  update public.billing_purchases
+     set status = 'expired', reserved_until = null, updated_at = now()
+   where plan_key = p_plan_key and status = 'pending'
+     and (reserved_until is null or reserved_until <= now());
+
+  if exists (select 1 from public.billing_purchases
+              where user_id = p_user_id and plan_key = p_plan_key
+                and status in ('paid', 'disputed', 'review')) then
+    raise exception 'already_owned';
+  end if;
+
+  if exists (select 1 from public.billing_purchases
+              where user_id = p_user_id and plan_key = p_plan_key and status = 'pending') then
+    raise exception 'hold_exists';
+  end if;
 
   select count(*) into v_taken
     from public.billing_purchases
-   where plan_key = p_plan_key
-     and (status = 'paid'
-          or (status = 'pending' and reserved_until > now()));
+   where plan_key = p_plan_key and status in ('paid', 'disputed', 'pending');
 
   if v_taken >= p_cap then
     return null;

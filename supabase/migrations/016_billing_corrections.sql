@@ -3,7 +3,8 @@
 -- Incremental follow-up to 015_billing (015 is NOT modified).
 --
 --  1. billing_config           — server-synced launch date / kill switch used by RLS.
---  2. billing_has_access()     — DB mirror of the app's entitlement rules (paid or trial).
+--  2. billing_has_access()     — DB mirror of the app's entitlement rules (paid or trial);
+--                                a caller may only ask about THEMSELVES (service role / direct DB excepted).
 --  3. RESTRICTIVE write policies on protected productivity tables + gallery uploads,
 --     so an expired, unpaid user cannot bypass the paywall with direct Supabase calls.
 --     Reads, DELETE, profiles, user_preferences (theme), support_requests, avatars,
@@ -27,6 +28,10 @@ create table if not exists public.billing_config (
   updated_at timestamptz not null default now()
 );
 alter table public.billing_config enable row level security;  -- no policies: service role only
+-- Least privilege (default privileges may otherwise give anon/authenticated ALL on a new table):
+-- no API-role access at all; the server uses the service role.
+revoke all on public.billing_config from anon, authenticated;
+grant all on public.billing_config to service_role;
 
 -- ─── 2. Purchases: retention, review and dispute columns ────────────────────
 alter table public.billing_purchases alter column user_id drop not null;
@@ -87,6 +92,16 @@ alter table public.billing_subscriptions
 -- Trial : now < greatest(email-confirmation time, launch_at) + 5 days.
 -- Fail-open when launch_at is missing/invalid or the kill switch is on, so a
 -- misconfiguration can never lock users out. (5 = TRIAL_DAYS in lib/billing/plans.ts.)
+--
+-- PRIVACY GUARD: this is SECURITY DEFINER (it must read billing tables that API roles cannot),
+-- so a signed-in user could otherwise pass ANY user id and learn whether that person has access.
+-- The caller's identity therefore has to match: p_user must equal auth.uid() (this is what every
+-- RLS policy does — they call it with no argument), unless the caller is privileged:
+--   * service_role (JWT role claim), or
+--   * a direct database session with NO JWT claims at all (SQL Editor / migrations / admins —
+--     API requests always carry claims, so an API user can never look like this).
+-- Any other attempt to query someone else's id returns false, before any billing data is read,
+-- so the answer reveals nothing. If the claims are present but unreadable the call fails closed.
 create or replace function public.billing_has_access(p_user uuid default auth.uid())
 returns boolean
 language plpgsql
@@ -95,11 +110,29 @@ security definer
 set search_path = public, auth
 as $$
 declare
-  v_disabled  text;
-  v_launch    timestamptz;
-  v_activated timestamptz;
+  v_disabled   text;
+  v_launch     timestamptz;
+  v_activated  timestamptz;
+  v_claims_txt text := nullif(current_setting('request.jwt.claims', true), '');
+  v_role_claim text := nullif(current_setting('request.jwt.claim.role', true), '');
+  v_role       text;
 begin
   if p_user is null then return false; end if;
+
+  if p_user is distinct from auth.uid() then
+    v_role := v_role_claim;
+    if v_role is null and v_claims_txt is not null then
+      begin
+        v_role := v_claims_txt::jsonb ->> 'role';
+      exception when others then
+        v_role := null;                      -- unreadable claims → unprivileged (fail closed)
+      end;
+    end if;
+    -- coalesce: a NULL role must evaluate to false, not NULL (NOT NULL would skip this guard)
+    if not (coalesce(v_role, '') = 'service_role' or (v_claims_txt is null and v_role_claim is null)) then
+      return false;
+    end if;
+  end if;
 
   select value into v_disabled from public.billing_config where key = 'paywall_disabled';
   if v_disabled = 'true' then return true; end if;
@@ -191,8 +224,19 @@ begin
   -- sets the Stripe session to expire well before reserved_until).
   update public.billing_purchases
      set status = 'expired', reserved_until = null, updated_at = now()
-   where plan_key = p_plan_key and status = 'pending' and reserved_until <= now();
+   where plan_key = p_plan_key and status = 'pending'
+     and (reserved_until is null or reserved_until <= now());
 
+  -- One allocation per customer: a customer who already owns this plan (paid, lost dispute,
+  -- or paid-but-flagged 'review') cannot reserve another. Refunded / expired rows do not block.
+  if exists (select 1 from public.billing_purchases
+              where user_id = p_user_id and plan_key = p_plan_key
+                and status in ('paid', 'disputed', 'review')) then
+    raise exception 'already_owned';
+  end if;
+
+  -- A live hold is never deleted or replaced by a newer attempt (its Stripe session may
+  -- still be payable); the caller retires the old session first.
   if exists (select 1 from public.billing_purchases
               where user_id = p_user_id and plan_key = p_plan_key and status = 'pending') then
     raise exception 'hold_exists';
@@ -266,6 +310,12 @@ begin
   if p_final_status = 'paid' then
     if v_uid is null then
       v_review := 'user_missing';
+    elsif exists (select 1 from public.billing_purchases
+                   where user_id = v_uid and plan_key = p_plan_key and id is distinct from r.id
+                     and status in ('paid', 'disputed', 'review')) then
+      -- Already owns this limited offer: paid at Stripe but NOT granted a second allocation,
+      -- flagged for manual handling (never auto-refunded).
+      v_review := 'duplicate_allocation';
     else
       select count(*) into v_taken
         from public.billing_purchases

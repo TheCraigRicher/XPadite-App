@@ -27,6 +27,7 @@ import { getStripe, verifyPlanPrice } from '@/lib/billing/stripe'
 const HOLD_MINUTES = 40          // inventory hold lifetime
 const SESSION_MARGIN_SECONDS = 300 // Checkout Session expires this long BEFORE the hold does
 const STRIPE_MIN_SESSION_SECONDS = 30 * 60 + 30 // Stripe requires >= 30 min; keep a safety buffer
+const IN_FLIGHT_MS = 2 * 60_000 // a hold with no Stripe session yet younger than this belongs to a request still creating it
 
 function appBaseUrl(req: NextRequest): string {
   return (process.env.NEXT_PUBLIC_APP_URL || new URL(req.url).origin).replace(/\/$/, '')
@@ -76,9 +77,14 @@ export async function POST(req: NextRequest) {
 
     // Limited offers: retire this user's earlier payable session BEFORE taking a new hold.
     if (plan.cap) {
-      const { data: prior } = await admin.from('billing_purchases').select('id,stripe_checkout_session_id')
+      const { data: prior } = await admin.from('billing_purchases').select('id,stripe_checkout_session_id,created_at')
         .eq('user_id', user.id).eq('plan_key', plan.key).eq('status', 'pending')
-      for (const row of (prior ?? []) as { id: string; stripe_checkout_session_id: string | null }[]) {
+      for (const row of (prior ?? []) as { id: string; stripe_checkout_session_id: string | null; created_at: string }[]) {
+        if (!row.stripe_checkout_session_id && Date.now() - new Date(row.created_at).getTime() < IN_FLIGHT_MS) {
+          // Another request from this user holds a slot and is still creating its Stripe session.
+          // Do NOT release that hold: its session is about to become payable.
+          return NextResponse.json({ error: 'A checkout is already being prepared. Please try again in a moment.', code: 'checkout_in_progress' }, { status: 409 })
+        }
         if (row.stripe_checkout_session_id) {
           const old = await stripe.checkout.sessions.retrieve(row.stripe_checkout_session_id)
           if (old.status === 'complete') {
@@ -95,6 +101,9 @@ export async function POST(req: NextRequest) {
         p_user_id: user.id, p_plan_key: plan.key, p_price_id: priceId, p_cap: plan.cap, p_hold_mins: HOLD_MINUTES,
       })
       if (error) {
+        if (error.message?.includes('already_owned')) {
+          return NextResponse.json({ error: 'You already own this limited offer.', code: 'already_owned' }, { status: 409 })
+        }
         if (error.message?.includes('hold_exists')) {
           return NextResponse.json({ error: 'A checkout is already being prepared. Please try again in a moment.', code: 'checkout_in_progress' }, { status: 409 })
         }
@@ -162,10 +171,13 @@ export async function POST(req: NextRequest) {
     if (!session.url) throw new Error('Stripe returned no checkout URL')
 
     if (reservationId) {
-      const { error } = await admin.from('billing_purchases')
+      const { data: linked, error } = await admin.from('billing_purchases')
         .update({ stripe_checkout_session_id: session.id, updated_at: new Date().toISOString() })
-        .eq('id', reservationId)
-      if (error) throw new Error(`could not link session to reservation: ${error.message}`)
+        .eq('id', reservationId).eq('status', 'pending').select('id')
+      if (error || !linked || linked.length !== 1) {
+        // The hold is no longer live — never hand out a payable session without one (the catch block expires it).
+        throw new Error(`could not link session to a live reservation${error ? `: ${error.message}` : ''}`)
+      }
     }
     return NextResponse.json({ url: session.url })
   } catch (err) {

@@ -16,7 +16,7 @@ Last reviewed: 2026-10-19 (Sandbox edge-case billing tests executed; production 
 | **Sandbox configuration** | DONE | Sandbox account `acct_1URex2FvPKlg0ley`, Supabase project `xpadite-test` initialised, four Sandbox Prices, webhook, **Customer Portal configuration created and verified (below)**. Owner-reported except the portal. |
 | **Sandbox integration tested** | DONE except 4 items | Owner-reported: Checkout, webhook and entitlements pass for all four plans. Verified: portal, and the 36-check edge-case run below (cancellation, full/partial refund, disputes opened/lost/won, duplicate and out-of-order delivery). **Still untested:** the Settings button in a browser, real Checkout cancel/failed-card/past-due paths, true parallel checkouts for the last slots, and delivery by Stripe itself (the run re-signed real events and POSTed them locally). |
 | **Production database** | DONE (owner-verified) | 009-014 applied; **015/016 verified by the owner's production SQL result** (exact evidence below). Paywall still inactive. |
-| **LIVE Stripe configuration** | NOT STARTED | No LIVE key, Prices, webhook or portal configuration touched. |
+| **LIVE Stripe configuration** | PARTIAL | Account and four prices verified (Pro Monthly = `price_1URziZ...`); **LIVE portal configuration created and verified** (`bpc_1USRrPFpjCSHmREDKdWPBgHL`); webhook endpoint not yet created (production URL now verified: `https://x-padite-app.vercel.app`); Stripe Tax pending; no production variables set. See the Task #2 section. |
 | **Production launch authorized** | NO | Paywall stays off: `BILLING_LAUNCH_AT` is unset everywhere. |
 
 ### Sandbox Customer Portal - FIXED and verified (2026-10-19)
@@ -71,11 +71,64 @@ No billing defects were found, so no application code was changed for this task.
 ### Tests executed so far (isolated in-memory Postgres - no real database touched)
 Latest suites against the current 015/016: security guard 29/29, 015+016 compatibility 20/20, privileges and reservation rules 56/56, RLS/billing logic 44/44, fresh install + test-project setup 49/49; `tsc` clean. Defects found and fixed by these: reservation-function ambiguity, over-broad default grants, missing one-allocation-per-customer rule, a checkout race that could leave a payable session without a hold, `billing_has_access()` cross-user disclosure (and a NULL-logic bug in the first version of its guard). **Not covered:** true parallel concurrency, real Stripe events (refund/dispute/cancel), real Supabase specifics, browser/PWA flow.
 
+### LIVE Stripe configuration (Task #2) - portal configuration CREATED and verified; webhook prepared, not created (2026-10-19)
+**Method:** Stripe CLI project `xpadite-live`, explicit `--live` on every request; the inspection used only `stripe get` (HTTP GET) and every returned object reported `livemode: true`. The only LIVE write so far is the single owner-approved portal configuration below. No other LIVE resource was created, modified or deleted; no key or secret was read or printed.
+
+**Account - VERIFIED:** `acct_1URewcFpjCSHmRED` (name "Xpadite", country CA, default currency CAD, charges and payouts enabled). Note: this is the same account that also owns its own test mode, which is why the old portal configuration `bpc_1USPkEFpjCSHmRED` (made in that account's *test* mode) was never visible to the separate Sandbox account `acct_1URex2FvPKlg0ley`. The earlier brief's ID `acct_1URwFcpiCSHmRED` was a typo.
+
+**Prices - VERIFIED (5 active; all CAD, livemode true):**
+| Plan | Env variable | LIVE Price ID | Check |
+|---|---|---|---|
+| Pro Yearly | `STRIPE_PRICE_PRO_YEARLY` | `price_1URgQyFpjCSHmREDhhkBLaNP` | CA$89.99 / year, tax_behavior exclusive - OK |
+| 3-Year Pro | `STRIPE_PRICE_3YEAR` | `price_1URgUsFpjCSHmREDYeLN2yTc` | CA$199.00 one-time, exclusive - OK |
+| Lifetime Pro | `STRIPE_PRICE_LIFETIME` | `price_1URgX9FpjCSHmREDPp36Uj3B` | CA$249.00 one-time, exclusive - OK |
+| Pro Monthly | `STRIPE_PRICE_PRO_MONTHLY` | `price_1URziZFpjCSHmRED0l1DwjcA` | CA$10.00 / month, exclusive - **owner-approved choice (2026-10-19)**; see the duplicate note below |
+
+**Pro Monthly had two active CA$10.00 / month prices on two separate products, both named "XPadite Pro Monthly"; neither has any subscription. Owner decision: use `price_1URziZFpjCSHmRED0l1DwjcA`; the older duplicate is left untouched (not archived).**
+- `price_1URziZFpjCSHmRED0l1DwjcA` - product `prod_VSvRJErfcNKWpF`, created 2026-10-18, **tax_behavior exclusive** (consistent with the other three prices), product tax code `txcd_10103100`.
+- `price_1URgOXFpjCSHmRED3CaDxZkj` - product `prod_VSbbcPH5Dzx3eV`, created 2026-10-17, **tax_behavior unspecified** (Stripe rejects a price without a tax behavior when automatic tax is on).
+- The App's own price check would accept either price, so the production environment variable is the only thing that selects one - it must be set to `price_1URziZFpjCSHmRED0l1DwjcA`. Archiving the older product/price is optional and needs separate approval.
+
+**Webhook endpoints - NONE exist (count 0).** **Customer Portal configurations - none existed at inspection; one was created (below).** **Stripe Tax - status `pending`, head-office address not set** (default tax behavior exclusive). Consequence: `STRIPE_AUTOMATIC_TAX=true` cannot be used until Stripe Tax is activated (head office + registrations); leave it unset for now.
+
+**Production App URL - VERIFIED: `https://x-padite-app.vercel.app`** (see "Production App deployment" below). Intended LIVE webhook URL = `https://x-padite-app.vercel.app/api/stripe/webhook`. No custom domain is configured as far as can be verified.
+
+**Events the App's webhook handles (verified from `app/api/stripe/webhook/route.ts`):** `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`, `charge.refunded`, `charge.dispute.closed` (required) and `charge.dispute.created` (optional, recording only). SDK pins API version `2026-09-30.endive`.
+
+**Production environment variables:** still not verifiable (no deployment access). Needed: `STRIPE_SECRET_KEY` (live), the four `STRIPE_PRICE_*`, `STRIPE_WEBHOOK_SECRET` (from the new LIVE endpoint), `STRIPE_PORTAL_CONFIGURATION_ID` (from the new LIVE portal configuration), `NEXT_PUBLIC_APP_URL`. Leave `STRIPE_AUTOMATIC_TAX`, `BILLING_LAUNCH_AT`, `BILLING_PAYWALL_DISABLED` unset. A restricted `rk_live_` key needs: Checkout Sessions write, Customers write, Subscriptions write, Customer portal write, PaymentIntents read, Charges read, Disputes read, Invoices read, Prices read.
+
+**LIVE Customer Portal configuration - CREATED and VERIFIED (owner-approved, 2026-10-19):** ID **`bpc_1USRrPFpjCSHmREDKdWPBgHL`** (livemode true, active, the account's only and default configuration). Read back from LIVE and compared with the tested Sandbox configuration: settings **identical**. Confirmed: cancellation at period end only, no immediate cancellation, no proration, cancellation reasons collected, payment-method updates on, billing-information (name/email/address) updates on, invoice history on, **plan switching and quantity changes disabled**. The App's own `getVerifiedPortalConfigurationId()` check was run against the LIVE configuration's data (offline stub, no key) and accepts it. Use it as `STRIPE_PORTAL_CONFIGURATION_ID` in the production environment (not yet set - production variables were not touched).
+
+**LIVE webhook endpoint - PREPARED, NOT CREATED.** The production URL is now known; creation waits only for the owner's go-ahead and for the decision on a custom domain (see below). Exact configuration:
+- URL: `https://x-padite-app.vercel.app/api/stripe/webhook` (verified publicly reachable; the endpoint URL can be edited later if a custom domain is adopted - the signing secret stays the same)
+- API version: `2026-09-30.endive` (matches the SDK the App uses)
+- Description: `XPadite App billing (LIVE)`
+- Events (12): `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`, `charge.refunded`, `charge.dispute.closed`, `charge.dispute.created`
+- Recommended: the owner creates it in the Dashboard with exactly the above, so the signing secret (shown once) goes straight into the deployment and is never handled by Claude; Claude then verifies the endpoint read-only (URL, status, API version, events).
+- If created via API instead, the response contains the signing secret once and it must be stored securely immediately.
+
+**Still pending (not done):** decision on launching on the `vercel.app` URL vs. adding a custom App domain; webhook endpoint creation; setting any production environment variable; Stripe Tax activation; optional archiving of the older duplicate Pro Monthly price/product.
+
+### Production App deployment - discovery (2026-10-19, read-only)
+**Existing Vercel App project: YES (confirmed through GitHub and live probes; project ID UNVERIFIED).**
+- **Repository:** `https://github.com/TheCraigRicher/XPadite-App` (public), default branch `master`; the local `origin` matches. This is the App repo, separate from the Website.
+- **Vercel project:** name `x-padite-app` in scope/team `the-craig-richer` (taken from the Vercel link on the latest commit's deployment status). There is no `.vercel/` folder locally, no Vercel CLI and no stored Vercel login, so the **project ID (`prj_...`)**, attached custom domains, deployment-protection settings and production environment-variable list are **UNVERIFIED** until Vercel access exists.
+- **Git integration: ACTIVE.** GitHub's deployment records show `vercel[bot]` creating a **Production** deployment for every push to `master`; the 8 most recent (2026-10-08 to 2026-10-20) are listed, the latest being commit `af34811` (v1.296), state `success`, 2026-10-20 01:04 UTC. **Consequence: every push to `master` deploys straight to production** (the production site already contains the billing code).
+- **Verified production URL: `https://x-padite-app.vercel.app`** (also the repo's GitHub `homepage`). Evidence it serves the App and not the Website: `GET /api/billing/status` -> `401 {"error":"Unauthorized"}` (App-specific); `GET /login` -> 200, title "XPadite"; `GET /api/stripe/webhook` -> 405 (route deployed); `Server: Vercel`. The control `https://www.xpadite.com` serves the Website (HTML for the same path).
+- **Publicly reachable for Stripe:** an unsigned POST to the production webhook reached the app (HTTP 500 `{"error":"Webhook not configured"}`) - no Vercel auth wall on the production alias. Per-deployment URLs (`x-padite-*-the-craig-richer.vercel.app`) ARE protected by Vercel Authentication and must never be used for webhooks.
+- **Observed production environment gap:** that same response means **`STRIPE_WEBHOOK_SECRET` is not set in the deployed production environment** (expected at this stage). Other production variables could not be observed.
+- **Custom domain: none verified.** `xpadite.app`, `www.xpadite.app` and `app.xpadite.com` do **not resolve in DNS**; `xpadite.com` redirects to `www.xpadite.com` (the Website).
+- **Side effects of this discovery:** none beyond read-only requests; the one unsigned `POST {}` to the production webhook was rejected before any processing (no secret configured) and wrote nothing.
+
+- **Homepage defect found (2026-10-19) - fix prepared locally, NOT yet live:** `https://x-padite-app.vercel.app/` shows the default Next.js starter page because `app/page.tsx` was still the unmodified `create-next-app` file (the real App is at `/app`; nothing linked to `/`). Deployment settings are not at fault. The local fix makes `/` redirect to `/app` (a valid `?plan=` is preserved; signed-out visitors continue to `/login`). Verified locally on a production build (`/` -> `/app` -> `/login`, no starter text; `/login`, `/signup`, billing and Stripe routes unchanged; `tsc`/eslint/build clean). **Production is fixed only after this change is committed, pushed to `master` (which auto-deploys) and re-checked at the production URL.**
+
+**Shortest safe path:** use `https://x-padite-app.vercel.app` for the LIVE webhook and `NEXT_PUBLIC_APP_URL` now (≈15 min). If you prefer a branded domain (e.g. an `app.` subdomain of `xpadite.com`), add it in Vercel and DNS BEFORE launch (≈20-30 min plus DNS propagation) and use it from the start - switching later means updating `NEXT_PUBLIC_APP_URL`, the Supabase Auth Site URL / redirect URLs, the Website's variable and the webhook endpoint URL.
+
 ### Remaining before LIVE (ordered, with realistic durations)
 | # | Step | Who | Estimate |
 |---|---|---|---|
 | 1 | Settings "Manage billing" button in a signed-in browser against the Sandbox portal (the only portal check not done) | owner or Claude with a browser tool | 5 min |
-| 2 | LIVE Stripe: confirm the four live Prices (CAD amounts/intervals), create the **same portal configuration** (cancel at period end; no plan switching), create the **live webhook endpoint** `https://<app-domain>/api/stripe/webhook` with the listed events and copy its signing secret | owner (dashboard) | 45 min |
+| 2 | LIVE Stripe: portal configuration DONE; remaining - create the LIVE webhook endpoint for `https://x-padite-app.vercel.app/api/stripe/webhook` (Dashboard, spec in the Task #2 section) and verify it read-only | owner + Claude | 15 min |
 | 3 | Production environment variables (live key, live Price IDs, live webhook secret, live portal ID, `NEXT_PUBLIC_APP_URL`, production Supabase keys) and **deploy** | owner | 30 min |
 | 4 | Decide tax: Stripe Tax / `STRIPE_AUTOMATIC_TAX`, GST/PST registration; BC business-address requirement; Website legal wording and `CHECKOUT_LIVE` | owner / accountant / Website session | days (not code) |
 | 5 | One small real purchase + refund on LIVE (owner approval required), confirm entitlement and refund revocation | owner | 30 min |
@@ -122,7 +175,7 @@ Prices, key, webhook and the four plan flows are **owner-reported done**; the po
 | Item | Status | Owner | Evidence / next action |
 |---|---|---|---|
 | Four direct-purchase CTAs wired | PENDING | Website | Wired behind a flag (`NEXT_PUBLIC_DIRECT_PURCHASE`, default OFF) to `<APP_URL>/signup?plan=<key>`; keys match the App allowlist. Not complete while the flag is off and the journey is untested end to end. |
-| Correct App destination URL | PENDING | Website | `NEXT_PUBLIC_APP_URL` must be the production App domain (the fallback is `https://xpadite.app` — confirm it is live). |
+| Correct App destination URL | PENDING | Website | `NEXT_PUBLIC_APP_URL` must be the production App URL: currently `https://x-padite-app.vercel.app` (verified). **The Website's built-in fallback `https://xpadite.app` does NOT resolve in DNS** (verified 2026-10-19), so the Website must set this variable explicitly or its purchase links would be dead. |
 | `NEXT_PUBLIC_DIRECT_PURCHASE` activation | BLOCKED | Website | Only after section A hand-off is tested in test mode. |
 | Checkout legal disclosures, Privacy/FAQ/Terms launch wording | PENDING | Website | Switch `CHECKOUT_LIVE` in `lib/legal.tsx` at launch; review the remaining pre-launch phrases listed in the Website's `docs/STRIPE_HANDOFF.md`. |
 | CA$ pricing, one-year early-adopter guarantee wording | DONE (Website) | Website | Reported done by the Website session; not re-verified here. |

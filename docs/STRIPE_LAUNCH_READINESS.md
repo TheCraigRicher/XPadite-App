@@ -4,82 +4,117 @@ Single source of truth for what remains before live payments. **DONE only with e
 compiles — it does not prove Stripe, Supabase, webhooks or real payments work. No secrets or customer data belong in this file.
 
 Status key: **DONE** · **PENDING** · **BLOCKED** (cannot proceed until something else is done)
-Last reviewed: 2026-10-17 (test-mode setup pass, after the Website → App purchase hand-off was added).
+Last reviewed: 2026-10-19 (Sandbox edge-case billing tests executed; production migrations verified by the owner).
 
-## 0. Status at a glance (2026-10-17 test-mode setup pass)
+**Evidence key:** *Verified* = exercised or read in this project by Claude. *Owner-reported* = stated by the owner, not independently checkable from here.
 
-Four separate questions — do not read one as the other.
+## 0. Status at a glance (2026-10-19)
 
 | Stage | State | Evidence |
 |---|---|---|
-| **Code implemented** | DONE | Checkout, portal, webhook, entitlements, hand-off, paywall, RLS migration all present. `tsc`, targeted eslint (billing/stripe files: 0 errors) and `next build` pass. |
-| **Configuration completed** | **NOT STARTED** | `.env.local` has **no** Stripe variables and no `BILLING_LAUNCH_AT`. No Stripe CLI installed here. Migrations 015/016 are not confirmed applied to any database. |
-| **Integration tested** | **PARTIAL — database logic only** | See "Tests actually executed" below. Nothing has run against Stripe or a real Supabase project. |
-| **Production launch authorized** | NO | Not requested. Paywall stays off until `BILLING_LAUNCH_AT` is deliberately set. |
+| **Code implemented** | DONE | Checkout, portal, webhook, entitlements, hand-off, paywall, RLS migrations. `tsc`, eslint (billing files) and `next build` pass. |
+| **Sandbox configuration** | DONE | Sandbox account `acct_1URex2FvPKlg0ley`, Supabase project `xpadite-test` initialised, four Sandbox Prices, webhook, **Customer Portal configuration created and verified (below)**. Owner-reported except the portal. |
+| **Sandbox integration tested** | DONE except 4 items | Owner-reported: Checkout, webhook and entitlements pass for all four plans. Verified: portal, and the 36-check edge-case run below (cancellation, full/partial refund, disputes opened/lost/won, duplicate and out-of-order delivery). **Still untested:** the Settings button in a browser, real Checkout cancel/failed-card/past-due paths, true parallel checkouts for the last slots, and delivery by Stripe itself (the run re-signed real events and POSTed them locally). |
+| **Production database** | DONE (owner-verified) | 009-014 applied; **015/016 verified by the owner's production SQL result** (exact evidence below). Paywall still inactive. |
+| **LIVE Stripe configuration** | NOT STARTED | No LIVE key, Prices, webhook or portal configuration touched. |
+| **Production launch authorized** | NO | Paywall stays off: `BILLING_LAUNCH_AT` is unset everywhere. |
 
-### Test project (added 2026-10-17, later pass)
-- **Separate Supabase test project `xpadite-test` (Canada Central, Healthy) has been created by the owner** — reported by the owner, not verified from here. The production project `xpadite` is untouched.
-- **Test database initialization: PENDING.** The project is reported empty. Procedure + SQL prepared: `docs/TEST_DATABASE_SETUP.md`, `supabase/test-project-setup/A_storage_buckets_and_policies.sql`, `supabase/test-project-setup/B_data_api_grants.sql`.
-  Rehearsed only in an in-memory Postgres (49/49 checks, fresh install of migrations 001–016 + A + B with simulated "automatic exposure off"). **Not run against any Supabase project.**
-- Missing-from-repo prerequisites found: Storage buckets, **`avatars` bucket policies**, Data API grants (see the setup doc).
-- **Stripe test-mode setup: PENDING.** **End-to-end payment verification: PENDING.** **Production launch: NOT authorized.** `.env.local` was not changed; `BILLING_LAUNCH_AT` is not set anywhere.
+### Sandbox Customer Portal - FIXED and verified (2026-10-19)
+- **Cause:** `STRIPE_PORTAL_CONFIGURATION_ID` pointed at a configuration made in a different Stripe test account (`acct_1URewcFpjCSHmRED`). The App's Sandbox account (`acct_1URex2FvPKlg0ley`, verified from the API key) had **no** portal configuration.
+- **Fix (owner-approved):** created ONE configuration in the Sandbox account: cancel at period end, no proration, cancellation reasons collected; payment-method update on; invoice history on; billing-information edit (name/email/address); **subscription updates (plan switching and quantity changes) OFF**. Only `STRIPE_PORTAL_CONFIGURATION_ID` in `.env.development.local` was changed (all other lines verified unchanged).
+- **Verified:** the project's real `getVerifiedPortalConfigurationId()` accepts the new configuration; portal sessions were created for an existing Sandbox customer with a subscription and for another customer (one-time-buyer path), both using the verified configuration; offline tests confirm the verifier refuses plan-switching, immediate cancellation, inactive and wrong-mode configurations.
+- **Code:** `lib/billing/stripe.ts` now also refuses a configuration that cancels immediately; Settings shows "Billing history" (not "Manage billing") for 3-Year/Lifetime holders. **Not browser-tested:** the Settings button in a signed-in browser.
 
-### Environment classification
-**UNKNOWN — treated as potentially production.** Exactly one Supabase project is configured (`.env.local` → ref `zbnzaitowprrbmlzcejd`), alongside real
-Resend credentials and a reminders sender on `xpadite.com`. Nothing in the repo identifies it as a dedicated test project, there is no staging
-configuration and no Vercel link. **No migration was applied and the project was not queried** (an attempt to read it with the service-role key was
-blocked, correctly). Backup availability for that project is **unconfirmed** — check Supabase Dashboard → Database → Backups (PITR needs a paid plan).
+### Production database - 015/016 VERIFIED (owner-provided SQL result, 2026-10-19)
+Earlier repository records had said 015/016 were not applied; the owner then reported them complete and supplied the result of the read-only check below. Claude cannot query production, so this is **owner-verified evidence**, recorded exactly as reported:
 
-### Tests actually executed (isolated in-memory Postgres via PGlite — no real database touched)
-Migrations 001, 002, 004, 005, 010, 015, 016 applied to a stubbed Supabase shape; 016 re-applied (idempotent). 43/43 checks passed after one fix:
-- **Defect found and fixed:** `billing_reserve_offer_v2` failed with `column reference "reserved_until" is ambiguous` (would have broken every 3-Year/Lifetime checkout). OUT columns renamed `hold_id` / `hold_until`; function dropped-and-recreated in 016; `checkout/route.ts` updated.
-- Trial/launch logic: missing or invalid `launch_at` → access (fail-open); existing 30-day-old account gets a fresh 5-day trial from launch; new account after launch gets 5 days; kill switch grants access.
-- RLS: expired user's INSERT/UPDATE on `calendar_days` and gallery upload are blocked; READ and DELETE still work; trial user can write; paid Lifetime keeps access; refunded Lifetime loses it. 15 `billing_paywall_*` policies present.
-- Inventory (sequential): cap respected, hold survives a second attempt by the same user, sold-out refusal, 3-Year and Lifetime counted independently, duplicate confirm idempotent, no-hold fallback with a full cap → `review` (not granted), late payment on a released hold, refunded slot released, lost dispute keeps its slot, stale hold replaced.
-- Retention: deleting the auth user keeps purchase + subscription rows (user_id nulled) and removes the customer mapping.
-- HTTP (built app, no Stripe/Supabase writes): webhook with no or forged signature → 400; checkout, portal, billing status, account delete and AI chat when signed out → 401.
+| Check | Required | Reported |
+|---|---|---|
+| billing tables | 5 | 5 |
+| billing functions | `billing_confirm_purchase`, `billing_has_access`, `billing_reserve_offer_v2` | 3 billing functions (matches; `billing_reserve_offer` gone) |
+| paywall policies (`billing_paywall%`) | 15 | 15 |
+| `has_access_privacy_guard` | true | true |
+| `reserve_ownership_guard` | true | true |
+| `confirm_duplicate_guard` | true | true |
+| `authenticated_can_truncate` | false | false |
+| `anon_reads_config` | false | false |
 
-**Not covered by those tests:** true parallel concurrency (PGlite is single-connection — the advisory lock is untested under real contention), real RLS on the other five protected tables, webhook handling of genuine Stripe events, anything involving Stripe objects, email verification, the browser/PWA flow.
+Conclusion: the current (hardened) versions of 015 and 016 are in production. **No further production migration is needed**; do not re-run runbook steps 6-8. The query used (kept for re-checks):
+```sql
+select
+  (select count(*) from pg_tables where schemaname='public' and tablename like 'billing%')                                  as billing_tables,
+  (select string_agg(proname, ', ' order by proname) from pg_proc where pronamespace='public'::regnamespace and proname like 'billing%') as billing_functions,
+  (select count(*) from pg_policies where policyname like 'billing_paywall%')                                              as paywall_policies,
+  pg_get_functiondef(to_regprocedure('public.billing_has_access(uuid)')) like '%request.jwt.claims%'                       as has_access_privacy_guard,
+  pg_get_functiondef(to_regprocedure('public.billing_reserve_offer_v2(uuid,text,text,integer,integer)')) like '%already_owned%' as reserve_ownership_guard,
+  pg_get_functiondef(to_regprocedure('public.billing_confirm_purchase(text,uuid,text,text,text,integer,text,integer,timestamptz,text)')) like '%duplicate_allocation%' as confirm_duplicate_guard,
+  has_table_privilege('authenticated', to_regclass('public.billing_purchases'), 'TRUNCATE')                                as authenticated_can_truncate,
+  has_table_privilege('anon', to_regclass('public.billing_config'), 'SELECT')                                              as anon_reads_config;
+```
+Not covered by that check (still worth a glance at launch): `billing_config` should still be empty / hold only NULL `launch_at`, and `BILLING_LAUNCH_AT` must remain unset until launch.
 
-### Tests blocked, and why
-All 17 scenarios in the task (signup/trial, the four Website-originated purchases, entitlement activation, cancelled checkout, duplicate webhook, cancellation, refunds, disputes, parallel inventory, expired-trial against real RLS, deletion with active subscription, portal, auth/plan preservation) are **BLOCKED** on: (1) no Stripe test keys/Prices/webhook secret/CLI, (2) no confirmed non-production Supabase project to apply 015/016 to.
+### Sandbox edge-case billing tests (executed 2026-10-19) - 36/36 passed in one clean run
+**What was real:** Sandbox Stripe objects and events (customers, a test-clock subscription, PaymentIntents, refunds, disputes), the App's real `/api/stripe/webhook` route and handlers, and the `xpadite-test` Supabase database. Isolated throw-away users/customers were used; nothing existing was modified (a fingerprint of all pre-existing billing rows was identical before and after). **What was simulated (and is not a Stripe-delivery test):** no Stripe CLI or public URL exists here, so the real events were fetched from Stripe, re-signed with the real signing secret and POSTed to the local dev server; the one-time purchase rows were seeded through the app's own `billing_confirm_purchase` function because completing a Checkout Session needs a browser. The test records were removed afterwards. The harness is not in the repo.
 
-### Next action required from the owner
-Initialise `xpadite-test` by following `docs/TEST_DATABASE_SETUP.md` (Part 1 Auth → Part 2 SQL 001→016, A, B → Part 4 verification queries), then report the verification results.
+| Scenario | Result | What was proven |
+|---|---|---|
+| A. Subscription cancel at period end | PASS (10 checks) | Monthly subscription created; early-adopter price lock recorded (locked price, ~1-year expiry); cancel-at-period-end event keeps status `active` with `cancel_at_period_end=true`; access stays valid until the period end; advancing a Stripe test clock past the period end produced a real `customer.subscription.deleted` and the entitlement lapsed. |
+| B. Full refund (Lifetime) | PASS (7) | Purchase held one slot; real `charge.refunded` marks it `refunded`, revokes the entitlement and releases the slot (2 -> 1). |
+| C. Partial refund (3-Year) | PASS (4) | Stays `paid`, not treated as a full refund; flagged `needs_review` / `partial_refund`; entitlement and slot untouched. |
+| D1. Dispute opened | PASS (3) | Real dispute (`needs_response`) recorded on the purchase; access NOT revoked. |
+| D2. Dispute lost | PASS (4) | Sandbox-simulated loss (`losing_evidence`) -> status `disputed`, entitlement revoked, slot stays consumed (documented policy). |
+| D3. Dispute won | PASS (3) | Sandbox-simulated win (`winning_evidence`), events delivered out of order (closed before created) -> status stays `paid`, `dispute_status=won`, entitlement preserved. |
+| E. Idempotency / consistency | PASS (5) | Duplicate deliveries of a subscription update, a full refund (twice) and a dispute-closed event were acknowledged as duplicates with no new rows, no changed rows and no extra slot release; one `billing_webhook_events` row per event; unrelated billing records unchanged. |
+
+No billing defects were found, so no application code was changed for this task.
+
+### Tests executed so far (isolated in-memory Postgres - no real database touched)
+Latest suites against the current 015/016: security guard 29/29, 015+016 compatibility 20/20, privileges and reservation rules 56/56, RLS/billing logic 44/44, fresh install + test-project setup 49/49; `tsc` clean. Defects found and fixed by these: reservation-function ambiguity, over-broad default grants, missing one-allocation-per-customer rule, a checkout race that could leave a payable session without a hold, `billing_has_access()` cross-user disclosure (and a NULL-logic bug in the first version of its guard). **Not covered:** true parallel concurrency, real Stripe events (refund/dispute/cancel), real Supabase specifics, browser/PWA flow.
+
+### Remaining before LIVE (ordered, with realistic durations)
+| # | Step | Who | Estimate |
+|---|---|---|---|
+| 1 | Settings "Manage billing" button in a signed-in browser against the Sandbox portal (the only portal check not done) | owner or Claude with a browser tool | 5 min |
+| 2 | LIVE Stripe: confirm the four live Prices (CAD amounts/intervals), create the **same portal configuration** (cancel at period end; no plan switching), create the **live webhook endpoint** `https://<app-domain>/api/stripe/webhook` with the listed events and copy its signing secret | owner (dashboard) | 45 min |
+| 3 | Production environment variables (live key, live Price IDs, live webhook secret, live portal ID, `NEXT_PUBLIC_APP_URL`, production Supabase keys) and **deploy** | owner | 30 min |
+| 4 | Decide tax: Stripe Tax / `STRIPE_AUTOMATIC_TAX`, GST/PST registration; BC business-address requirement; Website legal wording and `CHECKOUT_LIVE` | owner / accountant / Website session | days (not code) |
+| 5 | One small real purchase + refund on LIVE (owner approval required), confirm entitlement and refund revocation | owner | 30 min |
+| 6 | Set `BILLING_LAUNCH_AT` (ISO with timezone) - the **last** step; then flip Website purchase flag | owner | 5 min |
+| 7 | Monitor webhook deliveries, `billing_*` rows and Stripe events for the first days; PWA install check | owner | ongoing |
 
 ## A. App implementation
 
 | Item | Status | Owner | Evidence / next action |
 |---|---|---|---|
-| Stripe integration (checkout, portal, webhook, entitlements, 5-day trial, limited-offer holds) | PENDING | App | Code present (`app/api/stripe/*`, `lib/billing/*`) and read-reviewed. Never exercised against Stripe in this review. Verify in test mode (section C). |
-| Consolidated billing corrections | PENDING | App + Supabase | `016_billing_corrections.sql` exists; a reservation-function defect was found and fixed in the 2026-10-17 pass and the migration passes an isolated Postgres test (section 0). Not applied to any real database. |
+| Stripe integration (checkout, portal, webhook, entitlements, 5-day trial, limited-offer holds) | DONE (Sandbox) | App | Owner-reported: all four plans pass Checkout -> webhook -> entitlement. Verified 2026-10-19: portal, cancellation, full/partial refund, disputes, idempotency (36/36, section 0). Open: browser check of the Settings button, parallel last-slot checkouts. |
+| Consolidated billing corrections | DONE | App + Supabase | Current 015/016 pass the isolated suites and are in production (owner-verified SQL result, section 0). |
 | Website → App purchase hand-off | PENDING | App | Implemented: `?plan=<key>` survives middleware redirects, signup, login, email verification (stored on the account as `pending_plan`), and `/app` auto-starts Checkout once (`lib/billing/intent.ts`, `PurchaseIntent` in `BillingContext.tsx`). Verified: `tsc`, eslint (0 errors), isolated production build, redirect behaviour via HTTP, unit tests of the intent helpers, signup/login render and carry only valid plans. **Not verified:** a real signed-in account going through to Stripe Checkout, email-verification path, duplicate-session guard in a browser. |
 | Google / social sign-in | BLOCKED | App | Not implemented: the Google/Apple/Microsoft buttons have no handlers. The hand-off therefore only covers email + password. If OAuth is added later it must pass the plan the same way (validated `pending_plan` in metadata, or `/auth/callback?next=/app?plan=<key>` — `next` is now validated by `safeNext`). |
 | Authentication & entitlement security | PENDING | App | Reviewed, see "Security notes" below. One defect fixed (open redirect in `/auth/callback`); checkout now also requires a verified email. Broader items listed below. |
 | Trial-expiration enforcement | PENDING | App + Supabase | Server-side: `paywallResponse` on paid API routes, restrictive RLS write policies (016) on calendar/work/activities/gallery/labels/folders/reminders, gallery upload policy. Needs verification against a real expired test user (section B/C). |
-| Account deletion + subscription cancellation | PENDING | App | `DELETE /api/account/delete` cancels Stripe subscriptions first and aborts if it cannot confirm. Untested against Stripe. |
+| Account deletion + subscription cancellation | PENDING | App | `DELETE /api/account/delete` cancels Stripe subscriptions first and aborts if it cannot confirm. Still untested against Stripe (needs a signed-in session; not part of the 2026-10-19 run). |
 
 ## B. Supabase
 
 | Item | Status | Owner | Evidence / next action |
 |---|---|---|---|
-| Migration `015_billing.sql` applied | PENDING | Owner | Run in SQL Editor on a **test project first**. Passes an isolated Postgres test (section 0). Additive only; includes `create table if not exists` + `drop policy if exists`; nothing destructive. |
-| Migration `016_billing_corrections.sql` applied | PENDING | Owner | Run after 015. Re-run safe. Only destructive-looking statements: `drop function` of the replaced reserve functions and `drop constraint` of two billing-table constraints it re-creates — no data is deleted. With `BILLING_LAUNCH_AT` unset it changes no behaviour (database fails open). |
+| Migration `015_billing.sql` applied | Test: DONE (owner-reported) / Production: **DONE (owner-verified)** | Owner | Evidence recorded in section 0. |
+| Migration `016_billing_corrections.sql` applied | Test: DONE (owner-reported) / Production: **DONE (owner-verified)** | Owner | Evidence recorded in section 0. With `BILLING_LAUNCH_AT` unset it changes no behaviour (database fails open). |
 | RLS verification | PENDING | Owner | As an expired test user: reads work; inserts/updates on the paywalled tables fail; gallery upload fails; support requests still work. |
 | Billing configuration + launch timestamp (`BILLING_LAUNCH_AT`) | PENDING | Owner | Unset = nobody is locked out (by design). Set only at launch (section F). |
 | Email confirmation enabled | PENDING | Owner | The hand-off assumes sign-up requires email confirmation. Confirm the setting. No new redirect-URL allow-list entries are needed (no query strings are used in `emailRedirectTo`). |
 
 ## C. Stripe test mode
 
-All PENDING — Owner (Stripe dashboard) unless noted. Nothing here was done or verified in this review.
+Prices, key, webhook and the four plan flows are **owner-reported done**; the portal is **verified**. The scenarios below have not been exercised with real Stripe events.
 - Four test-mode CAD Prices: Pro Monthly 10.00, Pro Yearly 89.99, 3-Year 199.00 (one-time), Lifetime 249.00 (one-time); IDs in `STRIPE_PRICE_PRO_MONTHLY / _PRO_YEARLY / _3YEAR / _LIFETIME`.
 - Test secret key + webhook signing secret in the App environment (never in the Website).
 - Webhook events to subscribe (from `app/api/stripe/webhook/route.ts`): `checkout.session.completed`, `.async_payment_succeeded`, `.async_payment_failed`, `.expired`; `customer.subscription.created/updated/deleted`; `invoice.paid`, `invoice.payment_failed`; `charge.refunded`; `charge.dispute.closed` (and optionally `charge.dispute.created`).
-- Customer Portal configured (cancel at period end; update payment method).
+- Customer Portal configured (cancel at period end; update payment method) - **DONE and verified 2026-10-19** (Sandbox configuration created; verifier and portal sessions tested).
 - Tax: decide on `STRIPE_AUTOMATIC_TAX=true` and configure Stripe Tax / registrations.
 - Test scenarios: new user buys each of the four plans; signed-in user buys; verification on another device; cancelled checkout; failed card; sold-out limited offer (message shown); already-Lifetime; already-subscribed; payment still processing when returning.
-- Refund (full → revoke + release slot; partial → manual review) and dispute (opened ≠ revoke; lost = revoke; won = keep).
-- Subscription renewal, cancellation (access kept to period end), past-due, and one-year price-guarantee recording.
+- Refund (full → revoke + release slot; partial → manual review) and dispute (opened ≠ revoke; lost = revoke; won = keep) - **DONE 2026-10-19** with real Sandbox events (see section 0).
+- Cancellation (access kept to period end) and one-year price-guarantee recording - **DONE 2026-10-19**. Still untested: renewal invoice, past-due / failed renewal payment.
 - Limited-offer concurrency: many parallel checkouts for the last slots never oversell; each offer capped at 100 independently.
 
 ## D. Website coordination (Website project)

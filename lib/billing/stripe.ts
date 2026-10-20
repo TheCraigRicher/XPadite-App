@@ -86,7 +86,13 @@ export async function getVerifiedPortalConfigurationId(): Promise<string> {
   if (!config.active) throw new Error('Customer Portal configuration is not active')
   if (config.livemode !== isLiveKey()) throw new Error('Customer Portal configuration is in a different Stripe mode than the API key')
   if (config.features.subscription_update.enabled) {
+    // Covers plan switching AND quantity changes (both are subscription updates).
     throw new Error('Customer Portal allows subscription switching — disable "Customers can switch plans" in the Dashboard')
+  }
+  const cancel = config.features.subscription_cancel
+  if (cancel?.enabled && cancel.mode !== 'at_period_end') {
+    // Immediate cancellation would cut off paid-for time and invite proration/refund handling we do not offer.
+    throw new Error('Customer Portal must cancel subscriptions at the END of the billing period, not immediately')
   }
   portalCheck = { id: config.id, at: Date.now() }
   return config.id

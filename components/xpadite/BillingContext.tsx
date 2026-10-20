@@ -257,6 +257,8 @@ export function BillingSummary({ isDark }: { isDark: boolean }) {
   const s = billing.status
   const { title, detail } = describeStatus(s)
   const warn = s.state === 'expired' || s.pastDue
+  // 3-Year / Lifetime are one-time purchases: nothing to cancel, the portal only offers invoices and payment details.
+  const oneTime = s.plan === '3year-pro' || s.plan === 'ltd'
 
   return (
     <div style={{
@@ -285,7 +287,7 @@ export function BillingSummary({ isDark }: { isDark: boolean }) {
             opacity: busy ? 0.7 : 1,
           }}
         >
-          {busy ? 'Opening…' : 'Manage billing'}
+          {busy ? 'Opening…' : oneTime ? 'Billing history' : 'Manage billing'}
         </button>
       )}
     </div>

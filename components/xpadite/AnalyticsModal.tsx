@@ -23,6 +23,7 @@
 // dashboard family.
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { trackFeature } from '@/lib/analytics/client'
 import { useApp } from './AppContext'
 import { PremiumUpgradeModal } from './PremiumUpgradeModal'
 import { formatMs, dateKey as buildDateKey, isProductiveActivity, resolveProgressColor } from './utils'
@@ -966,6 +967,7 @@ function NextTargetCard({ target, onOpenPremium, isDark }: { target: { label: st
 export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => void; onDayDoubleClick?: (key: string, month: number, day: number) => void }) {
   const { isDark, calData, activities, progressColor: _rawProgressColor } = useApp()
   const progressColor = resolveProgressColor(_rawProgressColor, isDark)
+  useEffect(() => { trackFeature('analytics_dashboard') }, []) // analytics: dashboard opened (no-op without consent)
 
   // Freeze the page behind this modal at every breakpoint (not just desktop)
   // so neither wheel/trackpad nor touch-scroll-through can ever expose the

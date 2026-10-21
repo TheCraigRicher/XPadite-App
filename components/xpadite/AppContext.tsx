@@ -12,6 +12,7 @@ import {
   computeNextRunAt,
 } from '@/lib/reminders'
 import { createClient } from '@/lib/supabase/client'
+import { trackFeature } from '@/lib/analytics/client'
 import {
   fetchCalendarDays,
   fetchCalendarDay,
@@ -789,6 +790,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   }, [])
 
   const addSession = useCallback((s: WorkSession) => {
+    trackFeature('activity_time_tracker') // analytics: a finished tracked session (no-op without consent)
     // Upsert by id, never blind-append — the same session finalizing twice
     // (e.g. a rapid double Clock-Out click before the disabled state takes
     // effect, or a race with the setActiveTaskTimer(null) finalization path

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { trackFeature } from '@/lib/analytics/client'
 import dynamic from 'next/dynamic'
 import { useApp } from './AppContext'
 import { parseJournalDoc, mkId } from './journalUtils'
@@ -1143,6 +1144,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   // ── Persist ───────────────────────────────────────────────────────────────────
   const persistEntry = useCallback((dateKey: string, content: string) => {
     updateDay(dateKey, prev => ({ ...prev, notes: content }))
+    trackFeature('journal_planner_editor')
   }, [updateDay])
 
   // ── Navigation ────────────────────────────────────────────────────────────────

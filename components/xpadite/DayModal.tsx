@@ -1,6 +1,7 @@
 ﻿'use client'
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
+import { trackFeature } from '@/lib/analytics/client'
 import { createPortal } from 'react-dom'
 import { useApp, EMPTY_DAY } from './AppContext'
 import type { Task, TaskSession, Activity, TaskAttachment, DayData, JournalBlock } from './types'
@@ -2216,6 +2217,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
       return                                { ...prev, productive: true,  hyper: false, milestone: false, goal: true  }
     })
     if (newValue === 'goal' && !wasGoal) setShowConfetti(true)
+    if (newValue !== null) trackFeature('calendar')
   }
 
   const [addingTask,       setAddingTask]       = useState(false)
@@ -2604,6 +2606,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     if (!t) return
     const newTask = makeTask(t)
     updateDay(dateKey, prev => ({ ...prev, tasks: [...prev.tasks, newTask] }))
+    trackFeature('advanced_task_manager')
     setNewTaskText('')
     setAddingTask(false)
     setEditingTaskId(newTask.id)

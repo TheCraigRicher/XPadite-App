@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp } from './AppContext'
 import { exportLocalData } from '@/lib/data-backup'
+import { AnalyticsPreferenceRow } from '@/components/analytics/AnalyticsPreferenceRow'
 import { resolveProgressColor, detectBrowserTimezone } from './utils'
 import { useLockBodyScroll } from './useLockBodyScroll'
 import { SUPPORTED_LOCALES, t } from './i18n'
@@ -1255,6 +1256,12 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
                 </button>
               </div>
             </div>
+
+            {/* ══ USAGE ANALYTICS (optional, off unless allowed) ═══════════════ */}
+            <AnalyticsPreferenceRow
+              icon={<SectionIcon emoji="📊" />}
+              cardBg={cardBg} cardBorder={cardBorder} titleColor={titleColor} subtitleColor={subtitleColor} isDark={isDark}
+            />
 
           </div>
           {/* ── End scrollable body ─────────────────────────────────────────── */}

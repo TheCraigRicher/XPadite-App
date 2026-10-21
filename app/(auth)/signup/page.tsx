@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { track } from "@/lib/analytics/client";
 import { parsePlan, planQuery } from "@/lib/billing/intent";
 import { createClient } from "@/lib/supabase/client";
 import { XpaditeLogo } from "@/components/auth/XpaditeLogo";
@@ -136,6 +137,7 @@ function SignUpForm() {
 
       setSuccess(true);
       setLoading(false);
+      track("signup_completed", { method: "email", plan_id: plan ?? undefined }); // analytics: no-op without consent
     } catch (err) {
       setError(
         err instanceof Error

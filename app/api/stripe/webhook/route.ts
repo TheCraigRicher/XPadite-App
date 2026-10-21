@@ -16,8 +16,9 @@
  * login redirects because lib/supabase/middleware.ts only guards /app.
  */
 
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import type Stripe from 'stripe'
+import { trackBillingEvent } from '@/lib/analytics/billing'
 import { createAdminClient } from '@/lib/billing/admin'
 import { getStripe } from '@/lib/billing/stripe'
 import {
@@ -67,6 +68,8 @@ export async function POST(req: NextRequest) {
   try {
     await handleEvent(admin, event)
     await admin.from('billing_webhook_events').update({ status: 'processed', error: null, processed_at: new Date().toISOString() }).eq('event_id', event.id)
+    // Analytics only after the event was verified AND handled successfully; runs after the response, never affects it.
+    after(() => trackBillingEvent(event))
     return NextResponse.json({ received: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown error'

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useCallback, useMemo, useState, useEffect } from "react";
+import { trackFeature } from "@/lib/analytics/client";
 import { useApp } from "./AppContext";
 import {
   dateKey,
@@ -437,6 +438,7 @@ export function MonthCard({
             hyper: prev.productive ? false : prev.hyper,
           }));
           if (!wasProductive) {
+            trackFeature("calendar");
             if (ringTimerRef.current) clearTimeout(ringTimerRef.current);
             setNewlyMarkedKey(key);
             ringTimerRef.current = setTimeout(

@@ -5,6 +5,7 @@ import { useApp } from './AppContext'
 import type { BillingStatus } from '@/lib/billing/types'
 import type { BillingPlanKey } from '@/lib/billing/plans'
 import { parsePlan } from '@/lib/billing/intent'
+import { track } from '@/lib/analytics/client'
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 // Client view of the SERVER-computed billing status (/api/billing/status).
@@ -15,7 +16,7 @@ interface BillingCtx {
   status: BillingStatus | null
   refresh: (sessionId?: string) => Promise<BillingStatus | null>
   /** Starts Stripe Checkout for a plan. Resolves with an error message, or null once redirecting. */
-  startCheckout: (planKey: BillingPlanKey) => Promise<string | null>
+  startCheckout: (planKey: BillingPlanKey, source?: 'settings' | 'website_link') => Promise<string | null>
   /** Opens the Stripe Customer Portal. Resolves with an error message, or null once redirecting. */
   openPortal: () => Promise<string | null>
 }
@@ -130,7 +131,8 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     }
   }, [refresh, setToast])
 
-  const startCheckout = useCallback(async (planKey: BillingPlanKey) => {
+  const startCheckout = useCallback(async (planKey: BillingPlanKey, source: 'settings' | 'website_link' = 'settings') => {
+    track('plan_selected', { plan_id: planKey, source }) // analytics: a plan chosen (no-op without consent)
     try {
       const res = await fetch('/api/stripe/checkout', {
         method: 'POST',
@@ -235,7 +237,7 @@ Your access is active.`)
 
     setToast(`~Opening secure checkout
 ${planLabel(plan)} — taking you to Stripe…`)
-    void startCheckout(plan).then((err) => {
+    void startCheckout(plan, 'website_link').then((err) => {
       if (!err) return // redirecting to Stripe
       try { sessionStorage.removeItem(INTENT_GUARD_KEY) } catch { /* ignore */ }
       // Server messages are already user-friendly (sold out, already subscribed, in progress, …).

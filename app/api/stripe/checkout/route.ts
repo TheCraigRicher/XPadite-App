@@ -15,8 +15,9 @@
  *    verified webhook / server-side Stripe verification (see lib/billing/sync.ts).
  */
 
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse, after } from 'next/server'
 import type Stripe from 'stripe'
+import { captureForUser } from '@/lib/analytics/server'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/billing/admin'
 import { syncBillingConfig } from '@/lib/billing/config'
@@ -179,6 +180,8 @@ export async function POST(req: NextRequest) {
         throw new Error(`could not link session to a live reservation${error ? `: ${error.message}` : ''}`)
       }
     }
+    // Analytics: Stripe confirmed the session exists. Runs after the response and never affects it.
+    after(() => captureForUser(user.id, 'checkout_started', { plan_id: plan.key, mode: plan.mode === 'subscription' ? 'subscription' : 'one_time' }, `checkout-started:${session.id}`))
     return NextResponse.json({ url: session.url })
   } catch (err) {
     // Release the hold only when no payable session can exist for it.

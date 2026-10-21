@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useMemo } from 'react'
+import { trackFeature } from '@/lib/analytics/client'
 import { useApp } from './AppContext'
 import { formatMs, isProductiveActivity, APP_YEAR, MONTHS, todayKey, dateKey } from './utils'
 import { YearlyDashboardModal } from './YearlyDashboardModal'
@@ -746,6 +747,7 @@ type SubView = null | 'today' | 'weekly' | 'monthly' | 'yearly'
 
 export function AnalyticsPage({ onClose }: { onClose: () => void }) {
   const { calData, activities, isDark } = useApp()
+  useEffect(() => { trackFeature('analytics_dashboard') }, []) // analytics: dashboard opened (no-op without consent)
   const [subView, setSubView] = useState<SubView>(null)
   const [showPremium, setShowPremium] = useState(false)
   const [comingSoon, setComingSoon] = useState<string | null>(null)

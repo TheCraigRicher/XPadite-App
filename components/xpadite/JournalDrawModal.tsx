@@ -1,6 +1,7 @@
 'use client'
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { trackFeature } from '@/lib/analytics/client'
 import { useApp } from './AppContext'
 import { ColorPickerModal } from './ColorPickerModal'
 import { COLOR_PALETTE, normalizeHexColor } from './utils'
@@ -2063,6 +2064,7 @@ export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawMo
       // instead of a flattened picture — see JournalBlock.canvasData.
       const objectsJson = JSON.stringify(objectsRef.current)
       onSave(off.toDataURL('image/png'), objectsJson)
+      trackFeature('mind_mapping_canvas')
       lastSavedJsonRef.current = objectsJson
       setToast('Mind Map saved ✓')
       return true

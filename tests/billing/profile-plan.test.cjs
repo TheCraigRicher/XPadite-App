@@ -63,7 +63,7 @@ test('unknown status (still loading / check failed) is "Loading plan…", never 
 test('ProfileModal: same context + describeStatus as Settings, no independent plan logic, no Free fallback while loading', () => {
   const s = read('components/xpadite/ProfileModal.tsx')
   assert.ok(s.includes("import { useBilling, describeStatus } from './BillingContext'"))
-  assert.ok(/const billingInfo = billing\s*\?\s*\{ \.\.\.describeStatus\(billing\.status\)/.test(s), 'the plan text comes from describeStatus(billing.status) whenever billing exists')
+  assert.ok(/\.\.\.describeStatus\(billing\.status\)/.test(s), 'the plan text comes from describeStatus(billing.status) whenever the plan is known')
   assert.ok(!/billing\?\.status\s*\?/.test(s.slice(s.indexOf('const billingInfo') - 10, s.indexOf('const billingInfo') + 400)), 'a null status is no longer treated as "no plan"')
   assert.equal((s.replace(/^\s*\/\/.*$/gm, '').match(/XPadite Free/g) || []).length, 1, 'only the no-provider fallback mentions Free')
   assert.ok(!/pro-monthly|Pro Monthly|Pro Yearly|Lifetime Pro/.test(s.slice(s.indexOf('const billingInfo'), s.indexOf('const billingInfo') + 600)), 'no hardcoded plan labels')

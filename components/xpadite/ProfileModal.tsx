@@ -218,8 +218,11 @@ export function ProfileModal({
   // Same source and labels as Settings (BillingContext). While the plan is still loading (or a check failed) we show
   // "Loading plan…", never "Free": a paying customer must not be shown as Free just because the status isn't in yet.
   // "XPadite Free" remains only for the (unreachable in-app) case of no billing provider at all.
+  const planFailed = !!billing && !billing.status && !!billing.statusError
   const billingInfo = billing
-    ? { ...describeStatus(billing.status), badge: !billing.status ? '…' : billing.status.state === 'paid' ? 'Pro' : billing.status.state === 'trial' ? 'Trial' : 'Expired' }
+    ? (planFailed
+        ? { title: 'Plan unavailable', detail: 'Tap to retry', badge: 'Retry' }
+        : { ...describeStatus(billing.status), badge: !billing.status ? '…' : billing.status.state === 'paid' ? 'Pro' : billing.status.state === 'trial' ? 'Trial' : 'Expired' })
     : null
   // Re-check the plan whenever Profile opens, so a purchase or change made elsewhere shows up without a page reload.
   const refreshBilling = billing?.refresh
@@ -797,7 +800,7 @@ export function ProfileModal({
           {/* Current Plan — compact overview; upgrades happen in Settings, not here */}
           <div className="rounded-xl overflow-hidden" style={{ border: '0.5px solid rgba(124,58,237,0.18)' }}>
             <button
-              onClick={() => setPlanOpen(v => !v)}
+              onClick={() => { if (planFailed) void billing?.refresh(); else setPlanOpen(v => !v) }}
               className="w-full flex items-center justify-between px-3 py-2.5 transition-opacity hover:opacity-90"
               style={{ background: 'rgba(124,58,237,0.07)' }}
             >

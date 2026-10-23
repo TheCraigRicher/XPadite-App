@@ -2,6 +2,7 @@ import type { SupabaseClient, User } from '@supabase/supabase-js'
 import { TRIAL_DAYS, type BillingPlanKey } from './plans'
 import { getBillingLaunchAt, isPaywallDisabled } from './config'
 import type { BillingStatus } from './types'
+import { BillingLookupError, classifyDbError } from './diagnostics'
 
 // Server-only. Keep in step with public.billing_has_access() in migration 016.
 
@@ -44,6 +45,12 @@ export async function getBillingStatus(
     admin.from('billing_purchases').select('plan_key,status,access_expires_at').eq('user_id', user.id).eq('status', 'paid'),
     admin.from('billing_customers').select('stripe_customer_id').eq('user_id', user.id).maybeSingle(),
   ])
+
+  // A FAILED lookup is not proof of "no subscription": never let an unavailable/misconfigured database turn a paying
+  // customer into a trial user. Throw so callers can show "unavailable" (status route) or fail closed (checkout).
+  for (const [table, res] of [['billing_subscriptions', subsRes], ['billing_purchases', purchasesRes], ['billing_customers', customerRes]] as const) {
+    if (res.error) throw new BillingLookupError(classifyDbError(res.error), table)
+  }
 
   const trialEnd = trialEndsAt(user)
 

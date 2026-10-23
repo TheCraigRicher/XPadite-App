@@ -18,21 +18,31 @@ import { NextRequest, NextResponse, after } from 'next/server'
 import type { User } from '@supabase/supabase-js'
 import { captureServer, serverEventsEnabled, withinTrialWindow } from '@/lib/analytics/server'
 import { createAdminClient } from '@/lib/billing/admin'
+import { classifyDbError, failureCode } from '@/lib/billing/diagnostics'
 import { getBillingLaunchAt, isPaywallDisabled } from '@/lib/billing/config'
 import { TRIAL_DAYS } from '@/lib/billing/plans'
 import { createClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
 
-const admin = () => { try { return createAdminClient() } catch { return null } }
+// Failures log (and return) only a fixed code — e.g. config_project_mismatch / db_missing_table — never keys, URLs or user data.
+const admin = (): { db: ReturnType<typeof createAdminClient> } | { code: string } => {
+  try { return { db: createAdminClient() } } catch (err) {
+    const code = `config_${failureCode(err)}`
+    console.error('[Analytics consent] unavailable:', code)
+    return { code }
+  }
+}
+const unavailable = (code: string) => NextResponse.json({ error: 'Unavailable', code }, { status: 503 })
 
 export async function GET() {
   const { data: { user } } = await (await createClient()).auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const db = admin()
-  if (!db) return NextResponse.json({ error: 'Unavailable' }, { status: 503 })
+  const conn = admin()
+  if (!('db' in conn)) return unavailable(conn.code)
+  const db = conn.db
   const { data, error } = await db.from('analytics_consent').select('analytics').eq('user_id', user.id).maybeSingle()
-  if (error) return NextResponse.json({ error: 'Unavailable' }, { status: 503 })
+  if (error) { const code = `db_${classifyDbError(error)}`; console.error('[Analytics consent] read failed:', code); return unavailable(code) }
   const analytics = (data as { analytics?: boolean } | null)?.analytics
   return NextResponse.json({ analytics: typeof analytics === 'boolean' ? analytics : null })
 }
@@ -45,11 +55,12 @@ export async function POST(req: NextRequest) {
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }) }
   if (typeof body.analytics !== 'boolean') return NextResponse.json({ error: 'analytics must be true or false' }, { status: 400 })
 
-  const db = admin()
-  if (!db) return NextResponse.json({ error: 'Unavailable' }, { status: 503 })
+  const conn = admin()
+  if (!('db' in conn)) return unavailable(conn.code)
+  const db = conn.db
   const { error } = await db.from('analytics_consent')
     .upsert({ user_id: user.id, analytics: body.analytics, decided_at: new Date().toISOString() }, { onConflict: 'user_id' })
-  if (error) return NextResponse.json({ error: 'Could not save' }, { status: 500 })
+  if (error) { console.error('[Analytics consent] save failed:', `db_${classifyDbError(error)}`); return NextResponse.json({ error: 'Could not save', code: `db_${classifyDbError(error)}` }, { status: 500 }) }
 
   if (body.analytics && serverEventsEnabled()) after(() => reportTrialStart(db, user))
   return NextResponse.json({ ok: true })

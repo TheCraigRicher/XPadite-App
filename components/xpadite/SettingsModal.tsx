@@ -421,10 +421,13 @@ export function PlanPopup({ planId, isDark, onClose }: {
   const owned = billing?.status
   const alreadyThisPlan = !!owned && owned.state === 'paid' && owned.plan === planId
   const hasLifetime = !!owned?.lifetime
-  const ctaBlocked = cfg.ctaDisabled || !purchasable || alreadyThisPlan || hasLifetime || checkoutBusy
+  // While the plan is unknown (still loading, or it could not be loaded) nothing can be bought: it could duplicate an existing plan.
+  const planUnknown = !!billing && !billing.status
+  const ctaBlocked = cfg.ctaDisabled || !purchasable || alreadyThisPlan || hasLifetime || checkoutBusy || planUnknown
   const ctaText = alreadyThisPlan ? 'Your current plan'
     : hasLifetime ? 'You have Lifetime Pro'
     : checkoutBusy ? 'Opening secure checkout…'
+    : planUnknown && !cfg.ctaDisabled ? 'Checking your plan…'
     : cfg.ctaLabel
 
   async function handleCta() {

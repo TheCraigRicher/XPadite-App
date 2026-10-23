@@ -15,6 +15,7 @@ import { syncBillingConfig } from '@/lib/billing/config'
 import { getBillingStatus } from '@/lib/billing/entitlement'
 import { getStripe } from '@/lib/billing/stripe'
 import { grantFromCheckoutSession } from '@/lib/billing/sync'
+import { failureCode } from '@/lib/billing/diagnostics'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,7 +44,9 @@ export async function GET(req: NextRequest) {
     const status = await getBillingStatus(admin, user)
     return NextResponse.json(status, { headers: { 'Cache-Control': 'no-store' } })
   } catch (err) {
-    console.error('[Billing] status failed:', err instanceof Error ? err.message : 'unknown error')
-    return NextResponse.json({ error: 'Could not load billing status.' }, { status: 500 })
+    // Fixed codes only (e.g. project_mismatch, invalid_credentials, missing_table) — never keys, URLs or user data.
+    const code = failureCode(err)
+    console.error('[Billing] status failed:', code, err instanceof Error ? err.name : '')
+    return NextResponse.json({ error: 'Could not load billing status.', code }, { status: 500 })
   }
 }

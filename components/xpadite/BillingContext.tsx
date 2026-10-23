@@ -14,6 +14,8 @@ import { track } from '@/lib/analytics/client'
 
 interface BillingCtx {
   status: BillingStatus | null
+  /** Set when the plan could NOT be determined (server/database problem) and there is no earlier answer. null = fine or still loading. */
+  statusError: string | null
   refresh: (sessionId?: string) => Promise<BillingStatus | null>
   /** Starts Stripe Checkout for a plan. Resolves with an error message, or null once redirecting. */
   startCheckout: (planKey: BillingPlanKey, source?: 'settings' | 'website_link') => Promise<string | null>
@@ -74,17 +76,25 @@ export function describeStatus(s: BillingStatus | null): { title: string; detail
 export function BillingProvider({ children }: { children: ReactNode }) {
   const { setToast } = useApp()
   const [status, setStatus] = useState<BillingStatus | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
   const handledReturn = useRef(false)
 
   const refresh = useCallback(async (sessionId?: string) => {
     try {
       const qs = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
       const res = await fetch(`/api/billing/status${qs}`, { cache: 'no-store' })
-      if (!res.ok) return null
+      if (!res.ok) {
+        // The plan could not be determined — say so. Never fall back to "free"; a previous good answer is kept.
+        const body = (await res.json().catch(() => null)) as { code?: string } | null
+        setStatusError(body?.code ?? `http_${res.status}`)
+        return null
+      }
       const next = (await res.json()) as BillingStatus
       setStatus(next)
+      setStatusError(null)
       return next
     } catch {
+      setStatusError('network')
       return null // network blip — keep the last known status
     }
   }, [])
@@ -171,7 +181,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const value = useMemo(() => ({ status, refresh, startCheckout, openPortal }), [status, refresh, startCheckout, openPortal])
+  const value = useMemo(() => ({ status, statusError, refresh, startCheckout, openPortal }), [status, statusError, refresh, startCheckout, openPortal])
   return (
     <Ctx.Provider value={value}>
       {children}
@@ -271,6 +281,31 @@ export function BillingSummary({ isDark }: { isDark: boolean }) {
   const billing = useBilling()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The plan could not be determined: say so (with a retry) — never present a paying customer as Free / Trial.
+  if (billing && !billing.status && billing.statusError) {
+    return (
+      <div style={{
+        marginBottom: 14, padding: '12px 14px', borderRadius: 14,
+        background: isDark ? 'rgba(124,58,237,0.10)' : 'rgba(124,58,237,0.06)',
+        border: '1px solid rgba(239,68,68,0.45)',
+        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+      }}>
+        <div style={{ flex: 1, minWidth: 140 }}>
+          <p style={{ fontSize: 11, fontWeight: 600, opacity: 0.6, color: isDark ? '#fff' : '#111827' }}>Current plan</p>
+          <p style={{ fontSize: 14, fontWeight: 700, color: isDark ? '#fff' : '#111827' }}>Plan unavailable</p>
+          <p style={{ fontSize: 11.5, color: '#ef4444' }}>We couldn&apos;t load your subscription. Your plan has not changed.</p>
+        </div>
+        <button
+          disabled={busy}
+          onClick={async () => { setBusy(true); await billing.refresh(); setBusy(false) }}
+          style={{
+            padding: '8px 14px', borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: busy ? 'wait' : 'pointer',
+            color: 'white', border: 'none', background: 'linear-gradient(135deg, #9146FF 0%, #5D20BF 100%)', opacity: busy ? 0.7 : 1,
+          }}
+        >{busy ? 'Retrying…' : 'Retry'}</button>
+      </div>
+    )
+  }
   if (!billing?.status) return null
   const s = billing.status
   const { title, detail } = describeStatus(s)

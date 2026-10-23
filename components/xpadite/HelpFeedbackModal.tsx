@@ -151,15 +151,23 @@ export function HelpFeedbackModal({ onClose }: HelpFeedbackModalProps) {
       if (!res.ok) { setReviewMsg({ kind: 'error', text: res.message }); return }
       const wasUpdate = !!myReview
       setMyReview(res.review)
+      // Never report full success when the photo step failed: the review is saved, the photo is not.
+      if (res.photoSynced === false) {
+        setReviewMsg({
+          kind: 'error',
+          text: (res.held ? 'Your review was saved and is being checked before it appears publicly, but' : 'Your review was saved, but') +
+            ' your profile photo could not be updated. Please press the button again to retry.',
+        })
+        setToast('Review saved — photo not updated')
+        return
+      }
+      const noPhotoNote = showPhoto && res.photoReason === 'no_avatar'
+        ? ' You have no profile photo yet — add one in Profile, then save again to show it.' : ''
       if (res.held) {
-        setReviewMsg({ kind: 'held', text: 'Thanks! Your review was saved and is being checked before it appears publicly.' + (res.photoSynced === false ? ' (We could not update your photo — save again to retry.)' : '') })
+        setReviewMsg({ kind: 'held', text: 'Thanks! Your review was saved and is being checked before it appears publicly.' + noPhotoNote })
         setToast('Review received — thank you ✓')
       } else {
-        setReviewMsg({
-          kind: res.photoSynced === false ? 'held' : 'success',
-          text: (wasUpdate ? 'Your review was updated ✓' : 'Thank you! Your review is now live on the XPadite website ✓') +
-            (res.photoSynced === false ? ' We could not update your profile photo — please save again to retry.' : ''),
-        })
+        setReviewMsg({ kind: noPhotoNote ? 'held' : 'success', text: (wasUpdate ? 'Your review was updated ✓' : 'Thank you! Your review is now live on the XPadite website ✓') + noPhotoNote })
         setToast('Review published — thank you ✓')
       }
     } catch {

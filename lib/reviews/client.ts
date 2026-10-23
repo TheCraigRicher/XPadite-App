@@ -30,7 +30,7 @@ export interface MyReview {
 
 export type SubmitResult =
   /** photoSynced: true/false = the public photo copy was updated / the update failed; null = nothing to update. */
-  | { ok: true; review: MyReview; held: boolean; photoSynced: boolean | null }
+  | { ok: true; review: MyReview; held: boolean; photoSynced: boolean | null; photoReason?: 'no_avatar' | 'consent_off' }
   | { ok: false; code: string; message: string }
 
 /** Client-side check for fast feedback only — the database enforces the same rules and is the authority. */
@@ -81,17 +81,21 @@ export async function submitReview(supabase: SupabaseClient, input: ReviewInput)
   }
   if (error || !data) return { ok: false, ...mapSubmitError(error) }
   const review = data as MyReview
-  const photoSynced = input.showPhoto === undefined || review.show_profile_photo === undefined ? null : await syncReviewPhoto()
-  return { ok: true, review, held: review.status !== 'published', photoSynced }
+  const sync = input.showPhoto === undefined || review.show_profile_photo === undefined ? null : await syncReviewPhoto()
+  return { ok: true, review, held: review.status !== 'published', photoSynced: sync ? sync.ok : null, ...(sync?.reason ? { photoReason: sync.reason } : {}) }
 }
 
 /** Asks the server to bring the public copy of the author's photo in line with their saved consent (copy, or delete). */
-export async function syncReviewPhoto(): Promise<boolean> {
+export async function syncReviewPhoto(): Promise<{ ok: boolean; reason?: 'no_avatar' | 'consent_off' }> {
   try {
     const res = await fetch('/api/reviews/photo', { method: 'POST' })
-    return res.ok
+    if (!res.ok) return { ok: false }
+    let body: { photo?: boolean; reason?: string } | null = null
+    try { body = await res.json() } catch { /* an unreadable body still means the request succeeded */ }
+    // ok:true with photo:false and reason "no_avatar" = the choice is saved but there is no profile photo to show.
+    return body?.reason === 'no_avatar' ? { ok: true, reason: 'no_avatar' } : { ok: true }
   } catch {
-    return false
+    return { ok: false }
   }
 }
 

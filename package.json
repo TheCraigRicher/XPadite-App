@@ -8,7 +8,8 @@
     "start": "node --use-system-ca node_modules/next/dist/bin/next start",
     "lint": "eslint",
     "test:billing": "node --test \"tests/billing/*.test.cjs\"",
-    "test:journal": "node --test \"tests/journal/*.test.cjs\""
+    "test:journal": "node --test \"tests/journal/*.test.cjs\"",
+    "test:reviews": "node --test \"tests/reviews/*.test.cjs\""
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

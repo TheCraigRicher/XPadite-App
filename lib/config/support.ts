@@ -28,7 +28,6 @@ export const FEEDBACK_CATEGORIES = [
   'Other',
 ] as const
 
-// The XPadite public reviews page (external website, built separately).
-// Leave empty until that page exists — Rate Us stays disabled rather than
-// linking to a guessed/dead URL.
-export const XPADITE_REVIEW_URL = ''
+// The XPadite public reviews page on the Website. Reviews are SUBMITTED inside the App (Help & Feedback → Rate Us);
+// this link is only for reading the published reviews.
+export const XPADITE_REVIEW_URL = 'https://www.xpadite.com/reviews'

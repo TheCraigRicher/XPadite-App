@@ -49,6 +49,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unknown or unavailable plan' }, { status: 400 })
   }
   const plan = BILLING_PLANS[body.planKey]
+  if (plan.retired) {
+    // e.g. 3-Year Pro: historical purchases/entitlements stay valid, but nothing new is sold.
+    return NextResponse.json({ error: 'This plan is no longer available for new purchases.', code: 'plan_retired' }, { status: 410 })
+  }
 
   const admin = (() => { try { return createAdminClient() } catch { return null } })()
   if (!admin) return NextResponse.json({ error: 'Billing is not configured on the server.' }, { status: 500 })

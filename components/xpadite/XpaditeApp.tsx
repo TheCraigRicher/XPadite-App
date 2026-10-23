@@ -1288,7 +1288,7 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
         onViewPlans={() => { setProfileOpen(false); setSettingsOpen(true) }}
         onOpenProfile={() => { setSettingsOpen(false); setProfileOpen(true) }}
         onOpenHelp={() => { setSettingsOpen(false); setProfileOpen(false); setHelpOpen(true) }}
-        priceLine={`Pro Monthly ${PLAN_CONFIGS['pro-monthly'].price}/mo · Yearly ${PLAN_CONFIGS['pro-yearly'].price}/yr · 3-Year ${PLAN_CONFIGS['3year-pro'].price} · Lifetime ${PLAN_CONFIGS['ltd'].price}`}
+        priceLine={`Pro Monthly ${PLAN_CONFIGS['pro-monthly'].price}/mo · Yearly ${PLAN_CONFIGS['pro-yearly'].price}/yr · 6-Month ${PLAN_CONFIGS['pro-6month'].price} · Lifetime ${PLAN_CONFIGS['ltd'].price}`}
       />
 
       {whatsNewOpen && <WhatsNewModal onClose={() => setWhatsNewOpen(false)} />}

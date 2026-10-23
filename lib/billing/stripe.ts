@@ -35,10 +35,16 @@ export function getPriceId(planKey: BillingPlanKey): string {
   return id
 }
 
-/** Reverse lookup: Stripe Price ID → our plan key (null for unknown/foreign prices). */
+/**
+ * Reverse lookup: Stripe Price ID → our plan key (null for unknown/foreign prices).
+ * Matches the plan's current price AND any legacy prices listed in its legacyPriceEnv, so subscriptions bought at an
+ * older price (e.g. the former CA$89.99 yearly) keep syncing to the right plan. Legacy IDs never start a Checkout.
+ */
 export function planKeyForPriceId(priceId: string): BillingPlanKey | null {
   for (const def of Object.values(BILLING_PLANS)) {
     if (process.env[def.priceEnv] === priceId) return def.key
+    const legacy = def.legacyPriceEnv ? (process.env[def.legacyPriceEnv] ?? '').split(',').map(x => x.trim()).filter(Boolean) : []
+    if (legacy.includes(priceId)) return def.key
   }
   return null
 }
@@ -62,6 +68,8 @@ export async function verifyPlanPrice(planKey: BillingPlanKey): Promise<string> 
   const isRecurring = price.type === 'recurring'
   if ((def.mode === 'subscription') !== isRecurring) throw new Error(`Price for ${planKey} has the wrong billing type`)
   if (def.interval && price.recurring?.interval !== def.interval) throw new Error(`Price for ${planKey} has the wrong interval`)
+  // The interval COUNT matters: a 6-month price is `month x 6`, and must never be accepted as the monthly price (or vice versa).
+  if (isRecurring && (price.recurring?.interval_count ?? 1) !== (def.intervalCount ?? 1)) throw new Error(`Price for ${planKey} has the wrong billing period`)
   return priceId
 }
 

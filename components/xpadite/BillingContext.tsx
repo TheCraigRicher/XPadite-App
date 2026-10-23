@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useApp } from './AppContext'
 import type { BillingStatus } from '@/lib/billing/types'
-import type { BillingPlanKey } from '@/lib/billing/plans'
+import { isPurchasablePlanKey, type BillingPlanKey } from '@/lib/billing/plans'
 import { parsePlan } from '@/lib/billing/intent'
 import { track } from '@/lib/analytics/client'
 
@@ -30,6 +30,7 @@ export function useBilling(): BillingCtx | null {
 
 const PLAN_LABELS: Record<BillingPlanKey, string> = {
   'pro-monthly': 'Pro Monthly',
+  'pro-6month': 'Pro 6-Month',
   'pro-yearly': 'Pro Yearly',
   '3year-pro': '3-Year Pro',
   'ltd': 'Lifetime Pro',
@@ -216,7 +217,7 @@ Choose a plan from Settings → Subscription Plan.`)
 Nothing more to buy — enjoy XPadite!`)
       return
     }
-    const isSubPlan = plan === 'pro-monthly' || plan === 'pro-yearly'
+    const isSubPlan = plan === 'pro-monthly' || plan === 'pro-6month' || plan === 'pro-yearly'
     if (status.state === 'paid' && status.plan === plan && isSubPlan) {
       setToast(`~You're already on ${planLabel(plan)}
 Manage it from Settings → Subscription Plan.`)
@@ -225,6 +226,13 @@ Manage it from Settings → Subscription Plan.`)
     if (status.state === 'paid' && status.plan === '3year-pro' && plan === '3year-pro') {
       setToast(`~You already have 3-Year Pro
 Your access is active.`)
+      return
+    }
+
+    // Retired offers (3-Year Pro) are no longer sold; the server would refuse anyway, so say so plainly.
+    if (!isPurchasablePlanKey(plan)) {
+      setToast(`~That plan is no longer offered
+Choose a plan from Settings → Subscription Plan.`)
       return
     }
 

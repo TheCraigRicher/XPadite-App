@@ -78,6 +78,16 @@ export async function DELETE() {
     }
   }
 
+  // 3b. The PUBLIC review-photo copy (if the user showed their photo with a review) is not covered by the cascade either.
+  // Best-effort, same rule as the avatar: never blocks the deletion.
+  try {
+    const { data: reviewRow } = await admin.from('reviews').select('profile_photo_path').eq('user_id', user.id).maybeSingle()
+    const photoPath = (reviewRow as { profile_photo_path?: string | null } | null)?.profile_photo_path
+    if (photoPath) await admin.storage.from('review-photos').remove([photoPath])
+  } catch (err) {
+    console.error('[Account Delete] Review photo cleanup failed (continuing with deletion):', err)
+  }
+
   // 4. Delete the auth user — id comes only from the verified session above.
   // Postgres cascade removes the rest of this user's rows automatically.
   const { error: deleteError } = await admin.auth.admin.deleteUser(user.id)

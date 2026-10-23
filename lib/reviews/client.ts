@@ -10,6 +10,8 @@ export interface ReviewInput {
   rating: number
   title?: string
   profession?: string
+  /** Show the author's XPadite profile photo next to the public review. Omit to leave the saved choice unchanged. */
+  showPhoto?: boolean
   body: string
 }
 
@@ -18,6 +20,8 @@ export interface MyReview {
   rating: number
   title: string | null
   profession: string | null
+  /** Author's consent to show their profile photo publicly (absent until migration 020 is applied). */
+  show_profile_photo?: boolean
   body: string
   display_name: string
   status: 'published' | 'pending' | 'rejected'
@@ -25,7 +29,8 @@ export interface MyReview {
 }
 
 export type SubmitResult =
-  | { ok: true; review: MyReview; held: boolean }
+  /** photoSynced: true/false = the public photo copy was updated / the update failed; null = nothing to update. */
+  | { ok: true; review: MyReview; held: boolean; photoSynced: boolean | null }
   | { ok: false; code: string; message: string }
 
 /** Client-side check for fast feedback only — the database enforces the same rules and is the authority. */
@@ -62,24 +67,40 @@ export function isEligibleUser(user: { email_confirmed_at?: string | null } | nu
 export async function submitReview(supabase: SupabaseClient, input: ReviewInput): Promise<SubmitResult> {
   const invalid = validateReview(input)
   if (invalid) return { ok: false, code: 'invalid', message: invalid }
-  const { data, error } = await supabase.rpc('submit_review', {
+  const base = {
     p_rating: input.rating,
     p_title: input.title?.trim() || null,
     p_body: input.body.trim(),
     p_source: 'app',
     p_profession: input.profession?.trim() || null,
-  })
+  }
+  let { data, error } = await supabase.rpc('submit_review', input.showPhoto === undefined ? base : { ...base, p_show_photo: input.showPhoto })
+  // Database not yet on migration 020 (no p_show_photo): save the review without the photo choice rather than failing.
+  if (error && input.showPhoto !== undefined && /PGRST202|p_show_photo|submit_review/i.test(`${error.code ?? ''} ${error.message ?? ''}`)) {
+    ;({ data, error } = await supabase.rpc('submit_review', base))
+  }
   if (error || !data) return { ok: false, ...mapSubmitError(error) }
   const review = data as MyReview
-  return { ok: true, review, held: review.status !== 'published' }
+  const photoSynced = input.showPhoto === undefined || review.show_profile_photo === undefined ? null : await syncReviewPhoto()
+  return { ok: true, review, held: review.status !== 'published', photoSynced }
+}
+
+/** Asks the server to bring the public copy of the author's photo in line with their saved consent (copy, or delete). */
+export async function syncReviewPhoto(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/reviews/photo', { method: 'POST' })
+    return res.ok
+  } catch {
+    return false
+  }
 }
 
 /** The signed-in user's own review, if any (RLS returns only their row). Null when none or when reviews aren't set up yet. */
 export async function fetchMyReview(supabase: SupabaseClient): Promise<MyReview | null> {
-  const { data, error } = await supabase
-    .from('reviews')
-    .select('id, rating, title, profession, body, display_name, status, updated_at')
-    .maybeSingle()
+  const query = (cols: string) => supabase.from('reviews').select(cols).maybeSingle()
+  let { data, error } = await query('id, rating, title, profession, show_profile_photo, body, display_name, status, updated_at')
+  // Database not yet on migration 020: read without the photo column.
+  if (error) ({ data, error } = await query('id, rating, title, profession, body, display_name, status, updated_at'))
   if (error || !data) return null
-  return data as MyReview
+  return data as unknown as MyReview
 }

@@ -115,5 +115,9 @@ test('migration 019: hardening present, no destructive statements on data', () =
     .replace(/create or replace function public\.submit_review\([\s\S]*?\n\$\$;/, '')
     .replace(/create or replace function public\.admin_set_review_status\([\s\S]*?\n\$\$;/, '')
   assert.ok(!/\bdelete\s+from\b|\btruncate\b|\bdrop\s+table\b|\bupdate\s+public\.reviews\b|\binsert\s+into\s+public\.reviews\b/i.test(outside), 'no data-changing statements outside the guarded functions')
-  assert.ok(/security definer set search_path = public/.test(m))
+  const definers = m.match(/security definer set search_path = ''/g) || []
+  assert.equal(definers.length, 3, 'all three SECURITY DEFINER functions pin an empty search_path')
+  assert.ok(!/security definer set search_path = public/.test(m))
+  assert.ok(/revoke all on function public\.is_review_admin\(\) from public, anon/.test(m), 'is_review_admin not callable by anon')
+  assert.ok(/^begin;/m.test(m) && /^commit;/m.test(m), 'single transaction')
 })

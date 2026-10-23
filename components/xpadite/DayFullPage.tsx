@@ -66,14 +66,24 @@ function getSessionDurationMs(startTs: number, endTs: number): number {
 
 interface DayFullPageProps {
   onClose: () => void
+  /** Open on this day ("YYYY-MM-DD", the same key calData uses) instead of today. Prev/next navigation still works from there. */
+  initialDateKey?: string
 }
 
-export function DayFullPage({ onClose }: DayFullPageProps) {
+// "YYYY-MM-DD" (month 1-based, as dateKey() writes it) → a local-midnight Date; null for anything malformed.
+export function parseDateKey(key: string | undefined): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key ?? '')
+  if (!m) return null
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  return d.getFullYear() === Number(m[1]) && d.getMonth() === Number(m[2]) - 1 && d.getDate() === Number(m[3]) ? d : null
+}
+
+export function DayFullPage({ onClose, initialDateKey }: DayFullPageProps) {
   const { calData, activities, isDark, progressColor: _rawColor, effectiveTimezone } = useApp()
   const progressColor = resolveProgressColor(_rawColor, isDark)
   const firstName = useDisplayFirstName()
 
-  const [selectedDate, setSelectedDate] = useState(() => todayDateInTz(effectiveTimezone))
+  const [selectedDate, setSelectedDate] = useState(() => parseDateKey(initialDateKey) ?? todayDateInTz(effectiveTimezone))
   // Blocks navigating into a future date with no historical data. Timezone-
   // aware (not the browser's raw local clock), matching MonthFullPage.tsx.
   const isToday = isTodayDate(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), effectiveTimezone)
@@ -624,6 +634,36 @@ export function DayFullPage({ onClose }: DayFullPageProps) {
           </div>
 
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Standalone entry for a chosen day ────────────────────────────────────────
+// The Monthly calendar's day drill-down (Task Manager day → Dashboard) used to open the older DayDashboardModal. This
+// wraps THIS dashboard in the same backdrop+card shell Analytics uses for it, so both entry points show one design.
+// Same stacking as DayDashboardModal (z-[51]); Escape closes it, like the dashboard it replaces.
+export function DayFullPageModal({ dateKey: key, onClose }: { dateKey: string; onClose: () => void }) {
+  const { isDark } = useApp()
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  return (
+    <div
+      className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[51] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-3 sm:pt-4"
+      style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
+    >
+      <div
+        className="flex flex-col w-full h-full sm:h-auto sm:rounded-2xl sm:shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] sm:mb-6"
+        style={{
+          background: 'var(--xp-bg)',
+          border: isDark ? '0.5px solid rgba(124,58,237,0.22)' : '0.5px solid var(--xp-bdr2)',
+          boxShadow: isDark ? '0 30px 70px rgba(0,0,0,0.75)' : '0 20px 50px rgba(0,0,0,0.12)',
+        }}
+      >
+        <DayFullPage onClose={onClose} initialDateKey={key} />
       </div>
     </div>
   )

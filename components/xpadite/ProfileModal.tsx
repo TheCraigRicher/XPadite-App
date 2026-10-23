@@ -215,9 +215,15 @@ export function ProfileModal({
   const [activeSecurityModal, setActiveSecurityModal] = useState<'email' | 'password' | 'delete' | null>(null)
   const [planOpen, setPlanOpen] = useState(false)
   const billing = useBilling()
-  const billingInfo = billing?.status
-    ? { ...describeStatus(billing.status), badge: billing.status.state === 'paid' ? 'Pro' : billing.status.state === 'trial' ? 'Trial' : 'Expired' }
+  // Same source and labels as Settings (BillingContext). While the plan is still loading (or a check failed) we show
+  // "Loading plan…", never "Free": a paying customer must not be shown as Free just because the status isn't in yet.
+  // "XPadite Free" remains only for the (unreachable in-app) case of no billing provider at all.
+  const billingInfo = billing
+    ? { ...describeStatus(billing.status), badge: !billing.status ? '…' : billing.status.state === 'paid' ? 'Pro' : billing.status.state === 'trial' ? 'Trial' : 'Expired' }
     : null
+  // Re-check the plan whenever Profile opens, so a purchase or change made elsewhere shows up without a page reload.
+  const refreshBilling = billing?.refresh
+  useEffect(() => { void refreshBilling?.() }, [refreshBilling])
   const [planInfoTarget, setPlanInfoTarget] = useState<string | null>(null)
 
   // Backdrop click never closes Profile — it only gives a brief, subtle

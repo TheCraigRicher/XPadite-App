@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test:billing": "node --test \"tests/billing/*.test.cjs\"",
     "test:journal": "node --test \"tests/journal/*.test.cjs\"",
-    "test:reviews": "node --test \"tests/reviews/*.test.cjs\""
+    "test:reviews": "node --test \"tests/reviews/*.test.cjs\"",
+    "test:analytics": "node --test \"tests/analytics/*.test.cjs\""
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
@@ -35,6 +36,7 @@
     "posthog-node": "5.56.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "sharp": "^0.35.5",
     "stripe": "^23.0.0",
     "zod": "^4.4.3"
   },

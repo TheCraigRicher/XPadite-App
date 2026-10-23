@@ -91,11 +91,19 @@ export function BillingProvider({ children }: { children: ReactNode }) {
 
   // Initial load, plus re-check whenever the app regains focus (covers returning
   // from Stripe in another browser tab / the installed PWA after paying).
+  // A failed first check (e.g. the session cookie not ready yet) is retried a few times instead of leaving the plan
+  // unknown until the user happens to refocus the window.
   useEffect(() => {
-    const t = setTimeout(() => { void refresh() }, 0)
+    let cancelled = false
+    const t = setTimeout(async () => {
+      for (let i = 0; i < 4 && !cancelled; i++) {
+        if (await refresh()) return
+        await new Promise(r => setTimeout(r, 1500 * (i + 1)))
+      }
+    }, 0)
     const onVisible = () => { if (document.visibilityState === 'visible') void refresh() }
     document.addEventListener('visibilitychange', onVisible)
-    return () => { clearTimeout(t); document.removeEventListener('visibilitychange', onVisible) }
+    return () => { cancelled = true; clearTimeout(t); document.removeEventListener('visibilitychange', onVisible) }
   }, [refresh])
 
   // Returning from Stripe Checkout: /app?checkout=success&session_id=cs_...

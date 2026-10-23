@@ -99,6 +99,7 @@ export function HelpFeedbackModal({ onClose }: HelpFeedbackModalProps) {
   const [reviewTitle, setReviewTitle] = useState('')
   const [profession, setProfession] = useState('')
   const [reviewBody, setReviewBody] = useState('')
+  const [showPhoto, setShowPhoto] = useState(true) // new reviews default to ON (clearly disclosed); an existing review loads its saved choice
   const [eligibility, setEligibility] = useState<'loading' | 'ok' | 'signed_out' | 'unverified'>('loading')
   const [myReview, setMyReview] = useState<MyReview | null>(null)
   const [reviewMsg, setReviewMsg] = useState<{ kind: 'error' | 'success' | 'held'; text: string } | null>(null)
@@ -131,6 +132,7 @@ export function HelpFeedbackModal({ onClose }: HelpFeedbackModalProps) {
         setReviewTitle(mine.title ?? '')
         setProfession(mine.profession ?? '')
         setReviewBody(mine.body)
+        if (typeof mine.show_profile_photo === 'boolean') setShowPhoto(mine.show_profile_photo)
       } catch {
         setEligibility('ok') // let the server be the judge; it will report a precise error
       }
@@ -145,15 +147,19 @@ export function HelpFeedbackModal({ onClose }: HelpFeedbackModalProps) {
     setReviewSubmitting(true)
     setReviewMsg(null)
     try {
-      const res = await submitReview(createClient(), { rating, title: reviewTitle, profession, body: reviewBody })
+      const res = await submitReview(createClient(), { rating, title: reviewTitle, profession, showPhoto, body: reviewBody })
       if (!res.ok) { setReviewMsg({ kind: 'error', text: res.message }); return }
       const wasUpdate = !!myReview
       setMyReview(res.review)
       if (res.held) {
-        setReviewMsg({ kind: 'held', text: 'Thanks! Your review was saved and is being checked before it appears publicly.' })
+        setReviewMsg({ kind: 'held', text: 'Thanks! Your review was saved and is being checked before it appears publicly.' + (res.photoSynced === false ? ' (We could not update your photo — save again to retry.)' : '') })
         setToast('Review received — thank you ✓')
       } else {
-        setReviewMsg({ kind: 'success', text: wasUpdate ? 'Your review was updated ✓' : 'Thank you! Your review is now live on the XPadite website ✓' })
+        setReviewMsg({
+          kind: res.photoSynced === false ? 'held' : 'success',
+          text: (wasUpdate ? 'Your review was updated ✓' : 'Thank you! Your review is now live on the XPadite website ✓') +
+            (res.photoSynced === false ? ' We could not update your profile photo — please save again to retry.' : ''),
+        })
         setToast('Review published — thank you ✓')
       }
     } catch {
@@ -387,6 +393,23 @@ export function HelpFeedbackModal({ onClose }: HelpFeedbackModalProps) {
       <Field label="Profession (optional)">
         <input type="text" value={profession} onChange={e => setProfession(e.target.value)} maxLength={REVIEW_LIMITS.professionMax} placeholder="e.g. Student, Freelancer" style={inputStyle} />
       </Field>
+
+      <label className="flex items-start gap-2.5 mb-3.5 cursor-pointer" htmlFor="xp-review-show-photo">
+        <input
+          id="xp-review-show-photo"
+          type="checkbox"
+          checked={showPhoto}
+          onChange={e => setShowPhoto(e.target.checked)}
+          className="mt-0.5 flex-shrink-0"
+          style={{ width: 16, height: 16, accentColor: '#7c3aed' }}
+        />
+        <span>
+          <span className="block text-[12px] font-semibold" style={{ color: 'var(--xp-txt2)' }}>Display my profile photo with my review</span>
+          <span className="block text-[11px] mt-0.5 leading-snug" style={{ color: 'var(--xp-txt3)' }}>
+            Your XPadite profile photo will appear publicly alongside your review. Uncheck to keep it private.
+          </span>
+        </span>
+      </label>
 
       <Field label="Your review" required>
         <textarea

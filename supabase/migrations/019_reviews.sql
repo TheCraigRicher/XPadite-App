@@ -16,7 +16,16 @@
 -- HOW TO APPLY: Supabase Dashboard → SQL Editor → paste → Run. (Not applied automatically; needs owner approval.)
 -- ROLLBACK: nothing to roll back for data. To undo the hardening only:
 --   grant insert, update, delete on public.public_reviews to anon, authenticated;   -- NOT recommended
+-- SECURITY NOTES (audited):
+--   • Every SECURITY DEFINER function pins `search_path = ''` and schema-qualifies everything it touches.
+--   • EXECUTE is revoked from PUBLIC and anon on every function (Supabase's default privileges would otherwise grant it);
+--     the internal helpers are not callable by clients at all. Only `authenticated` may call submit_review,
+--     admin_set_review_status (which still requires a row in review_admins) and is_review_admin (needed by the RLS policy).
+--   • The legacy 4-argument submit_review overload (Website 015) is dropped; nothing in the database depends on it.
+--   • The whole file runs in ONE transaction: if any statement fails, nothing is changed.
 -- ─────────────────────────────────────────────────────────────────────────────
+
+begin;
 
 -- ─── 1. Tables ───────────────────────────────────────────────────────────────
 
@@ -61,8 +70,11 @@ grant select on public.reviews to authenticated;               -- still row-filt
 
 create or replace function public.is_review_admin()
 returns boolean
-language sql stable security definer set search_path = public
+language sql stable security definer set search_path = ''
 as $$ select exists (select 1 from public.review_admins where user_id = auth.uid()) $$;
+
+revoke all on function public.is_review_admin() from public, anon;
+grant execute on function public.is_review_admin() to authenticated;   -- the RLS policy below calls it as the signed-in user
 
 drop policy if exists "reviews_select_own_or_admin" on public.reviews;
 create policy "reviews_select_own_or_admin"
@@ -171,7 +183,7 @@ create or replace function public.submit_review(
   p_profession text default null
 )
 returns jsonb
-language plpgsql security definer set search_path = public
+language plpgsql security definer set search_path = ''
 as $$
 declare
   v_uid      uuid := auth.uid();
@@ -292,7 +304,7 @@ create or replace function public.admin_set_review_status(
   p_reason    text default null
 )
 returns jsonb
-language plpgsql security definer set search_path = public
+language plpgsql security definer set search_path = ''
 as $$
 declare
   v_row public.reviews%rowtype;
@@ -322,6 +334,8 @@ $$;
 
 revoke all on function public.admin_set_review_status(uuid, text, text) from public, anon;
 grant execute on function public.admin_set_review_status(uuid, text, text) to authenticated;
+
+commit;
 
 
 -- ─── Administrators ──────────────────────────────────────────────────────────

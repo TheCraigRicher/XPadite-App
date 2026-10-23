@@ -17,12 +17,21 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "XPadite",
   description: "Your year at a glance — track, plan, and share progress.",
+  applicationName: "XPadite",
   manifest: "/manifest.json",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  // iOS "Add to Home Screen". The status bar is solid ("black"), NOT "black-translucent": a translucent bar lets the
+  // page draw underneath the clock/notch, and the App's fixed headers have no top safe-area padding.
+  appleWebApp: { capable: true, title: "XPadite", statusBarStyle: "black" },
   other: {
-    "mobile-web-app-capable": "yes",
-    "apple-mobile-web-app-capable": "yes",
-    "apple-mobile-web-app-status-bar-style": "black-translucent",
-    "apple-mobile-web-app-title": "XPadite",
+    "apple-mobile-web-app-capable": "yes", // older iOS (the Next appleWebApp option emits the newer mobile-web-app-capable)
   },
 };
 

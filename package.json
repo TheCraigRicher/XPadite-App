@@ -10,7 +10,8 @@
     "test:billing": "node --test \"tests/billing/*.test.cjs\"",
     "test:journal": "node --test \"tests/journal/*.test.cjs\"",
     "test:reviews": "node --test \"tests/reviews/*.test.cjs\"",
-    "test:analytics": "node --test \"tests/analytics/*.test.cjs\""
+    "test:analytics": "node --test \"tests/analytics/*.test.cjs\"",
+    "test:pwa": "node --test \"tests/pwa/*.test.cjs\""
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

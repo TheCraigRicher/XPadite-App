@@ -29,6 +29,8 @@ import { useDisplayFirstName } from './useDisplayFirstName'
 import { AchievementBanner, PERFORMANCE_TIERS, getTaskPerformanceLevel, DonutChart, TASK_GRAD_STRINGS } from './DayDashboardModal'
 import { ProductiveDot } from './LegendRow'
 import { TrendBarChart, type TrendBucket } from './TrendBarChart'
+import { AICoachMenuIcon } from './AppSidebar'
+import { PremiumUpgradeModal } from './PremiumUpgradeModal'
 
 type ActivityRow = { name: string; color: string; ms: number }
 type SessionRow = { actName: string; actColor: string; durationMs: number; startTs: number }
@@ -68,6 +70,8 @@ interface DayFullPageProps {
   onClose: () => void
   /** Open on this day ("YYYY-MM-DD", the same key calData uses) instead of today. Prev/next navigation still works from there. */
   initialDateKey?: string
+  /** When given, the header shows the "AI Insights" pill (the control the older dashboard had) and calls this on click. */
+  onAiInsights?: () => void
 }
 
 // "YYYY-MM-DD" (month 1-based, as dateKey() writes it) → a local-midnight Date; null for anything malformed.
@@ -78,7 +82,7 @@ export function parseDateKey(key: string | undefined): Date | null {
   return d.getFullYear() === Number(m[1]) && d.getMonth() === Number(m[2]) - 1 && d.getDate() === Number(m[3]) ? d : null
 }
 
-export function DayFullPage({ onClose, initialDateKey }: DayFullPageProps) {
+export function DayFullPage({ onClose, initialDateKey, onAiInsights }: DayFullPageProps) {
   const { calData, activities, isDark, progressColor: _rawColor, effectiveTimezone } = useApp()
   const progressColor = resolveProgressColor(_rawColor, isDark)
   const firstName = useDisplayFirstName()
@@ -339,17 +343,31 @@ export function DayFullPage({ onClose, initialDateKey }: DayFullPageProps) {
           </span>
         </div>
 
-        {!isToday && (
-          <button
-            onClick={() => setSelectedDate(todayDateInTz(effectiveTimezone))}
-            className="absolute right-4 flex items-center flex-shrink-0 whitespace-nowrap"
-            style={{
-              top: '50%', transform: 'translateY(-50%)',
-              fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 20,
-              background: 'rgba(255,255,255,0.14)', color: '#ffffff', border: '0.5px solid rgba(255,255,255,0.28)',
-              cursor: 'pointer',
-            }}
-          >Today</button>
+        {(!isToday || onAiInsights) && (
+          <div className="absolute right-4 flex items-center gap-2 flex-shrink-0" style={{ top: '50%', transform: 'translateY(-50%)' }}>
+            {!isToday && (
+              <button
+                onClick={() => setSelectedDate(todayDateInTz(effectiveTimezone))}
+                className="flex items-center flex-shrink-0 whitespace-nowrap"
+                style={{
+                  fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 20,
+                  background: 'rgba(255,255,255,0.14)', color: '#ffffff', border: '0.5px solid rgba(255,255,255,0.28)',
+                  cursor: 'pointer',
+                }}
+              >Today</button>
+            )}
+            {onAiInsights && (
+              <button
+                onClick={onAiInsights}
+                aria-label="AI Insights"
+                className="flex items-center gap-1.5 text-[10px] sm:text-xs px-2 sm:px-3 py-1.5 rounded-full font-semibold hover:opacity-90 transition-opacity flex-shrink-0"
+                style={{ background: 'rgba(255,255,255,0.14)', border: '0.5px solid rgba(255,255,255,0.28)', color: '#ffffff', cursor: 'pointer' }}
+              >
+                <AICoachMenuIcon size={16} />
+                <span className="hidden sm:inline">AI Insights</span>
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -645,11 +663,13 @@ export function DayFullPage({ onClose, initialDateKey }: DayFullPageProps) {
 // Same stacking as DayDashboardModal (z-[51]); Escape closes it, like the dashboard it replaces.
 export function DayFullPageModal({ dateKey: key, onClose }: { dateKey: string; onClose: () => void }) {
   const { isDark } = useApp()
+  // "AI Insights" = the existing Unlock-AI upsell (PremiumUpgradeModal, also used by Analytics) — it was the older dashboard's header pill.
+  const [showAi, setShowAi] = useState(false)
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape' && !showAi) onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, showAi])
   return (
     <div
       className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[51] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-3 sm:pt-4"
@@ -663,8 +683,9 @@ export function DayFullPageModal({ dateKey: key, onClose }: { dateKey: string; o
           boxShadow: isDark ? '0 30px 70px rgba(0,0,0,0.75)' : '0 20px 50px rgba(0,0,0,0.12)',
         }}
       >
-        <DayFullPage onClose={onClose} initialDateKey={key} />
+        <DayFullPage onClose={onClose} initialDateKey={key} onAiInsights={() => setShowAi(true)} />
       </div>
+      {showAi && <PremiumUpgradeModal onClose={() => setShowAi(false)} />}
     </div>
   )
 }

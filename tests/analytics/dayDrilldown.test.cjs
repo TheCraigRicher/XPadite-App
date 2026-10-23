@@ -31,7 +31,7 @@ test('parseDateKey: malformed or impossible dates fall back (null) instead of sh
 test('DayFullPage: opens on the requested day; all data stays keyed to the selected day; default is still today', () => {
   assert.ok(/useState\(\(\) => parseDateKey\(initialDateKey\) \?\? todayDateInTz\(effectiveTimezone\)\)/.test(dfp))
   assert.ok(/const dayRecord = calData\[selectedKey\]/.test(dfp))
-  assert.ok(/<DayFullPage onClose=\{onClose\} initialDateKey=\{key\} \/>/.test(dfp))
+  assert.ok(/<DayFullPage onClose=\{onClose\} initialDateKey=\{key\}/.test(dfp))
 })
 
 test('Analytics → Today still renders DayFullPage with NO date (defaults to today)', () => {
@@ -68,7 +68,7 @@ test('legacy AnalyticsPage "today" view uses the same dashboard', () => {
 
 test('Back / Escape / × all close the dashboard to the day window underneath (as before); no click-outside dismissal', () => {
   const shell = dfp.slice(dfp.indexOf('export function DayFullPageModal'))
-  assert.ok(/e\.key === 'Escape'\) onClose\(\)/.test(shell))
+  assert.ok(/e\.key === 'Escape' && !showAi\) onClose\(\)/.test(shell))
   assert.ok(/<DayFullPage onClose=\{onClose\}/.test(shell))
   assert.ok(!/onClick/.test(shell.slice(0, shell.indexOf('<DayFullPage onClose'))), 'the backdrop has no click handler')
 })

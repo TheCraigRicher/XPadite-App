@@ -1,4 +1,4 @@
-// Monthly-calendar day drill-down → latest Daily Dashboard (DayFullPage). Source-level guards + the date parser.
+// ONE Daily Dashboard (DayFullPage) at every entry point. Source-level guards + the date parser.
 // (A real render needs the signed-in App; see the manual checklist in the release notes.)
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -10,6 +10,8 @@ const ROOT = path.resolve(__dirname, '..', '..')
 const read = rel => fs.readFileSync(path.join(ROOT, rel), 'utf8')
 const app = read('components/xpadite/XpaditeApp.tsx')
 const dfp = read('components/xpadite/DayFullPage.tsx')
+const am = read('components/xpadite/AnalyticsModal.tsx')
+const strip = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
 
 // Pull the pure parseDateKey out of DayFullPage.tsx and run it.
 const fnSrc = dfp.slice(dfp.indexOf('export function parseDateKey'), dfp.indexOf('export function DayFullPage('))
@@ -27,45 +29,69 @@ test('parseDateKey: malformed or impossible dates fall back (null) instead of sh
 })
 
 test('DayFullPage: opens on the requested day; all data stays keyed to the selected day; default is still today', () => {
-  assert.ok(/useState\(\(\) => parseDateKey\(initialDateKey\) \?\? todayDateInTz\(effectiveTimezone\)\)/.test(dfp), 'initial day = key, else today (unchanged normal behaviour)')
-  assert.ok(/const dayRecord = calData\[selectedKey\]/.test(dfp), 'sessions/tasks/pending come from the selected day only')
+  assert.ok(/useState\(\(\) => parseDateKey\(initialDateKey\) \?\? todayDateInTz\(effectiveTimezone\)\)/.test(dfp))
+  assert.ok(/const dayRecord = calData\[selectedKey\]/.test(dfp))
   assert.ok(/<DayFullPage onClose=\{onClose\} initialDateKey=\{key\} \/>/.test(dfp))
-  assert.ok(/initialDateKey\?: string/.test(dfp))
 })
 
-test('Analytics keeps rendering DayFullPage with NO date (today), exactly as before', () => {
-  const am = read('components/xpadite/AnalyticsModal.tsx')
+test('Analytics → Today still renders DayFullPage with NO date (defaults to today)', () => {
   assert.ok(/<DayFullPage onClose=\{\(\) => setOpenDashboard\(null\)\} \/>/.test(am))
 })
 
-test('routing: Monthly calendar drill-downs (Expandable Month, month zoom, Analytics) are flagged and open the latest dashboard', () => {
-  assert.equal((app.match(/fromMonthly: true/g) || []).length, 3, 'three monthly entry points flagged')
-  assert.ok(/onDayDoubleClick=\{\(key, month, day\) => \{ setAnalyticsOpen\(false\); setModalDay\(\{ key, month, day, fromMonthly: true \}\) \}\}/.test(app))
-  assert.ok(/dashboardDay\?\.fromMonthly && \(\s*<DayFullPageModal key=\{dashboardDay\.key\} dateKey=\{dashboardDay\.key\} onClose=\{\(\) => setDashboardDay\(null\)\} \/>/.test(app))
+test('main App: EVERY Dashboard action (main calendar, month zoom, Expandable Month, Analytics) opens the latest dashboard for the selected day', () => {
+  const code = strip(app)
+  assert.ok(!/DayDashboardModal/.test(code), 'the old dashboard is no longer rendered anywhere in the App shell')
+  assert.equal((code.match(/<DayFullPageModal/g) || []).length, 1, 'a single dashboard mount')
+  assert.ok(/\{dashboardDay && \(\s*<DayFullPageModal\s+key=\{dashboardDay\.key\}\s+dateKey=\{dashboardDay\.key\}/.test(code), 'opens on the selected day')
+  // the day window's Dashboard button hands over the day that was opened, from any calendar
+  assert.ok(/onDashboard=\{\(\) => \{[\s\S]*?setDashboardDay\(modalDay\)/.test(code))
+  // main calendar double-click still opens the Task Manager day window first (intermediate window preserved)
+  assert.ok(/<CalendarSection\s+onDayDoubleClick=\{\(key, month, day\) => setModalDay\(\{ key, month, day \}\)\}/.test(code))
+  assert.ok(/<DayModal\b/.test(code))
 })
 
-test('routing: other entry points (main calendar → Task Manager) keep the existing DayDashboardModal', () => {
-  assert.ok(/dashboardDay && !dashboardDay\.fromMonthly && \(\s*<DayDashboardModal/.test(app))
-  assert.ok(/onDayDoubleClick=\{\(key, month, day\) => setModalDay\(\{ key, month, day \}\)\}/.test(app), 'main calendar double-click is not flagged')
-  const ap = read('components/xpadite/AnalyticsPage.tsx')
-  assert.ok(ap.includes('<DayDashboardModal'), 'untouched')
+test('no component outside the dashboard family still uses the retired DayDashboardModal component', () => {
+  for (const f of fs.readdirSync(path.join(ROOT, 'components/xpadite')).filter(x => /\.tsx?$/.test(x))) {
+    const code = strip(read('components/xpadite/' + f))
+    assert.ok(!/<DayDashboardModal\b/.test(code) && !/import \{[^}]*\bDayDashboardModal\b[^}]*\}/.test(code), f)
+  }
+  const old = read('components/xpadite/DayDashboardModal.tsx')
+  assert.ok(!/export function DayDashboardModal/.test(old))
+  // the shared building blocks other dashboards import must still be there
+  for (const name of ['AchievementBanner', 'PERFORMANCE_TIERS', 'getTaskPerformanceLevel', 'DonutChart', 'TASK_GRAD_STRINGS']) assert.ok(new RegExp(`export (function|const) ${name}\\b`).test(old), name)
 })
 
-test('day navigation inside the Task Manager day keeps the drill-down flag (no silent fallback to the old dashboard)', () => {
-  assert.equal((app.match(/fromMonthly: modalDay\.fromMonthly/g) || []).length, 2, 'prev/next day and go-to-today both carry it')
+test('legacy AnalyticsPage "today" view uses the same dashboard', () => {
+  const ap = strip(read('components/xpadite/AnalyticsPage.tsx'))
+  assert.ok(/<DayFullPageModal dateKey=\{todK\} onClose=\{\(\) => setSubView\(null\)\} \/>/.test(ap) && !/DayDashboardModal/.test(ap))
 })
 
-test('back / close return to the day modal exactly like the dashboard they replace', () => {
-  assert.ok(/onDashboard=\{\(\) => \{[\s\S]*?setDashboardDay\(modalDay\)/.test(app), 'the day (with its flag) is what opens the dashboard')
-  assert.ok(/DayFullPageModal key=.*onClose=\{\(\) => setDashboardDay\(null\)\}/.test(app))
-  assert.ok(/e\.key === 'Escape'\) onClose\(\)/.test(dfp.slice(dfp.indexOf('export function DayFullPageModal'))), 'Escape closes, as the old dashboard did')
-  assert.ok(!/onClick=\{onClose\}[^>]*\n[^<]*backdrop/i.test(dfp), 'no click-outside dismissal introduced')
-})
-
-test('the shell matches the Analytics dashboard shell (one presentation), and no dashboard JSX was duplicated', () => {
+test('Back / Escape / × all close the dashboard to the day window underneath (as before); no click-outside dismissal', () => {
   const shell = dfp.slice(dfp.indexOf('export function DayFullPageModal'))
-  const am = read('components/xpadite/AnalyticsModal.tsx')
-  const sig = 'sm:rounded-2xl sm:shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] sm:mb-6'
-  assert.ok(shell.includes(sig) && am.includes(sig))
-  assert.equal((app.match(/<DayFullPageModal/g) || []).length, 1)
+  assert.ok(/e\.key === 'Escape'\) onClose\(\)/.test(shell))
+  assert.ok(/<DayFullPage onClose=\{onClose\}/.test(shell))
+  assert.ok(!/onClick/.test(shell.slice(0, shell.indexOf('<DayFullPage onClose'))), 'the backdrop has no click handler')
+})
+
+test('Analytics → Monthly: the day opened from its calendar remembers the month; closing returns to that month\'s calendar', () => {
+  const code = strip(app)
+  assert.ok(/setAnalyticsRestore\(null\); setAnalyticsOpen\(false\); setModalDay\(\{ key, month, day, fromAnalyticsMonth: month \}\)/.test(code))
+  assert.equal((code.match(/fromAnalyticsMonth: modalDay\.fromAnalyticsMonth/g) || []).length, 2, 'prev/next day and go-to-today keep it')
+  // day window closes normally → return; but NOT when it closed in order to navigate elsewhere (pending navigation)
+  assert.ok(/if \(pending\) \{[\s\S]*?pending\(\)\s*\} else \{\s*reopenAnalyticsMonth\(closing\)\s*\}/.test(code))
+  // dashboard closed while no day window is open (the dirty-guard path) → also return
+  assert.ok(/if \(!modalDay\) reopenAnalyticsMonth\(closing\)/.test(code))
+  assert.ok(/function reopenAnalyticsMonth\(day: ModalDay \| null \| undefined\) \{\s*if \(day\?\.fromAnalyticsMonth === undefined\) return/.test(code))
+  assert.ok(/function handleAnalyticsClose\(\) \{\s*setAnalyticsRestore\(null\)/.test(code), 'a normal close clears the restore')
+  // other entry points never set it
+  assert.equal((code.match(/fromAnalyticsMonth: month/g) || []).length, 1)
+  const modal = strip(am)
+  assert.ok(/restore\?: \{ month: number \}/.test(modal) && /\(restore \? 'monthly' : null\)/.test(modal))
+  assert.ok(/month=\{restore\?\.month \?\? today\.getMonth\(\)\}/.test(modal) && /initialView=\{restore \? 'calendar' : 'dashboard'\}/.test(modal))
+})
+
+test('normal Analytics opening is unaffected (no restore → Today/Weekly/Monthly/Yearly cards as before)', () => {
+  const modal = strip(am)
+  assert.ok(/month=\{restore\?\.month \?\? today\.getMonth\(\)\}/.test(modal))
+  assert.ok(/<AnalyticsModal\s+restore=\{analyticsRestore \?\? undefined\}/.test(strip(app)))
 })

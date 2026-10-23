@@ -5,7 +5,7 @@ import { trackFeature } from '@/lib/analytics/client'
 import { useApp } from './AppContext'
 import { formatMs, isProductiveActivity, APP_YEAR, MONTHS, todayKey, dateKey } from './utils'
 import { YearlyDashboardModal } from './YearlyDashboardModal'
-import { DayDashboardModal } from './DayDashboardModal'
+import { DayFullPageModal } from './DayFullPage'
 import { PremiumUpgradeModal } from './PremiumUpgradeModal'
 import type { CalendarData } from './types'
 import type { Activity } from './types'
@@ -856,13 +856,7 @@ export function AnalyticsPage({ onClose }: { onClose: () => void }) {
 
       {/* Stacked modals (z-50, later in DOM = on top) */}
       {subView === 'today' && (
-        <DayDashboardModal
-          dateKey={todK}
-          month={today.getMonth()}
-          day={today.getDate()}
-          onClose={() => setSubView(null)}
-          onBack={() => setSubView(null)}
-        />
+        <DayFullPageModal dateKey={todK} onClose={() => setSubView(null)} />
       )}
       {subView === 'yearly' && (
         <YearlyDashboardModal onClose={() => setSubView(null)} />

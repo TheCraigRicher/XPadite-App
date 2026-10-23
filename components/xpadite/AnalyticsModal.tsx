@@ -964,7 +964,12 @@ function NextTargetCard({ target, onOpenPremium, isDark }: { target: { label: st
 
 // ─── AnalyticsModal (main export) ──────────────────────────────────────────────
 
-export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => void; onDayDoubleClick?: (key: string, month: number, day: number) => void }) {
+export function AnalyticsModal({ onClose, onDayDoubleClick, restore }: {
+  onClose: () => void
+  onDayDoubleClick?: (key: string, month: number, day: number) => void
+  /** Reopen straight on Monthly's calendar for this month (returning from a day opened out of that calendar). */
+  restore?: { month: number }
+}) {
   const { isDark, calData, activities, progressColor: _rawProgressColor } = useApp()
   const progressColor = resolveProgressColor(_rawProgressColor, isDark)
   useEffect(() => { trackFeature('analytics_dashboard') }, []) // analytics: dashboard opened (no-op without consent)
@@ -994,7 +999,7 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
 
   const [selectedTimeframe, setSelectedTimeframe] = useState<Timeframe>('today')
   const [showPremium, setShowPremium] = useState(false)
-  const [openDashboard, setOpenDashboard] = useState<'today' | 'weekly' | 'monthly' | 'yearly' | null>(null)
+  const [openDashboard, setOpenDashboard] = useState<'today' | 'weekly' | 'monthly' | 'yearly' | null>(restore ? 'monthly' : null)
 
   function handleTimeframeSelect(id: Timeframe) {
     setSelectedTimeframe(id)
@@ -1467,8 +1472,8 @@ export function AnalyticsModal({ onClose, onDayDoubleClick }: { onClose: () => v
             }}
           >
             <MonthFullPage
-              month={today.getMonth()}
-              initialView="dashboard"
+              month={restore?.month ?? today.getMonth()}
+              initialView={restore ? 'calendar' : 'dashboard'}
               embedded
               onClose={() => setOpenDashboard(null)}
               onDayDoubleClick={onDayDoubleClick}

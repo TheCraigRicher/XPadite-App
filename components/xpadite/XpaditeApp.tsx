@@ -11,7 +11,6 @@ import { CalendarSection } from './CalendarSection'
 import { DayModal } from './DayModal'
 import { MonthZoomModal } from './MonthZoomModal'
 import { MonthFullPage } from './MonthFullPage'
-import { DayDashboardModal } from './DayDashboardModal'
 import { DayFullPageModal } from './DayFullPage'
 import { AnalyticsModal } from './AnalyticsModal'
 import { GoalManagerModal } from './GoalManagerModal'
@@ -661,8 +660,9 @@ function MobileMoreView({ onGallery, onSettings }: { onGallery: () => void; onSe
 
 // ─── ThemedApp ────────────────────────────────────────────────────────────────
 
-// fromMonthly: opened by double-clicking a date in a MONTHLY calendar (Expandable Month, month zoom, Analytics) → its Dashboard button shows the latest Daily Dashboard.
-interface ModalDay { key: string; month: number; day: number; skipAnim?: boolean; fromMonthly?: boolean }
+// fromAnalyticsMonth: the day was opened by double-clicking a date in Analytics → Monthly's calendar; when the day window / dashboard
+// closes, Analytics reopens on that month's calendar (see analyticsRestore). Every Daily Dashboard is the latest one (DayFullPage).
+interface ModalDay { key: string; month: number; day: number; skipAnim?: boolean; fromAnalyticsMonth?: number }
 
 function ThemedApp(_props: XpaditeAppProps) {
   const { isDark, toast, setToast, legendVisible, effectiveTimezone } = useApp()
@@ -674,6 +674,7 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [fullPageMonth, setFullPageMonth]           = useState<number | null>(null)
   const [motivationOpen, setMotivationOpen]             = useState(false)
   const [analyticsOpen, setAnalyticsOpen]               = useState(false)
+  const [analyticsRestore, setAnalyticsRestore]         = useState<{ month: number } | null>(null)
   const [goalManagerOpen, setGoalManagerOpen]           = useState(false)
   const [aiCoachOpen, setAICoachOpen]                   = useState(false)
   const [aiCoachMotivate, setAICoachMotivate]           = useState(false)
@@ -826,7 +827,15 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
   }
 
   function handleAnalyticsClose() {
+    setAnalyticsRestore(null)
     setAnalyticsOpen(false)
+  }
+
+  // Back to where the user came from: Analytics → Monthly calendar, on the month they double-clicked in.
+  function reopenAnalyticsMonth(day: ModalDay | null | undefined) {
+    if (day?.fromAnalyticsMonth === undefined) return
+    setAnalyticsRestore({ month: day.fromAnalyticsMonth })
+    setAnalyticsOpen(true)
   }
 
   function handleAICoachClose() {
@@ -1186,7 +1195,7 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
           month={fullPageMonth}
           onClose={() => setFullPageMonth(null)}
           onMonthDashboard={month => setZoomedMonth(month)}
-          onDayDoubleClick={(key, month, day) => setModalDay({ key, month, day, fromMonthly: true })}
+          onDayDoubleClick={(key, month, day) => setModalDay({ key, month, day })}
         />
       )}
 
@@ -1198,12 +1207,15 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
           day={modalDay.day}
           skipEntryAnimation={modalDay.skipAnim}
           onClose={() => {
+            const closing = modalDay
             setModalDay(null)
             setDayModalCloseIntent(null)
             const pending = pendingNavRef.current
             if (pending) {
               pendingNavRef.current = null
               pending()
+            } else {
+              reopenAnalyticsMonth(closing)
             }
           }}
           onDashboard={() => {
@@ -1221,27 +1233,28 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
             const [y, m, d] = modalDay.key.split('-').map(Number)
             const dt = new Date(y, m - 1, d)
             dt.setDate(dt.getDate() + delta)
-            setModalDay({ key: dateKey(dt.getFullYear(), dt.getMonth(), dt.getDate()), month: dt.getMonth(), day: dt.getDate(), skipAnim: true, fromMonthly: modalDay.fromMonthly })
+            setModalDay({ key: dateKey(dt.getFullYear(), dt.getMonth(), dt.getDate()), month: dt.getMonth(), day: dt.getDate(), skipAnim: true, fromAnalyticsMonth: modalDay.fromAnalyticsMonth })
           }}
           onGoToToday={() => {
             const t = new Date()
-            setModalDay({ key: dateKey(t.getFullYear(), t.getMonth(), t.getDate()), month: t.getMonth(), day: t.getDate(), skipAnim: true, fromMonthly: modalDay.fromMonthly })
+            setModalDay({ key: dateKey(t.getFullYear(), t.getMonth(), t.getDate()), month: t.getMonth(), day: t.getDate(), skipAnim: true, fromAnalyticsMonth: modalDay.fromAnalyticsMonth })
           }}
           closeIntent={dayModalCloseIntent}
         />
       )}
 
-      {dashboardDay?.fromMonthly && (
-        <DayFullPageModal key={dashboardDay.key} dateKey={dashboardDay.key} onClose={() => setDashboardDay(null)} />
-      )}
-
-      {dashboardDay && !dashboardDay.fromMonthly && (
-        <DayDashboardModal
+      {/* The one Daily Dashboard (DayFullPage), opened on the chosen day. Back / Escape / × all return to the day window
+          underneath; if that window is no longer open (it was closed to make room) and the day came from Analytics →
+          Monthly, Analytics reopens on that month. */}
+      {dashboardDay && (
+        <DayFullPageModal
+          key={dashboardDay.key}
           dateKey={dashboardDay.key}
-          month={dashboardDay.month}
-          day={dashboardDay.day}
-          onClose={() => setDashboardDay(null)}
-          onBack={() => setDashboardDay(null)}
+          onClose={() => {
+            const closing = dashboardDay
+            setDashboardDay(null)
+            if (!modalDay) reopenAnalyticsMonth(closing)
+          }}
         />
       )}
 
@@ -1249,7 +1262,7 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
         <MonthZoomModal
           month={zoomedMonth}
           onClose={() => setZoomedMonth(null)}
-          onDayDoubleClick={(key, month, day) => { setZoomedMonth(null); setModalDay({ key, month, day, fromMonthly: true }) }}
+          onDayDoubleClick={(key, month, day) => { setZoomedMonth(null); setModalDay({ key, month, day }) }}
         />
       )}
 
@@ -1257,8 +1270,9 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
           the burger menu and the mobile bottom-nav "Analytics" tab. */}
       {analyticsOpen && (
         <AnalyticsModal
+          restore={analyticsRestore ?? undefined}
           onClose={handleAnalyticsClose}
-          onDayDoubleClick={(key, month, day) => { setAnalyticsOpen(false); setModalDay({ key, month, day, fromMonthly: true }) }}
+          onDayDoubleClick={(key, month, day) => { setAnalyticsRestore(null); setAnalyticsOpen(false); setModalDay({ key, month, day, fromAnalyticsMonth: month }) }}
         />
       )}
 

@@ -1490,7 +1490,10 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
     }, { threshold: 0.25 })
     obs.observe(el)
     return () => obs.disconnect()
-  }, [activitiesRevealed])
+    // `view`: the card only exists in the dashboard view. When this page opens on the calendar and the user switches
+    // to the dashboard afterwards, the ref is still null on mount, so the effect must re-run once the card is rendered —
+    // otherwise the bars stay at 0% width (just the gray track).
+  }, [activitiesRevealed, view])
 
   return (
     <>

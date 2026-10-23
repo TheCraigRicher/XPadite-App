@@ -514,9 +514,22 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   if (isValid && endTs <= startTs) endTs += 86_400_000
   const durationMs = isValid ? Math.max(0, endTs - startTs) : 0
 
+  // Time edits are easy to lose, so this modal is NOT dismissed by clicking the backdrop or by Escape — only Cancel
+  // or a successful Save closes it. Escape is also swallowed before it reaches the Day modal's own Escape handler
+  // (a window listener that would otherwise close the whole Day modal, and this one with it).
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    function swallowEscape(e: KeyboardEvent) {
+      if (e.key === 'Escape' && !dialogRef.current?.contains(e.target as Node)) e.stopPropagation()
+    }
+    window.addEventListener('keydown', swallowEscape, true)
+    return () => window.removeEventListener('keydown', swallowEscape, true)
+  }, [])
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.65)' }} onClick={onClose}>
-      <div className="w-full max-w-[340px] rounded-2xl shadow-2xl" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)' }} onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.65)' }}>
+      <div ref={dialogRef} className="w-full max-w-[340px] rounded-2xl shadow-2xl" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)' }} onClick={e => e.stopPropagation()}
+        onKeyDown={e => { if (e.key === 'Escape') e.stopPropagation() }}>
 
         {/* Purple header */}
         <div style={{ background: 'linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)', borderRadius: '16px 16px 0 0', padding: '18px 20px 16px', textAlign: 'center', boxShadow: '0 2px 10px rgba(124,58,237,0.25)' }}>

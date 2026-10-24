@@ -377,7 +377,7 @@ function SignUpForm() {
 
             {/* Social */}
             <div className="mt-5">
-              <SocialLoginButtons />
+              <SocialLoginButtons plan={plan} mode="signup" />
             </div>
 
             {/* Login link */}

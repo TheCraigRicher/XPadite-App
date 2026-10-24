@@ -1,13 +1,22 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
-import { safeNext } from '@/lib/billing/intent'
+import { parsePlan, planQuery, safeNext } from '@/lib/billing/intent'
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
   // Same-origin /app paths only (was unvalidated: `//evil.com` could have been used as an open redirect).
   const next = safeNext(searchParams.get('next'))
+  // Keep a plan chosen on the Website across a failed attempt, so the retry from /login still carries it.
+  const plan = parsePlan(new URL(next, 'http://localhost').searchParams.get('plan'))
+  const toLogin = (message: string) => NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(message)}${planQuery(plan).replace('?', '&')}`)
+
+  // Google (or any provider) reports a refusal/cancel as ?error=access_denied — not a failure of ours.
+  const providerError = searchParams.get('error')
+  if (providerError) {
+    return toLogin(providerError === 'access_denied' ? 'Google sign-in was cancelled. You can try again or use your email and password.' : 'Google sign-in could not be completed. Please try again.')
+  }
 
   if (code) {
     const cookieStore = await cookies()
@@ -56,5 +65,5 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.redirect(`${origin}/login?error=Could+not+verify+email`)
+  return toLogin('This sign-in link is invalid or has expired. Please try again.')
 }

@@ -1,3 +1,11 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
+import { createClient } from '@/lib/supabase/client'
+import { planQuery } from '@/lib/billing/intent'
+import type { BillingPlanKey } from '@/lib/billing/plans'
+
 const GoogleIcon = () => (
   <svg viewBox="0 0 24 24" className="w-4 h-4 flex-shrink-0">
     <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
@@ -7,28 +15,66 @@ const GoogleIcon = () => (
   </svg>
 )
 
-const AppleIcon = () => (
-  <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 flex-shrink-0 text-gray-900">
-    <path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.54 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701" />
-  </svg>
-)
+// Google is the only social sign-in. It serves BOTH new registration and returning login: Supabase creates the account on
+// first use and signs the same account in afterwards (matching verified emails link to the existing account, so a paid
+// email/password account keeps its profile and subscription). The browser is sent to Google (PKCE) and comes back to
+// /auth/callback, which exchanges the code for a session and forwards into /app (keeping a plan chosen on the Website).
+async function googleEnabled(): Promise<boolean | null> {
+  try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL, key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    if (!url || !key) return null
+    const res = await fetch(`${url}/auth/v1/settings`, { headers: { apikey: key } })
+    if (!res.ok) return null
+    const body = (await res.json()) as { external?: { google?: boolean } }
+    return typeof body.external?.google === 'boolean' ? body.external.google : null
+  } catch {
+    return null
+  }
+}
 
-const MicrosoftIcon = () => (
-  <svg viewBox="0 0 21 21" className="w-4 h-4 flex-shrink-0">
-    <rect x="1"  y="1"  width="9" height="9" fill="#F25022" />
-    <rect x="11" y="1"  width="9" height="9" fill="#7FBA00" />
-    <rect x="1"  y="11" width="9" height="9" fill="#00A4EF" />
-    <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
-  </svg>
-)
+export function SocialLoginButtons({ plan = null, mode = 'login' }: { plan?: BillingPlanKey | null; mode?: 'login' | 'signup' }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-const providers = [
-  { name: 'Google',    icon: <GoogleIcon />    },
-  { name: 'Apple',     icon: <AppleIcon />     },
-  { name: 'Microsoft', icon: <MicrosoftIcon /> },
-]
+  // Coming back with the browser's Back button from Google's page would otherwise leave the button stuck on "Redirecting…".
+  useEffect(() => {
+    const reset = (e: PageTransitionEvent) => { if (e.persisted) setBusy(false) }
+    window.addEventListener('pageshow', reset)
+    return () => window.removeEventListener('pageshow', reset)
+  }, [])
 
-export function SocialLoginButtons() {
+  async function continueWithGoogle() {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      // If Google is not switched on for this project, Supabase would show a raw JSON error page. Check first (public
+      // settings endpoint, anon key only) and explain instead. A failed check just proceeds.
+      const enabled = await googleEnabled()
+      if (enabled === false) {
+        setError('Google sign-in is not available yet. Please use your email and password.')
+        setBusy(false)
+        return
+      }
+      const next = `/app${planQuery(plan)}`
+      const { error: oauthError } = await createClient().auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+          queryParams: { prompt: 'select_account' },
+        },
+      })
+      if (oauthError) {
+        setError('Google sign-in is unavailable right now. Please use your email and password instead.')
+        setBusy(false)
+      }
+      // On success the browser is already navigating to Google.
+    } catch {
+      setError('Could not reach Google sign-in. Check your connection and try again.')
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="relative flex items-center gap-3">
@@ -37,26 +83,32 @@ export function SocialLoginButtons() {
         <div className="flex-1 h-px bg-gray-200" />
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
-        {providers.map(({ name, icon }) => (
-          <button
-            key={name}
-            type="button"
-            aria-label={`Continue with ${name}`}
-            className="
-              flex items-center justify-center gap-2 h-11 rounded-xl
-              border border-gray-200 bg-white
-              hover:bg-gray-50 hover:border-gray-300 hover:shadow-sm
-              active:scale-[0.97]
-              transition-all duration-150
-              text-gray-700 text-sm font-medium
-            "
-          >
-            {icon}
-            <span className="hidden sm:inline text-xs">{name}</span>
-          </button>
-        ))}
-      </div>
+      <button
+        type="button"
+        onClick={continueWithGoogle}
+        disabled={busy}
+        aria-label="Continue with Google"
+        className="
+          w-full flex items-center justify-center gap-2 h-11 rounded-xl
+          border border-gray-200 bg-white
+          hover:bg-gray-50 hover:border-gray-300 hover:shadow-sm
+          active:scale-[0.99] disabled:opacity-70 disabled:cursor-wait
+          transition-all duration-150
+          text-gray-700 text-sm font-medium
+        "
+      >
+        <GoogleIcon />
+        <span>{busy ? 'Redirecting to Google…' : 'Continue with Google'}</span>
+      </button>
+
+      {error && <p role="alert" className="text-xs text-red-600 text-center">{error}</p>}
+
+      {mode === 'signup' && (
+        <p className="text-[11px] text-gray-400 text-center leading-snug">
+          By continuing with Google you agree to the{' '}
+          <Link href="https://www.xpadite.com/terms" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-600">Terms and Conditions</Link>.
+        </p>
+      )}
     </div>
   )
 }

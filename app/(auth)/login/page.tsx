@@ -36,11 +36,14 @@ export default function LoginPage() {
 
 function LoginForm() {
   // Plan chosen on the Website — validated against the server allowlist, then carried into /app to start Checkout.
-  const plan = parsePlan(useSearchParams().get('plan'))
+  const params = useSearchParams()
+  const plan = parsePlan(params.get('plan'))
+  // /auth/callback sends people back here with ?error=… (Google cancelled / failed, expired link). Shown as plain text.
+  const callbackError = params.get('error')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [rememberMe, setRememberMe] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(callbackError && callbackError.length <= 160 ? callbackError : null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
 
@@ -165,7 +168,7 @@ function LoginForm() {
 
             {/* Social */}
             <div className="mt-6">
-              <SocialLoginButtons />
+              <SocialLoginButtons plan={plan} mode="login" />
             </div>
 
             {/* Sign up link */}

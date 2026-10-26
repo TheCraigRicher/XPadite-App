@@ -13,6 +13,7 @@ import {
 import { calculateCurrentStreak } from './productivityEngine'
 import { useUpcomingReminderDates } from './useUpcomingReminderDates'
 import { useDisplayFirstName } from './useDisplayFirstName'
+import { freezeBodyOnIOS } from './useLockBodyScroll'
 import { AchievementBanner, PERFORMANCE_TIERS, getTaskPerformanceLevel, DonutChart, TASK_GRAD_STRINGS } from './DayDashboardModal'
 import { ProductiveDot } from './LegendRow'
 import { TrendBarChart, type TrendBucket } from './TrendBarChart'
@@ -953,7 +954,8 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
     if (embedded) return
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = prev }
+    const releaseIOS = freezeBodyOnIOS() // iOS only: overflow:hidden alone lets the page slide under the modal
+    return () => { if (releaseIOS) releaseIOS(); document.body.style.overflow = prev }
   }, [embedded])
 
   // Back button focus fix: when returning from dashboard → calendar, the back button

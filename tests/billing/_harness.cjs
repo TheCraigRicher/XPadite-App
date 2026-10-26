@@ -22,7 +22,7 @@ delete process.env.BILLING_PAYWALL_DISABLED
 
 function build() {
   fs.mkdirSync(OUT, { recursive: true })
-  for (const f of ['plans', 'config', 'diagnostics', 'admin', 'stripe', 'sync', 'entitlement', 'intent']) {
+  for (const f of ['plans', 'config', 'diagnostics', 'admin', 'trialIdentity', 'stripe', 'sync', 'entitlement', 'intent']) {
     const src = fs.readFileSync(path.join(ROOT, 'lib', 'billing', f + '.ts'), 'utf8')
     const out = ts.transpileModule(src, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
@@ -33,7 +33,7 @@ function build() {
 build()
 
 const load = f => require(path.join(OUT, f + '.js'))
-const mods = { diagnostics: load('diagnostics'), admin: load('admin'), plans: load('plans'), stripe: load('stripe'), sync: load('sync'), entitlement: load('entitlement'), intent: load('intent') }
+const mods = { diagnostics: load('diagnostics'), trialIdentity: load('trialIdentity'), admin: load('admin'), plans: load('plans'), stripe: load('stripe'), sync: load('sync'), entitlement: load('entitlement'), intent: load('intent') }
 
 /** Replace one Stripe SDK method (e.g. 'prices.retrieve') on the shared instance. Returns a restore function. */
 function stubStripe(pathStr, fn) {

@@ -2,6 +2,9 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { type NextRequest, NextResponse } from 'next/server'
 import { parsePlan, planQuery, safeNext } from '@/lib/billing/intent'
+import { createAdminClient } from '@/lib/billing/admin'
+import { failureCode } from '@/lib/billing/diagnostics'
+import { registerTrialIdentity } from '@/lib/billing/trialIdentity'
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
@@ -45,6 +48,11 @@ export async function GET(request: NextRequest) {
       // After exchangeCodeForSession the client has the session in memory,
       // so the authenticated UPDATE respects RLS (auth.uid() = id).
       const user = data.user
+      // Remember this person's trial identity the moment their email is verified (best effort: never blocks sign-in; the
+      // billing status check records it again and is the one that enforces).
+      if (user) {
+        try { await registerTrialIdentity(createAdminClient(), user) } catch (err) { console.error('[Trial] identity not recorded at sign-in:', failureCode(err)) }
+      }
       if (user) {
         const fullName =
           (user.user_metadata?.full_name as string | null | undefined) ||

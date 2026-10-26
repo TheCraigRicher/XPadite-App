@@ -86,5 +86,6 @@ export class BillingLookupError extends Error {
 export function failureCode(err: unknown): string {
   if (err instanceof AdminConfigError) return err.code
   if (err instanceof BillingLookupError) return err.code
+  if (err && typeof err === 'object' && (err as { name?: string }).name === 'TrialIdentityError') return String((err as { code?: string }).code ?? 'trial_identity')
   return 'unknown'
 }

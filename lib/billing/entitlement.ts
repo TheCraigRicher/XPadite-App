@@ -3,6 +3,7 @@ import { TRIAL_DAYS, type BillingPlanKey } from './plans'
 import { getBillingLaunchAt, isPaywallDisabled } from './config'
 import type { BillingStatus } from './types'
 import { BillingLookupError, classifyDbError } from './diagnostics'
+import { registerTrialIdentity, type TrialUser } from './trialIdentity'
 
 // Server-only. Keep in step with public.billing_has_access() in migration 016.
 
@@ -19,10 +20,11 @@ export function activationTime(user: Pick<User, 'email_confirmed_at' | 'created_
  * at verified activation. Both timestamps are immutable, so repeat logins or
  * reinstalls never reset it. Returns null while no valid launch date exists.
  */
-export function trialEndsAt(user: Pick<User, 'email_confirmed_at' | 'created_at'>): Date | null {
+export function trialEndsAt(user: Pick<User, 'email_confirmed_at' | 'created_at'>, startOverride?: Date | null): Date | null {
   const launch = getBillingLaunchAt()
   if (!launch) return null
-  const start = Math.max(activationTime(user).getTime(), launch.getTime())
+  // startOverride = the account's pinned trial start from the trial ledger (a returning identity keeps its ORIGINAL start).
+  const start = Math.max((startOverride ?? activationTime(user)).getTime(), launch.getTime())
   return new Date(start + TRIAL_DAYS * 86_400_000)
 }
 
@@ -36,7 +38,7 @@ export function trialEndsAt(user: Pick<User, 'email_confirmed_at' | 'created_at'
  */
 export async function getBillingStatus(
   admin: SupabaseClient,
-  user: Pick<User, 'id' | 'email_confirmed_at' | 'created_at'>,
+  user: TrialUser,
 ): Promise<BillingStatus> {
   const nowMs = Date.now()
 
@@ -51,8 +53,6 @@ export async function getBillingStatus(
   for (const [table, res] of [['billing_subscriptions', subsRes], ['billing_purchases', purchasesRes], ['billing_customers', customerRes]] as const) {
     if (res.error) throw new BillingLookupError(classifyDbError(res.error), table)
   }
-
-  const trialEnd = trialEndsAt(user)
 
   let lifetime = false
   let plan: BillingPlanKey | null = null
@@ -82,6 +82,22 @@ export async function getBillingStatus(
   }
 
   const paid = lifetime || plan !== null
+
+  // One free trial per person: a returning identity (account deleted and re-created, Gmail alias) keeps its ORIGINAL start.
+  // Recorded best-effort until enforcement is on; once the paywall is enforced, an unpaid user whose identity cannot be
+  // checked gets an error (never a fresh trial). Paid users are never blocked by a ledger problem.
+  let trialEnd = trialEndsAt(user)
+  const enforced = getBillingLaunchAt() !== null && !isPaywallDisabled()
+  if (user.email) {
+    try {
+      const start = await registerTrialIdentity(admin, user)
+      if (start) trialEnd = trialEndsAt(user, start)
+    } catch (err) {
+      if (!paid && enforced) throw err
+      console.error('[Billing] trial identity not recorded:', err instanceof Error ? err.message : 'unknown')
+    }
+  }
+
   const enforcementActive = trialEnd !== null && !isPaywallDisabled()
   // Without an enforced paywall, unpaid users count as "in trial" (never locked out).
   const inTrial = !enforcementActive || nowMs < trialEnd!.getTime()

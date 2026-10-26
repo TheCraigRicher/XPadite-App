@@ -22,6 +22,9 @@ const stubs = {
     from: () => { const q = { update: v => { state.updates.push(v); return q }, eq: () => q, is: async () => ({ error: null }) }; return q },
   }) },
   '@/lib/billing/intent': require(path.join(OUT, 'intent.js')),
+  '@/lib/billing/admin': { createAdminClient: () => ({}) },
+  '@/lib/billing/diagnostics': { failureCode: () => 'x' },
+  '@/lib/billing/trialIdentity': { registerTrialIdentity: async () => null },
 }
 fs.writeFileSync(path.join(OUT, 'plans.js'), fs.readFileSync(path.join(OUT, 'plans.js')))
 const routeFile = path.join(OUT, 'route.js')

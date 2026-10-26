@@ -720,6 +720,13 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
 
   function executeNav(tab: MobileTab) {
     setDashboardDay(null)
+    // Analytics is an overlay (not a mobileTab), so choosing ANY other destination must close it — otherwise it stays on
+    // screen over the newly selected section. Done here (not in handleMobileNav) so the unsaved-changes-guard path, which
+    // runs executeNav later, closes it too. Tapping Analytics itself keeps it mounted (no close/reopen flicker).
+    if (tab !== 'analytics') {
+      setAnalyticsRestore(null)
+      setAnalyticsOpen(false)
+    }
     if (tab === 'calendar') {
       setFullPageMonth(null)
       setMobileTab('calendar')

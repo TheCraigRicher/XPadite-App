@@ -64,13 +64,15 @@ if (command === 'backfill') {
   }
   console.log(`verified accounts: ${users.length} | distinct identities: ${identities.size} | merged duplicates: ${users.length - identities.size}`)
   console.log(apply ? `registered: ${registered} | failed: ${failed}${failed ? '  (re-run; it is idempotent)' : ''}` : 'DRY RUN — nothing written. Add --apply to record them.')
-  process.exit(failed ? 1 : 0)
+  // Set the exit code and let the event loop drain. Calling process.exit() here, right after network calls, can trip a libuv
+  // assertion on Windows + Node 24 ("!(handle->flags & UV_HANDLE_CLOSING)", src/win/async.c) while fetch sockets are closing.
+  process.exitCode = failed ? 1 : 0
 } else if (command === 'forget' && arg) {
   const norm = normalizeEmailIdentity(arg)
   if (!norm) { console.error('Not a valid email address.'); process.exit(1) }
   const { error, count } = await admin.from('trial_ledger').delete({ count: 'exact' }).eq('identity_hash', identityHash(norm, secret))
-  if (error) { console.error('Failed: ' + error.message); process.exit(1) }
-  console.log(`removed ${count ?? 0} ledger row(s). (A live account keeps its own pinned trial clock; this only forgets the identity.)`)
+  if (error) { console.error('Failed: ' + error.message); process.exitCode = 1 }
+  else console.log(`removed ${count ?? 0} ledger row(s). (A live account keeps its own pinned trial clock; this only forgets the identity.)`)
 } else {
   console.error('Usage: node scripts/trial-ledger.mjs backfill [--apply] | forget <email>')
   process.exit(1)

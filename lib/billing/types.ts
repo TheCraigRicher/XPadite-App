@@ -17,4 +17,6 @@ export interface BillingStatus {
   hasStripeCustomer: boolean
   /** false when the launch date is unset/invalid or the kill switch is on — nobody is locked out. */
   enforcementActive: boolean
+  /** Server time when this status was computed (status API only) — used to correct the device clock for countdowns. */
+  serverNow?: string
 }

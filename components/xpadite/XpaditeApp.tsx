@@ -27,6 +27,8 @@ import { MobileBottomNav } from './MobileBottomNav'
 import { ProfileModal } from './ProfileModal'
 import { PLAN_CONFIGS } from './SettingsModal'
 import { BillingProvider, TrialExpiredGate } from './BillingContext'
+import { TrialReminderBanner } from './TrialReminderBanner'
+import { TrialWelcome } from './TrialWelcome'
 import { ActivityManagerModal } from './ActivityManagerModal'
 import { dateKey, todayKey, APP_YEAR } from './utils'
 import { YearShareModal } from './YearProgressShare'
@@ -674,6 +676,7 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [fullPageMonth, setFullPageMonth]           = useState<number | null>(null)
   const [motivationOpen, setMotivationOpen]             = useState(false)
   const [analyticsOpen, setAnalyticsOpen]               = useState(false)
+  const [welcomeVisible, setWelcomeVisible]             = useState(false)
   const [analyticsRestore, setAnalyticsRestore]         = useState<{ month: number } | null>(null)
   const [goalManagerOpen, setGoalManagerOpen]           = useState(false)
   const [aiCoachOpen, setAICoachOpen]                   = useState(false)
@@ -844,6 +847,11 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
     setAnalyticsRestore({ month: day.fromAnalyticsMonth })
     setAnalyticsOpen(true)
   }
+
+  // Anything that means "the user is busy elsewhere": trial notices wait (they are hidden, not consumed) until it is closed.
+  const anotherScreenOpen = !!(modalDay || dashboardDay || analyticsOpen || profileOpen || settingsOpen || helpOpen || galleryOpen || activityManagerOpen ||
+    notificationsOpen || syncOpen || meetingsOpen || whatsNewOpen || goalManagerOpen || aiCoachOpen || journalNotesOpen ||
+    navGuardOpen || fullPageMonth !== null || zoomedMonth !== null || mobileTab !== 'calendar')
 
   function handleAICoachClose() {
     setAICoachOpen(false)
@@ -1308,6 +1316,13 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
           closeIntent={settingsCloseIntent}
         />
       )}
+
+      {/* Day 3/4/5 trial reminder: a small banner that stays out of the way of any open modal/screen. Upgrade opens the
+          same plans screen as the expired-trial gate (Settings → Stripe Checkout). */}
+      <TrialReminderBanner suppressed={anotherScreenOpen || welcomeVisible} onUpgrade={() => { setProfileOpen(false); setSettingsOpen(true) }} />
+
+      {/* First-time welcome (+ confetti) the moment a new trial begins; once per account; hidden while anything else is open. */}
+      <TrialWelcome suppressed={anotherScreenOpen} onVisibleChange={setWelcomeVisible} />
 
       {/* Trial ended with no paid entitlement: productivity UI is covered, but Settings
           (plans/upgrade) and Profile (account, sign-out) open above it. Data is untouched. */}

@@ -16,6 +16,8 @@ interface BillingCtx {
   status: BillingStatus | null
   /** Set when the plan could NOT be determined (server/database problem) and there is no earlier answer. null = fine or still loading. */
   statusError: string | null
+  /** Server time minus device time (ms), measured at the last status refresh. Add it to Date.now() for "server now". */
+  clockOffsetMs: number
   refresh: (sessionId?: string) => Promise<BillingStatus | null>
   /** Starts Stripe Checkout for a plan. Resolves with an error message, or null once redirecting. */
   startCheckout: (planKey: BillingPlanKey, source?: 'settings' | 'website_link') => Promise<string | null>
@@ -77,6 +79,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   const { setToast } = useApp()
   const [status, setStatus] = useState<BillingStatus | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
+  const [clockOffsetMs, setClockOffsetMs] = useState(0)
   const handledReturn = useRef(false)
 
   const refresh = useCallback(async (sessionId?: string) => {
@@ -92,6 +95,8 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       const next = (await res.json()) as BillingStatus
       setStatus(next)
       setStatusError(null)
+      const serverMs = next.serverNow ? Date.parse(next.serverNow) : NaN
+      if (Number.isFinite(serverMs)) setClockOffsetMs(serverMs - Date.now())
       return next
     } catch {
       setStatusError('network')
@@ -181,7 +186,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const value = useMemo(() => ({ status, statusError, refresh, startCheckout, openPortal }), [status, statusError, refresh, startCheckout, openPortal])
+  const value = useMemo(() => ({ status, statusError, clockOffsetMs, refresh, startCheckout, openPortal }), [status, statusError, clockOffsetMs, refresh, startCheckout, openPortal])
   return (
     <Ctx.Provider value={value}>
       {children}

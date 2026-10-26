@@ -42,7 +42,8 @@ export async function GET(req: NextRequest) {
     }
 
     const status = await getBillingStatus(admin, user)
-    return NextResponse.json(status, { headers: { 'Cache-Control': 'no-store' } })
+    // serverNow lets the browser correct a wrong device clock when it counts down the trial (additive; nothing else changes).
+    return NextResponse.json({ ...status, serverNow: new Date().toISOString() }, { headers: { 'Cache-Control': 'no-store' } })
   } catch (err) {
     // Fixed codes only (e.g. project_mismatch, invalid_credentials, missing_table) — never keys, URLs or user data.
     const code = failureCode(err)

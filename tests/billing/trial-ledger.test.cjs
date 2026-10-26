@@ -27,9 +27,14 @@ function ledgerDb({ failing = false } = {}) {
   const admin = makeAdmin({}, async (name, args) => {
     if (name !== 'billing_register_trial') return { data: null, error: null }
     if (failing) return { data: null, error: { message: 'boom' } }
-    if (!ledger.has(args.p_hash)) ledger.set(args.p_hash, args.p_activation)
-    if (!clock.has(args.p_user)) clock.set(args.p_user, ledger.get(args.p_hash))
-    return { data: clock.get(args.p_user), error: null }
+    // mirrors billing_register_trial (021): the EARLIEST applicable start wins — never a later one
+    const ms = x => Date.parse(x), least = (a, b) => (ms(a) <= ms(b) ? a : b)
+    const existing = clock.get(args.p_user)
+    if (!ledger.has(args.p_hash)) ledger.set(args.p_hash, existing ? least(args.p_activation, existing) : args.p_activation)
+    const eff = existing ? least(ledger.get(args.p_hash), existing) : ledger.get(args.p_hash)
+    clock.set(args.p_user, eff)
+    ledger.set(args.p_hash, least(ledger.get(args.p_hash), eff))
+    return { data: eff, error: null }
   })
   return { admin, ledger, clock, deleteAccount: id => clock.delete(id) }   // deleting an account removes its clock only
 }
@@ -190,4 +195,73 @@ test('wiring: status/checkout/guard all go through getBillingStatus; callback re
   assert.ok(/security definer\s+set search_path = ''/.test(mig))
   const forbidden = ['delete from public.calendar_days', 'drop table', 'truncate']
   for (const f of forbidden) assert.ok(!mig.toLowerCase().includes(f))
+})
+
+// ── v1.308 correction: email changes and missing timestamps ─────────────────
+test('email change to an identity with an EARLIER trial: the account keeps the earliest start (shortened) — never extended', async () => {
+  const db = ledgerDb(), t0 = LAUNCH + 1 * DAY, t1 = LAUNCH + 6 * DAY
+  await status(db, acct('owner', 'old-address@example.com', t0), t0 + HR)                 // identity A used a trial from t0
+  db.deleteAccount('owner')
+  const before = await status(db, acct('mover', 'brand-new@example.com', t1), t1 + HR)    // a new account, verified later: its own 5 days
+  assert.equal(Date.parse(before.trialEndsAt) - t1, 120 * HR)
+  const after = await status(db, acct('mover', 'old-address@example.com', t1), t1 + 2 * HR) // moves to the address that already had a trial
+  assert.equal(Date.parse(after.trialEndsAt) - t0, 120 * HR, 'back to the ORIGINAL window')
+  assert.ok(Date.parse(after.trialEndsAt) < Date.parse(before.trialEndsAt), 'shortened, not restarted')
+  assert.equal((await status(db, acct('mover', 'old-address@example.com', t1), t0 + 121 * HR)).state, 'expired')
+})
+
+test('email change to an identity with a LATER trial never extends the account; the ledger is lowered to the earliest start', async () => {
+  const db = ledgerDb(), early = LAUNCH + 1 * DAY, late = LAUNCH + 8 * DAY
+  const a = await status(db, acct('early', 'first@example.com', early), early + HR)
+  await status(db, acct('someone', 'target@example.com', late), late + HR)
+  const moved = await status(db, acct('early', 'target@example.com', early), late + 2 * HR)
+  assert.equal(moved.trialEndsAt, a.trialEndsAt, 'unchanged')
+  const newcomer = await status(db, acct('x', 'target@example.com', late + 3 * DAY), late + 3 * DAY + HR)
+  assert.equal(newcomer.trialEndsAt, a.trialEndsAt, 'the identity now carries the earliest start')
+})
+
+test('a changed-to address inherits the account\'s earliest start (no clean slate through a new address)', async () => {
+  const db = ledgerDb(), v = LAUNCH + 2 * DAY
+  const a = await status(db, acct('acc', 'one@example.com', v), v + HR)
+  await status(db, acct('acc', 'two@example.com', v), v + 2 * HR)
+  db.deleteAccount('acc')
+  const back = await status(db, acct('again', 'two@example.com', v + 3 * DAY), v + 3 * DAY + HR)
+  assert.equal(back.trialEndsAt, a.trialEndsAt)
+})
+
+test('pre-launch handling is unchanged by the earliest-start rule', async () => {
+  const db = ledgerDb(), old1 = Date.parse('2026-08-01T00:00:00Z'), old2 = Date.parse('2026-09-15T00:00:00Z')
+  await status(db, acct('p1', 'pre1@example.com', old1), LAUNCH + HR)
+  const moved = await status(db, acct('p1', 'pre2@example.com', old1), LAUNCH + 2 * HR)
+  assert.equal(Date.parse(moved.trialEndsAt), LAUNCH + 5 * DAY)
+  const other = await status(db, acct('p2', 'pre3@example.com', old2), LAUNCH + HR)
+  assert.equal(Date.parse(other.trialEndsAt), LAUNCH + 5 * DAY)
+})
+
+test('missing/invalid account timestamps: with enforcement on an unpaid user gets an error (never "no clock = no limit"); paid users are fine', async () => {
+  const db = ledgerDb()
+  const noStamps = { id: 'ghost', email: 'ghost@example.com', email_confirmed_at: null, created_at: undefined }
+  const garbage = { id: 'g', email: 'g@example.com', email_confirmed_at: 'not a date', created_at: 'also not' }
+  for (const u of [noStamps, garbage]) {
+    await assert.rejects(status(db, u, LAUNCH + DAY), e => e instanceof D.BillingLookupError && e.table === 'account_timestamp')
+  }
+  assert.equal(db.ledger.size, 0, 'nothing is registered for an account without a valid timestamp')
+  // paid → fine
+  const paidAdmin = makeAdmin({ billing_subscriptions: [{ user_id: 'g', plan_key: 'pro-monthly', status: 'active', current_period_end: new Date(LAUNCH + 30 * DAY).toISOString(), cancel_at_period_end: false }] })
+  const real = Date.now; Date.now = () => LAUNCH + DAY
+  try {
+    const s = await withEnv(ON, () => entitlement.getBillingStatus(paidAdmin, garbage))
+    assert.equal(s.state, 'paid')
+    // before enforcement: no trial end, no error
+    const pre = await withEnv({ BILLING_LAUNCH_AT: undefined, TRIAL_IDENTITY_SECRET: SECRET }, () => entitlement.getBillingStatus(makeAdmin({}), garbage))
+    assert.equal(pre.trialEndsAt, null); assert.equal(pre.enforcementActive, false)
+  } finally { Date.now = real }
+})
+
+test('migration: unknown users have no access; unregistered NEW accounts lose access after a grace; the marker is set once; legacy accounts are grandfathered', () => {
+  const m = read('supabase/migrations/021_trial_ledger.sql')
+  assert.ok(/if v_activated is null then return false; end if;/.test(m) && !/if v_activated is null then return true/.test(m))
+  assert.ok(/'trial_ledger_since', now\(\)::text\)\s*on conflict \(key\) do nothing/.test(m))
+  assert.ok(/v_activated >= v_since and now\(\) > v_activated \+ interval '10 minutes' then\s*return false/.test(m))
+  assert.ok(/least\(c\.trial_start, excluded\.trial_start\)/.test(m) && !/on conflict \(user_id\) do nothing/.test(m), 'the clock can only move EARLIER')
 })

@@ -10,13 +10,16 @@
 --   public.billing_trial_clock user_id → trial_start: this ACCOUNT's effective trial start (cascades with the account).
 --                              Never changes once set, so changing the email address cannot restart a trial.
 --   public.billing_register_trial(p_user, p_hash, p_activation)
---                              atomic: records the identity on first sight, then pins this account's clock to the ORIGINAL
---                              start. Concurrent calls cannot give two independent trials (unique key + ON CONFLICT).
---   public.billing_has_access  re-issued from 016 with ONE change: the trial start is the account's clock when present.
+--                              atomic: records the identity on first sight and pins this account's clock to the EARLIEST
+--                              applicable start (never later: an email change can only keep or shorten it, never restart or
+--                              extend it). Concurrent calls cannot give two independent trials (unique key + ON CONFLICT).
+--   public.billing_has_access  re-issued from 016: the trial start is the account's clock; an unknown user has NO access; a
+--                              NEW account that never registered its trial identity loses access after a 10-minute grace.
 --
 -- The trial END is still max(start, billing launch) + 5 days everywhere, so the existing launch grandfathering and the
--- 120-hour length are unchanged. Existing accounts keep working with no backfill (a missing clock row = the old
--- behaviour); the backfill (scripts/trial-ledger.mjs) only makes their identities remembered. Idempotent. One transaction.
+-- 120-hour length are unchanged. Accounts that existed BEFORE this migration (trial_ledger_since, below) keep working with
+-- no backfill (a missing clock row = the old behaviour); the backfill (scripts/trial-ledger.mjs) makes their identities
+-- remembered. Idempotent. One transaction.
 -- NOT applied automatically — owner runs it in the SQL Editor.
 -- ─────────────────────────────────────────────────────────────────────────────
 
@@ -46,6 +49,10 @@ revoke all on public.billing_trial_clock from anon, authenticated;
 grant all on public.trial_ledger        to service_role;
 grant all on public.billing_trial_clock to service_role;
 
+-- Accounts activated before this moment pre-date the ledger and keep the old rule until the backfill registers them.
+insert into public.billing_config (key, value) values ('trial_ledger_since', now()::text)
+on conflict (key) do nothing;
+
 -- ─── 2. Atomic registration ──────────────────────────────────────────────────
 
 create or replace function public.billing_register_trial(p_user uuid, p_hash text, p_activation timestamptz)
@@ -55,16 +62,20 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_start timestamptz;
-  v_clock timestamptz;
+  v_existing timestamptz;   -- this account's clock, if already pinned
+  v_start    timestamptz;   -- the identity's start in the ledger
+  v_eff      timestamptz;   -- the EARLIEST applicable start
 begin
   if p_user is null or p_activation is null or p_hash is null or p_hash !~ '^[0-9a-f]{64}$' then
     raise exception 'invalid_arguments' using errcode = '22023';
   end if;
 
-  -- First sight of this identity: remember its start. A row that outlived its retention period is treated as unseen.
+  select trial_start into v_existing from public.billing_trial_clock where user_id = p_user;
+
+  -- First sight of this identity: remember its start — no later than this account's own earliest start, so a new address
+  -- an account moves to inherits what that account already used. A row past its retention period is treated as unseen.
   insert into public.trial_ledger as l (identity_hash, first_trial_start)
-  values (p_hash, p_activation)
+  values (p_hash, least(p_activation, coalesce(v_existing, p_activation)))
   on conflict (identity_hash) do update
     set first_trial_start = excluded.first_trial_start,
         created_at        = now(),
@@ -73,13 +84,18 @@ begin
 
   select first_trial_start into v_start from public.trial_ledger where identity_hash = p_hash;
 
-  -- Pin THIS account to that start, once. Never moved afterwards (email changes cannot restart or shorten it).
-  insert into public.billing_trial_clock (user_id, trial_start)
-  values (p_user, v_start)
-  on conflict (user_id) do nothing;
+  -- The earliest applicable start wins — never a later one. (An email change to an identity that already had a trial can
+  -- only keep or SHORTEN this account's trial; it can never restart or extend it.)
+  v_eff := least(v_start, coalesce(v_existing, v_start));
 
-  select trial_start into v_clock from public.billing_trial_clock where user_id = p_user;
-  return v_clock;
+  insert into public.billing_trial_clock as c (user_id, trial_start)
+  values (p_user, v_eff)
+  on conflict (user_id) do update set trial_start = least(c.trial_start, excluded.trial_start);
+
+  -- Keep the identity's record at the earliest start of the accounts that have owned it.
+  update public.trial_ledger set first_trial_start = least(first_trial_start, v_eff) where identity_hash = p_hash;
+
+  return (select trial_start from public.billing_trial_clock where user_id = p_user);
 end;
 $$;
 
@@ -87,7 +103,7 @@ revoke all on function public.billing_register_trial(uuid, text, timestamptz) fr
 grant execute on function public.billing_register_trial(uuid, text, timestamptz) to service_role;
 
 -- ─── 3. Database paywall: use the account's trial clock ──────────────────────
--- Identical to 016's billing_has_access except for the two marked lines.
+-- Same as 016's billing_has_access (all guards, paid checks, launch/kill-switch handling unchanged) except the trial section.
 
 create or replace function public.billing_has_access(p_user uuid default auth.uid())
 returns boolean
@@ -101,6 +117,7 @@ declare
   v_launch     timestamptz;
   v_activated  timestamptz;
   v_clock      timestamptz;
+  v_since      timestamptz;
   v_claims_txt text := nullif(current_setting('request.jwt.claims', true), '');
   v_role_claim text := nullif(current_setting('request.jwt.claim.role', true), '');
   v_role       text;
@@ -144,10 +161,25 @@ begin
   end if;
 
   select coalesce(email_confirmed_at, created_at) into v_activated from auth.users where id = p_user;
-  if v_activated is null then return true; end if;
+  -- 021: an id with no account (e.g. a deleted user's still-valid token) has NO trial access. (016 returned true here.)
+  if v_activated is null then return false; end if;
 
-  select trial_start into v_clock from public.billing_trial_clock where user_id = p_user;   -- 021: account's pinned trial start
-  v_activated := coalesce(v_clock, v_activated);                                             -- 021: (absent = the old behaviour)
+  select trial_start into v_clock from public.billing_trial_clock where user_id = p_user;   -- the account's pinned trial start
+  if v_clock is not null then
+    v_activated := v_clock;
+  else
+    -- No clock row. Accounts that pre-date the ledger keep the old rule (grandfathered until backfilled). A NEW account whose
+    -- trial identity was never registered gets a 10-minute grace for the registration to land, then no access — so a missing
+    -- ledger entry can never be a way to a fresh trial.
+    begin
+      select value::timestamptz into v_since from public.billing_config where key = 'trial_ledger_since';
+    exception when others then
+      v_since := null;
+    end;
+    if v_since is not null and v_activated >= v_since and now() > v_activated + interval '10 minutes' then
+      return false;
+    end if;
+  end if;
 
   return now() < greatest(v_activated, v_launch) + interval '5 days';
 end;

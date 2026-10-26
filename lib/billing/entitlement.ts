@@ -86,9 +86,13 @@ export async function getBillingStatus(
   // One free trial per person: a returning identity (account deleted and re-created, Gmail alias) keeps its ORIGINAL start.
   // Recorded best-effort until enforcement is on; once the paywall is enforced, an unpaid user whose identity cannot be
   // checked gets an error (never a fresh trial). Paid users are never blocked by a ledger problem.
-  let trialEnd = trialEndsAt(user)
   const enforced = getBillingLaunchAt() !== null && !isPaywallDisabled()
-  if (user.email) {
+  // An account with no usable activation timestamp has no trial clock at all. Once enforcement is on that is an ERROR for an
+  // unpaid user (never "no clock, so no limit"); before enforcement or for paid users it simply has no trial end.
+  const activationValid = Number.isFinite(activationTime(user).getTime())
+  if (!activationValid && !paid && enforced) throw new BillingLookupError('other', 'account_timestamp')
+  let trialEnd = activationValid ? trialEndsAt(user) : null
+  if (user.email && activationValid) {
     try {
       const start = await registerTrialIdentity(admin, user)
       if (start) trialEnd = trialEndsAt(user, start)

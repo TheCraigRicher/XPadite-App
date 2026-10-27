@@ -1386,7 +1386,7 @@ function TaskRow({
             <button
               onClick={e => { e.stopPropagation(); onParentExpandToggle?.() }}
               className="xp-parent-expand-btn flex-shrink-0 flex items-center justify-center transition-colors hover:bg-black/5 rounded"
-              style={{ width: 18, height: 18, color: 'var(--xp-txt3)', fontSize: 10 }}
+              style={{ width: 18, height: 18, color: 'var(--xp-acc)', fontSize: 10 }}
               title={isParentExpanded ? 'Collapse sub-tasks' : 'Expand sub-tasks'}
             >
               <span style={{ display: 'inline-block', lineHeight: 1, transform: isParentExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 200ms cubic-bezier(0.4,0,0.2,1)' }}>▶</span>

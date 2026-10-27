@@ -2197,7 +2197,7 @@ interface DayModalProps {
 
 export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyChange, onNavigateDay, onGoToToday, closeIntent, skipEntryAnimation, onSendToPlanner }: DayModalProps) {
   const {
-    calData, updateDay, activeTaskTimer, setActiveTaskTimer,
+    calData, updateDay, flushDays, activeTaskTimer, setActiveTaskTimer,
     activities, activeSession, setActiveSession, selectedActId,
     reminders, isDark, setToast, sessions, effectiveTimezone, effectiveLocale,
   } = useApp()
@@ -2253,6 +2253,13 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   const [journalAnimKey,   setJournalAnimKey]    = useState(0)
   const [journalSaved,     setJournalSaved]      = useState(false)
   const [mainSaving,       setMainSaving]        = useState(false)
+  // true while Save is waiting for the server to CONFIRM the write ("Saving…"); "✓ Saved" only follows a confirmed write
+  const [saveBusy,         setSaveBusy]          = useState(false)
+  const saveBusyRef = useRef(false)
+  // A confirmed move changes this day on purpose: once it has committed, that state becomes the saved baseline
+  // (otherwise Cancel / Close Without Saving would roll the moved task back onto this day).
+  const rebaselineAfterMoveRef = useRef(false)
+  const [baselineTick, setBaselineTick] = useState(0)
   const [isMounted, setIsMounted] = useState(skipEntryAnimation ?? false)
   const [isClosing, setIsClosing] = useState(false)
   // Hierarchy & clipboard state
@@ -2495,7 +2502,15 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     if (Object.keys(dirtyNotesMap).length > 0) return true
     if (!openSnapshotRef.current) return false
     return JSON.stringify(calData[dateKey] ?? EMPTY_DAY) !== JSON.stringify(openSnapshotRef.current)
-  }, [mainSaving, newTaskText, dirtyNotesMap, calData, dateKey])
+  }, [mainSaving, newTaskText, dirtyNotesMap, calData, dateKey, baselineTick])
+
+  // Re-baseline after a confirmed move has committed to calData (see rebaselineAfterMoveRef).
+  useEffect(() => {
+    if (!rebaselineAfterMoveRef.current) return
+    rebaselineAfterMoveRef.current = false
+    openSnapshotRef.current = JSON.parse(JSON.stringify(calData[dateKey] ?? EMPTY_DAY))
+    setBaselineTick(n => n + 1)
+  }, [calData, dateKey])
 
   // Locale-aware: e.g. "Friday, September 25, 2026" (en-US) vs
   // "Friday, 25 September 2026" (en-GB) — real Intl formatting, not just a
@@ -2845,9 +2860,15 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     setDirtyNotesMap({})
   }
 
+  const closingRef = useRef(false)
   function doClose() {
+    if (closingRef.current) return                  // idempotent: Cancel + Escape + close-intent can race
+    closingRef.current = true
     setIsClosing(true)
     setTimeout(onClose, 210)
+    // Self-heal: if the parent has NOT unmounted this window shortly after onClose (e.g. a queued navigation
+    // re-opened it), come back fully interactive instead of staying as an invisible, click-blocking layer.
+    setTimeout(() => { closingRef.current = false; setIsClosing(false) }, 1500)
   }
 
   function attemptClose() {
@@ -2872,10 +2893,27 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
 
   const isViewingToday = dateKey === todayKey(effectiveTimezone)
 
-  function handleMainSave() {
-    flushDirtyNotes()
-    setNewTaskText('')
-    setAddingTask(false)
+  // Persist for real: queue the pending edits, then wait for the server to CONFIRM every unsynced day
+  // (this day and, after a move, its destination). Resolves false — and tells the user — if it did not land;
+  // nothing is closed, re-baselined or reported as saved in that case, and the edits stay in the sync queue.
+  async function persistConfirmed(): Promise<boolean> {
+    if (saveBusyRef.current) return false           // a second click while one Save is in flight
+    saveBusyRef.current = true; setSaveBusy(true)
+    try {
+      flushDirtyNotes()
+      setNewTaskText('')
+      setAddingTask(false)
+      await new Promise(r => setTimeout(r, 0))      // let the queued updateDay calls commit before flushing
+      const ok = await flushDays()
+      if (!ok) setToast('⚠ Couldn’t save to the cloud. Your changes are kept on this device and will retry — nothing was lost.')
+      return ok
+    } finally {
+      saveBusyRef.current = false; setSaveBusy(false)
+    }
+  }
+
+  async function handleMainSave() {
+    if (!(await persistConfirmed())) return
     setMainSaving(true)
     // Save keeps Task Manager open — re-baseline the dirty-change snapshot
     // to the just-saved state (via the mirror ref, so further edits made
@@ -2887,10 +2925,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     }, 620)
   }
 
-  function handleSaveAndClose() {
-    flushDirtyNotes()
-    setNewTaskText('')
-    setAddingTask(false)
+  async function handleSaveAndClose() {
+    if (!(await persistConfirmed())) return
     setMainSaving(true)
     // Same re-baseline as handleMainSave, then close once the state is clean.
     setTimeout(() => {
@@ -3020,6 +3056,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
         WebkitBackdropFilter: isDark ? `blur(${visible ? 9 : 0}px)` : undefined,
         transition: 'background 220ms ease-out, backdrop-filter 220ms ease-out',
         willChange: isDark ? 'backdrop-filter' : undefined,
+        // While fading out the window is no longer interactive and must never trap clicks if it lingers.
+        pointerEvents: isClosing ? 'none' : undefined,
       }}
     >
       {/* Purple ambient glow — dark mode only */}
@@ -3546,15 +3584,15 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             <button onClick={attemptClose} className="text-xs px-4 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: 'var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>Cancel</button>
             <button
               onClick={handleMainSave}
-              disabled={mainSaving}
+              disabled={mainSaving || saveBusy}
               className="text-xs px-4 sm:px-5 py-1.5 rounded-full text-white font-medium transition-all inline-flex items-center justify-center min-w-[90px] sm:min-w-[100px]"
               style={{ background: mainSaving ? '#16a34a' : '#7c3aed', opacity: mainSaving ? 1 : undefined }}
             >
               {/* Mobile drops the checkmark from the normal "Save" state
                   (desktop/tablet keep "✓ Save" unchanged) — both show
                   "✓ Saved" for the same success-feedback duration. */}
-              <span className="sm:hidden">{mainSaving ? '✓ Saved' : 'Save'}</span>
-              <span className="hidden sm:inline">{mainSaving ? '✓ Saved' : '✓ Save'}</span>
+              <span className="sm:hidden">{mainSaving ? '✓ Saved' : saveBusy ? 'Saving…' : 'Save'}</span>
+              <span className="hidden sm:inline">{mainSaving ? '✓ Saved' : saveBusy ? 'Saving…' : '✓ Save'}</span>
             </button>
           </div>
         </div>
@@ -3650,6 +3688,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
           <TransferTaskModal
             tasks={transferTasks}
             dateKey={dateKey}
+            onTransferred={() => { rebaselineAfterMoveRef.current = true }}
             onClose={() => { setTransferTaskIds(null); setMoveMode(false); setSelectedForMove(new Set()) }}
           />
         ) : null

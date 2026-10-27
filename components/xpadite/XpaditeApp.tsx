@@ -1245,12 +1245,16 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
           }}
           onDirtyChange={(dirty) => { modalDirtyRef.current = dirty }}
           onNavigateDay={delta => {
+            // A queued "after close" action was captured for the day being left: it must not fire later
+            // against this window (it would re-open the previous date).
+            pendingNavRef.current = null
             const [y, m, d] = modalDay.key.split('-').map(Number)
             const dt = new Date(y, m - 1, d)
             dt.setDate(dt.getDate() + delta)
             setModalDay({ key: dateKey(dt.getFullYear(), dt.getMonth(), dt.getDate()), month: dt.getMonth(), day: dt.getDate(), skipAnim: true, fromAnalyticsMonth: modalDay.fromAnalyticsMonth })
           }}
           onGoToToday={() => {
+            pendingNavRef.current = null
             const t = new Date()
             setModalDay({ key: dateKey(t.getFullYear(), t.getMonth(), t.getDate()), month: t.getMonth(), day: t.getDate(), skipAnim: true, fromAnalyticsMonth: modalDay.fromAnalyticsMonth })
           }}

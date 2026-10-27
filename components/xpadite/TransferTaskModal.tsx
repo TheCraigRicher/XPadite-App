@@ -31,6 +31,9 @@ interface TransferTaskModalProps {
   tasks: Task[]
   dateKey: string
   onClose: () => void
+  // Fired after a confirmed move/copy has been applied, so the host day window can treat the new origin
+  // state as its saved baseline (a later Cancel must not roll the moved task back onto this day).
+  onTransferred?: () => void
 }
 
 function parseDateKey(key: string): Date {
@@ -46,7 +49,7 @@ function fmtShort(d: Date): string {
   return `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getDate()}`
 }
 
-export function TransferTaskModal({ tasks, dateKey, onClose }: TransferTaskModalProps) {
+export function TransferTaskModal({ tasks, dateKey, onClose, onTransferred }: TransferTaskModalProps) {
   const { calData, updateDay, activeTaskTimer, setToast, effectiveTimezone } = useApp()
 
   const isMultiple = tasks.length > 1
@@ -146,16 +149,24 @@ export function TransferTaskModal({ tasks, dateKey, onClose }: TransferTaskModal
         members.forEach(t => removeIds.add(t.id))
         members.forEach(t => destAdditions.push(t.id === root.id && t.parentTaskId ? { ...t, parentTaskId: undefined } : t))
       })
-      if (removeIds.size > 0) {
-        updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.filter(t => !removeIds.has(t.id)) }))
-      }
+      // Destination FIRST, then the origin removal, which the sync layer holds until the destination
+      // write is confirmed by the server. If the destination write fails, the origin still has the task
+      // (worst case after a retry: briefly on both days) — it can never end up on neither.
       if (destAdditions.length > 0) {
-        updateDay(selectedKey, prev => ({ ...prev, tasks: [...prev.tasks, ...destAdditions] }))
+        updateDay(selectedKey, prev => ({
+          ...prev,
+          // never add an id the destination already holds (e.g. a retried/duplicated move)
+          tasks: [...prev.tasks, ...destAdditions.filter(a => !prev.tasks.some(t => t.id === a.id))],
+        }))
+      }
+      if (removeIds.size > 0) {
+        updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.filter(t => !removeIds.has(t.id)) }), { after: [selectedKey] })
       }
       setToast(isMultiple
         ? `${tasks.length} tasks moved to ${fmtShort(selectedDate)} ✓`
         : `Task moved to ${fmtShort(selectedDate)} ✓`)
     }
+    if (mode === 'move') onTransferred?.()
     onClose()
   }
 

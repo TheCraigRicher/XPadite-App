@@ -33,6 +33,12 @@ import {
   deleteJournalFolder,
 } from '@/lib/supabase/core-data'
 
+import { DaySyncQueue } from './daySync'
+
+// { uid, keys }: days whose latest edit the server has not confirmed. Survives a refresh so the edit is
+// re-sent instead of being replaced by the older server copy. Ignored unless it belongs to this account.
+const UNSYNCED_KEY = 'xp9d-unsynced'
+
 const DEFAULT_ACTIVITIES: Activity[] = [
   { id: 'a1',      name: 'Work',                 color: '#7c3aed' },
   { id: 'a2',      name: 'Workout',              color: '#16a34a' },
@@ -83,7 +89,10 @@ function persistReminders(next: Reminder[]): Reminder[] {
 
 interface AppContextValue {
   calData: CalendarData
-  updateDay: (key: string, updater: (prev: DayData) => DayData) => void
+  // opts.after: day keys whose write must be confirmed first (a move writes the destination before the origin).
+  updateDay: (key: string, updater: (prev: DayData) => DayData, opts?: { after?: string[] }) => void
+  // Writes the given days (or every unsynced day) to Supabase now; true only when the server confirmed it.
+  flushDays: (keys?: string[]) => Promise<boolean>
   sessions: WorkSession[]
   addSession: (s: WorkSession) => void
   activities: Activity[]
@@ -191,10 +200,28 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const effectiveTimezoneRef = useRef(effectiveTimezone)
   effectiveTimezoneRef.current = effectiveTimezone
 
-  // Per-dateKey debounce timers for Supabase day upserts (1 second idle = flush)
-  const pendingDaySyncTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
-  // Latest DayData awaiting sync for each dateKey (written synchronously, read by timer)
-  const pendingDaySyncDataRef = useRef<Map<string, DayData>>(new Map())
+  // Durable day-sync queue (see daySync.ts): a day stays "unsynced" from the first edit until the
+  // server confirms it. Failed writes keep their data and retry; a move's origin write waits for the
+  // destination; hydration / realtime never overwrite an unsynced day.
+  const daySyncRef = useRef<DaySyncQueue<DayData> | null>(null)
+  if (daySyncRef.current === null) {
+    daySyncRef.current = new DaySyncQueue<DayData>({
+      write: async (key, data) => {
+        const uid = userIdRef.current
+        if (!uid) throw new Error('no-user')
+        await upsertDayData(createClient(), uid, key, data)
+      },
+      onError: (key, err) => {
+        console.error('[CalData] Supabase sync error for', key, err)
+        setToast('⚠ Couldn’t save to the cloud — your changes are kept on this device and will retry automatically')
+      },
+      onRecovered: () => setToast('Changes synced ✓'),
+      onUnsyncedChange: keys => {
+        try { localStorage.setItem(UNSYNCED_KEY, JSON.stringify({ uid: userIdRef.current, keys })) } catch {}
+      },
+    })
+  }
+  const daySync = daySyncRef.current
 
   // ─── Load from localStorage on mount ────────────────────────────────────────
 
@@ -302,6 +329,18 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     if (!userId) return
     const supabase = createClient()
 
+    // Resume days whose last edit never reached the server (failed write, or a refresh mid-write): re-send the
+    // LOCAL copy and keep hydration from replacing it with the older server row.
+    try {
+      const marker = JSON.parse(localStorage.getItem(UNSYNCED_KEY) ?? 'null') as { uid?: string; keys?: string[] } | null
+      if (marker && marker.uid === userId && Array.isArray(marker.keys)) {
+        const local = JSON.parse(localStorage.getItem('xp9d') ?? '{}') as CalendarData
+        for (const key of marker.keys) {
+          if (local[key] && !daySync.hasUnsynced(key)) daySync.schedule(key, local[key])
+        }
+      }
+    } catch {}
+
     Promise.all([
       fetchCalendarDays(supabase, userId),
       fetchWorkSessions(supabase, userId),
@@ -319,7 +358,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
         setCalData(prev => {
           const merged = { ...prev }
           for (const [key, dayData] of Object.entries(sbCalData)) {
-            if (!pendingDaySyncTimersRef.current.has(key)) {
+            if (!daySync.hasUnsynced(key)) {
               merged[key] = dayData
             }
           }
@@ -592,7 +631,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
 
           // Accept remote calData only when we have no pending local write for this date.
           // This prevents echoes of our own debounce writes from clobbering optimistic state.
-          if (!pendingDaySyncTimersRef.current.has(dateKey)) {
+          if (!daySync.hasUnsynced(dateKey)) {
             setCalData(prev => {
               const next = { ...prev, [dateKey]: dayData }
               try { localStorage.setItem('xp9d', JSON.stringify(next)) } catch {}
@@ -723,27 +762,24 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
 
   // Flush all pending debounced day-sync writes when the page is about to be discarded.
   // Prevents data loss when the user closes the tab or navigates away within 1 second of editing.
+  // Entries stay "unsynced" (and in the persisted marker) until the server confirms, so a write cut off
+  // by the page closing is re-sent on the next load instead of being lost.
   useEffect(() => {
-    function flush() {
-      pendingDaySyncTimersRef.current.forEach((timer, key) => {
-        clearTimeout(timer)
-        const dayData = pendingDaySyncDataRef.current.get(key)
-        pendingDaySyncDataRef.current.delete(key)
-        const uid = userIdRef.current
-        if (dayData && uid) {
-          upsertDayData(createClient(), uid, key, dayData).catch(() => {})
-        }
-      })
-      pendingDaySyncTimersRef.current.clear()
+    function flush() { void daySync.flushAll() }
+    function onVisChange() {
+      if (document.visibilityState === 'hidden') flush()
+      else daySync.retryNow()
     }
-    function onVisChange() { if (document.visibilityState === 'hidden') flush() }
+    function onOnline() { daySync.retryNow() }
     window.addEventListener('pagehide', flush)
+    window.addEventListener('online', onOnline)
     document.addEventListener('visibilitychange', onVisChange)
     return () => {
       window.removeEventListener('pagehide', flush)
+      window.removeEventListener('online', onOnline)
       document.removeEventListener('visibilitychange', onVisChange)
     }
-  }, [])
+  }, [daySync])
 
   // Sync activeTaskTimer.taskText when the user renames the task while clocked in
   useEffect(() => {
@@ -758,7 +794,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
 
   // ─── Core data mutations ─────────────────────────────────────────────────────
 
-  const updateDay = useCallback((key: string, updater: (prev: DayData) => DayData) => {
+  const updateDay = useCallback((key: string, updater: (prev: DayData) => DayData, opts?: { after?: string[] }) => {
     setCalData(prev => {
       const raw = prev[key] ?? { ...EMPTY_DAY }
       // Normalize legacy DayData that may lack a tasks array
@@ -766,28 +802,20 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       const updated = updater(current)
       const next = { ...prev, [key]: updated }
       try { localStorage.setItem('xp9d', JSON.stringify(next)) } catch {}
-      // Store latest value for the debounced Supabase write
-      pendingDaySyncDataRef.current.set(key, updated)
+      // Queue the debounced, confirm-tracked Supabase write with this exact value. Runs inside the
+      // updater so the value is the one React actually committed; it is idempotent, so a strict-mode
+      // double invoke only re-queues the same data.
+      if (userIdRef.current) daySync.schedule(key, updated, opts)
       return next
     })
-    // Schedule debounced Supabase upsert (outside setState to avoid strict-mode double-invoke issues)
-    const uid = userIdRef.current
-    if (uid) {
-      const existing = pendingDaySyncTimersRef.current.get(key)
-      if (existing != null) clearTimeout(existing)
-      const timer = setTimeout(() => {
-        pendingDaySyncTimersRef.current.delete(key)
-        const dayData = pendingDaySyncDataRef.current.get(key)
-        pendingDaySyncDataRef.current.delete(key)
-        if (dayData) {
-          upsertDayData(createClient(), uid, key, dayData).catch(err =>
-            console.error('[CalData] Supabase sync error for', key, err)
-          )
-        }
-      }, 1000)
-      pendingDaySyncTimersRef.current.set(key, timer)
-    }
-  }, [])
+  }, [daySync])
+
+  const flushDays = useCallback(async (keys?: string[]): Promise<boolean> => {
+    if (!userIdRef.current) return true
+    if (!keys) return daySync.flushAll()
+    const results = await Promise.all(keys.map(k => daySync.flush(k)))
+    return results.every(Boolean)
+  }, [daySync])
 
   const addSession = useCallback((s: WorkSession) => {
     trackFeature('activity_time_tracker') // analytics: a finished tracked session (no-op without consent)
@@ -1214,7 +1242,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
 
   return (
     <AppContext.Provider value={{
-      calData, updateDay,
+      calData, updateDay, flushDays,
       sessions, addSession,
       activities, addActivity, removeActivity, updateActivity,
       selectedActId, setSelectedActId,

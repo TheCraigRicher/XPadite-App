@@ -320,6 +320,10 @@ const MFP_STYLES = `
      different element in the tree. */
   @media (min-width: 1024px) {
     .xp-goal-shift { transform: translateX(-6px); }
+    /* End caps of a shifted goal cell's connectors: cancel the 6px shift for the line ENDS only (see the
+       comment at connLeft/connRight), so they meet the neighbouring cell's line whatever its marker. */
+    .xp-goal-conn-l { left: 6px !important; }
+    .xp-goal-conn-r { right: -15px !important; }
   }
 
   /* Dashboard pill micro-interactions */
@@ -612,11 +616,18 @@ function MonthCalendarLarge({
           const connR = visStreak && cell.dow !== 6 && !!nextKey && (() => { const d = cd[nextKey]; return !!(d?.productive || d?.hyper || d?.milestone || d?.goal) })()
 
           const connEdge = (rawHyper || rawMil || rawGoal) && !calendarClean ? '50%' : '70%'
+          // A goal-only cell's whole connector wrapper is nudged 6px left on desktop (.xp-goal-shift) so the line
+          // stays centred on the shifted 🎯. That also moved the line's two END points 6px, opening a gap after
+          // (or before) every 🎯 whose neighbour is not shifted identically. The end-cap classes cancel the shift
+          // for the ends only, so every segment ends at the same place whatever the neighbour's marker is: the left
+          // line starts at the cell's own left edge, the right line reaches 1px past the 8px grid gap (a 1px overlap
+          // so two separately anti-aliased edges can't leave a hairline seam). Independent of marker type.
+          const goalOnly = !rawHyper && !rawMil && rawGoal
           const connLeft = connL && (
-            <div style={{ position: 'absolute', left: 0, right: connEdge, top: '50%', height: 2.5, background: progressColor, boxShadow: connGlow, transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
+            <div className={goalOnly ? 'xp-goal-conn-l' : undefined} style={{ position: 'absolute', left: 0, right: connEdge, top: '50%', height: 2.5, background: progressColor, boxShadow: connGlow, transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
           )
           const connRight = connR && (
-            <div style={{ position: 'absolute', left: connEdge, right: -8, top: '50%', height: 2.5, background: progressColor, boxShadow: connGlow, transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
+            <div className={goalOnly ? 'xp-goal-conn-r' : undefined} style={{ position: 'absolute', left: connEdge, right: -9, top: '50%', height: 2.5, background: progressColor, boxShadow: connGlow, transform: 'translateY(-50%)', zIndex: 0, pointerEvents: 'none' }} />
           )
 
           return (

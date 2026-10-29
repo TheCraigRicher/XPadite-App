@@ -35,6 +35,7 @@ import { SendToOptionsModal } from './SendToOptionsModal'
 import {
   ensureTaskItemIds, extractPlannerTaskTree, makeTaskId,
 } from './plannerTaskBridge'
+import { createDictation, prefersSingleUtterance, type Dictation } from './speechDictation'
 import type { PlannerTaskNode } from './plannerTaskBridge'
 import type { SectionColorKey } from './journalUtils'
 
@@ -2287,11 +2288,14 @@ export function JournalEditorContent({
   const [isRecording, setIsRecording] = useState(false)
   const [voiceError,  setVoiceError]  = useState<string | null>(null)
   const isRecordingRef     = useRef(false)
-  const recognitionRef     = useRef<any>(null)
+  const dictationRef       = useRef<Dictation | null>(null)
   // The section editor focused WHEN Mic was pressed — stays the dictation
   // target for the whole session even though clicking the Mic button itself
   // moves DOM focus away from that section.
   const micTargetEditorRef = useRef<Editor | null>(null)
+  // Where finalized speech goes. Kept for the short drain after a manual Stop (so the last words the engine is
+  // still finalizing are not lost) and cleared once the session has fully settled.
+  const dictationTargetRef = useRef<Editor | null>(null)
   const silenceTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Refs ────────────────────────────────────────────────────────────────────
@@ -3499,17 +3503,17 @@ export function JournalEditorContent({
     clearSilenceTimer()
     silenceTimerRef.current = setTimeout(() => stopVoiceSession(), 10000)
   }
-  function stopVoiceSession() {
+  function stopVoiceSession(drain = false) {
     isRecordingRef.current = false
     setIsRecording(false)
     clearSilenceTimer()
     micTargetEditorRef.current = null
-    try { recognitionRef.current?.stop() } catch {}
-    recognitionRef.current = null
+    dictationRef.current?.stop({ drain })
+    if (!drain) dictationTargetRef.current = null
   }
   function handleVoiceToggle() {
     if (isRecordingRef.current) {
-      stopVoiceSession()
+      stopVoiceSession(true) // manual Stop: let the sentence being finalized land, nothing after that
       return
     }
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -3525,59 +3529,43 @@ export function JournalEditorContent({
       setVoiceError('Click inside a section first, then press Mic to dictate into it.')
       return
     }
-    micTargetEditorRef.current = target
-    const rec = new SR()
-    rec.continuous = true
-    rec.interimResults = true
-    rec.lang = navigator.language || 'en-US'
-    rec.onresult = (e: any) => {
-      resetSilenceTimer() // any recognition activity — interim or final — proves the user is still talking
-      let transcript = ''
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) transcript += e.results[i][0].transcript
-      }
-      if (transcript.trim()) {
-        // No .focus() — dictation must not steal UI focus from wherever the
+    // One controller for the component's lifetime: a new session closes whatever the previous one left behind, so
+    // two recognizers can never feed the editor at once (see speechDictation.ts for the duplication root causes).
+    if (!dictationRef.current) {
+      dictationRef.current = createDictation({
+        createRecognition: () => new SR(),
+        lang: navigator.language || 'en-US',
+        continuous: !prefersSingleUtterance(navigator),
+        // Only finalized speech arrives here. No .focus() — dictation must not steal UI focus from wherever the
         // user is looking (the Mic button/Listening indicator).
-        micTargetEditorRef.current?.chain().insertContent(transcript.trim() + ' ').run()
-      }
-    }
-    rec.onerror = (e: any) => {
-      // 'no-speech' fires on ordinary pauses and 'aborted' fires from our own
-      // .stop() calls — neither means the session should end.
-      if (e.error === 'no-speech' || e.error === 'aborted') return
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-        setVoiceError('Microphone access denied. Allow microphone access in your browser settings and try again.')
-      } else {
-        setVoiceError(`Voice error (${e.error}). Please try again.`)
-      }
-      stopVoiceSession()
-    }
-    rec.onend = () => {
-      // The browser ending its own recognition cycle is NOT the same as the
-      // XPadite session ending — restart it as long as the user hasn't
-      // manually stopped and the silence timer hasn't already fired. A short
-      // delay avoids some browsers throwing if .start() is called again in
-      // the same tick the previous cycle finished.
-      if (!isRecordingRef.current) return
-      setTimeout(() => {
-        if (!isRecordingRef.current) return
-        try { rec.start() } catch {
-          setVoiceError('Voice recognition stopped unexpectedly. Please try again.')
+        onText: text => {
+          const ed = dictationTargetRef.current
+          if (ed && !ed.isDestroyed) ed.chain().insertContent(text + ' ').run()
+        },
+        onActivity: () => { if (isRecordingRef.current) resetSilenceTimer() }, // interim or final proves the user is still talking
+        onFatal: code => {
+          // 'no-speech' / 'aborted' never reach here — they are ordinary pauses and our own stop().
+          if (code === 'not-allowed' || code === 'service-not-allowed') {
+            setVoiceError('Microphone access denied. Allow microphone access in your browser settings and try again.')
+          } else if (code === 'restart-failed') {
+            setVoiceError('Voice recognition stopped unexpectedly. Please try again.')
+          } else {
+            setVoiceError(`Voice error (${code}). Please try again.`)
+          }
           stopVoiceSession()
-        }
-      }, 200)
+        },
+        onSettled: () => { if (!isRecordingRef.current) dictationTargetRef.current = null },
+      })
     }
-    recognitionRef.current = rec
-    try {
-      rec.start()
+    if (dictationRef.current.start()) {
+      micTargetEditorRef.current = target
+      dictationTargetRef.current = target
       isRecordingRef.current = true
       setIsRecording(true)
       setVoiceError(null)
       resetSilenceTimer()
-    } catch {
+    } else {
       setVoiceError('Could not start voice recognition. Please check your microphone.')
-      recognitionRef.current = null
       micTargetEditorRef.current = null
     }
   }

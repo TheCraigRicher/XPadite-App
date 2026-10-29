@@ -1595,7 +1595,25 @@ const TEXT_COLORS: Array<{ label: string; value: string | null; swatch: string }
   { label: 'Black',    value: '#1e293b', swatch: '#1e293b' },
 ]
 
-function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMRect }) {
+// ── Mobile-only containment for the floating formatter ──────────────────────
+// Below Tailwind's `sm` (640px) — the app-wide phone breakpoint — the toolbar is kept fully inside the VISIBLE viewport
+// (visualViewport: respects browser UI and the on-screen keyboard) using its real rendered size. Tablet and desktop keep
+// the original positioning code path untouched.
+const FF_MOBILE_MAX_WIDTH = 640
+const FF_PAD = 8        // minimum distance from every screen edge
+const FF_GAP = 10       // distance between the selection and the toolbar
+const FF_HANDLE_CLEARANCE = 24   // when placed BELOW a selection, clear the native selection handles
+type FFMode = 'normal' | 'compact' | 'wrap'   // natural size -> tighter padding -> wrapped onto a second row (nothing is ever removed)
+
+const ffIsMobile = () => typeof window !== 'undefined' && window.innerWidth < FF_MOBILE_MAX_WIDTH
+function ffViewport() {
+  const vv = typeof window !== 'undefined' ? window.visualViewport : null
+  return vv
+    ? { left: vv.offsetLeft, top: vv.offsetTop, width: vv.width, height: vv.height }
+    : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }
+}
+
+function FloatingFormatter({ editor, rect: selRect }: { editor: Editor | null; rect: DOMRect }) {
   const [showSize,      setShowSize]      = useState(false)
   const [showColor,     setShowColor]     = useState(false)
   const [showHighlight, setShowHighlight] = useState(false)
@@ -1615,6 +1633,81 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
     document.addEventListener('mousedown', outside)
     return () => document.removeEventListener('mousedown', outside)
   }, [showSize, showColor, showHighlight, showBoxColor])
+
+  // ── Mobile containment (no effect on tablet/desktop: every handler below bails out at >= 640px) ──
+  // rect = the selection's CURRENT position: a new selection replaces it, scrolling/resizing/keyboard refresh it.
+  const [rect, setRect] = useState<DOMRect>(selRect)
+  const [prevSelRect, setPrevSelRect] = useState<DOMRect>(selRect)
+  if (selRect !== prevSelRect) { setPrevSelRect(selRect); setRect(selRect) }
+  const [, setVpTick] = useState(0)
+  const [mode, setMode] = useState<FFMode>('normal')
+  const [mpos, setMpos] = useState<{ top: number; left: number } | null>(null)
+
+  useEffect(() => {
+    let raf = 0
+    function update() {
+      raf = 0
+      if (!ffIsMobile()) return
+      const sel = window.getSelection()
+      if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+        const r = sel.getRangeAt(0).getBoundingClientRect()
+        if (r.width > 0 || r.height > 0) setRect(r)
+      }
+      setMode('normal')           // a different viewport width may fit the natural layout again
+      setVpTick(t => t + 1)
+    }
+    const schedule = () => { if (!raf && ffIsMobile()) raf = requestAnimationFrame(update) }
+    const vv = window.visualViewport
+    window.addEventListener('scroll', schedule, true)   // capture: scrolling inside the Planner's own scroll containers too
+    window.addEventListener('resize', schedule)
+    vv?.addEventListener('resize', schedule)            // keyboard open/close, browser UI show/hide
+    vv?.addEventListener('scroll', schedule)
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+      window.removeEventListener('scroll', schedule, true)
+      window.removeEventListener('resize', schedule)
+      vv?.removeEventListener('resize', schedule)
+      vv?.removeEventListener('scroll', schedule)
+    }
+  }, [])
+
+  // Place the toolbar from its measured size. Runs after every render (guarded so it settles immediately).
+  useLayoutEffect(() => {
+    if (!ffIsMobile()) return
+    const el = ref.current
+    if (!el) return
+    const vp = ffViewport()
+    const availW = vp.width - 2 * FF_PAD
+    const w = el.offsetWidth, h = el.offsetHeight
+    if (w > availW + 0.5 && mode !== 'wrap') { setMode(mode === 'normal' ? 'compact' : 'wrap'); return }
+    const left = Math.min(Math.max(rect.left + rect.width / 2 - w / 2, vp.left + FF_PAD), vp.left + vp.width - w - FF_PAD)
+    const minTop = vp.top + FF_PAD, maxTop = vp.top + vp.height - h - FF_PAD
+    const above = rect.top - h - FF_GAP
+    const below = rect.bottom + FF_GAP + FF_HANDLE_CLEARANCE
+    // Prefer above the selection, then below it; whatever is chosen is clamped into the visible area, so a selection that has
+    // been scrolled off-screen leaves the toolbar pinned at the nearest edge instead of off the screen.
+    const wanted = above >= minTop ? above : below <= maxTop ? below : above
+    const top = Math.min(Math.max(wanted, minTop), Math.max(minTop, maxTop))
+    setMpos(prev => (prev && Math.abs(prev.top - top) < 0.5 && Math.abs(prev.left - left) < 0.5 ? prev : { top, left }))
+  })
+
+  // Keep each open sub-menu (colour / highlight / size / box colour) inside the screen too: slide it sideways, or open it
+  // downward when there is no room above. Re-measured whenever the toolbar moves or a menu opens.
+  useLayoutEffect(() => {
+    if (!ffIsMobile()) return
+    const root = ref.current
+    if (!root) return
+    const vp = ffViewport()
+    root.querySelectorAll<HTMLElement>('[data-xp-ff-pop]').forEach(pop => {
+      const off = Number(pop.dataset.xpFfPop) || 6
+      pop.style.transform = 'translateX(-50%)'; pop.style.top = ''; pop.style.bottom = `calc(100% + ${off}px)`
+      let r = pop.getBoundingClientRect()
+      if (r.top < vp.top + FF_PAD) { pop.style.bottom = 'auto'; pop.style.top = `calc(100% + ${off}px)`; r = pop.getBoundingClientRect() }
+      const minX = vp.left + FF_PAD, maxX = vp.left + vp.width - FF_PAD
+      const dx = r.left < minX ? minX - r.left : r.right > maxX ? maxX - r.right : 0
+      if (dx !== 0) pop.style.transform = `translateX(calc(-50% + ${dx}px))`
+    })
+  }, [mpos, mode, showSize, showColor, showHighlight, showBoxColor])
 
   if (!editor) return null
 
@@ -1638,11 +1731,20 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
   const activeHighlight: string | null = (editor.getAttributes('xpHighlight').color as string | undefined) ?? null
   const hasHighlight = activeHighlight !== null
 
+  const mobile = ffIsMobile()
   const top  = Math.max(8, rect.top - 50)
   const left = rect.left + rect.width / 2
+  // Tablet/desktop: the original placement, unchanged. Phones: measured, clamped placement (see above).
+  const placement: React.CSSProperties = mobile
+    ? {
+        top: mpos?.top ?? 0, left: mpos?.left ?? 0, visibility: mpos ? 'visible' : 'hidden',
+        width: 'max-content', maxWidth: mode === 'wrap' ? ffViewport().width - 2 * FF_PAD : undefined,
+        flexWrap: mode === 'wrap' ? 'wrap' : 'nowrap', rowGap: mode === 'wrap' ? 3 : undefined,
+      }
+    : { top, left, transform: 'translateX(-50%)' }
 
   const fBtn = (active: boolean, extra?: React.CSSProperties): React.CSSProperties => ({
-    padding: '3px 8px', borderRadius: 5, border: 'none', cursor: 'pointer',
+    padding: mode === 'normal' ? '3px 8px' : '3px 5px', borderRadius: 5, border: 'none', cursor: 'pointer',
     background: active ? 'rgba(124,58,237,0.40)' : 'transparent',
     color: active ? '#c4b5fd' : 'rgba(255,255,255,0.82)',
     fontSize: 12, fontWeight: active ? 700 : 500,
@@ -1657,8 +1759,7 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
     <div
       ref={ref}
       style={{
-        position: 'fixed', top, left,
-        transform: 'translateX(-50%)',
+        position: 'fixed', ...placement,
         zIndex: 9990,
         background: 'rgba(10,6,30,0.97)',
         border: '0.5px solid rgba(124,58,237,0.32)',
@@ -1702,7 +1803,7 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
         </button>
 
         {showColor && (
-          <div style={{
+          <div data-xp-ff-pop="6" style={{
             position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%',
             transform: 'translateX(-50%)',
             background: 'rgba(10,6,30,0.98)',
@@ -1764,7 +1865,7 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
         </button>
 
         {showHighlight && (
-          <div style={{
+          <div data-xp-ff-pop="6" style={{
             position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%',
             transform: 'translateX(-50%)',
             background: 'rgba(10,6,30,0.98)',
@@ -1822,7 +1923,7 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
           {sizeLabel} <span style={{ fontSize: 8, opacity: 0.65 }}>▾</span>
         </button>
         {showSize && (
-          <div style={{
+          <div data-xp-ff-pop="5" style={{
             position: 'absolute', bottom: 'calc(100% + 5px)', left: '50%',
             transform: 'translateX(-50%)',
             background: 'rgba(10,6,30,0.97)',
@@ -1875,7 +1976,7 @@ function FloatingFormatter({ editor, rect }: { editor: Editor | null; rect: DOMR
         >▾</button>
 
         {showBoxColor && (
-          <div style={{
+          <div data-xp-ff-pop="6" style={{
             position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%',
             transform: 'translateX(-50%)',
             background: 'rgba(10,6,30,0.98)',

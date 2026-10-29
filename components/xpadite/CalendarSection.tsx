@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useMemo } from 'react'
+import { useState, useRef, useMemo, useLayoutEffect } from 'react'
 import { MonthCard } from './MonthCard'
 import { APP_YEAR, todayKeyInTz } from './utils'
 import { useApp } from './AppContext'
@@ -11,6 +11,36 @@ const QUARTERS: { label: string; months: [number, number, number] }[] = [
   { label: 'Q3', months: [6, 7, 8] },
   { label: 'Q4', months: [9, 10, 11] },
 ]
+
+// ── Remembered quarter state (this device/browser only) ─────────────────────
+// { "Q1": "expanded" | "collapsed", ... } — only quarters the user has toggled by hand are stored, so a first-time
+// user (nothing stored) keeps the existing default of every quarter expanded.
+const STORAGE_KEY = 'xp-cal-quarters'
+
+function readSavedQuarters(): Record<string, boolean> {
+  const saved: Record<string, boolean> = {}
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')
+    for (const q of QUARTERS) {
+      if (raw?.[q.label] === 'collapsed') saved[q.label] = false
+      else if (raw?.[q.label] === 'expanded') saved[q.label] = true
+    }
+  } catch {}
+  return saved
+}
+
+// Only the quarter the user just toggled is written (merged into what is already stored), so programmatic
+// expansion (jump-to-today) never turns into a saved preference.
+function saveQuarter(label: string, isOpen: boolean) {
+  let base: Record<string, unknown> = {}
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) base = raw
+  } catch {} // unreadable stored value: start over from the toggle just made instead of never saving again
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...base, [label]: isOpen ? 'expanded' : 'collapsed' }))
+  } catch {}
+}
 
 const ChevronIcon = ({ open }: { open: boolean }) => (
   <svg
@@ -50,8 +80,19 @@ export function CalendarSection({ onDayDoubleClick, onMonthZoom, activeMonth, on
   const [flashMonth, setFlashMonth] = useState<number | null>(null)
   const currentMonthRef = useRef<HTMLDivElement | null>(null)
 
+  // Restore the saved quarter state. The first render is always the default (so this is also safe if the component
+  // is ever server-rendered); this layout effect applies the saved state synchronously BEFORE the browser paints,
+  // so there is no visible expanded→collapsed flip. (In the app the calendar mounts client-side only, after
+  // AppProvider has hydrated, so there is no server HTML to mismatch.)
+  useLayoutEffect(() => {
+    const saved = readSavedQuarters()
+    if (Object.keys(saved).length > 0) setOpen(prev => ({ ...prev, ...saved }))
+  }, [])
+
   function toggle(q: string) {
-    setOpen(prev => ({ ...prev, [q]: !prev[q] }))
+    const next = !open[q]
+    setOpen(prev => ({ ...prev, [q]: next }))
+    saveQuarter(q, next)
   }
 
   function jumpToToday() {

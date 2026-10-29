@@ -1072,7 +1072,90 @@ function TaskRow({
     onNotesDraftChange(lines.join('\n'))
   }
 
+  // ── Mobile-only (< 640px): tap a ☐ / ☑ to toggle it ─────────────────────────
+  // The checklist is plain Unicode in a plain <textarea>. The original tap detection divides the tap's Y by the line height,
+  // which is only right when every item fits on ONE visual row — an item that wraps shifts every later checkbox, so taps
+  // landed on the wrong line (or none). On phones the glyph's real position is measured instead (a hidden mirror of the
+  // textarea lays the same text out with the same wrapping), and the target is a comfortable finger-sized area.
+  const MOBILE_CHECKLIST_MAX_WIDTH = 640
+  const mobileTapRef = useRef<{ start: number; end: number; focused: boolean } | null>(null)
+
+  function mobileChecklistHit(ta: HTMLTextAreaElement, clientX: number, clientY: number): number | null {
+    const value = (draftJournal ?? task.journal) || ''
+    if (!/(^|\n)[☐☑] /.test(value)) return null
+    const cs = window.getComputedStyle(ta)
+    const mirror = document.createElement('div')
+    const ms = mirror.style
+    ms.position = 'fixed'; ms.left = '-10000px'; ms.top = '0'; ms.visibility = 'hidden'; ms.pointerEvents = 'none'
+    ms.boxSizing = 'border-box'; ms.width = `${ta.clientWidth}px`; ms.border = '0'
+    ms.whiteSpace = 'pre-wrap'; ms.overflowWrap = 'break-word'; ms.wordBreak = cs.wordBreak
+    ms.font = cs.font; ms.letterSpacing = cs.letterSpacing; ms.wordSpacing = cs.wordSpacing; ms.textTransform = cs.textTransform
+    ms.textIndent = cs.textIndent; ms.tabSize = cs.tabSize; ms.lineHeight = cs.lineHeight
+    ms.padding = `${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft}`
+    mirror.textContent = value
+    document.body.appendChild(mirror)
+    try {
+      const node = mirror.firstChild
+      if (!node) return null
+      const mr = mirror.getBoundingClientRect()
+      const tr = ta.getBoundingClientRect()
+      const originX = tr.left + ta.clientLeft
+      const originY = tr.top + ta.clientTop - ta.scrollTop
+      let best: { index: number; dist: number } | null = null
+      let offset = 0
+      value.split('\n').forEach((line, index) => {
+        if (line.startsWith('☐ ') || line.startsWith('☑ ')) {
+          const range = document.createRange()
+          range.setStart(node, offset); range.setEnd(node, offset + 1)
+          const r = range.getClientRects()[0]
+          if (r) {
+            const top = originY + (r.top - mr.top), bottom = top + r.height
+            const right = originX + (r.right - mr.left)
+            // Finger-sized zone: from the textarea's left edge to ~16px past the box, one full text row tall (+3px: rows never
+            // overlap a neighbouring row's own zone, and plain text next to the box is never captured).
+            if (clientX >= originX && clientX <= right + 16 && clientY >= top - 3 && clientY <= bottom + 3) {
+              const dist = Math.abs(clientY - (top + bottom) / 2)
+              if (!best || dist < best.dist) best = { index, dist }
+            }
+          }
+        }
+        offset += line.length + 1
+      })
+      return best ? (best as { index: number; dist: number }).index : null
+    } finally {
+      mirror.remove()
+    }
+  }
+
+  // Remember where the caret/selection and focus were BEFORE the tap, and keep a checkbox tap from moving the caret,
+  // selecting text or opening the keyboard.
+  function handleNotesPointerDown(e: React.PointerEvent<HTMLTextAreaElement>) {
+    if (window.innerWidth >= MOBILE_CHECKLIST_MAX_WIDTH) return
+    const ta = e.currentTarget
+    mobileTapRef.current = { start: ta.selectionStart, end: ta.selectionEnd, focused: document.activeElement === ta }
+    if (mobileChecklistHit(ta, e.clientX, e.clientY) !== null) e.preventDefault()
+  }
+
+  function handleMobileChecklistTap(e: React.MouseEvent<HTMLTextAreaElement>) {
+    const ta = e.currentTarget
+    const before = mobileTapRef.current
+    mobileTapRef.current = null
+    const index = mobileChecklistHit(ta, e.clientX, e.clientY)
+    if (index === null) return                      // not a checkbox: normal text tap (caret placement) is left alone
+    e.preventDefault()
+    toggleChecklistLine(index)
+    // Put the caret/selection/focus back exactly as they were (React has re-rendered the new text by the next frame).
+    requestAnimationFrame(() => {
+      if (!before) return
+      // Rewriting the value makes the browser jump the caret to the end — even in an unfocused textarea — so restore it
+      // in both cases, and never leave the box focused (keyboard open) if the tap found it unfocused.
+      try { ta.setSelectionRange(before.start, before.end) } catch { /* detached */ }
+      if (!before.focused && document.activeElement === ta) ta.blur()
+    })
+  }
+
   function handleNotesTextareaClick(e: React.MouseEvent<HTMLTextAreaElement>) {
+    if (window.innerWidth < MOBILE_CHECKLIST_MAX_WIDTH) { handleMobileChecklistTap(e); return }
     const ta = e.currentTarget
     const rect = ta.getBoundingClientRect()
     const style = window.getComputedStyle(ta)
@@ -1645,6 +1728,7 @@ function TaskRow({
                     onChange={e => onNotesDraftChange(e.target.value)}
                     onKeyDown={handleNotesKeyDown}
                     onClick={handleNotesTextareaClick}
+                    onPointerDown={handleNotesPointerDown}
                     placeholder="Add notes, or type ☐ to start a checklist item..."
                     rows={3}
                     tabIndex={expanded ? 0 : -1}

@@ -36,6 +36,7 @@ import {
   ensureTaskItemIds, extractPlannerTaskTree, makeTaskId,
 } from './plannerTaskBridge'
 import { createDictation, prefersSingleUtterance, type Dictation } from './speechDictation'
+import { formatDictation } from './speechPunctuation'
 import type { PlannerTaskNode } from './plannerTaskBridge'
 import type { SectionColorKey } from './journalUtils'
 
@@ -3540,7 +3541,24 @@ export function JournalEditorContent({
         // user is looking (the Mic button/Listening indicator).
         onText: text => {
           const ed = dictationTargetRef.current
-          if (ed && !ed.isDestroyed) ed.chain().insertContent(text + ' ').run()
+          if (!ed || ed.isDestroyed) return
+          const { $from, $to } = ed.state.selection
+          // Plain text in code blocks is inserted exactly as spoken — no punctuation or capitalization is applied there.
+          if ($from.parent.type.name === 'codeBlock') { ed.chain().insertContent({ type: 'text', text }).run(); return }
+          // Punctuation/capitalization is decided per FINALIZED segment, from the text around the cursor (see
+          // speechPunctuation.ts) — nothing already in the editor is touched, and each segment is processed once.
+          const fromOff = $from.parentOffset, toOff = $to.parentOffset
+          const before = fromOff === 0 ? '' : $from.parent.textBetween(Math.max(0, fromOff - 4), fromOff, undefined, '\n')
+          const after = $to.parent.textBetween(toOff, Math.min($to.parent.content.size, toOff + 4), undefined, '\n')
+          const parts = formatDictation(text, { before, after })
+          if (parts.length === 0) return
+          let chain = ed.chain()   // one chain = one transaction = one undo step per spoken segment
+          for (const part of parts) {
+            if (part.kind === 'text') chain = chain.insertContent({ type: 'text', text: part.text })
+            else if (part.kind === 'line') chain = chain.setHardBreak()
+            else chain = chain.splitBlock()
+          }
+          chain.run()
         },
         onActivity: () => { if (isRecordingRef.current) resetSilenceTimer() }, // interim or final proves the user is still talking
         onFatal: code => {

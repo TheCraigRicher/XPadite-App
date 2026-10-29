@@ -169,7 +169,8 @@ test('JournalEditorContent: uses the controller, inserts at the editor selection
   const s = fs.readFileSync(path.join(ROOT, 'components/xpadite/JournalEditorContent.tsx'), 'utf8')
   assert.ok(/createDictation\(\{/.test(s) && /continuous: !prefersSingleUtterance\(navigator\)/.test(s))
   const voice = s.slice(s.indexOf('function stopVoiceSession'), s.indexOf('if (!showEmoji) return'))
-  assert.ok(/ed\.chain\(\)\.insertContent\(text \+ ' '\)\.run\(\)/.test(voice) && !/chain\(\)\.focus/.test(voice), 'same insertion path as before; no .focus()')
+  // v1.315: finalized text now goes through formatDictation() (speechPunctuation.ts) before insertion at the selection.
+  assert.ok(/formatDictation\(text, \{ before, after \}\)/.test(voice) && /chain = chain\.insertContent\(\{ type: 'text', text: part\.text \}\)/.test(voice) && !/chain\(\)\.focus/.test(voice), 'inserts at the editor selection; no .focus()')
   assert.ok(/!ed\.isDestroyed/.test(s))
   assert.ok(/stopVoiceSession\(true\)/.test(s), 'manual Stop drains')
   assert.ok(/silenceTimerRef\.current = setTimeout\(\(\) => stopVoiceSession\(\), 10000\)/.test(s), '10s silence stop unchanged')

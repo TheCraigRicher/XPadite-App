@@ -8,29 +8,23 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const src = fs.readFileSync(path.join(__dirname, '..', '..', 'components/xpadite/DayModal.tsx'), 'utf8').replace(/\r\n/g, '\n')
-const a = src.indexOf('// ── Mobile-only (< 640px): tap a ☐ / ☑ to toggle it')
+const a = src.indexOf('// ── Checklist (☐ / ☑) clicks')
 const b = src.indexOf('function handleTitleEditEnd')
 const block = src.slice(a, b)
 
 test('the mobile checklist code exists next to the existing checklist helpers', () => {
   assert.ok(a > 0 && b > a)
-  assert.ok(/function toggleChecklistLine\(lineIndex: number\)/.test(src), 'the existing toggle is reused, not replaced')
+  assert.ok(/function toggleChecklistGlyph\(lineIndex: number\)/.test(src), 'the shared space-independent toggle (v1.318) sits with the helpers')
 })
 test('phones only: gated at the app-wide sm breakpoint (640px), in both the pointer handler and the click handler', () => {
   assert.ok(/MOBILE_CHECKLIST_MAX_WIDTH = 640/.test(block))
   assert.ok(/if \(window\.innerWidth >= MOBILE_CHECKLIST_MAX_WIDTH\) return/.test(block), 'pointerdown bails out on tablet/desktop')
   assert.ok(/if \(window\.innerWidth < MOBILE_CHECKLIST_MAX_WIDTH\) \{ handleMobileChecklistTap\(e\); return \}/.test(block), 'click routes to the mobile path only on phones')
 })
-test('tablet/desktop keep the ORIGINAL click handler body, character for character', () => {
-  const legacy = block.slice(block.indexOf('const ta = e.currentTarget\n    const rect = ta.getBoundingClientRect()'))
-  for (const line of [
-    'const lineHeight = parseFloat(style.lineHeight) || 19.5',
-    'const relY = e.clientY - rect.top - paddingTop + ta.scrollTop',
-    'const lineIndex = Math.floor(relY / lineHeight)',
-    "if (!line.startsWith('☐ ') && !line.startsWith('☑ ')) return",
-    'if (relX > 22) return',
-    'toggleChecklistLine(lineIndex)',
-  ]) assert.ok(legacy.includes(line), line)
+test('tablet/desktop: plain mouse clicks only — no preventDefault, no caret/focus juggling (see checklistDesktop.test.cjs for the toggle fix)', () => {
+  const click = src.slice(src.indexOf('function handleNotesTextareaClick'), src.indexOf('function handleTitleEditEnd'))
+  assert.ok(/mobileChecklistHit\(e\.currentTarget, e\.clientX, e\.clientY, 'mouse'\)/.test(click))
+  assert.ok(!/preventDefault|setSelectionRange|blur\(|focus\(/.test(click), 'desktop click behaviour (caret placement, selection) is the browser default')
 })
 test('the tapped checkbox is located from the REAL text layout (wrapping-safe), not from line-height arithmetic', () => {
   const mobile = block.slice(0, block.indexOf('function handleNotesTextareaClick'))
@@ -40,7 +34,8 @@ test('the tapped checkbox is located from the REAL text layout (wrapping-safe), 
   assert.ok(!/Math\.floor\(relY \/ lineHeight\)/.test(mobile), 'no line-height arithmetic on phones')
 })
 test('finger-sized, non-greedy target: left edge to ~16px past the box, one text row tall; the nearest row wins; plain text is never captured', () => {
-  assert.ok(/clientX >= originX && clientX <= right \+ 16 && clientY >= top - 3 && clientY <= bottom \+ 3/.test(block))
+  assert.ok(/clientX >= originX && clientX <= xMax && clientY >= top - slack && clientY <= bottom \+ slack/.test(block))
+  assert.ok(/: 3\b/.test(block) && /: right \+ 16/.test(block), "phones (mode 'touch'): ±3px rows and 16px past the box — values unchanged")
   assert.ok(/dist < best\.dist/.test(block))
 })
 test('a checkbox tap does not move the caret, select text or open the keyboard', () => {
@@ -51,10 +46,10 @@ test('a checkbox tap does not move the caret, select text or open the keyboard',
   assert.ok(/if \(index === null\) return/.test(block), 'taps on text keep their normal behaviour')
 })
 test('toggling goes through the existing draft + Save path, so persistence is unchanged', () => {
-  assert.ok(/toggleChecklistLine\(index\)/.test(block))
-  const tg = src.slice(src.indexOf('function toggleChecklistLine'), src.indexOf('// ── Mobile-only (< 640px)'))
+  assert.ok(/toggleChecklistGlyph\(index\)/.test(block), 'phones use the space-independent toggle (v1.318); see checklistMobileSpace.test.cjs')
+  const tg = src.slice(src.indexOf('function toggleChecklistGlyph'), src.indexOf('function mobileChecklistHit'))
   assert.ok(/onNotesDraftChange\(lines\.join\('\\n'\)\)/.test(tg), 'writes the notes draft exactly like typing does')
-  assert.ok(/'☑ ' \+ line\.slice\(2\)/.test(tg) && /'☐ ' \+ line\.slice\(2\)/.test(tg), 'only the marker changes; the rest of the line is untouched')
+  assert.ok(/'☑' \+ line\.slice\(1\)/.test(tg) && /'☐' \+ line\.slice\(1\)/.test(tg), 'only the marker changes; the rest of the line is untouched')
 })
 test('scope: nothing else in the Task Manager notes UI changed (insert buttons, placeholder, save/cancel, attachments)', () => {
   assert.ok(/onClick=\{\(\) => applyListType\('check'\)\}/.test(src) && /placeholder="Add notes, or type ☐ to start a checklist item\.\.\."/.test(src))

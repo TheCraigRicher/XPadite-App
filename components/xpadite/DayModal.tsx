@@ -1062,27 +1062,30 @@ function TaskRow({
     setShowPopover(true)
   }
 
-  // Checklist helpers
-  function toggleChecklistLine(lineIndex: number) {
-    const current = draftJournal ?? task.journal
-    const lines = (current || '').split('\n')
-    const line  = lines[lineIndex]
-    if (line.startsWith('☐ '))      lines[lineIndex] = '☑ ' + line.slice(2)
-    else if (line.startsWith('☑ ')) lines[lineIndex] = '☐ ' + line.slice(2)
-    onNotesDraftChange(lines.join('\n'))
-  }
-
-  // ── Mobile-only (< 640px): tap a ☐ / ☑ to toggle it ─────────────────────────
-  // The checklist is plain Unicode in a plain <textarea>. The original tap detection divides the tap's Y by the line height,
-  // which is only right when every item fits on ONE visual row — an item that wraps shifts every later checkbox, so taps
-  // landed on the wrong line (or none). On phones the glyph's real position is measured instead (a hidden mirror of the
-  // textarea lays the same text out with the same wrapping), and the target is a comfortable finger-sized area.
+  // ── Checklist (☐ / ☑) clicks ─────────────────────────────────────────────────
+  // The checklist is plain Unicode in a plain <textarea>. The original click detection divided the click's Y by the line
+  // height, which is only right when every item fits on ONE visual row (an item that wraps shifts every later checkbox), and it
+  // required a space after the box. The box is now located from the real text layout (a hidden mirror of the textarea lays the
+  // same text out with the same wrapping) and toggles whatever follows it. Phones (< 640px) get a finger-sized zone and keep
+  // the caret/keyboard exactly as they were; tablet and desktop get the original mouse zone and normal click behaviour.
   const MOBILE_CHECKLIST_MAX_WIDTH = 640
   const mobileTapRef = useRef<{ start: number; end: number; focused: boolean } | null>(null)
 
-  function mobileChecklistHit(ta: HTMLTextAreaElement, clientX: number, clientY: number): number | null {
+  // Flips ☐ <-> ☑ at the start of the line and nothing else — no space after the box is required, and no character is added,
+  // removed or rewritten. Shared by phones and by tablet/desktop.
+  function toggleChecklistGlyph(lineIndex: number) {
+    const lines = ((draftJournal ?? task.journal) || '').split('\n')
+    const line = lines[lineIndex]
+    if (!line) return
+    if (line[0] === '☐') lines[lineIndex] = '☑' + line.slice(1)
+    else if (line[0] === '☑') lines[lineIndex] = '☐' + line.slice(1)
+    else return
+    onNotesDraftChange(lines.join('\n'))
+  }
+
+  function mobileChecklistHit(ta: HTMLTextAreaElement, clientX: number, clientY: number, mode: 'touch' | 'mouse' = 'touch'): number | null {
     const value = (draftJournal ?? task.journal) || ''
-    if (!/(^|\n)[☐☑] /.test(value)) return null
+    if (!/(^|\n)[☐☑]/.test(value)) return null      // a box is a ☐/☑ at the start of a line — whatever follows it (text, spaces, nothing)
     const cs = window.getComputedStyle(ta)
     const mirror = document.createElement('div')
     const ms = mirror.style
@@ -1104,16 +1107,20 @@ function TaskRow({
       let best: { index: number; dist: number } | null = null
       let offset = 0
       value.split('\n').forEach((line, index) => {
-        if (line.startsWith('☐ ') || line.startsWith('☑ ')) {
+        if (line.startsWith('☐') || line.startsWith('☑')) {
           const range = document.createRange()
           range.setStart(node, offset); range.setEnd(node, offset + 1)
           const r = range.getClientRects()[0]
           if (r) {
             const top = originY + (r.top - mr.top), bottom = top + r.height
             const right = originX + (r.right - mr.left)
-            // Finger-sized zone: from the textarea's left edge to ~16px past the box, one full text row tall (+3px: rows never
-            // overlap a neighbouring row's own zone, and plain text next to the box is never captured).
-            if (clientX >= originX && clientX <= right + 16 && clientY >= top - 3 && clientY <= bottom + 3) {
+            // 'touch' (phones) — finger-sized zone: from the textarea's left edge to ~16px past the box, one full text row tall
+            // (+3px: rows never overlap a neighbouring row's own zone, and plain text next to the box is never captured).
+            // 'mouse' (tablet/desktop) — the original zone: the first 22px of text, over the row's whole line box.
+            const lh = parseFloat(cs.lineHeight) || r.height
+            const slack = mode === 'mouse' ? Math.max(0, (lh - r.height) / 2) : 3
+            const xMax = mode === 'mouse' ? originX + (parseFloat(cs.paddingLeft) || 0) + 22 : right + 16
+            if (clientX >= originX && clientX <= xMax && clientY >= top - slack && clientY <= bottom + slack) {
               const dist = Math.abs(clientY - (top + bottom) / 2)
               if (!best || dist < best.dist) best = { index, dist }
             }
@@ -1143,7 +1150,7 @@ function TaskRow({
     const index = mobileChecklistHit(ta, e.clientX, e.clientY)
     if (index === null) return                      // not a checkbox: normal text tap (caret placement) is left alone
     e.preventDefault()
-    toggleChecklistLine(index)
+    toggleChecklistGlyph(index)
     // Put the caret/selection/focus back exactly as they were (React has re-rendered the new text by the next frame).
     requestAnimationFrame(() => {
       if (!before) return
@@ -1156,21 +1163,9 @@ function TaskRow({
 
   function handleNotesTextareaClick(e: React.MouseEvent<HTMLTextAreaElement>) {
     if (window.innerWidth < MOBILE_CHECKLIST_MAX_WIDTH) { handleMobileChecklistTap(e); return }
-    const ta = e.currentTarget
-    const rect = ta.getBoundingClientRect()
-    const style = window.getComputedStyle(ta)
-    const lineHeight = parseFloat(style.lineHeight) || 19.5
-    const paddingTop = parseFloat(style.paddingTop) || 8
-    const paddingLeft = parseFloat(style.paddingLeft) || 10
-    const relY = e.clientY - rect.top - paddingTop + ta.scrollTop
-    const lineIndex = Math.floor(relY / lineHeight)
-    const lines = ((draftJournal ?? task.journal) || '').split('\n')
-    if (lineIndex < 0 || lineIndex >= lines.length) return
-    const line = lines[lineIndex]
-    if (!line.startsWith('☐ ') && !line.startsWith('☑ ')) return
-    const relX = e.clientX - rect.left - paddingLeft
-    if (relX > 22) return
-    toggleChecklistLine(lineIndex)
+    // Tablet/desktop: a plain click on the box toggles it; every other click (caret placement, selection) is untouched.
+    const index = mobileChecklistHit(e.currentTarget, e.clientX, e.clientY, 'mouse')
+    if (index !== null) toggleChecklistGlyph(index)
   }
 
   function handleTitleEditEnd() {

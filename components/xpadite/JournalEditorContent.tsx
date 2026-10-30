@@ -1246,11 +1246,13 @@ interface InlineMediaBlockProps {
   onResizeActivate: () => void
   onDelete: () => void
   onCollapseToggle: () => void
+  onDuplicate?: () => void   // Duplicate: an independent copy right after this image on the same date
+  onTransfer?: () => void    // Move Image: move or copy to another date (the same modal as Move Section)
   onBeginDrag?: (e: React.MouseEvent | React.TouchEvent) => void
   wasJustDragged?: () => boolean
 }
 
-function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onResizeActivate, onDelete, onCollapseToggle, onBeginDrag, wasJustDragged }: InlineMediaBlockProps) {
+function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onResizeActivate, onDelete, onCollapseToggle, onDuplicate, onTransfer, onBeginDrag, wasJustDragged }: InlineMediaBlockProps) {
   const { setToast } = useApp()
   const [menuOpen, setMenuOpen] = useState(false)
   const [lightbox, setLightbox] = useState(false)
@@ -1361,6 +1363,16 @@ function InlineMediaBlock({ block, isDark, onEdit, onMoveActivate, onResizeActiv
             <button onClick={() => { onEdit(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
               🧠 Edit Mind Map
             </button>
+            {!!onDuplicate && (
+              <button onClick={() => { onDuplicate(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                📑 Duplicate
+              </button>
+            )}
+            {!!onTransfer && (
+              <button onClick={() => { onTransfer(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                📅 Move Image
+              </button>
+            )}
             <button onClick={() => { setSendToOpen(true); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
               📤 Send to →
             </button>
@@ -2232,10 +2244,13 @@ export function JournalEditorContent({
 }: JournalEditorContentProps) {
 
   // ── App context (for Task Manager integration) ───────────────────────────────
-  const { calData, updateDay, activeTaskTimer, setActiveTaskTimer, setToast } = useApp()
+  const { calData, updateDay, flushDays, activeTaskTimer, setActiveTaskTimer, setToast } = useApp()
 
   // ── Transfer Section modal (Move/Copy a section to another date) ─────────────
   const [transferBlockId, setTransferBlockId] = useState<string | null>(null)
+  // Move Image / Copy to Date for a Planner image or Mind Map (re-uses the Move Section modal below)
+  const [transferImageId, setTransferImageId] = useState<string | null>(null)
+  const imageTransferBusyRef = useRef(false)
 
   // ── State ───────────────────────────────────────────────────────────────────
   // ── Editor-wide history (mobile undo/redo) ───────────────────────────────────
@@ -2804,6 +2819,67 @@ export function JournalEditorContent({
       appendBlockToDay(destKey, moved)
       deleteBlock(id)
       setToast(`Section moved to ${destLabel} ✓`)
+    }
+  }
+
+  // ── Images / Mind Maps: Duplicate, and Move/Copy to another date ─────────────────────────────────────────────
+  // Duplicate: a fully independent copy straight after the original (new id; same picture, size and — for a Mind Map — the same editable
+  // canvasData string, so editing one never touches the other). The copy is flagged galleryExempt: it gets no Gallery item of its own, and
+  // saving it can never refresh the original's Gallery image.
+  function duplicateImageBlock(id: string) {
+    const idx = blocksRef.current.findIndex(b => b.id === id)
+    if (idx < 0) return
+    const original = blocksRef.current[idx]
+    if (original.type !== 'image' && original.type !== 'drawing') return
+    const ts = Date.now()
+    insertBlock({ ...original, id: mkId(), createdAt: ts, updatedAt: ts, galleryExempt: true }, idx)
+    setToast(original.type === 'drawing' ? 'Mind Map duplicated ✓' : 'Image duplicated ✓')
+  }
+
+  // Move: the SAME block (same id) is written to the destination date first; only once the server has confirmed that write is the original
+  // removed from this date. Copy: a fresh-id, galleryExempt copy; the original is never touched. If the destination cannot be saved,
+  // the destination change is rolled back and nothing on this date changes. The destination's notes are read INSIDE the updateDay updater
+  // (not from this render's calData snapshot), so rapid transfers to the same date compose instead of overwriting each other, and a block
+  // id that is already there is never added twice.
+  async function transferImage(mode: 'move' | 'copy', id: string, destKey: string) {
+    const block = blocksRef.current.find(b => b.id === id)
+    if (!block || (block.type !== 'image' && block.type !== 'drawing')) return
+    if (destKey === dateKeyRef.current) { setToast('Pick a different date to transfer this image'); return }
+    if (imageTransferBusyRef.current) return
+    imageTransferBusyRef.current = true
+    const originKey = dateKeyRef.current
+    const destLabel = fmtTransferDate(destKey)
+    const ts = Date.now()
+    const payload: JournalBlock = mode === 'copy'
+      ? { ...block, id: mkId(), createdAt: ts, updatedAt: ts, galleryExempt: true }
+      : { ...block, updatedAt: ts }
+    try {
+      updateDay(destKey, prev => {
+        const doc = parseJournalDoc(prev.notes)
+        if (doc.blocks.some(b => b.id === payload.id)) return prev
+        return { ...prev, notes: serializeJournalDoc({ ...doc, blocks: [...doc.blocks, payload] }) }
+      })
+      await new Promise(r => setTimeout(r, 0))               // let the queued day update commit before asking for confirmation
+      const saved = await flushDays([destKey])
+      if (!saved) {
+        updateDay(destKey, prev => {
+          const doc = parseJournalDoc(prev.notes)
+          return { ...prev, notes: serializeJournalDoc({ ...doc, blocks: doc.blocks.filter(b => b.id !== payload.id) }) }
+        })
+        setToast(`Couldn’t save to ${destLabel} — nothing was ${mode === 'move' ? 'moved' : 'copied'}`)
+        return
+      }
+      if (mode === 'move') {
+        if (dateKeyRef.current !== originKey) { setToast(`Image saved to ${destLabel}; the original was left on its date`); return }
+        deleteBlock(id)
+        // The destination is already confirmed, so removing the original can only ever end in "on both dates", never "on neither" — even
+        // if this date's own save is slow, fails or the app closes first. Persist the removal to the durable day store NOW instead of
+        // waiting out the 1.5s autosave debounce (same content autosave would write; the editor's unsaved-changes state is untouched).
+        try { flushFnRef.current() } catch (err) { console.error('[Planner] could not persist the move on the source date yet:', err) }
+      }
+      setToast(`Image ${mode === 'move' ? 'moved' : 'copied'} to ${destLabel} ✓`)
+    } finally {
+      imageTransferBusyRef.current = false
     }
   }
 
@@ -3499,7 +3575,9 @@ export function JournalEditorContent({
       savedBlock = { ...existing, src: dataUrl, thumbnail: dataUrl, canvasData: objectsJson, updatedAt: Date.now() }
       next = blocksRef.current.map(b => b.id === existing.id ? savedBlock : b)
       // Keep the Mind Map's existing Gallery item current (it used to keep the very first save forever).
-      try { refreshGalleryDrawing(existing.src, existing.createdAt, dataUrl) } catch (err) { console.error('[Gallery] refresh failed:', err) }
+      if (!existing.galleryExempt) {
+        try { refreshGalleryDrawing(existing.src, existing.createdAt, dataUrl) } catch (err) { console.error('[Gallery] refresh failed:', err) }
+      }
     } else {
       savedBlock = createDrawingBlock(dataUrl, `Mind Map — ${fmtShortDate(dateKey)}`, objectsJson)
       next = [...blocksRef.current]
@@ -4610,6 +4688,8 @@ export function JournalEditorContent({
                               setSelectedBlockId(block.id)
                             }}
                             onDelete={() => deleteBlock(block.id)}
+                            onDuplicate={() => duplicateImageBlock(block.id)}
+                            onTransfer={() => setTransferImageId(block.id)}
                             onCollapseToggle={() => updateBlock(block.id, { collapsed: !block.collapsed })}
                             onBeginDrag={e => startImagePressDrag(block.id, e)}
                             wasJustDragged={() => {
@@ -5247,6 +5327,25 @@ export function JournalEditorContent({
             onConfirm={(mode, destKey) => {
               transferSection(mode, transferBlockId, destKey)
               setTransferBlockId(null)
+            }}
+          />
+        )
+      })()}
+
+      {/* ── Transfer Image modal — the Move Section modal, re-worded ───────── */}
+      {transferImageId && (() => {
+        const block = blocks.find(b => b.id === transferImageId)
+        if (!block) return null
+        return (
+          <TransferSectionModal
+            kind="image"
+            dateKey={dateKey}
+            sectionLabel={block.name ?? ''}
+            onClose={() => setTransferImageId(null)}
+            onConfirm={(mode, destKey) => {
+              const id = transferImageId
+              setTransferImageId(null)
+              void transferImage(mode, id, destKey)
             }}
           />
         )

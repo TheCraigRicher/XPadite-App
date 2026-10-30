@@ -24,6 +24,8 @@ type TransferMode = 'move' | 'copy'
 interface TransferSectionModalProps {
   dateKey: string
   sectionLabel: string
+  // 'image' re-uses this exact modal (same layout, calendar and controls) for Planner images / Mind Maps; only the wording changes.
+  kind?: 'section' | 'image'
   onClose: () => void
   onConfirm: (mode: TransferMode, destDateKey: string) => void
 }
@@ -37,7 +39,23 @@ function fmtShort(d: Date): string {
   return `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getDate()}`
 }
 
-export function TransferSectionModal({ dateKey, sectionLabel, onClose, onConfirm }: TransferSectionModalProps) {
+const WORDING = {
+  section: {
+    title: 'Move Section', subtitle: 'Move or copy this section to another date.', untitled: '(untitled section)',
+    copyDesc: 'Creates a copy on another date. The original section stays here.',
+    moveDesc: "Moves this section to another date. The original section is removed from this day's Planner.",
+    sameDate: "This is already the section's current date — pick another date to transfer it.",
+  },
+  image: {
+    title: 'Move Image', subtitle: 'Move or copy this image to another date.', untitled: '(untitled image)',
+    copyDesc: 'Creates an independent copy on the selected date. The original remains on its current date.',
+    moveDesc: "Transfers the original image to the selected date and removes it from this day's Planner once it is saved there.",
+    sameDate: "This is already the image's current date — pick another date to transfer it.",
+  },
+} as const
+
+export function TransferSectionModal({ dateKey, sectionLabel, kind = 'section', onClose, onConfirm }: TransferSectionModalProps) {
+  const W = WORDING[kind]
   const { effectiveTimezone } = useApp()
   const originDate = useMemo(() => parseDateKey(dateKey), [dateKey])
   const [monthCursor, setMonthCursor] = useState(() => new Date(originDate.getFullYear(), originDate.getMonth(), 1))
@@ -91,8 +109,8 @@ export function TransferSectionModal({ dateKey, sectionLabel, onClose, onConfirm
           style={{ background: 'linear-gradient(135deg, #5b21b6 0%, #7c3aed 100%)' }}
         >
           <div className="min-w-0">
-            <h3 className="text-[14px] font-semibold" style={{ color: '#ffffff' }}>Move Section</h3>
-            <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.75)' }}>Move or copy this section to another date.</p>
+            <h3 className="text-[14px] font-semibold" style={{ color: '#ffffff' }}>{W.title}</h3>
+            <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.75)' }}>{W.subtitle}</p>
           </div>
           <button
             onClick={onClose}
@@ -111,7 +129,7 @@ export function TransferSectionModal({ dateKey, sectionLabel, onClose, onConfirm
             style={{ color: 'var(--xp-txt)', background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)', borderRadius: 9, padding: '7px 10px' }}
             title={sectionLabel}
           >
-            {sectionLabel || '(untitled section)'}
+            {sectionLabel || W.untitled}
           </p>
 
           {/* Mode selector — purple = selected, white = available */}
@@ -127,7 +145,7 @@ export function TransferSectionModal({ dateKey, sectionLabel, onClose, onConfirm
             >
               <span className="text-[12.5px] font-semibold" style={{ color: mode === 'copy' ? '#ffffff' : 'var(--xp-txt)' }}>📋 Copy to Date</span>
               <p className="text-[10.5px] mt-0.5" style={{ color: mode === 'copy' ? 'rgba(255,255,255,0.80)' : 'var(--xp-txt3)' }}>
-                Creates a copy on another date. The original section stays here.
+                {W.copyDesc}
               </p>
             </button>
 
@@ -142,7 +160,7 @@ export function TransferSectionModal({ dateKey, sectionLabel, onClose, onConfirm
             >
               <span className="text-[12.5px] font-semibold" style={{ color: mode === 'move' ? '#ffffff' : 'var(--xp-txt)' }}>➡️ Move to Date</span>
               <p className="text-[10.5px] mt-0.5" style={{ color: mode === 'move' ? 'rgba(255,255,255,0.80)' : 'var(--xp-txt3)' }}>
-                Moves this section to another date. The original section is removed from this day&apos;s Planner.
+                {W.moveDesc}
               </p>
             </button>
           </div>
@@ -211,7 +229,7 @@ export function TransferSectionModal({ dateKey, sectionLabel, onClose, onConfirm
 
           {isSameAsOrigin && (
             <p className="text-[11px] mb-3" style={{ color: 'var(--xp-txt3)' }}>
-              This is already the section&apos;s current date — pick another date to transfer it.
+              {W.sameDate}
             </p>
           )}
 

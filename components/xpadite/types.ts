@@ -118,6 +118,9 @@ export interface JournalBlock {
   // before this field existed; the canvas falls back to its old flat-image
   // behavior for those rather than breaking on missing data.
   canvasData?: string
+  // Set on a Mind Map/image that was created by Duplicate or Copy to Date. Such a copy has NO Gallery item of its own, but it shares
+  // its picture with the original, so re-saving it must never "refresh" the original's Gallery item (see handleDrawSave).
+  galleryExempt?: boolean
   // Section only, both optional and mutually set by "insert image"/"Split
   // Section"/"Merge Section": an unsplit section normally uses `content`
   // above exactly as before. `sectionImage` replaces that with a single

@@ -89,17 +89,37 @@ export function addGalleryItem(item: GalleryItem): void {
 // This swaps in the new image on the existing item — same id/title/date, nothing duplicated or deleted — matching it by the
 // exact previous image, or (for items whose image was already out of date) by being created together with the drawing.
 // Returns whether an item was refreshed.
-export function refreshGalleryDrawing(previousDataUri: string | undefined, drawingCreatedAt: number | undefined, dataUri: string): boolean {
+export function refreshGalleryDrawing(previousDataUri: string | undefined, drawingCreatedAt: number | undefined, dataUri: string): string | null {
+  const id = findGalleryDrawingId(previousDataUri, drawingCreatedAt)
+  if (!id) return null
+  return updateGalleryDrawingById(id, { dataUri }) ? id : null
+}
+
+// LEGACY link only — for a Mind Map saved before blocks recorded their own galleryItemId. Created-together (±5s) wins; the exact previous
+// image is only a fallback, so a later item that happens to hold identical pixels can never be mistaken for the original's. Blocks that are
+// copies/duplicates never use this (they have no item until their own first save creates one).
+export function findGalleryDrawingId(previousDataUri: string | undefined, drawingCreatedAt: number | undefined): string | null {
+  const items = loadGallery().filter(i => i.type === 'drawing' && i.source === 'Planner/Journal')
+  const byTime = typeof drawingCreatedAt === 'number' ? items.find(i => Math.abs(i.createdAt - drawingCreatedAt) <= 5000) : undefined
+  if (byTime) return byTime.id
+  const byImage = previousDataUri ? items.find(i => i.dataUri === previousDataUri) : undefined
+  return byImage ? byImage.id : null
+}
+
+// Update ONE Gallery drawing by its exact id: a new picture (also synced to storage) and/or its related-date label. Nothing else about the
+// item (id, title, creation time) changes, and nothing is created or deleted. Returns false when the item is not in this device's store.
+export function updateGalleryDrawingById(id: string, patch: { dataUri?: string; relatedDateLabel?: string }): boolean {
   const items = loadGallery()
-  const idx = items.findIndex(i =>
-    i.type === 'drawing' && i.source === 'Planner/Journal' &&
-    ((!!previousDataUri && i.dataUri === previousDataUri) ||
-     (typeof drawingCreatedAt === 'number' && Math.abs(i.createdAt - drawingCreatedAt) <= 5000)))
+  const idx = items.findIndex(i => i.id === id && i.type === 'drawing')
   if (idx < 0) return false
-  const updated: GalleryItem = { ...items[idx], dataUri }
+  const updated: GalleryItem = {
+    ...items[idx],
+    ...(patch.dataUri !== undefined ? { dataUri: patch.dataUri } : {}),
+    ...(patch.relatedDateLabel !== undefined ? { relatedDateLabel: patch.relatedDateLabel } : {}),
+  }
   const next = items.slice(); next[idx] = updated
   saveGallery(next)
-  syncGalleryItemInBackground(updated)
+  if (patch.dataUri !== undefined) syncGalleryItemInBackground(updated)
   return true
 }
 

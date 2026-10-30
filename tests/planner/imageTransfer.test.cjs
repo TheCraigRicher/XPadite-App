@@ -64,7 +64,8 @@ test('Duplicate: an independent copy directly after the original, same picture/s
   assert.notEqual(copy.id, MM.id)
   for (const k of ['type', 'src', 'thumbnail', 'name', 'canvasData', 'width', 'height']) assert.equal(copy[k], MM[k], k)
   assert.ok(copy.createdAt > MM.createdAt && copy.updatedAt >= copy.createdAt)
-  assert.equal(copy.galleryExempt, true, 'flagged: no Gallery item, never refreshes the original’s')
+  assert.equal(copy.galleryExempt, true, 'flagged: no Gallery item yet; its first Mind Map save creates its OWN entry')
+  assert.equal(copy.galleryItemId, undefined, 'never inherits the original’s Gallery link')
   assert.equal(env.blocksRef.current[1], MM, 'the original object is untouched')
 })
 test('Duplicate works for uploaded images and repeated duplicates each get their own identity', () => {
@@ -178,8 +179,10 @@ test('Move Image reuses the Move Section modal: same component, image wording on
   assert.ok(/<TransferSectionModal\s+dateKey=\{dateKey\}\s+sectionLabel=\{block\.name \?\? ''\}\s+onClose=\{\(\) => setTransferBlockId/.test(planner), 'the Section usage is unchanged (no kind prop)')
 })
 test('copies/duplicates can never refresh the original’s Gallery item; v1.319 refresh for normal Mind Maps is intact', () => {
-  assert.ok(/if \(!existing\.galleryExempt\) \{\s*try \{ refreshGalleryDrawing\(existing\.src, existing\.createdAt, dataUrl\)/.test(planner))
-  assert.ok(/galleryExempt\?: boolean/.test(read('components/xpadite/types.ts')))
+  // v1.321: a duplicate/copy is "no entry yet" (never matched to anyone else's); its first save creates its OWN entry and records the link
+  assert.ok(/\} else if \(existing\.galleryExempt\) \{\s*const item = newGalleryItem\(\)/.test(planner))
+  assert.ok(/galleryItemId = refreshGalleryDrawing\(existing\.src, existing\.createdAt, dataUrl\)/.test(planner), 'legacy originals keep the v1.319 match')
+  assert.ok(/galleryExempt\?: boolean/.test(read('components/xpadite/types.ts')) && /galleryItemId\?: string/.test(read('components/xpadite/types.ts')))
   assert.ok(/const existing = drawSessionBlockRef\.current \?\? drawState\.editingBlock/.test(planner), 'Ctrl+S fix intact')
   assert.ok(/exportFramedPng/.test(read('components/xpadite/JournalDrawModal.tsx')), 'framing intact')
 })

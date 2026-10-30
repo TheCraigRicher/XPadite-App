@@ -101,13 +101,13 @@ test('Download / Share / Export read the same original image (no separate thumbn
 test('re-saving a Mind Map refreshes its Gallery item instead of leaving the first save forever', () => {
   assert.ok(/export function refreshGalleryDrawing\(/.test(gallery) && /i\.type === 'drawing' && i\.source === 'Planner\/Journal'/.test(gallery))
   assert.ok(/Math\.abs\(i\.createdAt - drawingCreatedAt\) <= 5000/.test(gallery))
-  assert.ok(/const updated: GalleryItem = \{ \.\.\.items\[idx\], dataUri \}/.test(gallery), 'same id/title/date — nothing duplicated or deleted')
+  assert.ok(/export function updateGalleryDrawingById\(id: string, patch: \{ dataUri\?: string; relatedDateLabel\?: string \}\)/.test(gallery), 'exact-id update: same id/title/creation time — nothing duplicated or deleted')
   assert.ok(/refreshGalleryDrawing\(existing\.src, existing\.createdAt, dataUrl\)/.test(planner))
   assert.ok(/export function addGalleryItem\(item: GalleryItem\): void \{\s*saveGallery\(\[item, \.\.\.loadGallery\(\)\]\)\s*syncGalleryItemInBackground\(item\)/.test(gallery), 'adding is unchanged')
 })
 test('a full browser store can never abort the Planner save: Gallery writes are guarded', () => {
-  assert.ok(/try \{\s*addGalleryItem\(\{/.test(planner) && /could not add the Mind Map to the Gallery/.test(planner))
-  assert.ok(/try \{ refreshGalleryDrawing\(/.test(planner))
+  assert.ok(/try \{ addGalleryItem\(item\);/.test(planner) && /could not add the Mind Map to the Gallery/.test(planner))
+  assert.ok(/try \{ galleryItemId = refreshGalleryDrawing\(/.test(planner) && /try \{ updateGalleryDrawingById\(galleryItemId/.test(planner))
 })
 test('scope: no change to the Planner display code, no new dependency', () => {
   const pkg = JSON.parse(read('package.json')); const before = ['@tiptap/react', 'react']

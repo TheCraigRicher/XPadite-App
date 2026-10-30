@@ -25,7 +25,7 @@ function extractFunction(src, name) {
 const fnSrc = extractFunction(planner, 'handleDrawSave')
 
 function harness({ editingBlock = null, insertAt = 0, blocks = [{ id: 'sec1', type: 'section' }] } = {}) {
-  const calls = { add: [], refresh: [], manualSave: 0 }
+  const calls = { add: [], refresh: [], update: [], manualSave: 0 }
   let n = 0
   const env = {
     drawState: { insertAt, editingBlock, editingCell: undefined },     // what the closure sees: a render's snapshot (NOT updated between quick saves)
@@ -36,7 +36,8 @@ function harness({ editingBlock = null, insertAt = 0, blocks = [{ id: 'sec1', ty
     getSectionImageCell: () => null, updateBlock: () => {},
     createDrawingBlock: (src, name, canvasData) => ({ id: 'blk' + (++n), type: 'drawing', src, thumbnail: src, name, canvasData, createdAt: 1000 + n, updatedAt: 1000 + n }),
     addGalleryItem: item => calls.add.push(item),
-    refreshGalleryDrawing: (prevUri, createdAt, uri) => { calls.refresh.push({ prevUri, createdAt, uri }); return true },
+    refreshGalleryDrawing: (prevUri, createdAt, uri) => { calls.refresh.push({ prevUri, createdAt, uri }); return 'g-legacy' },   // legacy matcher: returns the matched item's id
+    updateGalleryDrawingById: (id, patch) => { calls.update.push({ id, ...patch }); return true },
     fmtShortDate: () => 'Oct 30, 2026', dateKey: '2026-10-30', Date,
   }
   const js = ts.transpileModule(fnSrc.replace(/\(prev\) =>/g, '(prev) =>') + '\nmodule.exports = handleDrawSave', { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
@@ -62,17 +63,18 @@ test('repeated saves BEFORE React re-renders (stale drawState: editingBlock stil
   assert.equal(h.drawingBlocks().length, 1, 'still ONE Planner block')
   assert.equal(h.drawingBlocks()[0].id, first.id, 'block identity preserved')
   assert.equal(h.calls.add.length, 1, 'ONE Gallery item ever created')
-  assert.equal(h.calls.refresh.length, 4, 'every later save refreshes the existing Gallery item')
+  assert.equal(h.calls.refresh.length, 0, 'no timestamp/picture matching: the block owns its Gallery item by id')
+  assert.equal(h.calls.update.length, 4, 'every later save updates that same item')
   assert.equal(h.drawingBlocks()[0].src, 'data:image/png;base64,E'); assert.equal(h.drawingBlocks()[0].canvasData, '[1,2,3,4,5]', 'latest content wins')
   assert.equal(h.drawingBlocks()[0].createdAt, first.createdAt, 'creation identity (used to match its Gallery item) is kept')
-  // each refresh is told the image the block had BEFORE this save, so the right item is found
-  assert.deepEqual(h.calls.refresh.map(r => r.prevUri.slice(-1)), ['A', 'B', 'C', 'D'])
-  assert.ok(h.calls.refresh.every(r => r.createdAt === first.createdAt))
+  // every later save targets the id recorded on the block by the FIRST save (even though the render's snapshot is stale)
+  assert.ok(h.calls.update.every(u => u.id === h.calls.add[0].id))
+  assert.equal(h.drawingBlocks()[0].galleryItemId, h.calls.add[0].id)
 })
 test('keyboard Save and toolbar Save are the same code path: interleaved saves give the same single block and item', () => {
   const h = harness()
   for (const [i, who] of ['key', 'button', 'key', 'button', 'key'].entries()) h.save('data:image/png;base64,' + who + i, '[' + i + ']')
-  assert.equal(h.drawingBlocks().length, 1); assert.equal(h.calls.add.length, 1); assert.equal(h.calls.refresh.length, 4)
+  assert.equal(h.drawingBlocks().length, 1); assert.equal(h.calls.add.length, 1); assert.equal(h.calls.update.length, 4)
 })
 test('re-opening an existing Mind Map from the Planner: saves update that block, never create one', () => {
   const existing = { id: 'blkX', type: 'drawing', src: 'data:image/png;base64,OLD', thumbnail: 'x', name: 'Mind Map — Oct 1, 2026', canvasData: '[]', createdAt: 5000, updatedAt: 5000 }
@@ -80,7 +82,10 @@ test('re-opening an existing Mind Map from the Planner: saves update that block,
   h.save('data:image/png;base64,NEW1', '[1]'); h.save('data:image/png;base64,NEW2', '[2]')
   assert.equal(h.drawingBlocks().length, 1); assert.equal(h.drawingBlocks()[0].id, 'blkX'); assert.equal(h.drawingBlocks()[0].createdAt, 5000)
   assert.equal(h.calls.add.length, 0, 'no new Gallery item')
-  assert.deepEqual(h.calls.refresh.map(r => [r.prevUri.slice(-3), r.createdAt]), [['OLD', 5000], ['EW1', 5000]])
+  // a block saved before links existed is matched ONCE (legacy matcher: its old picture + creation time), then remembers the exact id
+  assert.deepEqual(h.calls.refresh.map(r => [r.prevUri.slice(-3), r.createdAt]), [['OLD', 5000]])
+  assert.equal(h.drawingBlocks()[0].galleryItemId, 'g-legacy')
+  assert.deepEqual(h.calls.update.map(u => u.id), ['g-legacy'], 'the second save updates by id')
 })
 test('a failing Gallery write never aborts the Planner save', () => {
   const h = harness(); h.env.addGalleryItem = () => { throw new Error('QuotaExceededError') }

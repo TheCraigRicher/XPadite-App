@@ -16,7 +16,7 @@ import { Color } from '@tiptap/extension-color'
 import { Table as TiptapTable, TableRow, TableHeader, TableCell } from '@tiptap/extension-table'
 import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
-import { addGalleryItem, refreshGalleryDrawing } from './GalleryModal'
+import { addGalleryItem, refreshGalleryDrawing, updateGalleryDrawingById, findGalleryDrawingId } from './GalleryModal'
 import dynamic from 'next/dynamic'
 import { buildAttachment, buildAttachments, ATTACHMENT_ACCEPT, CameraModal, ImageLightbox } from './attachmentUtils'
 import type { JournalBlock, JournalTimerSession, TaskAttachment, Task, TaskSession, SectionCell } from './types'
@@ -2832,7 +2832,7 @@ export function JournalEditorContent({
     const original = blocksRef.current[idx]
     if (original.type !== 'image' && original.type !== 'drawing') return
     const ts = Date.now()
-    insertBlock({ ...original, id: mkId(), createdAt: ts, updatedAt: ts, galleryExempt: true }, idx)
+    insertBlock({ ...original, id: mkId(), createdAt: ts, updatedAt: ts, galleryExempt: true, galleryItemId: undefined }, idx)
     setToast(original.type === 'drawing' ? 'Mind Map duplicated ✓' : 'Image duplicated ✓')
   }
 
@@ -2850,9 +2850,14 @@ export function JournalEditorContent({
     const originKey = dateKeyRef.current
     const destLabel = fmtTransferDate(destKey)
     const ts = Date.now()
+    // A copy never inherits the original's Gallery link (it gets its own entry on its first Mind Map save). A moved block keeps its identity
+    // and its Gallery ownership; a pre-link original adopts the exact link now so it stays attached wherever it goes.
     const payload: JournalBlock = mode === 'copy'
-      ? { ...block, id: mkId(), createdAt: ts, updatedAt: ts, galleryExempt: true }
+      ? { ...block, id: mkId(), createdAt: ts, updatedAt: ts, galleryExempt: true, galleryItemId: undefined }
       : { ...block, updatedAt: ts }
+    if (mode === 'move' && block.type === 'drawing' && !block.galleryItemId && !block.galleryExempt) {
+      try { payload.galleryItemId = findGalleryDrawingId(block.src, block.createdAt) ?? undefined } catch (err) { console.error('[Gallery] could not resolve the link:', err) }
+    }
     try {
       updateDay(destKey, prev => {
         const doc = parseJournalDoc(prev.notes)
@@ -2868,6 +2873,10 @@ export function JournalEditorContent({
         })
         setToast(`Couldn’t save to ${destLabel} — nothing was ${mode === 'move' ? 'moved' : 'copied'}`)
         return
+      }
+      if (mode === 'move' && payload.galleryItemId) {
+        // keep the Gallery item's related date in step with where the Mind Map now lives (no new item, nothing deleted)
+        try { updateGalleryDrawingById(payload.galleryItemId, { relatedDateLabel: fmtShortDate(destKey) }) } catch (err) { console.error('[Gallery] could not update the date:', err) }
       }
       if (mode === 'move') {
         if (dateKeyRef.current !== originKey) { setToast(`Image saved to ${destLabel}; the original was left on its date`); return }
@@ -3571,31 +3580,42 @@ export function JournalEditorContent({
     let savedBlock: JournalBlock
     // The latest saved version of this Mind Map: the one this session just saved (if any), else the one it was opened from.
     const existing = drawSessionBlockRef.current ?? drawState.editingBlock
+    // Every Gallery write below is best-effort: a full/blocked store must never abort the Planner save itself.
+    const newGalleryItem = () => ({
+      id: 'draw-' + Date.now(),
+      type: 'drawing' as const,
+      createdAt: Date.now(),
+      title: `Mind Map — ${fmtShortDate(dateKey)}`,
+      dataUri: dataUrl,
+      source: 'Planner/Journal',
+      relatedDateLabel: fmtShortDate(dateKey),     // the Planner date it is being saved on
+    })
     if (existing) {
-      savedBlock = { ...existing, src: dataUrl, thumbnail: dataUrl, canvasData: objectsJson, updatedAt: Date.now() }
-      next = blocksRef.current.map(b => b.id === existing.id ? savedBlock : b)
-      // Keep the Mind Map's existing Gallery item current (it used to keep the very first save forever).
-      if (!existing.galleryExempt) {
-        try { refreshGalleryDrawing(existing.src, existing.createdAt, dataUrl) } catch (err) { console.error('[Gallery] refresh failed:', err) }
+      // Gallery ownership (the id is recorded on the block, so rapid saves, refreshes and moves all stay attached to the same item):
+      //  • owns an item  → update exactly that item in place
+      //  • duplicate/copy with no item yet (galleryExempt) → its first save creates its OWN item; never matched to anyone else's
+      //  • pre-link original → v1.319 matching, then remember the exact link
+      let galleryItemId = existing.galleryItemId
+      let stillNeedsEntry = false
+      if (galleryItemId) {
+        try { updateGalleryDrawingById(galleryItemId, { dataUri: dataUrl }) } catch (err) { console.error('[Gallery] update failed:', err) }
+      } else if (existing.galleryExempt) {
+        const item = newGalleryItem()
+        try { addGalleryItem(item); galleryItemId = item.id } catch (err) { console.error('[Gallery] could not add the Mind Map to the Gallery:', err); stillNeedsEntry = true }
+      } else {
+        try { galleryItemId = refreshGalleryDrawing(existing.src, existing.createdAt, dataUrl) ?? undefined } catch (err) { console.error('[Gallery] refresh failed:', err) }
       }
+      savedBlock = { ...existing, src: dataUrl, thumbnail: dataUrl, canvasData: objectsJson, updatedAt: Date.now(), galleryItemId, galleryExempt: stillNeedsEntry ? true : undefined }
+      next = blocksRef.current.map(b => b.id === existing.id ? savedBlock : b)
     } else {
       savedBlock = createDrawingBlock(dataUrl, `Mind Map — ${fmtShortDate(dateKey)}`, objectsJson)
       next = [...blocksRef.current]
       next.splice(drawState.insertAt + 1, 0, savedBlock)
-      // New drawings become Gallery assets automatically; re-editing an existing
-      // one (the branch above) does not create a second Gallery entry.
-      // A full browser store must never abort the Planner save itself, so a Gallery write failure is only logged.
-      try {
-        addGalleryItem({
-          id: 'draw-' + Date.now(),
-          type: 'drawing',
-          createdAt: Date.now(),
-          title: `Mind Map — ${fmtShortDate(dateKey)}`,
-          dataUri: dataUrl,
-          source: 'Planner/Journal',
-          relatedDateLabel: fmtShortDate(dateKey),
-        })
-      } catch (err) { console.error('[Gallery] could not add the Mind Map to the Gallery:', err) }
+      // New drawings become Gallery assets automatically and remember their item; if that write fails the block is flagged so its next save
+      // retries (exactly once — success records the id).
+      const item = newGalleryItem()
+      try { addGalleryItem(item); savedBlock = { ...savedBlock, galleryItemId: item.id } } catch (err) { console.error('[Gallery] could not add the Mind Map to the Gallery:', err); savedBlock = { ...savedBlock, galleryExempt: true } }
+      next[drawState.insertAt + 1] = savedBlock
     }
     blocksRef.current = next
     drawSessionBlockRef.current = savedBlock

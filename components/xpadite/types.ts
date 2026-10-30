@@ -118,8 +118,12 @@ export interface JournalBlock {
   // before this field existed; the canvas falls back to its old flat-image
   // behavior for those rather than breaking on missing data.
   canvasData?: string
-  // Set on a Mind Map/image that was created by Duplicate or Copy to Date. Such a copy has NO Gallery item of its own, but it shares
-  // its picture with the original, so re-saving it must never "refresh" the original's Gallery item (see handleDrawSave).
+  // Gallery ownership of a Mind Map. galleryItemId = the id of the Gallery item this block OWNS; every save of the block updates exactly that
+  // item (never matched by time or picture). It survives moves/refreshes because it lives in the block itself.
+  galleryItemId?: string
+  // Set on a Mind Map created by Duplicate or Copy to Date (and on a new Mind Map whose first Gallery write failed): it has NO Gallery item
+  // yet. It shares its picture with the original, so it must never be "matched" to the original's item — its first Mind Mapping Canvas save
+  // creates its OWN item and records galleryItemId (the flag is then cleared).
   galleryExempt?: boolean
   // Section only, both optional and mutually set by "insert image"/"Split
   // Section"/"Merge Section": an unsplit section normally uses `content`

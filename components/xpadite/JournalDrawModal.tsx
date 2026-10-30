@@ -5,6 +5,7 @@ import { trackFeature } from '@/lib/analytics/client'
 import { useApp } from './AppContext'
 import { ColorPickerModal } from './ColorPickerModal'
 import { COLOR_PALETTE, normalizeHexColor } from './utils'
+import { exportFramedPng } from './mindMapExport'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1181,6 +1182,12 @@ export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawMo
   // on demand when Cancel/Close is requested, rather than threading a "dirty"
   // flag through every one of the many mutation call sites below.
   const lastSavedJsonRef = useRef<string>('[]')
+  // The keyboard listener below is (re)registered only when a popover opens/closes, so a plain `handleSave()` call in it ran the
+  // handleSave — and therefore the onSave prop — from THAT render: after the first save it still believed the Mind Map was new
+  // and created another Planner block + Gallery item on every Ctrl+S. The ref always points at this render's handleSave, so
+  // keyboard Save and the toolbar Save button run exactly the same function.
+  const handleSaveRef = useRef<() => boolean>(() => false)
+  handleSaveRef.current = handleSave   // every render (function declarations are hoisted)
 
   const [tool,        setTool]        = useState<DrawTool>('select')
   const [penIdx,      setPenIdx]      = useState(1)
@@ -2050,20 +2057,23 @@ export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawMo
       if (textInput) commitText()
       const canvas = canvasRef.current
       if (!canvas) { setToast('Could not save — please try again'); return false }
-      const off = document.createElement('canvas')
-      off.width=canvas.width; off.height=canvas.height
-      const c=off.getContext('2d')
-      if (!c) { setToast('Could not save — please try again'); return false }
-      const dpr=window.devicePixelRatio||1; c.scale(dpr,dpr)
+      const dpr=window.devicePixelRatio||1
       const w=canvas.offsetWidth, h=canvas.offsetHeight
-      c.fillStyle='#ffffff'; c.fillRect(0,0,w,h)
-      if (bgImgRef.current) c.drawImage(bgImgRef.current,0,0,w,h)
-      for (const obj of objectsRef.current) renderObj(c, obj, imageCacheRef.current)
+      // The saved PNG is framed around what is actually drawn (plus balanced padding), not the whole editing surface — see
+      // mindMapExport.ts. The canvas itself, the objects and their coordinates are not touched by this.
+      const exported = exportFramedPng({
+        viewportW: w, viewportH: h, dpr,
+        boxes: objectsRef.current.map(getObjBB),
+        draw: (c) => {
+          if (bgImgRef.current) c.drawImage(bgImgRef.current,0,0,w,h)
+          for (const obj of objectsRef.current) renderObj(c, obj, imageCacheRef.current)
+        },
+      })
       // PNG stays the thumbnail/preview shown everywhere else; the object list
       // is what makes reopening the canvas resume as a REAL editable Mind Map
       // instead of a flattened picture — see JournalBlock.canvasData.
       const objectsJson = JSON.stringify(objectsRef.current)
-      onSave(off.toDataURL('image/png'), objectsJson)
+      onSave(exported.dataUrl, objectsJson)
       trackFeature('mind_mapping_canvas')
       lastSavedJsonRef.current = objectsJson
       setToast('Mind Map saved ✓')
@@ -2657,7 +2667,12 @@ export const JournalDrawModal = forwardRef<JournalDrawModalHandle, JournalDrawMo
       // browser's native "Save Page" dialog — checked before the text-input
       // guard below so it still fires while a shape's title/note field (or any
       // other input) has focus.
-      if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s') { e.preventDefault(); handleSave(); return }
+      if ((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s') {
+        e.preventDefault()
+        // Holding the keys down auto-repeats keydown: one press = one save.
+        if (!e.repeat) handleSaveRef.current()
+        return
+      }
       const t = e.target as HTMLElement
       // The shape-text-edit/free-text <input> has its own onKeyDown (Enter
       // commits, Escape discards and keeps the shape selected) — leave it alone.

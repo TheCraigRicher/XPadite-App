@@ -82,6 +82,28 @@ export function saveGallery(items: GalleryItem[]): void {
 // Callers do not need to await — write-through pattern.
 export function addGalleryItem(item: GalleryItem): void {
   saveGallery([item, ...loadGallery()])
+  syncGalleryItemInBackground(item)
+}
+
+// A Mind Map that is re-saved (re-opened from the Planner) used to leave its Gallery item showing the FIRST save forever.
+// This swaps in the new image on the existing item — same id/title/date, nothing duplicated or deleted — matching it by the
+// exact previous image, or (for items whose image was already out of date) by being created together with the drawing.
+// Returns whether an item was refreshed.
+export function refreshGalleryDrawing(previousDataUri: string | undefined, drawingCreatedAt: number | undefined, dataUri: string): boolean {
+  const items = loadGallery()
+  const idx = items.findIndex(i =>
+    i.type === 'drawing' && i.source === 'Planner/Journal' &&
+    ((!!previousDataUri && i.dataUri === previousDataUri) ||
+     (typeof drawingCreatedAt === 'number' && Math.abs(i.createdAt - drawingCreatedAt) <= 5000)))
+  if (idx < 0) return false
+  const updated: GalleryItem = { ...items[idx], dataUri }
+  const next = items.slice(); next[idx] = updated
+  saveGallery(next)
+  syncGalleryItemInBackground(updated)
+  return true
+}
+
+function syncGalleryItemInBackground(item: GalleryItem): void {
   // Background Supabase sync — fire and forget
   ;(async () => {
     try {
@@ -461,7 +483,9 @@ function AssetThumb({ item, aspect = 'video' }: { item: DisplayItem; aspect?: 'v
   const mime = mimeFromDataUri(item.dataUri)
   const isImage = item.type !== 'document' || mime.startsWith('image/')
   if (isImage) {
-    return <img src={item.displayUrl || item.dataUri} alt={item.title} className={`w-full object-cover ${aspect === 'video' ? 'aspect-video' : 'aspect-square'}`} />
+    // A Mind Map must be shown WHOLE (its framed shape is whatever the map is): contain on white, never cropped by cover.
+    const whole = item.type === 'drawing'
+    return <img src={item.displayUrl || item.dataUri} alt={item.title} className={`w-full ${whole ? 'object-contain' : 'object-cover'} ${aspect === 'video' ? 'aspect-video' : 'aspect-square'}`} style={whole ? { background: '#ffffff' } : undefined} />
   }
   return (
     <div className={`w-full flex items-center justify-center ${aspect === 'video' ? 'aspect-video' : 'aspect-square'}`} style={{ background: 'var(--xp-bg)' }}>

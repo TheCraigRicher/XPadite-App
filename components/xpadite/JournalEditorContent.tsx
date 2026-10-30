@@ -16,7 +16,7 @@ import { Color } from '@tiptap/extension-color'
 import { Table as TiptapTable, TableRow, TableHeader, TableCell } from '@tiptap/extension-table'
 import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
-import { addGalleryItem } from './GalleryModal'
+import { addGalleryItem, refreshGalleryDrawing } from './GalleryModal'
 import dynamic from 'next/dynamic'
 import { buildAttachment, buildAttachments, ATTACHMENT_ACCEPT, CameraModal, ImageLightbox } from './attachmentUtils'
 import type { JournalBlock, JournalTimerSession, TaskAttachment, Task, TaskSession, SectionCell } from './types'
@@ -2322,6 +2322,10 @@ export function JournalEditorContent({
   }, [closeIntent])
   const showExitDialogRef = useRef(false)  // for ESC handler stable closure
   const drawStateRef = useRef<typeof drawState>(null)  // lets the capture-phase ESC/Ctrl+S handler know the Mind Mapping Canvas owns the key right now
+  // The Mind Map block this canvas session has already saved. handleDrawSave records it synchronously, so two saves that land
+  // before React has re-rendered (a quick double Ctrl+S) still see "this Mind Map exists" and update it instead of creating a
+  // second Planner block + Gallery item. Cleared whenever the canvas closes.
+  const drawSessionBlockRef = useRef<JournalBlock | null>(null)
   // Lets the mobile-only header back arrow (rendered here, outside
   // JournalDrawModal, for Fit-mode portal reasons) trigger that component's
   // OWN unsaved-changes guard instead of unconditionally closing — the exact
@@ -2415,6 +2419,7 @@ export function JournalEditorContent({
   showExitDialogRef.current = showExitDialog
   showSessionsRef.current   = showSessions
   drawStateRef.current      = drawState
+  if (!drawState) drawSessionBlockRef.current = null
 
   // Keep blocksRef in sync with blocks state
   useEffect(() => { blocksRef.current = blocks }, [blocks])
@@ -3488,26 +3493,34 @@ export function JournalEditorContent({
     }
     let next: JournalBlock[]
     let savedBlock: JournalBlock
-    if (drawState.editingBlock) {
-      savedBlock = { ...drawState.editingBlock, src: dataUrl, thumbnail: dataUrl, canvasData: objectsJson, updatedAt: Date.now() }
-      next = blocksRef.current.map(b => b.id === drawState.editingBlock!.id ? savedBlock : b)
+    // The latest saved version of this Mind Map: the one this session just saved (if any), else the one it was opened from.
+    const existing = drawSessionBlockRef.current ?? drawState.editingBlock
+    if (existing) {
+      savedBlock = { ...existing, src: dataUrl, thumbnail: dataUrl, canvasData: objectsJson, updatedAt: Date.now() }
+      next = blocksRef.current.map(b => b.id === existing.id ? savedBlock : b)
+      // Keep the Mind Map's existing Gallery item current (it used to keep the very first save forever).
+      try { refreshGalleryDrawing(existing.src, existing.createdAt, dataUrl) } catch (err) { console.error('[Gallery] refresh failed:', err) }
     } else {
       savedBlock = createDrawingBlock(dataUrl, `Mind Map — ${fmtShortDate(dateKey)}`, objectsJson)
       next = [...blocksRef.current]
       next.splice(drawState.insertAt + 1, 0, savedBlock)
       // New drawings become Gallery assets automatically; re-editing an existing
       // one (the branch above) does not create a second Gallery entry.
-      addGalleryItem({
-        id: 'draw-' + Date.now(),
-        type: 'drawing',
-        createdAt: Date.now(),
-        title: `Mind Map — ${fmtShortDate(dateKey)}`,
-        dataUri: dataUrl,
-        source: 'Planner/Journal',
-        relatedDateLabel: fmtShortDate(dateKey),
-      })
+      // A full browser store must never abort the Planner save itself, so a Gallery write failure is only logged.
+      try {
+        addGalleryItem({
+          id: 'draw-' + Date.now(),
+          type: 'drawing',
+          createdAt: Date.now(),
+          title: `Mind Map — ${fmtShortDate(dateKey)}`,
+          dataUri: dataUrl,
+          source: 'Planner/Journal',
+          relatedDateLabel: fmtShortDate(dateKey),
+        })
+      } catch (err) { console.error('[Gallery] could not add the Mind Map to the Gallery:', err) }
     }
     blocksRef.current = next
+    drawSessionBlockRef.current = savedBlock
     setBlocks(next)
     setDrawState(prev => prev ? { ...prev, editingBlock: savedBlock } : prev)
     onContentChange(buildDocStr())

@@ -116,6 +116,7 @@ const QOTD_LIST = [
   { quote: "Your limitation is only your imagination.", author: "Anonymous" },
   { quote: "One productive day at a time — that's how it's built.", author: "XPadite" },
   { quote: "Dream it. Wish it. Do it.", author: "Anonymous" },
+  { quote: "The best time to start was yesterday. The next best time is now.", author: "Unknown" },
 ]
 
 // Deterministic per local calendar day → same quote all day, advances at local midnight

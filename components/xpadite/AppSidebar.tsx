@@ -97,7 +97,7 @@ const MENU_ITEMS: MenuItem[] = [
   { icon: '⚡', label: 'Activity Manager',       action: 'activities'                                                                 },
   { icon: '📅', label: 'Sync Google Calendar',  action: 'sync-calendar', dividerBefore: true                                         },
   { icon: '🤖', label: 'XPadite AI Coach',      action: 'ai-coach'                                                                   },
-  { icon: '👥', label: 'Meetings',              action: 'meetings'                                                                   },
+  { icon: '👥', label: 'My Schedule',           action: 'meetings'                                                                   },
   { icon: '🖼️', label: 'Gallery',              action: 'gallery'                                                                     },
   { icon: '🔥', label: 'Motivate Me',           action: 'motivate',      dividerBefore: true                                         },
   { icon: '💬', label: 'Quote of the Day | QOTD', action: 'qotd'                                                                     },

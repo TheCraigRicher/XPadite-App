@@ -1,6 +1,8 @@
 'use client'
 
-// ── XPadite Meetings — Phase 1 (front-end only, mock data) ──────────────────
+// ── XPadite My Schedule (formerly Meetings) — Phase 1 (front-end only, mock data) ──
+// Tabs: My Schedule (weekly scheduler, MyScheduleView) · Today · Upcoming. The Past list is no longer shown, but past
+// meetings remain in the data. The Task Manager auto-add setting is unchanged — only its banners were removed from view.
 // No Supabase, no Google/Microsoft OAuth, no real Task Manager writes here.
 // `meetingsMockData.ts` is the seam: Phase 2 swaps MOCK_MEETINGS for a real
 // fetch without this file needing a rewrite. See the mock-data file for the
@@ -10,9 +12,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from './AppContext'
 import { useLockBodyScroll } from './useLockBodyScroll'
 import { MOCK_MEETINGS } from './meetingsMockData'
+import { MyScheduleView } from './MyScheduleView'
+import { buildSampleScheduleEvents } from './scheduleMockData'
+import type { ScheduleEvent } from './scheduleLogic'
 import type { XpaditeMeeting, MeetingProviderId, MeetingPlatform } from './meetingsMockData'
 
-type TabKey = 'upcoming' | 'today' | 'past' | 'monthly'
+type TabKey = 'schedule' | 'today' | 'upcoming'
 type SourceFilter = 'all' | MeetingProviderId
 type MeetingPhase = 'cancelled' | 'live' | 'starting-soon' | 'upcoming' | 'past'
 
@@ -141,10 +146,9 @@ function Pill({ color, bg, border, label, pulse }: { color: string; bg: string; 
 // ── Tabs ──────────────────────────────────────────────────────────────────
 
 const TABS: { key: TabKey; label: (n: number) => string }[] = [
-  { key: 'upcoming', label: n => `Upcoming (${n})` },
+  { key: 'schedule', label: () => 'My Schedule' },
   { key: 'today',    label: n => `Today (${n})` },
-  { key: 'past',     label: n => `Past (${n})` },
-  { key: 'monthly',  label: () => 'Monthly Meetings' },
+  { key: 'upcoming', label: n => `Upcoming (${n})` },
 ]
 
 // ── Source filter dropdown ──────────────────────────────────────────────────
@@ -419,122 +423,6 @@ function EmptyDetailState() {
   )
 }
 
-// ── Monthly Meetings view ───────────────────────────────────────────────────
-
-interface MonthDay { date: Date | null; meetings: XpaditeMeeting[] }
-interface MonthWeek { weekNum: number; days: MonthDay[] }
-
-function getMonthWeeks(monthCursor: Date, meetings: XpaditeMeeting[]): MonthWeek[] {
-  const year = monthCursor.getFullYear()
-  const month = monthCursor.getMonth()
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
-  const startDow = new Date(year, month, 1).getDay()
-
-  const weeks: MonthWeek[] = []
-  let dayCounter = 1 - startDow
-  let weekNum = 1
-  while (dayCounter <= daysInMonth) {
-    const days: MonthDay[] = []
-    for (let dow = 0; dow < 7; dow++, dayCounter++) {
-      if (dayCounter < 1 || dayCounter > daysInMonth) {
-        days.push({ date: null, meetings: [] })
-      } else {
-        const date = new Date(year, month, dayCounter)
-        const dayMeetings = meetings
-          .filter(m => isSameLocalDay(new Date(m.startAt), date))
-          .sort((a, b) => a.startAt - b.startAt)
-        days.push({ date, meetings: dayMeetings })
-      }
-    }
-    weeks.push({ weekNum, days })
-    weekNum++
-  }
-  return weeks
-}
-
-const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-
-function MonthlyMeetingsView({
-  monthCursor, onPrevMonth, onNextMonth, meetings, now, selectedId, onSelectMeeting,
-}: {
-  monthCursor: Date
-  onPrevMonth: () => void
-  onNextMonth: () => void
-  meetings: XpaditeMeeting[]
-  now: number
-  selectedId: string | null
-  onSelectMeeting: (id: string) => void
-}) {
-  const weeks = useMemo(() => getMonthWeeks(monthCursor, meetings), [monthCursor, meetings])
-  const monthLabel = monthCursor.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-
-  return (
-    <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4" style={{ overscrollBehavior: 'contain' }}>
-      <div className="flex items-center justify-center gap-3 mb-4">
-        <button onClick={onPrevMonth} aria-label="Previous month" className="flex items-center justify-center flex-shrink-0" style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><polyline points="15 18 9 12 15 6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        </button>
-        <span className="text-[14px] font-semibold" style={{ color: 'var(--xp-txt)', minWidth: 150, textAlign: 'center' }}>{monthLabel}</span>
-        <button onClick={onNextMonth} aria-label="Next month" className="flex items-center justify-center flex-shrink-0" style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)', color: 'var(--xp-txt2)' }}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="13" height="13"><polyline points="9 18 15 12 9 6" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        </button>
-      </div>
-
-      <div className="flex flex-col gap-4">
-        {weeks.map(week => (
-          <div key={week.weekNum}>
-            <p className="text-[11px] font-semibold mb-1.5" style={{ color: 'var(--xp-txt3)' }}>Week {week.weekNum}</p>
-            <div className="overflow-x-auto">
-              <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(7, minmax(84px, 1fr))', minWidth: 588 }}>
-                {week.days.map((day, i) => (
-                  <div key={i}>
-                    {week.weekNum === 1 && (
-                      <p className="text-[10px] font-semibold text-center mb-1" style={{ color: 'var(--xp-txt3)' }}>{DOW_LABELS[i]}</p>
-                    )}
-                    <div
-                      className="flex flex-col gap-1 min-h-[64px]"
-                      style={{
-                        padding: 6, borderRadius: 8,
-                        background: day.date ? 'var(--xp-bg3)' : 'transparent',
-                        border: day.date ? '0.5px solid var(--xp-bdr)' : 'none',
-                      }}
-                    >
-                      {day.date && (
-                        <span className="text-[10px]" style={{ color: isSameLocalDay(day.date, new Date(now)) ? '#7c3aed' : 'var(--xp-txt3)', fontWeight: isSameLocalDay(day.date, new Date(now)) ? 700 : 500 }}>
-                          {day.date.getDate()}
-                        </span>
-                      )}
-                      {day.meetings.slice(0, 3).map(m => (
-                        <button
-                          key={m.id}
-                          onClick={() => onSelectMeeting(m.id)}
-                          className="text-left w-full"
-                          style={{
-                            borderLeft: `2.5px solid ${m.meetingProvider ? PLATFORM_META[m.meetingProvider].color : 'var(--xp-bdr2)'}`,
-                            background: selectedId === m.id ? 'rgba(124,58,237,0.14)' : 'var(--xp-card)',
-                            borderRadius: 4, padding: '3px 5px',
-                            opacity: m.isCancelled ? 0.55 : 1,
-                          }}
-                        >
-                          <p className="text-[9.5px] leading-tight truncate" style={{ color: 'var(--xp-txt3)' }}>{fmtClock(m.startAt)}</p>
-                          <p className="text-[10.5px] leading-tight truncate font-medium" style={{ color: 'var(--xp-txt)', textDecoration: m.isCancelled ? 'line-through' : 'none' }}>{m.title}</p>
-                        </button>
-                      ))}
-                      {day.meetings.length > 3 && (
-                        <p className="text-[9.5px]" style={{ color: 'var(--xp-txt3)' }}>+{day.meetings.length - 3} more</p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 // ── Root modal ────────────────────────────────────────────────────────────
 
 interface MeetingsModalProps {
@@ -544,11 +432,13 @@ interface MeetingsModalProps {
 export function MeetingsModal({ onClose }: MeetingsModalProps) {
   const { setToast } = useApp()
   const [meetings, setMeetings] = useState<XpaditeMeeting[]>(() => MOCK_MEETINGS)
-  const [tab, setTab] = useState<TabKey>('upcoming')
+  const [tab, setTab] = useState<TabKey>('schedule')
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [autoAdd, setAutoAdd] = useState(true)
-  const [monthCursor, setMonthCursor] = useState(() => { const d = new Date(); d.setDate(1); return d })
+  // Task Manager auto-add stays ON (its toggle banner was removed from the UI; the behaviour in MeetingDetail is unchanged).
+  const [autoAdd] = useState(true)
+  // Sample schedule events — in-memory preview only, separate from `meetings`; nothing here is saved.
+  const [scheduleEvents, setScheduleEvents] = useState<ScheduleEvent[]>(() => buildSampleScheduleEvents(new Date()))
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -557,7 +447,12 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   }, [])
 
   useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      // an open My Schedule dialog (add/edit, delete confirm, details sheet) handles Escape first
+      if (document.querySelector('[data-xp-sched-layer]')) return
+      onClose()
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
@@ -577,12 +472,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
     () => bySource.filter(m => m.endAt >= now).sort((a, b) => a.startAt - b.startAt),
     [bySource, now],
   )
-  const pastList = useMemo(
-    () => bySource.filter(m => m.endAt < now).sort((a, b) => b.startAt - a.startAt),
-    [bySource, now],
-  )
-
-  const activeList = tab === 'today' ? todayList : tab === 'past' ? pastList : upcomingList
+  const activeList = tab === 'today' ? todayList : upcomingList
 
   const grouped = useMemo(() => {
     const groups: { label: string; items: XpaditeMeeting[] }[] = []
@@ -615,7 +505,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
     setSelectedId(null)
   }
 
-  const emptyMessage = tab === 'today' ? 'No meetings scheduled for today.' : tab === 'past' ? 'No past meetings yet.' : 'No upcoming meetings.'
+  const emptyMessage = tab === 'today' ? 'No meetings scheduled for today.' : 'No upcoming meetings.'
 
   return (
     <div
@@ -644,7 +534,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="xp-meet-title"
-        className="w-full sm:max-w-[980px] h-full sm:h-[86vh] sm:max-h-[86vh] rounded-none sm:rounded-2xl max-sm:border-0! overflow-hidden flex flex-col"
+        className={`relative w-full ${tab === 'schedule' ? 'sm:max-w-[1240px]' : 'sm:max-w-[980px]'} h-full sm:h-[86vh] sm:max-h-[86vh] rounded-none sm:rounded-2xl max-sm:border-0! overflow-hidden flex flex-col`}
         style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.32)' }}
         onClick={e => e.stopPropagation()}
       >
@@ -658,8 +548,8 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
               <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" width="17" height="17"><rect x="3" y="5" width="18" height="16" rx="2.5" /><path d="M8 3v4M16 3v4M3 10h18" strokeLinecap="round" /></svg>
             </div>
             <div className="min-w-0">
-              <h2 id="xp-meet-title" style={{ fontSize: 16, fontWeight: 700, color: 'white', letterSpacing: '-0.01em', lineHeight: 1.2 }}>Meetings</h2>
-              <p className="truncate" style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 1 }}>Your scheduled meetings, all in one place.</p>
+              <h2 id="xp-meet-title" style={{ fontSize: 16, fontWeight: 700, color: 'white', letterSpacing: '-0.01em', lineHeight: 1.2 }}>My Schedule</h2>
+              <p className="truncate" style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 1 }}>Schedule your day, all in one place.</p>
             </div>
           </div>
           <button
@@ -672,41 +562,18 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
           </button>
         </div>
 
-        {/* Auto-add + read-only info row */}
-        <div className="flex flex-col sm:flex-row gap-2.5 px-4 pt-3.5 pb-2 flex-shrink-0">
-          <div className="flex items-center justify-between gap-3 flex-1" style={{ padding: '10px 14px', borderRadius: 12, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)' }}>
-            <div className="min-w-0">
-              <p className="text-[12.5px] font-semibold" style={{ color: 'var(--xp-txt)' }}>Automatically add meetings to Task Manager</p>
-              <p className="text-[11px] mt-0.5" style={{ color: 'var(--xp-txt3)' }}>When enabled, synced meetings automatically appear in your Task Manager.</p>
-            </div>
-            <button
-              onClick={() => setAutoAdd(v => !v)}
-              aria-label="Toggle auto-add to Task Manager"
-              className="flex items-center flex-shrink-0"
-            >
-              <div className="relative rounded-full transition-colors duration-300" style={{ width: 40, height: 20, background: autoAdd ? '#7c3aed' : 'var(--xp-bdr2)' }}>
-                <div className="absolute top-[2px] w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-300" style={{ transform: autoAdd ? 'translateX(21px)' : 'translateX(2px)' }} />
-              </div>
-            </button>
-          </div>
-          <div className="hidden sm:flex items-start gap-2 flex-1 text-[11px] leading-snug" style={{ padding: '10px 14px', borderRadius: 12, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)', color: 'var(--xp-txt3)' }}>
-            <span aria-hidden="true">ⓘ</span>
-            <span>Meetings from Google Calendar and Outlook are read-only. You can view them, join them, add notes, and include them in your Task Manager.</span>
-          </div>
-        </div>
-
         {/* Tabs + source filter */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 pb-3 flex-shrink-0">
-          <div className="flex items-center gap-1 flex-wrap" style={{ padding: 3, borderRadius: 10, background: 'var(--xp-bg3)', width: 'fit-content' }}>
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 pt-3 pb-2.5 flex-shrink-0">
+          <div className="flex items-center gap-0.5 sm:gap-1" style={{ padding: 3, borderRadius: 10, background: 'var(--xp-bg3)', width: 'fit-content' }}>
             {TABS.map(t => {
-              const count = t.key === 'upcoming' ? upcomingList.length : t.key === 'today' ? todayList.length : t.key === 'past' ? pastList.length : 0
+              const count = t.key === 'upcoming' ? upcomingList.length : t.key === 'today' ? todayList.length : 0
               return (
                 <button
                   key={t.key}
                   onClick={() => selectTab(t.key)}
-                  className="text-[12px] whitespace-nowrap"
+                  className="text-[11.5px] sm:text-[12px] whitespace-nowrap px-2 sm:px-3"
                   style={{
-                    padding: '6px 12px', borderRadius: 7,
+                    paddingTop: 6, paddingBottom: 6, borderRadius: 7,
                     fontWeight: tab === t.key ? 700 : 500,
                     background: tab === t.key ? '#7c3aed' : 'transparent',
                     color: tab === t.key ? '#ffffff' : 'var(--xp-txt2)',
@@ -721,32 +588,15 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
         </div>
 
         {/* Body */}
-        {tab === 'monthly' ? (
-          selectedMeeting ? (
-            <div className="xp-meet-overlay flex-1 min-h-0">
-              <MeetingDetail
-                meeting={selectedMeeting}
-                now={now}
-                autoAdd={autoAdd}
-                onJoin={handleJoin}
-                onAddToTaskManager={() => updateMeeting(selectedMeeting.id, { addedToTaskManager: true, linkedTaskId: `mock-task-${selectedMeeting.id}` })}
-                onRemove={() => handleRemove(selectedMeeting.id)}
-                onNotesChange={text => updateMeeting(selectedMeeting.id, { notes: text })}
-                onClose={() => setSelectedId(null)}
-                showClose
-              />
-            </div>
-          ) : (
-            <MonthlyMeetingsView
-              monthCursor={monthCursor}
-              onPrevMonth={() => setMonthCursor(d => new Date(d.getFullYear(), d.getMonth() - 1, 1))}
-              onNextMonth={() => setMonthCursor(d => new Date(d.getFullYear(), d.getMonth() + 1, 1))}
-              meetings={bySource}
-              now={now}
-              selectedId={selectedId}
-              onSelectMeeting={setSelectedId}
-            />
-          )
+        {tab === 'schedule' ? (
+          <MyScheduleView
+            meetings={bySource}
+            events={scheduleEvents}
+            setEvents={setScheduleEvents}
+            now={now}
+            onViewAllUpcoming={() => selectTab('upcoming')}
+            onToast={setToast}
+          />
         ) : (
           <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
             {/* List column */}

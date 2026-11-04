@@ -110,8 +110,8 @@ const MENU_ITEMS: MenuItem[] = [
 
 // Finalized order, labels and icons — used at every screen size.
 const FINAL_ORDER: MenuAction[] = [
-  'profile', 'tasks', 'activities', 'journal-notes', 'analytics', 'goal-manager', 'notifications', 'qotd',
-  'ai-coach', 'motivate', 'gallery', 'sync-calendar', 'meetings', 'settings', 'tutorials', 'help', 'whats-new',
+  'profile', 'tasks', 'meetings', 'activities', 'journal-notes', 'analytics', 'goal-manager', 'notifications', 'qotd',
+  'ai-coach', 'motivate', 'gallery', 'sync-calendar', 'settings', 'tutorials', 'help', 'whats-new',
 ]
 
 const FINAL_MENU_ITEMS: MenuItem[] = FINAL_ORDER.map(action => {

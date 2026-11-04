@@ -2,8 +2,11 @@
 // No React, no storage, no network: everything here is deterministic so it can be unit-tested directly
 // (tests/schedule/scheduleLogic.test.cjs). Events are plain objects; nothing in this file persists them.
 
+import type { XpaditeMeeting } from './meetingsMockData'
+
 export type ScheduleCategoryId = 'lecture' | 'meeting' | 'assignment' | 'study' | 'personal' | 'other'
 export type ScheduleRecurrence = 'none' | 'daily' | 'weekly' | 'monthly'
+export type ScheduleSource = 'google' | 'microsoft'
 
 export interface ScheduleEvent {
   id: string
@@ -23,6 +26,8 @@ export interface ScheduleEvent {
   readOnly?: boolean
   /** Shown for read-only events, e.g. "Google Calendar". */
   sourceLabel?: string
+  /** Which connected calendar a synced event came from (undefined for events made in XPadite). */
+  source?: ScheduleSource
   isCancelled?: boolean
 }
 
@@ -242,10 +247,28 @@ export function layoutDayEvents(events: ScheduleEvent[], day: Date): PositionedE
 
 // ── Filtering ───────────────────────────────────────────────────────────────
 
+/** The single combined filter dropdown: All, one of the six categories, or (at the bottom) one connected calendar. */
+export type CombinedFilter = 'all' | ScheduleCategoryId | ScheduleSource
+
+export const FILTER_OPTIONS: { value: CombinedFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  ...SCHEDULE_CATEGORIES.map(c => ({ value: c.id as CombinedFilter, label: c.label })),
+  { value: 'google', label: 'Google Calendar' },
+  { value: 'microsoft', label: 'Outlook' },
+]
+
+/** Splits the combined dropdown value into the two independent tests filterScheduleEvents applies. */
+export function splitFilter(v: CombinedFilter): { category: ScheduleCategoryId | 'all'; source: ScheduleSource | 'all' } {
+  if (v === 'google' || v === 'microsoft') return { category: 'all', source: v }
+  return { category: v, source: 'all' }
+}
+
 export interface ScheduleFilters {
   query: string
-  /** A single category chosen in the toolbar dropdown, or 'all'. */
+  /** A single category chosen in the dropdown, or 'all'. */
   category: ScheduleCategoryId | 'all'
+  /** A single connected calendar chosen in the dropdown, or 'all'. Events made in XPadite have no source. */
+  source?: ScheduleSource | 'all'
   /** Categories switched off with the legend checkboxes (hides blocks; never deletes events). */
   hidden: ScheduleCategoryId[]
 }
@@ -254,11 +277,57 @@ export function filterScheduleEvents(events: ScheduleEvent[], f: ScheduleFilters
   const q = f.query.trim().toLowerCase()
   return events.filter(ev => {
     if (f.category !== 'all' && ev.category !== f.category) return false
+    if (f.source && f.source !== 'all' && ev.source !== f.source) return false
     if (f.hidden.includes(ev.category)) return false
     if (!q) return true
     const hay = `${ev.title} ${ev.location ?? ''} ${ev.notes ?? ''} ${categoryMeta(ev.category).label}`.toLowerCase()
     return hay.includes(q)
   })
+}
+
+/** A synced meeting as a read-only "Meeting" schedule event (id prefixed so it can never collide with an XPadite event). */
+export function meetingToScheduleEvent(m: XpaditeMeeting): ScheduleEvent {
+  return {
+    id: `meeting:${m.id}`,
+    title: m.title,
+    category: 'meeting',
+    startAt: m.startAt,
+    endAt: m.endAt,
+    meetingUrl: m.meetingUrl ?? undefined,
+    notes: m.notes || undefined,
+    readOnly: true,
+    sourceLabel: m.calendarSource,
+    source: m.provider,
+    isCancelled: m.isCancelled,
+  }
+}
+
+// ── Day agenda / mini calendar ──────────────────────────────────────────────
+
+/** Events that touch `day`, earliest first. */
+export function eventsOnDay(events: ScheduleEvent[], day: Date): ScheduleEvent[] {
+  return events.filter(e => daySlice(e, day) !== null).sort((a, b) => a.startAt - b.startAt || a.endAt - b.endAt)
+}
+
+export function startOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1)
+}
+
+/**
+ * Rows of seven real dates (Sun → Sat) covering `month`, including the leading/trailing days of the neighbouring months so
+ * every row — including the first and last — is a genuine week.
+ */
+export function monthWeeks(month: Date): Date[][] {
+  const first = startOfMonth(month)
+  const last = new Date(first.getFullYear(), first.getMonth() + 1, 0)
+  const start = startOfWeek(first)
+  const rows = Math.ceil((first.getDay() + last.getDate()) / 7)
+  return Array.from({ length: rows }, (_, r) => Array.from({ length: 7 }, (_, c) => addDays(start, r * 7 + c)))
+}
+
+/** Index of the row of `monthWeeks(month)` that contains `day` (the collapsed mini calendar shows exactly this row), or -1. */
+export function weekRowIndex(month: Date, day: Date): number {
+  return monthWeeks(month).findIndex(row => row.some(d => isSameLocalDay(d, day)))
 }
 
 // ── Links ───────────────────────────────────────────────────────────────────

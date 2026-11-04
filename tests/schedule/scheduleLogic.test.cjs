@@ -178,25 +178,111 @@ test('sample events are valid, categorised, uniquely identified and stay within 
   assert.ok(evs.some(e => L.daySlice(e, new Date(2026, 10, 6)) && L.layoutDayEvents(evs, new Date(2026, 10, 6)).some(p => p.lanes > 1)), 'the sample week includes overlapping events')
 })
 
+// ── combined filter (categories + sources) ─────────────────────────────────
+const mk = (id, category, source) => ({ id, title: id, category, startAt: 1, endAt: 2, ...(source ? { source } : {}) })
+test('the single dropdown lists All, the six categories, then Google Calendar and Outlook at the bottom', () => {
+  assert.deepEqual(L.FILTER_OPTIONS.map(o => o.label), ['All', 'Lecture / Class', 'Meeting', 'Assignment / Test', 'Study / Focus', 'Personal', 'Other', 'Google Calendar', 'Outlook'])
+  assert.deepEqual(L.FILTER_OPTIONS.map(o => o.value), ['all', 'lecture', 'meeting', 'assignment', 'study', 'personal', 'other', 'google', 'microsoft'])
+  assert.deepEqual(L.splitFilter('all'), { category: 'all', source: 'all' }); assert.deepEqual(L.splitFilter('study'), { category: 'study', source: 'all' })
+  assert.deepEqual(L.splitFilter('google'), { category: 'all', source: 'google' }); assert.deepEqual(L.splitFilter('microsoft'), { category: 'all', source: 'microsoft' })
+})
+test('source filtering: Google / Outlook keep only that calendar’s events; All keeps everything; categories still apply', () => {
+  const list = [mk('g1', 'meeting', 'google'), mk('g2', 'meeting', 'google'), mk('o1', 'meeting', 'microsoft'), mk('mine', 'study'), mk('mine2', 'lecture')]
+  const run = v => L.filterScheduleEvents(list, { query: '', ...L.splitFilter(v), hidden: [] }).map(e => e.id)
+  assert.deepEqual(run('all'), ['g1', 'g2', 'o1', 'mine', 'mine2'])
+  assert.deepEqual(run('google'), ['g1', 'g2']); assert.deepEqual(run('microsoft'), ['o1'])
+  assert.deepEqual(run('meeting'), ['g1', 'g2', 'o1'], 'category Meeting covers synced meetings from both calendars')
+  assert.deepEqual(run('study'), ['mine'])
+  // an event with BOTH a category and a source obeys both the legend checkboxes and the source choice
+  const both = L.filterScheduleEvents(list, { query: '', ...L.splitFilter('google'), hidden: ['meeting'] }).map(e => e.id)
+  assert.deepEqual(both, [], 'hiding the Meeting category hides Google meetings even when Google is chosen (filters combine)')
+})
+test('synced meetings become read-only Meeting events that carry their calendar source', () => {
+  const m = { id: 'x1', provider: 'microsoft', calendarSource: 'Outlook Calendar', title: 'Sync', startAt: 5, endAt: 9, meetingUrl: null, isCancelled: true, notes: 'n' }
+  const e = L.meetingToScheduleEvent(m)
+  assert.deepEqual([e.id, e.category, e.readOnly, e.source, e.sourceLabel, e.isCancelled, e.meetingUrl, e.notes], ['meeting:x1', 'meeting', true, 'microsoft', 'Outlook Calendar', true, undefined, 'n'])
+  assert.equal(L.meetingToScheduleEvent({ ...m, notes: '' }).notes, undefined)
+})
+
+// ── Today: agenda + mini calendar maths ─────────────────────────────────────
+test('agenda for a day is chronological and includes events that run past midnight', () => {
+  const evs = [ev('b', at(2026, 11, 4, 14), at(2026, 11, 4, 15)), ev('late', at(2026, 11, 3, 23), at(2026, 11, 4, 0, 30)), ev('a', at(2026, 11, 4, 9), at(2026, 11, 4, 10)), ev('other', at(2026, 11, 5, 9), at(2026, 11, 5, 10))]
+  assert.deepEqual(L.eventsOnDay(evs, new Date(2026, 10, 4)).map(e => e.id), ['late', 'a', 'b'])
+  assert.deepEqual(L.eventsOnDay(evs, new Date(2026, 10, 5)).map(e => e.id), ['other'])
+})
+test('month grid: real consecutive Sunday-first weeks, including neighbouring-month days', () => {
+  const nov = L.monthWeeks(new Date(2026, 10, 15))
+  assert.equal(nov.length, 5); assert.equal(nov[0][0].getDate(), 1); assert.equal(nov[0][0].getMonth(), 10); assert.equal(nov[4][6].getMonth(), 11, 'last row ends in December')
+  const oct = L.monthWeeks(new Date(2026, 9, 1)); assert.equal(oct[0][0].getMonth(), 8); assert.equal(oct[0][0].getDate(), 27)
+  const aug = L.monthWeeks(new Date(2026, 7, 1)); assert.equal(aug.length, 6, 'a month spanning six weeks gets six rows')
+  for (const grid of [nov, oct, aug]) {
+    const flat = grid.flat(); assert.ok(flat.every(d => d.getHours() === 0))
+    for (let i = 1; i < flat.length; i++) assert.equal(flat[i].getTime(), L.addDays(flat[i - 1], 1).getTime(), 'no gaps or repeats')
+    assert.ok(grid.every(r => r[0].getDay() === 0 && r[6].getDay() === 6))
+  }
+})
+test('collapsed calendar shows exactly the week holding the selected date — also across month and year boundaries', () => {
+  const row = (m, d) => L.monthWeeks(m)[L.weekRowIndex(m, d)]
+  const nov30 = new Date(2026, 10, 30), r = row(new Date(2026, 10, 1), nov30)
+  assert.ok(r.some(d => L.isSameLocalDay(d, nov30))); assert.deepEqual([r[0].getMonth(), r[0].getDate(), r[6].getMonth(), r[6].getDate()], [10, 29, 11, 5], 'Nov 29 – Dec 5 (straddles two months, all real dates)')
+  const dec31 = new Date(2026, 11, 31), r2 = row(new Date(2026, 11, 1), dec31); assert.equal(r2[6].getFullYear(), 2027); assert.ok(r2.some(d => L.isSameLocalDay(d, dec31)))
+  const jan1 = new Date(2027, 0, 1), r3 = row(new Date(2027, 0, 1), jan1); assert.equal(r3[0].getFullYear(), 2026, 'week of Jan 1 starts in December'); assert.ok(r3.some(d => L.isSameLocalDay(d, jan1)))
+  assert.equal(L.weekRowIndex(new Date(2026, 10, 1), new Date(2027, 5, 1)), -1)
+  for (let d = 1; d <= 30; d++) { const x = new Date(2026, 10, d); assert.ok(row(new Date(2026, 10, 1), x).some(c => L.isSameLocalDay(c, x))) }
+})
+
 // ── wiring (structure) ──────────────────────────────────────────────────────
-test('Meetings → My Schedule: naming, exactly three tabs, banners gone, integrations untouched', () => {
+test('Meetings → My Schedule: naming, exactly two tabs, banners gone, integrations untouched', () => {
   const m = read('components/xpadite/MeetingsModal.tsx'), side = read('components/xpadite/AppSidebar.tsx')
   assert.ok(/label: 'My Schedule',\s+action: 'meetings'/.test(side) && !/label: 'Meetings'/.test(side), 'burger menu renamed, same action')
   assert.ok(/>My Schedule<\/h2>/.test(m) && /Schedule your day, all in one place\./.test(m))
   const tabsBlock = m.slice(m.indexOf('const TABS'), m.indexOf('\n]', m.indexOf('const TABS')))
-  assert.deepEqual([...tabsBlock.matchAll(/key: '(\w+)'/g)].map(x => x[1]), ['schedule', 'today', 'upcoming'], 'exactly three tabs in order')
+  assert.deepEqual([...tabsBlock.matchAll(/key: '(\w+)'/g)].map(x => x[1]), ['schedule', 'today'], 'exactly two tabs in order: My Schedule | Today')
+  assert.ok(/type TabKey = 'schedule' \| 'today'\r?\n/.test(m), 'tab state no longer knows an upcoming tab')
+  assert.ok(!/key: 'upcoming'|Upcoming \(|selectTab|SourceFilter\b|setSourceFilter|All Sources/.test(m), 'no stale Upcoming-tab / All-Sources references in the modal')
   assert.ok(/useState<TabKey>\('schedule'\)/.test(m), 'My Schedule is the default tab')
   assert.ok(!/Past \(/.test(m) && !/Monthly Meetings/.test(m), 'Past and Monthly tabs removed from the UI')
   assert.ok(!/Automatically add meetings to Task Manager/.test(m) && !/are read-only\. You can view them, join them/.test(m), 'both banners removed')
   // preserved behaviour
-  assert.ok(/SourceFilterDropdown/.test(m) && /MeetingCard/.test(m) && /MeetingDetail/.test(m) && /useLockBodyScroll\(\)/.test(m))
+  assert.ok(/function MeetingDetail/.test(m) && /useLockBodyScroll\(\)/.test(m))
   assert.ok(/const \[autoAdd\] = useState\(true\)/.test(m) && /addedToTaskManager: true, linkedTaskId/.test(m), 'Task Manager add logic kept')
-  assert.ok(/MOCK_MEETINGS/.test(m) && /handleRemove/.test(m) && /handleJoin/.test(m))
+  assert.ok(/MOCK_MEETINGS/.test(m) && /handleRemove/.test(m) && /handleJoin/.test(m) && /onNotesChange=\{text => updateMeeting/.test(m), 'notes + remove-from-XPadite + join kept')
   assert.ok(/setMeetingsOpen\(true\)/.test(read('components/xpadite/XpaditeApp.tsx')) && /<MeetingsModal onClose/.test(read('components/xpadite/XpaditeApp.tsx')), 'opening/closing wiring unchanged')
+  assert.ok(/upcoming = useMemo/.test(read('components/xpadite/MyScheduleView.tsx')) && /View All/.test(read('components/xpadite/MyScheduleView.tsx')), 'upcoming events + View All still live in the weekly view')
+})
+test('exactly ONE Add Event button, in the modal navigation row, shared by both tabs', () => {
+  const m = read('components/xpadite/MeetingsModal.tsx'), v = read('components/xpadite/MyScheduleView.tsx')
+  assert.equal((m.match(/aria-label="Add Event"/g) || []).length, 1, 'one button in the modal')
+  assert.ok(/onClick=\{openAdd\}/.test(m) && !/Add Event/.test(v), 'removed from the weekly toolbar')
+  const navRow = m.slice(m.indexOf('Tabs + the one Add Event button'), m.indexOf('{/* Body */}'))
+  assert.ok(/aria-label="Add Event"/.test(navRow) && /TABS\.map/.test(navRow), 'sits beside the tabs, outside either tab body')
+  assert.ok(/blankForm\(tab === 'today' \? todayDate : activeDay\)/.test(m), 'defaults to the day being looked at')
+})
+test('one combined filter control; the old All Sources dropdown is gone', () => {
+  const m = read('components/xpadite/MeetingsModal.tsx'), v = read('components/xpadite/MyScheduleView.tsx'), p = read('components/xpadite/ScheduleParts.tsx')
+  assert.ok(/<FilterSelect/.test(v) && /FILTER_OPTIONS\.map/.test(p) && (v.match(/<FilterSelect/g) || []).length === 1)
+  assert.ok(!/All Sources|SourceFilterDropdown/.test(m + v + p))
+  assert.ok(/splitFilter\(filter\)/.test(m) && /splitFilter\(filter\)/.test(v), 'the same filter drives Today’s agenda and the weekly grid')
+  assert.ok(/CategoryChecklist/.test(v) && /Color Categories/.test(v), 'legend checkboxes kept')
+})
+test('modal sizing: Analytics’ rules on desktop, full screen on phones with safe areas', () => {
+  const m = read('components/xpadite/MeetingsModal.tsx'), a = read('components/xpadite/AnalyticsModal.tsx')
+  assert.ok(/lg:max-w-\[1296px\]/.test(a) && /sm:max-w-\[640px\]/.test(a) && /sm:p-3 sm:pt-4/.test(a), 'Analytics’ rules (the reference)')
+  assert.ok(/fixed inset-0 z-\[70\]/.test(m) && /sm:p-3 sm:pt-4/.test(m) && /sm:max-w-\[640px\] md:max-w-\[900px\] lg:max-w-\[1296px\]/.test(m), 'same padding and max widths as Analytics (+ md:900 for tablets)')
+  assert.ok(!/bottom-14/.test(m), 'no longer stops above the phone bottom bar')
+  assert.ok(/env\(safe-area-inset-top/.test(m) && /env\(safe-area-inset-bottom/.test(m), 'safe areas respected')
+  const nav = read('components/xpadite/MobileBottomNav.tsx'); assert.ok(/zIndex: 50/.test(nav), 'bottom bar is z-50, below this z-[70] layer')
+})
+test('Today tab: dark mini calendar with the purple triangle, agenda, and details; no leftover Upcoming list', () => {
+  const m = read('components/xpadite/MeetingsModal.tsx'), c = read('components/xpadite/ScheduleMiniCalendar.tsx')
+  assert.ok(/ScheduleMiniCalendar/.test(m) && /onToggle=\{toggleCalendar\}/.test(m) && /data-testid="today-agenda"/.test(m))
+  assert.ok(/▶/.test(c) && /rotate\(90deg\)/.test(c) && /aria-expanded=\{expanded\}/.test(c), 'the signature ▶ triangle rotates when expanded')
+  assert.ok(/setViewMonth\(startOfMonth\(todayDate\)\)/.test(m) && !/setTodayDate\(startOfDay\(new Date\(\)\)\)\s*\n\s*setCalExpanded/.test(m), 'toggling never changes the selected date')
+  assert.ok(/<MeetingDetail/.test(m) && /<EventDetails/.test(m), 'synced meeting detail (read-only + notes) and XPadite event detail (edit/delete)')
 })
 test('My Schedule never touches storage, network, Supabase or the Task Manager', () => {
-  for (const f of ['MyScheduleView', 'scheduleLogic', 'scheduleMockData']) {
-    const src = read(`components/xpadite/${f}.tsx`.replace(/\.tsx$/, f === 'MyScheduleView' ? '.tsx' : '.ts'))
+  for (const f of ['MyScheduleView.tsx', 'ScheduleParts.tsx', 'ScheduleMiniCalendar.tsx', 'scheduleLogic.ts', 'scheduleMockData.ts']) {
+    const src = read(`components/xpadite/${f}`)
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')   // comments may mention Supabase; code must not use it
     assert.ok(!/supabase|fetch\(|localStorage|sessionStorage|useApp|addTask|XMLHttpRequest/i.test(code), `${f} must stay frontend-only`)
   }
@@ -209,4 +295,13 @@ test('grid structure: 24 hours, 5 AM initial scroll, sticky header sharing the b
   assert.ok(/sticky top-0/.test(v))
   assert.ok(!/Quick Actions/.test(v), 'no Quick Actions panel')
   assert.ok(/Upcoming \(\$\{upcoming\.length\}\)/.test(v) && /title="Selected Event"/.test(v) && /title="Color Categories"/.test(v))
+})
+test('burger menu: My Schedule sits right after Task Manager, once, with its icon, label and handler intact', () => {
+  const side = read('components/xpadite/AppSidebar.tsx')
+  const order = [...side.match(/const FINAL_ORDER[^=]*=\s*\[([\s\S]*?)\]/)[1].matchAll(/'([\w-]+)'/g)].map(x => x[1])
+  assert.deepEqual(order.slice(0, 5), ['profile', 'tasks', 'meetings', 'activities', 'journal-notes'], 'Profile, Task Manager, My Schedule, Activity Manager, Planner/Journal')
+  assert.equal(order.filter(a => a === 'meetings').length, 1, 'no duplicate')
+  assert.deepEqual(order.slice(5), ['analytics', 'goal-manager', 'notifications', 'qotd', 'ai-coach', 'motivate', 'gallery', 'sync-calendar', 'settings', 'tutorials', 'help', 'whats-new'], 'every other item keeps its relative order')
+  assert.ok(/icon: '👥', label: 'My Schedule',\s+action: 'meetings'/.test(side) && /case 'meetings':\s+onMeetings\?\.\(\)/.test(side), 'icon, label and handler preserved')
+  assert.ok(/onMeetings=\{\(\) => setMeetingsOpen\(true\)\}/.test(read('components/xpadite/XpaditeApp.tsx')))
 })

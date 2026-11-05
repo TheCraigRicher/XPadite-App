@@ -6,11 +6,13 @@
 
 import { useEffect, useState } from 'react'
 import {
-  SCHEDULE_CATEGORIES, REMINDER_OPTIONS, RECURRENCE_OPTIONS, FILTER_OPTIONS,
-  categoryMeta, durationLabel, longDateLabel, meetingLinkLabel, recurrenceLabel, reminderLabel, safeHttpUrl,
+  REMINDER_OPTIONS, RECURRENCE_OPTIONS, filterOptions, formatTimeValue, parseTimeText, timeOptions,
+  durationLabel, longDateLabel, meetingLinkLabel, recurrenceLabel, reminderLabel, safeHttpUrl,
   timeRangeLabel, validateScheduleForm,
 } from './scheduleLogic'
 import type { CombinedFilter, ScheduleCategoryId, ScheduleEvent, ScheduleFormErrors, ScheduleFormValues } from './scheduleLogic'
+import { withDateChange, withStartChange } from './scheduleEngine'
+import { useSchedule } from './scheduleContext'
 
 /** Marker so the modal's Escape handler lets an open sub-dialog close first (see MeetingsModal). */
 export const LAYER_ATTR = 'data-xp-sched-layer'
@@ -27,7 +29,8 @@ export function Chevron({ dir }: { dir: 'left' | 'right' | 'up' | 'down' }) {
 }
 
 export function CategoryDot({ id, size = 10 }: { id: ScheduleCategoryId; size?: number }) {
-  const c = categoryMeta(id)
+  const { meta } = useSchedule()
+  const c = meta(id)
   return <span aria-hidden="true" style={{ width: size, height: size, borderRadius: 3, background: c.bg, border: `1.5px solid ${c.edge}`, display: 'inline-block', flexShrink: 0 }} />
 }
 
@@ -42,8 +45,9 @@ export function DetailRow({ label, children }: { label: string; children: React.
   )
 }
 
-export function EventDetails({ ev, onEdit, onDelete }: { ev: ScheduleEvent; onEdit: () => void; onDelete: () => void }) {
-  const cat = categoryMeta(ev.category)
+export function EventDetails({ ev, onEdit, onDelete, onDuplicate }: { ev: ScheduleEvent; onEdit: () => void; onDelete: () => void; onDuplicate?: () => void }) {
+  const { meta, fmt } = useSchedule()
+  const cat = meta(ev.category)
   const link = safeHttpUrl(ev.meetingUrl)
   const reminder = reminderLabel(ev.reminderMins)
   const repeat = recurrenceLabel(ev.recurrence)
@@ -64,7 +68,7 @@ export function EventDetails({ ev, onEdit, onDelete }: { ev: ScheduleEvent; onEd
       </div>
       <dl className="flex flex-col gap-2">
         <DetailRow label="Date">{longDateLabel(ev.startAt)}</DetailRow>
-        <DetailRow label="Time">{timeRangeLabel(ev.startAt, ev.endAt)} <span style={{ color: 'var(--xp-txt3)' }}>({durationLabel(ev.startAt, ev.endAt)})</span></DetailRow>
+        <DetailRow label="Time">{timeRangeLabel(ev.startAt, ev.endAt, fmt)} <span style={{ color: 'var(--xp-txt3)' }}>({durationLabel(ev.startAt, ev.endAt)})</span></DetailRow>
         <DetailRow label="Category"><span className="inline-flex items-center gap-1.5"><CategoryDot id={ev.category} />{cat.label}</span></DetailRow>
         {ev.location && <DetailRow label="Location">{ev.location}</DetailRow>}
         {ev.meetingUrl && (
@@ -81,6 +85,13 @@ export function EventDetails({ ev, onEdit, onDelete }: { ev: ScheduleEvent; onEd
         {repeat && <DetailRow label="Repeats">{repeat}</DetailRow>}
         {ev.sourceLabel && <DetailRow label="Source">{ev.sourceLabel}</DetailRow>}
       </dl>
+      {!ev.readOnly && onDuplicate && (
+        <button type="button" onClick={onDuplicate} className="self-start inline-flex items-center gap-1.5 text-[12px] font-semibold"
+          style={{ padding: '6px 11px', borderRadius: 9, background: 'rgba(124,58,237,0.10)', border: '0.5px solid rgba(124,58,237,0.28)', color: '#7c3aed' }}>
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h9" strokeLinecap="round" /></svg>
+          Duplicate
+        </button>
+      )}
       {ev.readOnly && (
         <p className="text-[11px] leading-snug" style={{ color: 'var(--xp-txt3)' }}>
           Synced from {ev.sourceLabel ?? 'your calendar'} — read-only here. Change it in {ev.sourceLabel ?? 'the source calendar'}.
@@ -112,7 +123,7 @@ export function useLayerEscape(onClose: () => void) {
   }, [onClose])
 }
 
-export function EventSheet({ ev, onClose, onEdit, onDelete }: { ev: ScheduleEvent; onClose: () => void; onEdit: () => void; onDelete: () => void }) {
+export function EventSheet({ ev, onClose, onEdit, onDelete, onDuplicate }: { ev: ScheduleEvent; onClose: () => void; onEdit: () => void; onDelete: () => void; onDuplicate?: () => void }) {
   useLayerEscape(onClose)
   return (
     <div {...{ [LAYER_ATTR]: '' }} className="lg:hidden absolute inset-0 z-30 flex items-end" style={{ background: 'rgba(0,0,0,0.42)' }} onClick={onClose}>
@@ -128,7 +139,7 @@ export function EventSheet({ ev, onClose, onEdit, onDelete }: { ev: ScheduleEven
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" /><line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" /></svg>
           </button>
         </div>
-        <EventDetails ev={ev} onEdit={onEdit} onDelete={onDelete} />
+        <EventDetails ev={ev} onEdit={onEdit} onDelete={onDelete} onDuplicate={onDuplicate} />
       </div>
     </div>
   )
@@ -165,14 +176,75 @@ function Field({ label, error, children, htmlFor }: { label: string; error?: str
   )
 }
 
-export function EventForm({ mode, initial, onCancel, onSubmit }: { mode: 'add' | 'edit'; initial: ScheduleFormValues; onCancel: () => void; onSubmit: (v: ScheduleFormValues) => void }) {
+const TIME_STEP_MIN = 15
+
+/**
+ * Time entry that follows the Schedule Preferences format (the browser's own <input type="time"> always follows the device locale).
+ * Type "2:30 pm", "14:30", "1430" or "9"; pick a suggestion; or use the up/down arrow keys (15 minutes). The form keeps its value as
+ * 24-hour "HH:MM", so changing the display format never changes a stored time.
+ */
+function TimeField({ id, value, fmt, onChange }: { id: string; value: string; fmt: '12h' | '24h'; onChange: (hhmm: string) => void }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const shown = draft ?? formatTimeValue(value, fmt)
+  const options = timeOptions(TIME_STEP_MIN)
+  const labels = new Set(options.map(o => formatTimeValue(o, fmt)))
+
+  function commit(text: string) {
+    const parsed = parseTimeText(text)
+    if (parsed) { onChange(parsed); setDraft(null) } else onChange('')       // leave what was typed on screen; validation explains
+  }
+
+  return (
+    <>
+      <input
+        id={id} type="text" inputMode="text" autoComplete="off" spellCheck={false} list={`${id}-options`} value={shown}
+        placeholder={fmt === '24h' ? '14:30' : '2:30 PM'} aria-label={undefined}
+        onChange={e => {
+          const t = e.target.value
+          setDraft(t)
+          if (labels.has(t.toUpperCase()) || labels.has(t)) commit(t)          // a suggestion was picked or a full time typed
+        }}
+        onBlur={() => { if (draft !== null) commit(draft) }}
+        onKeyDown={e => {
+          if (e.key === 'Enter' && draft !== null) { e.preventDefault(); commit(draft); return }
+          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault()
+            const cur = parseTimeText(draft ?? '') ?? (value || '09:00')
+            const mins = Math.min(Math.max(+cur.slice(0, 2) * 60 + +cur.slice(3) + (e.key === 'ArrowUp' ? TIME_STEP_MIN : -TIME_STEP_MIN), 0), 24 * 60 - 1)
+            onChange(`${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`)
+            setDraft(null)
+          }
+        }}
+        style={fieldStyle}
+      />
+      <datalist id={`${id}-options`}>{options.map(o => <option key={o} value={formatTimeValue(o, fmt)} />)}</datalist>
+    </>
+  )
+}
+
+export function EventForm({ mode, initial, onCancel, onSubmit, getConflict, heading, hint }: {
+  mode: 'add' | 'edit'
+  initial: ScheduleFormValues
+  onCancel: () => void
+  onSubmit: (v: ScheduleFormValues) => void
+  /** Returns a "Scheduling Conflict" message when the chosen date/time overlaps another event (the form then refuses to save, keeping every input). */
+  getConflict?: (v: ScheduleFormValues) => string | null
+  heading?: string
+  hint?: string
+}) {
+  const { categories, fmt } = useSchedule()
+  const [showEndDate, setShowEndDate] = useState(() => !!initial.endDate && initial.endDate !== initial.date)
   const [v, setV] = useState<ScheduleFormValues>(initial)
   const [errors, setErrors] = useState<ScheduleFormErrors>({})
   const [tried, setTried] = useState(false)
   useLayerEscape(onCancel)
+  const conflict = getConflict ? getConflict(v) : null
 
   function set<K extends keyof ScheduleFormValues>(k: K, val: ScheduleFormValues[K]) {
-    const next = { ...v, [k]: val }
+    // Add / Duplicate: moving the date or start carries the end along (the length stays); Edit leaves the end alone.
+    const next = mode === 'add' && (k === 'start' || k === 'date') ? withStartChange(v, { [k]: val } as Partial<Pick<ScheduleFormValues, 'date' | 'start'>>)
+      : k === 'date' ? withDateChange(v, val as string)
+      : { ...v, [k]: val }
     setV(next)
     if (tried) setErrors(validateScheduleForm(next))
   }
@@ -182,25 +254,26 @@ export function EventForm({ mode, initial, onCancel, onSubmit }: { mode: 'add' |
     setTried(true)
     const errs = validateScheduleForm(v)
     setErrors(errs)
-    if (Object.keys(errs).length === 0) onSubmit(v)
+    if (Object.keys(errs).length === 0 && !conflict) onSubmit(v)
   }
 
   return (
     <div {...{ [LAYER_ATTR]: '' }} className="absolute inset-0 z-40 flex items-end sm:items-center justify-center sm:p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onCancel}>
       <form
-        onSubmit={submit} noValidate role="dialog" aria-modal="true" aria-label={mode === 'add' ? 'Add event' : 'Edit event'}
+        onSubmit={submit} noValidate role="dialog" aria-modal="true" aria-label={heading ?? (mode === 'add' ? 'Add event' : 'Edit event')}
         className="xp-sch-sheet w-full sm:max-w-[480px] flex flex-col"
         style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', borderRadius: 18, maxHeight: '94%', boxShadow: '0 24px 60px rgba(0,0,0,0.38)' }}
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 flex-shrink-0" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
-          <h3 className="text-[15px] font-bold" style={{ color: 'var(--xp-txt)' }}>{mode === 'add' ? 'Add Event' : 'Edit Event'}</h3>
+          <h3 className="text-[15px] font-bold" style={{ color: 'var(--xp-txt)' }}>{heading ?? (mode === 'add' ? 'Add Event' : 'Edit Event')}</h3>
           <button type="button" onClick={onCancel} aria-label="Close" style={{ ...iconBtn, width: 28, height: 28 }}>
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" /><line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" /></svg>
           </button>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3.5 flex flex-col gap-3" style={{ overscrollBehavior: 'contain' }}>
+          {hint && <p className="text-[11.5px] leading-snug" style={{ color: 'var(--xp-txt2)', padding: '8px 10px', borderRadius: 9, background: 'rgba(124,58,237,0.08)', border: '0.5px solid rgba(124,58,237,0.22)' }}>{hint}</p>}
           <Field label="Title *" htmlFor="sch-title" error={errors.title}>
             <input id="sch-title" value={v.title} maxLength={120} onChange={e => set('title', e.target.value)} placeholder="e.g. Study session" style={fieldStyle} autoFocus />
           </Field>
@@ -209,15 +282,24 @@ export function EventForm({ mode, initial, onCancel, onSubmit }: { mode: 'add' |
               <input id="sch-date" type="date" value={v.date} onChange={e => set('date', e.target.value)} style={fieldStyle} />
             </Field>
             <Field label="Start *" htmlFor="sch-start" error={errors.start}>
-              <input id="sch-start" type="time" step={900} value={v.start} onChange={e => set('start', e.target.value)} style={fieldStyle} />
+              <TimeField id="sch-start" value={v.start} fmt={fmt} onChange={t => set('start', t)} />
             </Field>
             <Field label="End *" htmlFor="sch-end" error={errors.end}>
-              <input id="sch-end" type="time" step={900} value={v.end} onChange={e => set('end', e.target.value)} style={fieldStyle} />
+              <TimeField id="sch-end" value={v.end} fmt={fmt} onChange={t => set('end', t)} />
             </Field>
           </div>
+          {showEndDate || (v.endDate && v.endDate !== v.date) ? (
+            <Field label="End date *" htmlFor="sch-end-date" error={errors.endDate}>
+              <input id="sch-end-date" type="date" value={v.endDate || v.date} min={v.date} onChange={e => set('endDate', e.target.value)} style={fieldStyle} />
+            </Field>
+          ) : (
+            <button type="button" onClick={() => setShowEndDate(true)} className="self-start text-[12px] font-semibold" style={{ color: '#7c3aed' }}>
+              + Ends on a different day
+            </button>
+          )}
           <Field label="Category" htmlFor="sch-category">
             <div id="sch-category" role="radiogroup" aria-label="Category" className="flex flex-wrap gap-1.5">
-              {SCHEDULE_CATEGORIES.map(c => {
+              {categories.map(c => {
                 const on = v.category === c.id
                 return (
                   <button key={c.id} type="button" role="radio" aria-checked={on} onClick={() => set('category', c.id)}
@@ -255,9 +337,15 @@ export function EventForm({ mode, initial, onCancel, onSubmit }: { mode: 'add' |
           </p>
         </div>
 
+        {conflict && (
+          <div role="alert" data-testid="schedule-conflict" className="mx-4 mb-1 flex-shrink-0" style={{ padding: '9px 11px', borderRadius: 10, background: 'rgba(220,38,38,0.09)', border: '0.5px solid rgba(220,38,38,0.4)' }}>
+            <p className="text-[12px] font-bold" style={{ color: '#dc2626' }}>Scheduling Conflict</p>
+            <p className="text-[11.5px] leading-snug mt-0.5" style={{ color: 'var(--xp-txt)' }}>{conflict}</p>
+          </div>
+        )}
         <div className="flex gap-2 px-4 py-3 flex-shrink-0" style={{ borderTop: '0.5px solid var(--xp-bdr)' }}>
           <button type="button" onClick={onCancel} className="flex-1 text-[13px] font-medium" style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)', color: 'var(--xp-txt)' }}>Cancel</button>
-          <button type="submit" className="flex-1 text-[13px] font-semibold text-white" style={{ padding: '10px 12px', borderRadius: 10, background: '#7c3aed' }}>{mode === 'add' ? 'Add Event' : 'Save Changes'}</button>
+          <button type="submit" aria-disabled={!!conflict} className="flex-1 text-[13px] font-semibold text-white" style={{ padding: '10px 12px', borderRadius: 10, background: '#7c3aed', opacity: conflict ? 0.55 : 1 }}>{mode === 'add' ? 'Add Event' : 'Save Changes'}</button>
         </div>
       </form>
     </div>
@@ -268,6 +356,7 @@ export function EventForm({ mode, initial, onCancel, onSubmit }: { mode: 'add' |
 // ── The single combined filter (categories, then Google Calendar / Outlook at the bottom) ──
 
 export function FilterSelect({ value, onChange, className, style }: { value: CombinedFilter; onChange: (v: CombinedFilter) => void; className?: string; style?: React.CSSProperties }) {
+  const { categories } = useSchedule()
   return (
     <label className="flex-shrink-0">
       <span className="sr-only">Filter by category or calendar</span>
@@ -275,7 +364,7 @@ export function FilterSelect({ value, onChange, className, style }: { value: Com
         value={value} onChange={e => onChange(e.target.value as CombinedFilter)} aria-label="Filter by category or calendar" className={className}
         style={{ padding: '7px 6px', borderRadius: 10, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)', color: 'var(--xp-txt)', fontSize: 16, maxWidth: 170, ...style }}
       >
-        {FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        {filterOptions(categories).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </label>
   )

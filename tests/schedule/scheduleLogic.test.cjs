@@ -248,7 +248,7 @@ test('Meetings → My Schedule: naming, exactly two tabs, banners gone, integrat
   assert.ok(/const \[autoAdd\] = useState\(true\)/.test(m) && /addedToTaskManager: true, linkedTaskId/.test(m), 'Task Manager add logic kept')
   assert.ok(/MOCK_MEETINGS/.test(m) && /handleRemove/.test(m) && /handleJoin/.test(m) && /onNotesChange=\{text => updateMeeting/.test(m), 'notes + remove-from-XPadite + join kept')
   assert.ok(/setMeetingsOpen\(true\)/.test(read('components/xpadite/XpaditeApp.tsx')) && /<MeetingsModal onClose/.test(read('components/xpadite/XpaditeApp.tsx')), 'opening/closing wiring unchanged')
-  assert.ok(/upcoming = useMemo/.test(read('components/xpadite/MyScheduleView.tsx')) && /View All/.test(read('components/xpadite/MyScheduleView.tsx')), 'upcoming events + View All still live in the weekly view')
+  assert.ok(/upcoming = useMemo/.test(read('components/xpadite/MyScheduleView.tsx')), 'upcoming events still live in the weekly view (now a scrolling list that fills the sidebar — no View All toggle needed)')
 })
 test('exactly ONE Add Event button, in the modal navigation row, shared by both tabs', () => {
   const m = read('components/xpadite/MeetingsModal.tsx'), v = read('components/xpadite/MyScheduleView.tsx')
@@ -256,11 +256,11 @@ test('exactly ONE Add Event button, in the modal navigation row, shared by both 
   assert.ok(/onClick=\{openAdd\}/.test(m) && !/Add Event/.test(v), 'removed from the weekly toolbar')
   const navRow = m.slice(m.indexOf('Tabs + the one Add Event button'), m.indexOf('{/* Body */}'))
   assert.ok(/aria-label="Add Event"/.test(navRow) && /TABS\.map/.test(navRow), 'sits beside the tabs, outside either tab body')
-  assert.ok(/blankForm\(tab === 'today' \? todayDate : activeDay\)/.test(m), 'defaults to the day being looked at')
+  assert.ok(/blankForm\(tab === 'today' \? todayDate : activeDay, 9, prefs\.defaultDurationMins\)/.test(m), 'defaults to the day being looked at, using the preferred duration')
 })
 test('one combined filter control; the old All Sources dropdown is gone', () => {
   const m = read('components/xpadite/MeetingsModal.tsx'), v = read('components/xpadite/MyScheduleView.tsx'), p = read('components/xpadite/ScheduleParts.tsx')
-  assert.ok(/<FilterSelect/.test(v) && /FILTER_OPTIONS\.map/.test(p) && (v.match(/<FilterSelect/g) || []).length === 1)
+  assert.ok(/<FilterSelect/.test(v) && /filterOptions\(categories\)\.map/.test(p) && (v.match(/<FilterSelect/g) || []).length === 1)
   assert.ok(!/All Sources|SourceFilterDropdown/.test(m + v + p))
   assert.ok(/splitFilter\(filter\)/.test(m) && /splitFilter\(filter\)/.test(v), 'the same filter drives Today’s agenda and the weekly grid')
   assert.ok(/CategoryChecklist/.test(v) && /Color Categories/.test(v), 'legend checkboxes kept')

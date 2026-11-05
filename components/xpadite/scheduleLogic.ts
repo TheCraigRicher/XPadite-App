@@ -4,7 +4,9 @@
 
 import type { XpaditeMeeting } from './meetingsMockData'
 
-export type ScheduleCategoryId = 'lecture' | 'meeting' | 'assignment' | 'study' | 'personal' | 'other'
+/** The six built-in ids, plus any custom category id (custom ids are generated and never collide with these). */
+export type DefaultCategoryId = 'lecture' | 'meeting' | 'assignment' | 'study' | 'personal' | 'other'
+export type ScheduleCategoryId = string
 export type ScheduleRecurrence = 'none' | 'daily' | 'weekly' | 'monthly'
 export type ScheduleSource = 'google' | 'microsoft'
 
@@ -38,19 +40,46 @@ export interface ScheduleCategory {
   bg: string
   edge: string
   text: string
+  /** The six originals - protected from rename / recolour / delete. */
+  builtIn?: boolean
 }
 
 export const SCHEDULE_CATEGORIES: ScheduleCategory[] = [
-  { id: 'lecture',    label: 'Lecture / Class',   bg: '#e4d4fb', edge: '#a78bfa', text: '#4c1d95' },
-  { id: 'meeting',    label: 'Meeting',           bg: '#bff5d9', edge: '#34d399', text: '#065f46' },
-  { id: 'assignment', label: 'Assignment / Test', bg: '#fbd3ea', edge: '#f472b6', text: '#831843' },
-  { id: 'study',      label: 'Study / Focus',     bg: '#c3e2fb', edge: '#60a5fa', text: '#1e3a8a' },
-  { id: 'personal',   label: 'Personal',          bg: '#fbf6a8', edge: '#e0b81a', text: '#713f12' },
-  { id: 'other',      label: 'Other',             bg: '#fddbae', edge: '#fb923c', text: '#7c2d12' },
+  { id: 'lecture',    label: 'Lecture / Class',   bg: '#e4d4fb', edge: '#a78bfa', text: '#4c1d95', builtIn: true },
+  { id: 'meeting',    label: 'Meeting',           bg: '#bff5d9', edge: '#34d399', text: '#065f46', builtIn: true },
+  { id: 'assignment', label: 'Assignment / Test', bg: '#fbd3ea', edge: '#f472b6', text: '#831843', builtIn: true },
+  { id: 'study',      label: 'Study / Focus',     bg: '#c3e2fb', edge: '#60a5fa', text: '#1e3a8a', builtIn: true },
+  { id: 'personal',   label: 'Personal',          bg: '#fbf6a8', edge: '#e0b81a', text: '#713f12', builtIn: true },
+  { id: 'other',      label: 'Other',             bg: '#fddbae', edge: '#fb923c', text: '#7c2d12', builtIn: true },
 ]
 
-export function categoryMeta(id: ScheduleCategoryId): ScheduleCategory {
-  return SCHEDULE_CATEGORIES.find(c => c.id === id) ?? SCHEDULE_CATEGORIES[SCHEDULE_CATEGORIES.length - 1]
+/** Looks `id` up in `list` (default: the six built-ins); an unknown id falls back to Other so nothing is ever unstyled. */
+export function categoryMeta(id: ScheduleCategoryId, list: ScheduleCategory[] = SCHEDULE_CATEGORIES): ScheduleCategory {
+  return list.find(c => c.id === id) ?? SCHEDULE_CATEGORIES[SCHEDULE_CATEGORIES.length - 1]
+}
+
+// -- Preferences (frontend-only, in memory) ---------------------------------
+
+export type TimeFormat = '12h' | '24h'
+export type WeekStart = 0 | 1   // 0 = Sunday, 1 = Monday
+
+export interface SchedulePrefs {
+  defaultDurationMins: number
+  weekStart: WeekStart
+  timeFormat: TimeFormat
+}
+
+export const DEFAULT_PREFS: SchedulePrefs = { defaultDurationMins: 60, weekStart: 0, timeFormat: '12h' }
+export const DURATION_CHOICES = [15, 30, 45, 60, 90, 120]
+
+/** Coerces anything into a valid prefs object (unknown / out-of-range values fall back to the defaults). */
+export function sanitizePrefs(p: Partial<SchedulePrefs> | null | undefined): SchedulePrefs {
+  const dur = p?.defaultDurationMins
+  return {
+    defaultDurationMins: typeof dur === 'number' && DURATION_CHOICES.includes(dur) ? dur : DEFAULT_PREFS.defaultDurationMins,
+    weekStart: p?.weekStart === 1 ? 1 : 0,
+    timeFormat: p?.timeFormat === '24h' ? '24h' : '12h',
+  }
 }
 
 export const REMINDER_OPTIONS: { value: number | null; label: string }[] = [
@@ -95,18 +124,19 @@ export function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate())
 }
 
-/** The Sunday on/before `d`, at local midnight. Uses calendar arithmetic, so month/year/DST boundaries are exact. */
-export function startOfWeek(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay())
+/** The first day of the week (Sunday, or Monday when `weekStart` is 1) on/before `d`, at local midnight. Calendar arithmetic, so month/year/DST boundaries are exact. */
+export function startOfWeek(d: Date, weekStart: WeekStart = 0): Date {
+  const back = (d.getDay() - weekStart + 7) % 7
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - back)
 }
 
 export function addDays(d: Date, n: number): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
 }
 
-/** The seven days (Sun → Sat) of the week containing `anchor`. */
-export function weekDays(anchor: Date): Date[] {
-  const s = startOfWeek(anchor)
+/** The seven days of the week containing `anchor` (Sun → Sat, or Mon → Sun). */
+export function weekDays(anchor: Date, weekStart: WeekStart = 0): Date[] {
+  const s = startOfWeek(anchor, weekStart)
   return Array.from({ length: 7 }, (_, i) => addDays(s, i))
 }
 
@@ -130,8 +160,17 @@ export function monthYearShort(d: Date): string {
 }
 
 /** "Nov 1 – Nov 7", "Oct 25 – Oct 31" or, across a year end, "Dec 27, 2026 – Jan 2, 2027". */
-export function weekRangeLabel(anchor: Date): string {
-  const days = weekDays(anchor)
+/** Phone-width form: "Nov 1–7", "Oct 25–Nov 1", "Dec 27–Jan 2" (the year is left out; the month label beside it carries it). */
+export function weekRangeShort(anchor: Date, weekStart: WeekStart = 0): string {
+  const days = weekDays(anchor, weekStart)
+  const a = days[0], b = days[6]
+  return a.getMonth() === b.getMonth()
+    ? `${MONTH_SHORT[a.getMonth()]} ${a.getDate()}–${b.getDate()}`
+    : `${MONTH_SHORT[a.getMonth()]} ${a.getDate()}–${MONTH_SHORT[b.getMonth()]} ${b.getDate()}`
+}
+
+export function weekRangeLabel(anchor: Date, weekStart: WeekStart = 0): string {
+  const days = weekDays(anchor, weekStart)
   const a = days[0], b = days[6]
   if (a.getFullYear() !== b.getFullYear()) {
     return `${MONTH_SHORT[a.getMonth()]} ${a.getDate()}, ${a.getFullYear()} – ${MONTH_SHORT[b.getMonth()]} ${b.getDate()}, ${b.getFullYear()}`
@@ -143,23 +182,25 @@ export function shortDayLabel(d: Date): string {
   return `${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`
 }
 
-/** 0 → "12 AM", 5 → "5 AM", 12 → "12 PM", 23 → "11 PM". */
-export function hourLabel(h: number): string {
+/** 0 → "12 AM", 5 → "5 AM", 12 → "12 PM", 23 → "11 PM" (or "00:00" … "23:00" in 24-hour time). */
+export function hourLabel(h: number, fmt?: TimeFormat | number): string {
   const hh = ((h % 24) + 24) % 24
+  if (fmt === '24h') return `${String(hh).padStart(2, '0')}:00`
   const suffix = hh < 12 ? 'AM' : 'PM'
   const h12 = hh % 12 === 0 ? 12 : hh % 12
   return `${h12} ${suffix}`
 }
 
-export function clockLabel(ts: number): string {
+export function clockLabel(ts: number, fmt?: TimeFormat | number): string {
   const d = new Date(ts)
   const h = d.getHours(), m = d.getMinutes()
+  if (fmt === '24h') return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
   const h12 = h % 12 === 0 ? 12 : h % 12
   return `${h12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
 }
 
-export function timeRangeLabel(startAt: number, endAt: number): string {
-  return `${clockLabel(startAt)} – ${clockLabel(endAt)}`
+export function timeRangeLabel(startAt: number, endAt: number, fmt?: TimeFormat): string {
+  return `${clockLabel(startAt, fmt)} – ${clockLabel(endAt, fmt)}`
 }
 
 export function durationLabel(startAt: number, endAt: number): string {
@@ -248,7 +289,7 @@ export function layoutDayEvents(events: ScheduleEvent[], day: Date): PositionedE
 // ── Filtering ───────────────────────────────────────────────────────────────
 
 /** The single combined filter dropdown: All, one of the six categories, or (at the bottom) one connected calendar. */
-export type CombinedFilter = 'all' | ScheduleCategoryId | ScheduleSource
+export type CombinedFilter = string   // 'all' | a category id (built-in or custom) | 'google' | 'microsoft'
 
 export const FILTER_OPTIONS: { value: CombinedFilter; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -256,6 +297,16 @@ export const FILTER_OPTIONS: { value: CombinedFilter; label: string }[] = [
   { value: 'google', label: 'Google Calendar' },
   { value: 'microsoft', label: 'Outlook' },
 ]
+
+/** The dropdown options for the current category list (built-ins, then custom ones), with the connected calendars last. */
+export function filterOptions(categories: ScheduleCategory[]): { value: CombinedFilter; label: string }[] {
+  return [
+    { value: 'all', label: 'All' },
+    ...categories.map(c => ({ value: c.id as CombinedFilter, label: c.label })),
+    { value: 'google', label: 'Google Calendar' },
+    { value: 'microsoft', label: 'Outlook' },
+  ]
+}
 
 /** Splits the combined dropdown value into the two independent tests filterScheduleEvents applies. */
 export function splitFilter(v: CombinedFilter): { category: ScheduleCategoryId | 'all'; source: ScheduleSource | 'all' } {
@@ -271,6 +322,8 @@ export interface ScheduleFilters {
   source?: ScheduleSource | 'all'
   /** Categories switched off with the legend checkboxes (hides blocks; never deletes events). */
   hidden: ScheduleCategoryId[]
+  /** Category list used to make category names searchable (default: the six built-ins). */
+  categories?: ScheduleCategory[]
 }
 
 export function filterScheduleEvents(events: ScheduleEvent[], f: ScheduleFilters): ScheduleEvent[] {
@@ -280,7 +333,7 @@ export function filterScheduleEvents(events: ScheduleEvent[], f: ScheduleFilters
     if (f.source && f.source !== 'all' && ev.source !== f.source) return false
     if (f.hidden.includes(ev.category)) return false
     if (!q) return true
-    const hay = `${ev.title} ${ev.location ?? ''} ${ev.notes ?? ''} ${categoryMeta(ev.category).label}`.toLowerCase()
+    const hay = `${ev.title} ${ev.location ?? ''} ${ev.notes ?? ''} ${categoryMeta(ev.category, f.categories).label}`.toLowerCase()
     return hay.includes(q)
   })
 }
@@ -317,17 +370,17 @@ export function startOfMonth(d: Date): Date {
  * Rows of seven real dates (Sun → Sat) covering `month`, including the leading/trailing days of the neighbouring months so
  * every row — including the first and last — is a genuine week.
  */
-export function monthWeeks(month: Date): Date[][] {
+export function monthWeeks(month: Date, weekStart: WeekStart = 0): Date[][] {
   const first = startOfMonth(month)
   const last = new Date(first.getFullYear(), first.getMonth() + 1, 0)
-  const start = startOfWeek(first)
-  const rows = Math.ceil((first.getDay() + last.getDate()) / 7)
+  const start = startOfWeek(first, weekStart)
+  const rows = Math.ceil((((first.getDay() - weekStart + 7) % 7) + last.getDate()) / 7)
   return Array.from({ length: rows }, (_, r) => Array.from({ length: 7 }, (_, c) => addDays(start, r * 7 + c)))
 }
 
 /** Index of the row of `monthWeeks(month)` that contains `day` (the collapsed mini calendar shows exactly this row), or -1. */
-export function weekRowIndex(month: Date, day: Date): number {
-  return monthWeeks(month).findIndex(row => row.some(d => isSameLocalDay(d, day)))
+export function weekRowIndex(month: Date, day: Date, weekStart: WeekStart = 0): number {
+  return monthWeeks(month, weekStart).findIndex(row => row.some(d => isSameLocalDay(d, day)))
 }
 
 // ── Links ───────────────────────────────────────────────────────────────────
@@ -358,8 +411,10 @@ export function meetingLinkLabel(url: string): string {
 
 export interface ScheduleFormValues {
   title: string
-  /** YYYY-MM-DD */
+  /** Start date, YYYY-MM-DD */
   date: string
+  /** End date, YYYY-MM-DD. Equal to `date` for same-day events; the next day (or later) for events that run past midnight. */
+  endDate: string
   /** HH:MM (24h) */
   start: string
   end: string
@@ -371,7 +426,10 @@ export interface ScheduleFormValues {
   recurrence: ScheduleRecurrence
 }
 
-export type ScheduleFormErrors = Partial<Record<'title' | 'date' | 'start' | 'end' | 'meetingUrl', string>>
+export type ScheduleFormErrors = Partial<Record<'title' | 'date' | 'endDate' | 'start' | 'end' | 'meetingUrl', string>>
+
+/** The longest single event the form accepts (guards against a mistyped end date). */
+export const MAX_EVENT_DAYS = 7
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
@@ -395,19 +453,29 @@ export function parseLocal(date: string, time: string): number | null {
   const dt = new Date(y, mo - 1, d, h, mi)
   // reject rollovers such as 2026-02-31
   if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null
+  // reject a wall-clock time that does not exist (the hour skipped when clocks spring forward) instead of silently shifting it
+  if (dt.getHours() !== h || dt.getMinutes() !== mi) return null
   return dt.getTime()
 }
 
 export function validateScheduleForm(v: ScheduleFormValues): ScheduleFormErrors {
   const errors: ScheduleFormErrors = {}
   if (!v.title.trim()) errors.title = 'Give your event a title.'
+  const endDate = v.endDate || v.date
   const startOk = parseLocal(v.date, v.start)
-  const endOk = parseLocal(v.date, v.end)
+  const endOk = parseLocal(endDate, v.end)
   if (!v.date || parseLocal(v.date, '00:00') === null) errors.date = 'Choose a valid date.'
+  if (v.endDate && parseLocal(v.endDate, '00:00') === null) errors.endDate = 'Choose a valid end date.'
   if (!v.start || (!errors.date && startOk === null)) errors.start = 'Choose a start time.'
-  if (!v.end || (!errors.date && endOk === null)) errors.end = 'Choose an end time.'
-  if (!errors.date && !errors.start && !errors.end && startOk !== null && endOk !== null && endOk <= startOk) {
-    errors.end = 'End time must be after the start time.'
+  if (!v.end || (!errors.endDate && !errors.date && endOk === null)) errors.end = 'Choose an end time.'
+  if (!errors.date && !errors.endDate && !errors.start && !errors.end && startOk !== null && endOk !== null) {
+    if (endOk <= startOk) {
+      errors.end = endDate === v.date
+        ? 'End time must be after the start time. If it finishes on another day, use \u201cEnds on a different day\u201d.'
+        : 'The end must be after the start.'
+    } else if (endOk - startOk > MAX_EVENT_DAYS * DAY_MINUTES * MINUTE_MS) {
+      errors.endDate = `Events can be at most ${MAX_EVENT_DAYS} days long.`
+    }
   }
   if (v.meetingUrl.trim() && !safeHttpUrl(v.meetingUrl)) errors.meetingUrl = 'Enter a valid link, e.g. https://meet.google.com/abc-defg-hij'
   return errors
@@ -415,7 +483,7 @@ export function validateScheduleForm(v: ScheduleFormValues): ScheduleFormErrors 
 
 export function formToEventFields(v: ScheduleFormValues): Omit<ScheduleEvent, 'id'> {
   const startAt = parseLocal(v.date, v.start) as number
-  const endAt = parseLocal(v.date, v.end) as number
+  const endAt = parseLocal(v.endDate || v.date, v.end) as number
   const url = safeHttpUrl(v.meetingUrl)
   return {
     title: v.title.trim(),
@@ -433,6 +501,7 @@ export function eventToForm(ev: ScheduleEvent): ScheduleFormValues {
   return {
     title: ev.title,
     date: toDateInput(ev.startAt),
+    endDate: toDateInput(ev.endAt),
     start: toTimeInput(ev.startAt),
     end: toTimeInput(ev.endAt),
     category: ev.category,
@@ -444,12 +513,57 @@ export function eventToForm(ev: ScheduleEvent): ScheduleFormValues {
   }
 }
 
-export function blankForm(day: Date, requestedHour = 9): ScheduleFormValues {
-  const startHour = Math.min(Math.max(requestedHour, 0), 22)   // the default 1-hour block must end by 11 PM, same day
-  const s = new Date(day.getFullYear(), day.getMonth(), day.getDate(), startHour)
-  const e = new Date(day.getFullYear(), day.getMonth(), day.getDate(), startHour + 1)
+/** A blank Add form starting at `startMin` (minutes from midnight) and lasting `durationMins`, ending no later than 23:59 the same day. */
+export function blankFormAt(day: Date, startMin: number, durationMins = DEFAULT_PREFS.defaultDurationMins): ScheduleFormValues {
+  const sMin = Math.min(Math.max(0, Math.round(startMin)), 24 * 60 - 2)
+  const eMin = Math.min(sMin + Math.max(1, durationMins), 24 * 60 - 1)
+  const s = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, sMin)
+  const e = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, eMin)
   return {
-    title: '', date: toDateInput(s.getTime()), start: toTimeInput(s.getTime()), end: toTimeInput(e.getTime()),
+    title: '', date: toDateInput(s.getTime()), endDate: toDateInput(s.getTime()), start: toTimeInput(s.getTime()), end: toTimeInput(e.getTime()),
     category: 'meeting', location: '', meetingUrl: '', notes: '', reminderMins: null, recurrence: 'none',
   }
+}
+
+/** The Add button's default: `requestedHour` (9 AM), pulled earlier when the default block would not fit before midnight. */
+export function blankForm(day: Date, requestedHour = 9, durationMins = DEFAULT_PREFS.defaultDurationMins): ScheduleFormValues {
+  const latestStart = Math.floor((24 * 60 - 1 - Math.max(1, durationMins)) / 15) * 15
+  return blankFormAt(day, Math.min(Math.max(requestedHour, 0) * 60, Math.max(0, latestStart)), durationMins)
+}
+
+// -- Time text (24-hour values in the form, shown in the user's chosen format) ----------------------------------
+
+/** "14:30" → "2:30 PM" (12h) or "14:30" (24h). Anything that is not HH:MM gives ''. */
+export function formatTimeValue(hhmm: string, fmt: TimeFormat = '12h'): string {
+  const m = /^(\d{2}):(\d{2})$/.exec(hhmm)
+  if (!m) return ''
+  const h = +m[1], mi = +m[2]
+  if (h > 23 || mi > 59) return ''
+  if (fmt === '24h') return `${m[1]}:${m[2]}`
+  return `${h % 12 === 0 ? 12 : h % 12}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`
+}
+
+/**
+ * Reads what a person types into a time field: "2:30 pm", "2pm", "14:30", "1430", "9", "930a". Returns 24-hour "HH:MM", or null.
+ * Without am/pm the number is read as 24-hour time ("9" = 09:00, "14" = 14:00).
+ */
+export function parseTimeText(raw: string): string | null {
+  const s = raw.trim().toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ')
+  const m = /^(\d{1,2})(?::?(\d{2}))?\s?(a|p|am|pm)?$/.exec(s)
+  if (!m) return null
+  let h = +m[1]
+  const mi = m[2] ? +m[2] : 0
+  if (mi > 59) return null
+  if (m[3]) {
+    if (h < 1 || h > 12) return null
+    h = h % 12 + (m[3][0] === 'p' ? 12 : 0)
+  } else if (h > 23) return null
+  return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`
+}
+
+/** Every `stepMin` minutes of the day as "HH:MM" (suggestions for the time fields). */
+export function timeOptions(stepMin = 15): string[] {
+  const out: string[] = []
+  for (let m = 0; m < DAY_MINUTES; m += stepMin) out.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`)
+  return out
 }

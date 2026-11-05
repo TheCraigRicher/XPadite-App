@@ -16,12 +16,22 @@ import { MOCK_MEETINGS } from './meetingsMockData'
 import { MyScheduleView } from './MyScheduleView'
 import { ScheduleMiniCalendar } from './ScheduleMiniCalendar'
 import { ConfirmDelete, EventDetails, EventForm, FilterSelect, LAYER_ATTR } from './ScheduleParts'
+import { ScheduleMenu } from './ScheduleMenu'
+import { useIsPhone } from './ScheduleMobile'
+import { ManageCategoriesDialog, PreferencesDialog } from './ScheduleDialogs'
+import { ScheduleContext, useSchedule } from './scheduleContext'
 import { buildSampleScheduleEvents } from './scheduleMockData'
 import {
-  blankForm, categoryMeta, daySlice, eventToForm, eventsOnDay, filterScheduleEvents, formToEventFields, isSameLocalDay,
-  meetingToScheduleEvent, splitFilter, startOfDay, startOfMonth,
+  SCHEDULE_CATEGORIES, blankForm, blankFormAt, clockLabel, daySlice, durationLabel, eventToForm, eventsOnDay, filterScheduleEvents,
+  formToEventFields, isSameLocalDay, meetingToScheduleEvent, sanitizePrefs, splitFilter, startOfDay, startOfMonth, timeRangeLabel,
+  DEFAULT_PREFS,
 } from './scheduleLogic'
-import type { CombinedFilter, ScheduleCategoryId, ScheduleEvent, ScheduleFormValues } from './scheduleLogic'
+import type { CombinedFilter, ScheduleCategory, ScheduleCategoryId, ScheduleEvent, ScheduleFormValues, SchedulePrefs } from './scheduleLogic'
+import {
+  addCategory, canDuplicate, conflictMessage, deleteCategory, dragBlockReason, duplicateFormValues, findConflicts, formConflict,
+  recolorCategory, renameCategory,
+} from './scheduleEngine'
+import type { FilterState } from './scheduleEngine'
 import type { XpaditeMeeting, MeetingProviderId, MeetingPlatform } from './meetingsMockData'
 
 type TabKey = 'schedule' | 'today'
@@ -77,14 +87,6 @@ const PLATFORM_META: Record<MeetingPlatform, { label: string; color: string }> =
 }
 
 // ── Date/time helpers ───────────────────────────────────────────────────────
-
-function fmtClock(ts: number): string {
-  return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-}
-
-function fmtTimeRange(startAt: number, endAt: number): string {
-  return `${fmtClock(startAt)} – ${fmtClock(endAt)}`
-}
 
 function fmtDuration(startAt: number, endAt: number): string {
   const mins = Math.round((endAt - startAt) / 60_000)
@@ -156,6 +158,7 @@ function MeetingDetail({
   onClose?: () => void
   showClose: boolean
 }) {
+  const { fmt } = useSchedule()
   const phase = getPhase(meeting, now)
   const source = SOURCE_META[meeting.provider]
   const SourceIcon = source.Icon
@@ -189,7 +192,7 @@ function MeetingDetail({
       <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4" style={{ overscrollBehavior: 'contain' }}>
         <dl className="flex flex-col gap-2.5 text-[12.5px]">
           <DetailRow label="Date" value={new Date(meeting.startAt).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} />
-          <DetailRow label="Time" value={`${fmtTimeRange(meeting.startAt, meeting.endAt)} (${fmtDuration(meeting.startAt, meeting.endAt)})`} />
+          <DetailRow label="Time" value={`${timeRangeLabel(meeting.startAt, meeting.endAt, fmt)} (${fmtDuration(meeting.startAt, meeting.endAt)})`} />
           {meeting.meetingUrl ? (
             <DetailRow label="Meeting Link" value={meeting.meetingUrl} link />
           ) : (
@@ -300,7 +303,8 @@ function EmptyDetailState() {
 // ── Today agenda item (dark panel) ──────────────────────────────────────────
 
 function AgendaItem({ ev, meeting, now, selected, onSelect }: { ev: ScheduleEvent; meeting: XpaditeMeeting | null; now: number; selected: boolean; onSelect: () => void }) {
-  const cat = categoryMeta(ev.category)
+  const { meta, fmt } = useSchedule()
+  const cat = meta(ev.category)
   const phase = meeting ? getPhase(meeting, now) : null
   const faded = phase === 'past' || phase === 'cancelled' || (!!ev.isCancelled)
   const source = meeting ? SOURCE_META[meeting.provider] : null
@@ -323,7 +327,7 @@ function AgendaItem({ ev, meeting, now, selected, onSelect }: { ev: ScheduleEven
           <p className="text-[13px] font-semibold leading-snug truncate" style={{ textDecoration: ev.isCancelled ? 'line-through' : 'none' }}>{ev.title}</p>
           {meeting?.addedToTaskManager && <span className="flex-shrink-0" style={{ fontSize: 9, fontWeight: 700, color: '#4ade80' }} title="Added to Task Manager">✓</span>}
         </div>
-        <p className="text-[11px] mt-0.5 truncate" style={{ color: '#9ca3af' }}>{fmtClock(ev.startAt)} – {fmtClock(ev.endAt)} · {fmtDuration(ev.startAt, ev.endAt)}</p>
+        <p className="text-[11px] mt-0.5 truncate" style={{ color: '#9ca3af' }}>{clockLabel(ev.startAt, fmt)} – {clockLabel(ev.endAt, fmt)} · {fmtDuration(ev.startAt, ev.endAt)}</p>
         <div className="flex items-center gap-2 mt-1.5 flex-wrap">
           <span className="inline-flex items-center gap-1" style={{ fontSize: 10, color: '#9ca3af' }}>
             {source ? <><source.Icon /> {source.label}</> : <>XPadite</>}
@@ -341,7 +345,11 @@ interface MeetingsModalProps {
   onClose: () => void
 }
 
-type FormState = { mode: 'add'; initial: ScheduleFormValues } | { mode: 'edit'; id: string; initial: ScheduleFormValues } | null
+type FormState =
+  | { mode: 'add'; initial: ScheduleFormValues; heading?: string; hint?: string }
+  | { mode: 'edit'; id: string; initial: ScheduleFormValues; original: { startAt: number; endAt: number } }
+  | null
+type DialogKey = 'categories' | 'prefs' | null
 
 export function MeetingsModal({ onClose }: MeetingsModalProps) {
   const { setToast } = useApp()
@@ -366,7 +374,17 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   const [activeDay, setActiveDay] = useState(() => startOfDay(new Date()))
   const [form, setForm] = useState<FormState>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
-  const [focus, setFocus] = useState<{ id: string; at: number; nonce: number } | null>(null)
+  const [focus, setFocus] = useState<{ id: string; at: number; nonce: number; quiet?: boolean } | null>(null)
+  // Custom categories + preferences: in-memory for this preview (nothing is saved). The built-in six always come first.
+  const [customCategories, setCustomCategories] = useState<ScheduleCategory[]>([])
+  const [prefs, setPrefs] = useState<SchedulePrefs>(DEFAULT_PREFS)
+  const [dialog, setDialog] = useState<DialogKey>(null)
+  // The event selected in the My Schedule tab (the Today tab keeps its own `todaySelId`) — the menu's Duplicate needs it.
+  const [weekSelId, setWeekSelId] = useState<string | null>(null)
+  // Search text (shared by the phone slide-down bar and the tablet/desktop field) and the phone's slide-down panel (one at a time).
+  const phone = useIsPhone()
+  const [query, setQuery] = useState('')
+  const [panel, setPanel] = useState<{ kind: 'search' | 'filter' | null; nonce: number }>({ kind: null, nonce: 0 })
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000)
@@ -389,10 +407,13 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   // Everything on the calendar: XPadite events + read-only synced meetings. `filtered` applies the combined dropdown
   // (category or connected calendar) — used by Today's agenda and its count; the weekly view applies the same filter itself.
   const allEvents = useMemo(() => [...scheduleEvents, ...meetings.map(meetingToScheduleEvent)], [scheduleEvents, meetings])
+  const categories = useMemo(() => [...SCHEDULE_CATEGORIES, ...customCategories], [customCategories])
+  const ctx = useMemo(() => ({ categories, prefs }), [categories, prefs])
+  const fmt = prefs.timeFormat
   const parts = splitFilter(filter)
   const filtered = useMemo(
-    () => filterScheduleEvents(allEvents, { query: '', category: parts.category, source: parts.source, hidden: [] }),
-    [allEvents, parts.category, parts.source],
+    () => filterScheduleEvents(allEvents, { query: '', category: parts.category, source: parts.source, hidden: [], categories }),
+    [allEvents, parts.category, parts.source, categories],
   )
   const dayEvents = useMemo(() => eventsOnDay(filtered, todayDate), [filtered, todayDate])
   const todayCount = useMemo(() => eventsOnDay(filtered, new Date(now)).length, [filtered, now])
@@ -403,6 +424,10 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   const hasSelection = !!(selMeeting || selNative)
   const showDetailMobile = detailOpen && hasSelection
   const confirming = scheduleEvents.find(e => e.id === confirmId) ?? null
+  // Duplicate Event is available only for a selected XPadite event; otherwise the menu says why not.
+  const menuSelId = tab === 'today' ? todaySelId : weekSelId
+  const menuSel = scheduleEvents.find(e => e.id === menuSelId) ?? null
+  const duplicateHint = canDuplicate(menuSel) ? null : menuSelId ? 'Synced calendar events can\u2019t be duplicated.' : 'Select one of your events first.'
 
   function updateMeeting(id: string, patch: Partial<XpaditeMeeting>) {
     setMeetings(prev => prev.map(m => m.id === id ? { ...m, ...patch } : m))
@@ -416,6 +441,13 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
     setMeetings(prev => prev.filter(m => m.id !== id))
     if (todaySelId === `meeting:${id}`) setTodaySelId(null)
   }
+
+  // Opening one slide-down panel replaces the other; a changing nonce re-initialises the filter draft / refocuses the search input.
+  function changePanel(kind: 'search' | 'filter' | null) {
+    setPanel(p => (kind === null ? { ...p, kind: null } : { kind, nonce: p.nonce + 1 }))
+  }
+  function applyFilter(st: FilterState) { setFilter(st.filter); setHidden(st.hidden) }
+  function resetFilter() { setFilter('all'); setHidden([]) }
 
   function toggleCategory(id: ScheduleCategoryId) {
     setHidden(h => (h.includes(id) ? h.filter(x => x !== id) : [...h, id]))
@@ -433,27 +465,49 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
     setCalExpanded(v => !v)
   }
 
-  // ── Add / Edit / Delete (shared by both tabs; in-memory preview) ──
+  // ── Add / Edit / Duplicate / Move / Delete (shared by both tabs; in-memory preview) ──
   function openAdd() {
-    setForm({ mode: 'add', initial: blankForm(tab === 'today' ? todayDate : activeDay) })
+    setForm({ mode: 'add', initial: blankForm(tab === 'today' ? todayDate : activeDay, 9, prefs.defaultDurationMins) })
+  }
+
+  // Empty calendar slot: the same Add form, prefilled with that date/time and the default duration.
+  function openAddAt(day: Date, startMin: number) {
+    setForm({ mode: 'add', initial: blankFormAt(day, startMin, prefs.defaultDurationMins) })
   }
 
   function openEdit(ev: ScheduleEvent) {
     if (ev.readOnly) return
-    setForm({ mode: 'edit', id: ev.id, initial: eventToForm(ev) })
+    setForm({ mode: 'edit', id: ev.id, initial: eventToForm(ev), original: { startAt: ev.startAt, endAt: ev.endAt } })
+  }
+
+  function openDuplicate(ev: ScheduleEvent) {
+    if (!canDuplicate(ev)) return
+    setForm({
+      mode: 'add', initial: duplicateFormValues(ev, allEvents), heading: 'Duplicate Event',
+      hint: `Pick the new date and start time \u2014 the end follows from the original length (${durationLabel(ev.startAt, ev.endAt)}). The original event isn\u2019t changed.`,
+    })
+  }
+
+  function formConflictFor(v: ScheduleFormValues): string | null {
+    if (!form) return null
+    return form.mode === 'edit'
+      ? formConflict(v, allEvents, { excludeId: form.id, original: form.original, fmt })
+      : formConflict(v, allEvents, { fmt })
   }
 
   function submitForm(v: ScheduleFormValues) {
+    const conflict = formConflictFor(v)
+    if (conflict) { setToast(conflict); return }          // the form already shows it and keeps the inputs; this is the backstop
     const fields = formToEventFields(v)
     let id: string
     if (form?.mode === 'edit') {
       id = form.id
       setScheduleEvents(prev => prev.map(e => (e.id === id ? { ...e, ...fields } : e)))
-      setToast('Event updated in this preview — not saved yet')
+      setToast('Event updated in this preview \u2014 not saved yet')
     } else {
       id = `user-sched-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
       setScheduleEvents(prev => [...prev, { id, ...fields }])
-      setToast('Event added to this preview — not saved yet')
+      setToast('Event added to this preview \u2014 not saved yet')
     }
     setFocus({ id, at: fields.startAt, nonce: Date.now() })
     setTodayDate(startOfDay(new Date(fields.startAt)))
@@ -461,6 +515,55 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
     setTodaySelId(id)
     setDetailOpen(true)
     setForm(null)
+  }
+
+  // Drag-and-drop drop: re-validated here (the grid already showed the user the result) before anything changes.
+  function moveEvent(ev: ScheduleEvent, startAt: number) {
+    const cur = scheduleEvents.find(e => e.id === ev.id)
+    if (!cur) return
+    const blocked = dragBlockReason(cur)
+    if (blocked) { setToast(blocked.message); return }
+    const endAt = startAt + (cur.endAt - cur.startAt)                 // the exact original duration
+    const conflicts = findConflicts({ startAt, endAt, excludeId: cur.id }, allEvents)
+    if (conflicts.length > 0) { setToast(conflictMessage(conflicts, startAt, fmt) ?? 'That time is taken.'); return }
+    setScheduleEvents(prev => prev.map(e => (e.id === cur.id ? { ...e, startAt, endAt } : e)))
+    setFocus({ id: cur.id, at: startAt, nonce: Date.now(), quiet: true })   // keep it selected, but don't pop the details sheet over the result
+    setTodayDate(startOfDay(new Date(startAt)))
+    setViewMonth(startOfMonth(new Date(startAt)))
+    setToast('Event moved in this preview \u2014 not saved yet')
+  }
+
+  // ── Categories (custom ones are in memory only) ──
+  function newCategoryId() { return `cat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}` }
+  const customOnly = (list: ScheduleCategory[]) => list.filter(c => !c.builtIn)
+
+  function handleAddCategory(name: string, hex: string): string | null {
+    const r = addCategory(categories, name, hex, newCategoryId())
+    if (!r.ok) return r.error
+    setCustomCategories(customOnly(r.categories))
+    return null
+  }
+  function handleRenameCategory(id: string, name: string): string | null {
+    const r = renameCategory(categories, id, name)
+    if (!r.ok) return r.error
+    setCustomCategories(customOnly(r.categories))
+    return null
+  }
+  function handleRecolorCategory(id: string, hex: string): string | null {
+    const r = recolorCategory(categories, id, hex)
+    if (!r.ok) return r.error
+    setCustomCategories(customOnly(r.categories))
+    return null
+  }
+  function handleDeleteCategory(id: string, replacementId?: string): string | null {
+    const r = deleteCategory(categories, scheduleEvents, id, replacementId)
+    if (!r.ok) return r.error
+    setCustomCategories(customOnly(r.categories))
+    setScheduleEvents(r.events)
+    setHidden(h => h.filter(x => x !== id))
+    setFilter(f => (f === id ? 'all' : f))
+    setToast(r.reassigned > 0 ? `Category deleted \u2014 ${r.reassigned} event${r.reassigned === 1 ? '' : 's'} moved` : 'Category deleted')
+    return null
   }
 
   function confirmDelete() {
@@ -476,9 +579,10 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   const isTodayDate = isSameLocalDay(todayDate, new Date(now))
   const agendaLabel = isTodayDate ? 'Today' : todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
 
+  // Phones: the modal covers the whole screen (above the bottom bar). Larger screens: Analytics' sizing — same padding,
+  // sm:640 / lg:1296 max widths (md:900 on tablets so the seven-day grid keeps its room), height = viewport minus padding.
   return (
-    // Phones: the modal covers the whole screen (above the bottom bar). Larger screens: Analytics' sizing — same padding,
-    // sm:640 / lg:1296 max widths (md:900 on tablets so the seven-day grid keeps its room), height = viewport minus padding.
+    <ScheduleContext.Provider value={ctx}>
     <div
       className="fixed inset-0 z-[70] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:p-3 sm:pt-4"
       style={{ background: 'rgba(0,0,0,0.55)' }}
@@ -537,8 +641,8 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
             {TABS.map(t => (
               <button
                 key={t.key}
-                onClick={() => setTab(t.key)}
-                className="text-[11.5px] sm:text-[12px] whitespace-nowrap px-2.5 sm:px-3"
+                onClick={() => { setTab(t.key); setWeekSelId(null); setPanel(p => ({ ...p, kind: null })) }}
+                className="text-[11.5px] sm:text-[12px] whitespace-nowrap px-2 min-[361px]:px-2.5 sm:px-3"
                 style={{
                   paddingTop: 6, paddingBottom: 6, borderRadius: 7,
                   fontWeight: tab === t.key ? 700 : 500,
@@ -550,9 +654,19 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
               </button>
             ))}
           </div>
-          <button type="button" onClick={openAdd} aria-label="Add Event" className="flex items-center gap-1 text-[12.5px] font-semibold text-white flex-shrink-0" style={{ padding: '7px 13px', borderRadius: 10, background: '#7c3aed' }}>
-            <span aria-hidden="true" className="text-[15px] leading-none">+</span> Add Event
-          </button>
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+            <button type="button" onClick={openAdd} aria-label="Add Event" className="flex items-center gap-1 text-[12px] min-[361px]:text-[12.5px] font-semibold text-white flex-shrink-0 px-2.5 min-[361px]:px-[13px]" style={{ paddingTop: 7, paddingBottom: 7, borderRadius: 10, background: '#7c3aed' }}>
+              <span aria-hidden="true" className="text-[15px] leading-none">+</span> Add Event
+            </button>
+            <ScheduleMenu
+              onManageCategories={() => setDialog('categories')}
+              onDuplicate={() => { if (menuSel) openDuplicate(menuSel) }}
+              onPreferences={() => setDialog('prefs')}
+              duplicateHint={duplicateHint}
+              onSearch={phone && tab === 'schedule' ? () => changePanel('search') : undefined}
+              onFilter={phone && tab === 'schedule' ? () => changePanel('filter') : undefined}
+            />
+          </div>
         </div>
 
         {/* Body */}
@@ -567,7 +681,18 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
             focus={focus}
             onEdit={openEdit}
             onDelete={ev => setConfirmId(ev.id)}
+            onDuplicate={openDuplicate}
             onActiveDayChange={setActiveDay}
+            onSelectionChange={setWeekSelId}
+            onAddAt={openAddAt}
+            onMove={moveEvent}
+            onNotice={setToast}
+            query={query}
+            onQueryChange={setQuery}
+            panel={panel}
+            onPanelChange={changePanel}
+            onApplyFilter={applyFilter}
+            onResetFilter={resetFilter}
           />
         ) : (
           <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
@@ -585,6 +710,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
                 hasEvents={hasEventsOn}
                 expanded={calExpanded}
                 onToggle={toggleCalendar}
+                weekStart={prefs.weekStart}
               />
               <div className="flex items-center justify-between gap-2 flex-shrink-0 px-1">
                 <p className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: '#9ca3af', letterSpacing: '0.06em' }}>
@@ -636,7 +762,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12"><polyline points="15 18 9 12 15 6" strokeLinecap="round" strokeLinejoin="round" /></svg>
                     Back
                   </button>
-                  <EventDetails ev={selNative} onEdit={() => openEdit(selNative)} onDelete={() => setConfirmId(selNative.id)} />
+                  <EventDetails ev={selNative} onEdit={() => openEdit(selNative)} onDelete={() => setConfirmId(selNative.id)} onDuplicate={() => openDuplicate(selNative)} />
                   <p className="text-[11px] mt-4" style={{ color: 'var(--xp-txt3)' }}>Preview — events you add aren’t saved or synced yet.</p>
                 </div>
               ) : (
@@ -647,9 +773,14 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
         )}
 
         {/* Dialogs (cover the whole modal) */}
-        {form && <EventForm mode={form.mode} initial={form.initial} onCancel={() => setForm(null)} onSubmit={submitForm} />}
+        {form && <EventForm mode={form.mode} initial={form.initial} heading={form.mode === 'add' ? form.heading : undefined} hint={form.mode === 'add' ? form.hint : undefined} getConflict={formConflictFor} onCancel={() => setForm(null)} onSubmit={submitForm} />}
+        {dialog === 'categories' && (
+          <ManageCategoriesDialog categories={categories} events={scheduleEvents} onAdd={handleAddCategory} onRename={handleRenameCategory} onRecolor={handleRecolorCategory} onDelete={handleDeleteCategory} onClose={() => setDialog(null)} />
+        )}
+        {dialog === 'prefs' && <PreferencesDialog prefs={prefs} onChange={patch => setPrefs(prev => sanitizePrefs({ ...prev, ...patch }))} onClose={() => setDialog(null)} />}
         {confirming && <ConfirmDelete ev={confirming} onCancel={() => setConfirmId(null)} onConfirm={confirmDelete} />}
       </div>
     </div>
+    </ScheduleContext.Provider>
   )
 }

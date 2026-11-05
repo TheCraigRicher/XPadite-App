@@ -7,9 +7,10 @@
 
 import { useMemo } from 'react'
 import { isSameLocalDay, monthWeeks, monthYearLabel, startOfMonth, weekRowIndex } from './scheduleLogic'
+import type { WeekStart } from './scheduleLogic'
 
 export const MINI_ROW_PX = 36
-const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S']   // Sunday-first; rotated when the week starts on Monday
 
 interface Props {
   /** Month shown while expanded. */
@@ -23,13 +24,15 @@ interface Props {
   expanded: boolean
   /** When provided, the triangle toggle is shown (phones). */
   onToggle?: () => void
+  /** 0 = weeks start on Sunday (default), 1 = Monday. */
+  weekStart?: WeekStart
 }
 
-export function ScheduleMiniCalendar({ viewMonth, onViewMonthChange, selected, onSelect, today, hasEvents, expanded, onToggle }: Props) {
+export function ScheduleMiniCalendar({ viewMonth, onViewMonthChange, selected, onSelect, today, hasEvents, expanded, onToggle, weekStart = 0 }: Props) {
   // Collapsed: always the month of the selected date, scrolled to its week. Expanded: the month being browsed.
   const month = expanded ? startOfMonth(viewMonth) : startOfMonth(selected)
-  const weeks = useMemo(() => monthWeeks(month), [month])
-  const selRow = Math.max(0, weekRowIndex(month, selected))
+  const weeks = useMemo(() => monthWeeks(month, weekStart), [month, weekStart])
+  const selRow = Math.max(0, weekRowIndex(month, selected, weekStart))
   const shownRows = expanded ? weeks.length : 1
   const offsetRows = expanded ? 0 : selRow
 
@@ -62,7 +65,7 @@ export function ScheduleMiniCalendar({ viewMonth, onViewMonthChange, selected, o
       </div>
 
       <div className="grid grid-cols-7 text-center" style={{ marginTop: 2 }} aria-hidden="true">
-        {DOW.map((d, i) => <span key={i} className="text-[10.5px] font-semibold" style={{ color: '#6b7280', lineHeight: '20px' }}>{d}</span>)}
+        {[...DOW.slice(weekStart), ...DOW.slice(0, weekStart)].map((d, i) => <span key={i} className="text-[10.5px] font-semibold" style={{ color: '#6b7280', lineHeight: '20px' }}>{d}</span>)}
       </div>
 
       {/* The viewport is exactly N rows tall; the month grid slides inside it, so expand/collapse animates smoothly. */}

@@ -8,7 +8,7 @@ import {
 } from './scheduleLogic'
 import type { ScheduleCategory, ScheduleCategoryId, ScheduleEvent, ScheduleFormValues, TimeFormat } from './scheduleLogic'
 
-export const SLOT_MINUTES = 30       // empty-slot click resolution
+export const SLOT_MINUTES = 60       // empty-slot click resolution: one whole hour cell
 export const SNAP_MINUTES = 15       // drag-and-drop snapping
 export const DOUBLE_TAP_MS = 400
 const DAY_MIN = 24 * 60
@@ -226,9 +226,10 @@ export function validateCategoryName(name: string, categories: ScheduleCategory[
   return null
 }
 
+/** Soft pastel palette for new categories (lavender, mint, blush, baby blue, peach, pale yellow, coral, turquoise, lilac, sage). */
 export const CATEGORY_SWATCHES = [
-  '#ef4444', '#f97316', '#eab308', '#84cc16', '#10b981', '#14b8a6',
-  '#06b6d4', '#3b82f6', '#6366f1', '#a855f7', '#ec4899', '#78716c',
+  '#b8a4f5', '#6fd6a8', '#f4a3c4', '#7fbdf2', '#f7b58a',
+  '#f0d96a', '#f48c8c', '#5fd3d0', '#d19be6', '#9bbf9a',
 ]
 
 export function isHexColor(s: string): boolean { return /^#[0-9a-fA-F]{6}$/.test(s) }

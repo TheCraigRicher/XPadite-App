@@ -379,6 +379,11 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   const [customCategories, setCustomCategories] = useState<ScheduleCategory[]>([])
   const [prefs, setPrefs] = useState<SchedulePrefs>(DEFAULT_PREFS)
   const [dialog, setDialog] = useState<DialogKey>(null)
+  // Overlays keep rendering after they close (open={false}) so phones can play the slide-down exit; each unmounts itself afterwards.
+  const [lastForm, setLastForm] = useState<{ data: NonNullable<FormState>; id: number } | null>(null)
+  if (form && form !== lastForm?.data) setLastForm({ data: form, id: (lastForm?.id ?? 0) + 1 })
+  const [lastDialog, setLastDialog] = useState<NonNullable<DialogKey> | null>(null)
+  if (dialog && dialog !== lastDialog) setLastDialog(dialog)
   // The event selected in the My Schedule tab (the Today tab keeps its own `todaySelId`) — the menu's Duplicate needs it.
   const [weekSelId, setWeekSelId] = useState<string | null>(null)
   // Search text (shared by the phone slide-down bar and the tablet/desktop field) and the phone's slide-down panel (one at a time).
@@ -601,6 +606,10 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
         }
         @keyframes xp-meet-overlay-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
         .xp-meet-overlay { animation: xp-meet-overlay-in 160ms ease-out; }
+        /* phone sheets (Filter, Manage Categories, Preferences, Add/Edit): one easing + duration for all of them */
+        .xp-sheet-fade { transition: opacity 260ms ease; }
+        .xp-sheet-panel { transition: transform 280ms cubic-bezier(0.32, 0.72, 0, 1); }
+        @media (prefers-reduced-motion: reduce) { .xp-sheet-fade, .xp-sheet-panel { transition: none !important; } .xp-meet-overlay { animation: none; } }
       `}</style>
 
       <div
@@ -773,11 +782,15 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
         )}
 
         {/* Dialogs (cover the whole modal) */}
-        {form && <EventForm mode={form.mode} initial={form.initial} heading={form.mode === 'add' ? form.heading : undefined} hint={form.mode === 'add' ? form.hint : undefined} getConflict={formConflictFor} onCancel={() => setForm(null)} onSubmit={submitForm} />}
-        {dialog === 'categories' && (
-          <ManageCategoriesDialog categories={categories} events={scheduleEvents} onAdd={handleAddCategory} onRename={handleRenameCategory} onRecolor={handleRecolorCategory} onDelete={handleDeleteCategory} onClose={() => setDialog(null)} />
+        {lastForm && (
+          <EventForm key={lastForm.id} open={!!form} mode={lastForm.data.mode} initial={lastForm.data.initial}
+            heading={lastForm.data.mode === 'add' ? lastForm.data.heading : undefined} hint={lastForm.data.mode === 'add' ? lastForm.data.hint : undefined}
+            getConflict={formConflictFor} onCancel={() => setForm(null)} onSubmit={submitForm} />
         )}
-        {dialog === 'prefs' && <PreferencesDialog prefs={prefs} onChange={patch => setPrefs(prev => sanitizePrefs({ ...prev, ...patch }))} onClose={() => setDialog(null)} />}
+        {lastDialog === 'categories' && (
+          <ManageCategoriesDialog open={dialog === 'categories'} categories={categories} events={scheduleEvents} onAdd={handleAddCategory} onRename={handleRenameCategory} onRecolor={handleRecolorCategory} onDelete={handleDeleteCategory} onClose={() => setDialog(null)} />
+        )}
+        {lastDialog === 'prefs' && <PreferencesDialog open={dialog === 'prefs'} prefs={prefs} onChange={patch => setPrefs(prev => sanitizePrefs({ ...prev, ...patch }))} onClose={() => setDialog(null)} />}
         {confirming && <ConfirmDelete ev={confirming} onCancel={() => setConfirmId(null)} onConfirm={confirmDelete} />}
       </div>
     </div>

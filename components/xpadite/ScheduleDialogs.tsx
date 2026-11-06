@@ -9,7 +9,8 @@ import { useState } from 'react'
 import { DURATION_CHOICES } from './scheduleLogic'
 import type { ScheduleCategory, ScheduleEvent, SchedulePrefs } from './scheduleLogic'
 import { CATEGORY_NAME_MAX, CATEGORY_SWATCHES, categoryUsage, isHexColor } from './scheduleEngine'
-import { LAYER_ATTR, iconBtn, useLayerEscape } from './ScheduleParts'
+import { iconBtn, useLayerEscape } from './ScheduleParts'
+import { LAYER_ATTR, SheetFrame, useIsPhone, useSheetPhase } from './ScheduleSheet'
 
 const field: React.CSSProperties = {
   width: '100%', background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)', borderRadius: 10,
@@ -20,37 +21,42 @@ function CloseX() {
   return <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" /><line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" /></svg>
 }
 
-function Shell({ title, onClose, children, footer, label }: { title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; label?: string }) {
+function Shell({ title, onClose, children, footer, label, phone, visible }: { title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; label?: string; phone: boolean; visible: boolean }) {
   return (
-    <div {...{ [LAYER_ATTR]: '' }} className="absolute inset-0 z-40 flex items-end sm:items-center justify-center sm:p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={label ?? title} className="xp-sch-sheet w-full sm:max-w-[480px] flex flex-col"
-        style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', borderRadius: 18, maxHeight: '94%', boxShadow: '0 24px 60px rgba(0,0,0,0.38)' }} onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 flex-shrink-0" style={{ borderBottom: '0.5px solid var(--xp-bdr)' }}>
-          <h3 className="text-[15px] font-bold" style={{ color: 'var(--xp-txt)' }}>{title}</h3>
-          <button type="button" onClick={onClose} aria-label="Close" style={{ ...iconBtn, width: 28, height: 28 }}><CloseX /></button>
-        </div>
-        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3.5 flex flex-col gap-3" style={{ overscrollBehavior: 'contain' }}>{children}</div>
-        {footer && <div className="px-4 py-3 flex-shrink-0" style={{ borderTop: '0.5px solid var(--xp-bdr)' }}>{footer}</div>}
+    <SheetFrame phone={phone} visible={visible} variant="sheet" label={label ?? title} onClose={onClose}>
+      <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 flex-shrink-0" style={{ borderBottom: '0.5px solid var(--xp-bdr)', paddingTop: phone ? 4 : undefined }}>
+        <h3 className="text-[15px] font-bold" style={{ color: 'var(--xp-txt)' }}>{title}</h3>
+        <button type="button" onClick={onClose} aria-label="Close" style={{ ...iconBtn, width: 28, height: 28 }}><CloseX /></button>
       </div>
-    </div>
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3.5 flex flex-col gap-3" style={{ overscrollBehavior: 'contain' }}>{children}</div>
+      {footer && <div className="px-4 py-3 flex-shrink-0" style={{ borderTop: '0.5px solid var(--xp-bdr)' }}>{footer}</div>}
+    </SheetFrame>
   )
 }
+
+const SWATCH = 28
 
 function Swatch({ hex, on, taken, onPick }: { hex: string; on: boolean; taken: boolean; onPick: () => void }) {
   return (
     <button type="button" role="radio" aria-checked={on} aria-label={`Colour ${hex}${taken ? ' (already used)' : ''}`} disabled={taken && !on} onClick={onPick}
-      style={{ width: 26, height: 26, borderRadius: '50%', background: hex, border: on ? '3px solid var(--xp-txt)' : '2px solid transparent', boxShadow: on ? '0 0 0 1.5px var(--xp-card) inset' : 'none', opacity: taken && !on ? 0.28 : 1, cursor: taken && !on ? 'not-allowed' : 'pointer' }} />
+      style={{ width: SWATCH, height: SWATCH, borderRadius: '50%', background: hex, border: on ? '3px solid var(--xp-txt)' : '2px solid rgba(0,0,0,0.08)', boxShadow: on ? '0 0 0 2px var(--xp-card) inset' : 'none', opacity: taken && !on ? 0.28 : 1, cursor: taken && !on ? 'not-allowed' : 'pointer', flexShrink: 0 }} />
   )
 }
 
+/** Soft pastel swatches (all circles) plus a circular custom-colour control — a rainbow ring until a custom colour is chosen. */
 function ColorPicker({ value, onChange, categories, selfId }: { value: string; onChange: (hex: string) => void; categories: ScheduleCategory[]; selfId?: string }) {
   const used = new Set(categories.filter(c => c.id !== selfId).map(c => c.edge.toLowerCase()))
+  const custom = isHexColor(value) && !CATEGORY_SWATCHES.includes(value.toLowerCase())
   return (
-    <div role="radiogroup" aria-label="Category colour" className="flex flex-wrap items-center gap-1.5">
+    <div role="radiogroup" aria-label="Category colour" className="flex flex-wrap items-center gap-2">
+      <style>{`.xp-cpick:focus-within { box-shadow: 0 0 0 3px rgba(124,58,237,0.55); }`}</style>
       {CATEGORY_SWATCHES.map(hex => <Swatch key={hex} hex={hex} on={value.toLowerCase() === hex} taken={used.has(hex)} onPick={() => onChange(hex)} />)}
-      <label className="inline-flex items-center gap-1 text-[11px]" style={{ color: 'var(--xp-txt3)' }}>
-        <input type="color" value={isHexColor(value) ? value : '#7c3aed'} onChange={e => onChange(e.target.value)} aria-label="Custom colour" style={{ width: 28, height: 26, padding: 0, border: 'none', background: 'transparent' }} />
-        Custom
+      <label className="xp-cpick relative inline-flex items-center justify-center flex-shrink-0" title="Custom colour" data-testid="custom-color"
+        style={{ width: SWATCH, height: SWATCH, borderRadius: '50%', overflow: 'hidden', cursor: 'pointer',
+          background: custom ? value : 'conic-gradient(#f4a3c4, #f7b58a, #f0d96a, #9bd9a8, #7fbdf2, #b8a4f5, #f4a3c4)',
+          border: custom ? '3px solid var(--xp-txt)' : '2px solid rgba(0,0,0,0.08)' }}>
+        <input type="color" value={isHexColor(value) ? value : '#b8a4f5'} onChange={e => onChange(e.target.value)} aria-label="Custom colour" className="absolute inset-0" style={{ width: '100%', height: '100%', opacity: 0, cursor: 'pointer' }} />
+        {!custom && <span aria-hidden="true" style={{ fontSize: 15, fontWeight: 800, color: 'rgba(60,40,100,0.75)', lineHeight: 1, pointerEvents: 'none' }}>+</span>}
       </label>
     </div>
   )
@@ -69,7 +75,15 @@ export interface ManageCategoriesProps {
   onClose: () => void
 }
 
-export function ManageCategoriesDialog({ categories, events, onAdd, onRename, onRecolor, onDelete, onClose }: ManageCategoriesProps) {
+/** Phones: a bottom sheet that slides up and back down. Tablet/desktop: the original centred dialog. Keep rendering with open={false} to let it exit. */
+export function ManageCategoriesDialog(props: ManageCategoriesProps & { open?: boolean }) {
+  const phone = useIsPhone()
+  const { mounted, visible } = useSheetPhase(props.open ?? true, phone)
+  if (!mounted) return null
+  return <ManageCategoriesInner {...props} phone={phone} visible={visible} />
+}
+
+function ManageCategoriesInner({ categories, events, onAdd, onRename, onRecolor, onDelete, onClose, phone, visible }: ManageCategoriesProps & { phone: boolean; visible: boolean }) {
   const firstFree = CATEGORY_SWATCHES.find(h => !categories.some(c => c.edge.toLowerCase() === h)) ?? CATEGORY_SWATCHES[0]
   const [name, setName] = useState('')
   const [color, setColor] = useState(firstFree)
@@ -124,7 +138,7 @@ export function ManageCategoriesDialog({ categories, events, onAdd, onRename, on
   const usedCount = deleting ? categoryUsage(events, deleting.id) : 0
 
   return (
-    <Shell title="Manage Categories" onClose={onClose}
+    <Shell title="Manage Categories" onClose={onClose} phone={phone} visible={visible}
       footer={<div className="flex items-center justify-between gap-3"><p className="text-[11px] leading-snug" style={{ color: 'var(--xp-txt3)' }}>Preview — custom categories last only while My Schedule is open; they aren’t saved yet.</p><button type="button" onClick={onClose} className="text-[13px] font-semibold text-white flex-shrink-0" style={{ padding: '9px 16px', borderRadius: 10, background: '#7c3aed' }}>Done</button></div>}>
       <form onSubmit={add} className="flex flex-col gap-2" aria-label="Add a category" style={{ padding: 10, borderRadius: 12, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
         <label htmlFor="sch-cat-name" className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt2)' }}>New category</label>
@@ -228,10 +242,17 @@ function Segmented<T extends string | number>({ label, value, options, onChange 
   )
 }
 
-export function PreferencesDialog({ prefs, onChange, onClose }: { prefs: SchedulePrefs; onChange: (patch: Partial<SchedulePrefs>) => void; onClose: () => void }) {
+export function PreferencesDialog(props: { prefs: SchedulePrefs; onChange: (patch: Partial<SchedulePrefs>) => void; onClose: () => void; open?: boolean }) {
+  const phone = useIsPhone()
+  const { mounted, visible } = useSheetPhase(props.open ?? true, phone)
+  if (!mounted) return null
+  return <PreferencesInner {...props} phone={phone} visible={visible} />
+}
+
+function PreferencesInner({ prefs, onChange, onClose, phone, visible }: { prefs: SchedulePrefs; onChange: (patch: Partial<SchedulePrefs>) => void; onClose: () => void; phone: boolean; visible: boolean }) {
   useLayerEscape(onClose)
   return (
-    <Shell title="Schedule Preferences" onClose={onClose}
+    <Shell title="Schedule Preferences" onClose={onClose} phone={phone} visible={visible}
       footer={<div className="flex items-center justify-between gap-3"><p className="text-[11px] leading-snug" style={{ color: 'var(--xp-txt3)' }}>Preview — these apply right away but only while My Schedule is open; they aren’t saved yet.</p><button type="button" onClick={onClose} className="text-[13px] font-semibold text-white flex-shrink-0" style={{ padding: '9px 16px', borderRadius: 10, background: '#7c3aed' }}>Done</button></div>}>
       <div className="flex flex-col gap-1">
         <label htmlFor="sch-pref-dur" className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt2)' }}>Default event duration</label>
@@ -247,7 +268,7 @@ export function PreferencesDialog({ prefs, onChange, onClose }: { prefs: Schedul
       <div className="flex flex-col gap-1">
         <span className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt2)' }}>Time format</span>
         <Segmented label="Time format" value={prefs.timeFormat} options={[{ value: '12h', label: '12-hour' }, { value: '24h', label: '24-hour' }]} onChange={timeFormat => onChange({ timeFormat })} />
-        <p className="text-[11px]" style={{ color: 'var(--xp-txt3)' }}>Applies to the calendar, agenda and event details. Time pickers in forms follow your device’s own setting.</p>
+        <p className="text-[11px]" style={{ color: 'var(--xp-txt3)' }}>Applies to the calendar, agenda, event details and the Start/End time lists.</p>
       </div>
     </Shell>
   )

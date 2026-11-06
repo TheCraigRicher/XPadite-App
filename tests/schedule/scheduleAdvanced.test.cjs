@@ -190,11 +190,13 @@ test('sample data is untouched: its overlapping events remain, and are never rew
 })
 
 // ── 12–13. empty-slot add, double-tap, long press ───────────────────────────
-test('grid position → slot start: floors to 30 minutes and stays inside the day', () => {
-  assert.equal(E.minutesFromOffset(0, 56), 0); assert.equal(E.minutesFromOffset(27, 56), 0); assert.equal(E.minutesFromOffset(28, 56), 30)
-  assert.equal(E.minutesFromOffset(56 * 9 + 10, 56), 540); assert.equal(E.minutesFromOffset(56 * 9 + 30, 56), 570)
-  assert.equal(E.minutesFromOffset(56 * 24 + 50, 56), 24 * 60 - 30, 'clamped to the last slot'); assert.equal(E.minutesFromOffset(-30, 56), 0)
+test('grid position → slot start: floors to the whole hour cell and stays inside the day', () => {
+  assert.equal(E.SLOT_MINUTES, 60)
+  assert.equal(E.minutesFromOffset(0, 56), 0); assert.equal(E.minutesFromOffset(55, 56), 0); assert.equal(E.minutesFromOffset(56, 56), 60)
+  assert.equal(E.minutesFromOffset(56 * 9 + 10, 56), 540); assert.equal(E.minutesFromOffset(56 * 9 + 55, 56), 540); assert.equal(E.minutesFromOffset(56 * 10, 56), 600)
+  assert.equal(E.minutesFromOffset(56 * 24 + 50, 56), 24 * 60 - 60, 'clamped to the last hour'); assert.equal(E.minutesFromOffset(-30, 56), 0)
   assert.equal(E.minutesFromOffset(NaN, 56), 0); assert.equal(E.minutesFromOffset(100, 0), 0)
+  assert.equal(E.minutesFromOffset(56 * 9 + 30, 56, 30), 570, 'a finer step is still available to callers')
 })
 test('empty-slot Add form: prefilled date/start, default-duration end, adjustable, valid, never crossing midnight', () => {
   const f = L.blankFormAt(day(2026, 11, 4), 14 * 60 + 30, 90)

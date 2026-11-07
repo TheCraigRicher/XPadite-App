@@ -26,9 +26,11 @@ interface Props {
   onToggle?: () => void
   /** 0 = weeks start on Sunday (default), 1 = Monday. */
   weekStart?: WeekStart
+  /** Jumps back to the real current date (month, selection and agenda). Shows the Today pill when provided. */
+  onToday?: () => void
 }
 
-export function ScheduleMiniCalendar({ viewMonth, onViewMonthChange, selected, onSelect, today, hasEvents, expanded, onToggle, weekStart = 0 }: Props) {
+export function ScheduleMiniCalendar({ viewMonth, onViewMonthChange, selected, onSelect, today, hasEvents, expanded, onToggle, weekStart = 0, onToday }: Props) {
   // Collapsed: always the month of the selected date, scrolled to its week. Expanded: the month being browsed.
   const month = expanded ? startOfMonth(viewMonth) : startOfMonth(selected)
   const weeks = useMemo(() => monthWeeks(month, weekStart), [month, weekStart])
@@ -50,16 +52,22 @@ export function ScheduleMiniCalendar({ viewMonth, onViewMonthChange, selected, o
 
   return (
     <div className="flex-shrink-0" style={{ background: '#1a1d2e', borderRadius: 14, padding: '8px 10px 6px', color: '#e5e7eb', border: '0.5px solid rgba(139,92,246,0.25)' }}>
-      <div className="flex items-center justify-between" style={{ minHeight: 30 }}>
-        <div className="flex items-center gap-1 mx-auto" style={{ marginLeft: onToggle ? 0 : 'auto' }}>
+      <div className="flex items-center justify-between gap-1" style={{ minHeight: 30 }}>
+        <div className="flex items-center gap-0.5 min-w-0">
           {arrow('prev')}
-          <span className="text-[13px] font-semibold text-center whitespace-nowrap" style={{ minWidth: 130 }} aria-live="polite">{monthYearLabel(month)}</span>
+          <span className="text-[13px] font-semibold text-center whitespace-nowrap" style={{ minWidth: onToday ? 104 : 130 }} aria-live="polite">{monthYearLabel(month)}</span>
           {arrow('next')}
         </div>
+        {onToday && (
+          <button type="button" onClick={onToday} data-testid="mini-today" aria-label="Go to today"
+            className="text-[11.5px] font-semibold flex-shrink-0" style={{ padding: '3px 10px', borderRadius: 999, color: '#a78bfa', background: 'rgba(139,92,246,0.12)', border: '1px solid rgba(139,92,246,0.55)' }}>
+            Today
+          </button>
+        )}
         {onToggle && (
           <button type="button" onClick={onToggle} aria-expanded={expanded} aria-label={expanded ? 'Collapse calendar to one week' : 'Expand calendar to full month'}
             className="flex items-center justify-center flex-shrink-0" style={{ width: 30, height: 30, color: '#a78bfa' }}>
-            <span aria-hidden="true" style={{ display: 'inline-block', fontSize: 11, lineHeight: 1, transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 220ms cubic-bezier(0.4,0,0.2,1)' }}>▶</span>
+            <span aria-hidden="true" style={{ display: 'inline-block', fontSize: 11, lineHeight: 1, transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 220ms cubic-bezier(0.4,0.0,0.2,1)' }}>▶</span>
           </button>
         )}
       </div>

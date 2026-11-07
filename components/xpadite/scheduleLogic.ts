@@ -322,6 +322,8 @@ export interface ScheduleFilters {
   source?: ScheduleSource | 'all'
   /** Categories switched off with the legend checkboxes (hides blocks; never deletes events). */
   hidden: ScheduleCategoryId[]
+  /** Calendars switched off in the phone Filter sheet: 'xpadite' (events made here), 'google', 'microsoft'. Hides blocks; never deletes events. */
+  hiddenSources?: string[]
   /** Category list used to make category names searchable (default: the six built-ins). */
   categories?: ScheduleCategory[]
 }
@@ -332,6 +334,7 @@ export function filterScheduleEvents(events: ScheduleEvent[], f: ScheduleFilters
     if (f.category !== 'all' && ev.category !== f.category) return false
     if (f.source && f.source !== 'all' && ev.source !== f.source) return false
     if (f.hidden.includes(ev.category)) return false
+    if (f.hiddenSources && f.hiddenSources.length > 0 && f.hiddenSources.includes(ev.source ?? 'xpadite')) return false
     if (!q) return true
     const hay = `${ev.title} ${ev.location ?? ''} ${ev.notes ?? ''} ${categoryMeta(ev.category, f.categories).label}`.toLowerCase()
     return hay.includes(q)

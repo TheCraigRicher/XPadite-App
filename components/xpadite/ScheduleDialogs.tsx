@@ -21,12 +21,12 @@ function CloseX() {
   return <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" /><line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" /></svg>
 }
 
-function Shell({ title, onClose, children, footer, label, phone, visible }: { title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; label?: string; phone: boolean; visible: boolean }) {
+function Shell({ title, onClose, children, footer, label, phone, visible, showClose = true }: { title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; label?: string; phone: boolean; visible: boolean; showClose?: boolean }) {
   return (
     <SheetFrame phone={phone} visible={visible} variant="sheet" label={label ?? title} onClose={onClose}>
       <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 flex-shrink-0" style={{ borderBottom: '0.5px solid var(--xp-bdr)', paddingTop: phone ? 4 : undefined }}>
         <h3 className="text-[15px] font-bold" style={{ color: 'var(--xp-txt)' }}>{title}</h3>
-        <button type="button" onClick={onClose} aria-label="Close" style={{ ...iconBtn, width: 28, height: 28 }}><CloseX /></button>
+        {showClose && <button type="button" onClick={onClose} aria-label="Close" style={{ ...iconBtn, width: 28, height: 28 }}><CloseX /></button>}
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3.5 flex flex-col gap-3" style={{ overscrollBehavior: 'contain' }}>{children}</div>
       {footer && <div className="px-4 py-3 flex-shrink-0" style={{ borderTop: '0.5px solid var(--xp-bdr)' }}>{footer}</div>}
@@ -242,32 +242,40 @@ function Segmented<T extends string | number>({ label, value, options, onChange 
   )
 }
 
-export function PreferencesDialog(props: { prefs: SchedulePrefs; onChange: (patch: Partial<SchedulePrefs>) => void; onClose: () => void; open?: boolean }) {
+type PrefsProps = { prefs: SchedulePrefs; onApply: (next: SchedulePrefs) => void; onClose: () => void }
+
+export function PreferencesDialog(props: PrefsProps & { open?: boolean }) {
   const phone = useIsPhone()
   const { mounted, visible } = useSheetPhase(props.open ?? true, phone)
   if (!mounted) return null
   return <PreferencesInner {...props} phone={phone} visible={visible} />
 }
 
-function PreferencesInner({ prefs, onChange, onClose, phone, visible }: { prefs: SchedulePrefs; onChange: (patch: Partial<SchedulePrefs>) => void; onClose: () => void; phone: boolean; visible: boolean }) {
+/** Edited as a DRAFT: Done applies it; Cancel, backdrop, swipe-down and Esc all close without applying. */
+function PreferencesInner({ prefs, onApply, onClose, phone, visible }: PrefsProps & { phone: boolean; visible: boolean }) {
+  const [draft, setDraft] = useState<SchedulePrefs>(prefs)
   useLayerEscape(onClose)
+  const change = (patch: Partial<SchedulePrefs>) => setDraft(d => ({ ...d, ...patch }))
   return (
-    <Shell title="Schedule Preferences" onClose={onClose} phone={phone} visible={visible}
-      footer={<div className="flex items-center justify-between gap-3"><p className="text-[11px] leading-snug" style={{ color: 'var(--xp-txt3)' }}>Preview — these apply right away but only while My Schedule is open; they aren’t saved yet.</p><button type="button" onClick={onClose} className="text-[13px] font-semibold text-white flex-shrink-0" style={{ padding: '9px 16px', borderRadius: 10, background: '#7c3aed' }}>Done</button></div>}>
+    <Shell title="Schedule Preferences" onClose={onClose} phone={phone} visible={visible} showClose={false}
+      footer={<div className="flex gap-2">
+        <button type="button" onClick={onClose} data-testid="prefs-cancel" className="flex-1 text-[13px] font-medium" style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)', color: 'var(--xp-txt)' }}>Cancel</button>
+        <button type="button" onClick={() => onApply(draft)} data-testid="prefs-done" className="flex-1 text-[13px] font-semibold text-white" style={{ padding: '10px 12px', borderRadius: 10, background: '#7c3aed' }}>Done</button>
+      </div>}>
       <div className="flex flex-col gap-1">
         <label htmlFor="sch-pref-dur" className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt2)' }}>Default event duration</label>
-        <select id="sch-pref-dur" value={prefs.defaultDurationMins} onChange={e => onChange({ defaultDurationMins: Number(e.target.value) })} style={field}>
+        <select id="sch-pref-dur" value={draft.defaultDurationMins} onChange={e => change({ defaultDurationMins: Number(e.target.value) })} style={field}>
           {DURATION_CHOICES.map(m => <option key={m} value={m}>{m < 60 ? `${m} minutes` : m === 60 ? '1 hour' : m % 60 === 0 ? `${m / 60} hours` : `${Math.floor(m / 60)} hr ${m % 60} min`}</option>)}
         </select>
         <p className="text-[11px]" style={{ color: 'var(--xp-txt3)' }}>Used when you add an event, including from an empty time slot.</p>
       </div>
       <div className="flex flex-col gap-1">
         <span className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt2)' }}>Week starts on</span>
-        <Segmented label="Week starts on" value={prefs.weekStart} options={[{ value: 0, label: 'Sunday' }, { value: 1, label: 'Monday' }]} onChange={weekStart => onChange({ weekStart })} />
+        <Segmented label="Week starts on" value={draft.weekStart} options={[{ value: 0, label: 'Sunday' }, { value: 1, label: 'Monday' }]} onChange={weekStart => change({ weekStart })} />
       </div>
       <div className="flex flex-col gap-1">
         <span className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt2)' }}>Time format</span>
-        <Segmented label="Time format" value={prefs.timeFormat} options={[{ value: '12h', label: '12-hour' }, { value: '24h', label: '24-hour' }]} onChange={timeFormat => onChange({ timeFormat })} />
+        <Segmented label="Time format" value={draft.timeFormat} options={[{ value: '12h', label: '12-hour' }, { value: '24h', label: '24-hour' }]} onChange={timeFormat => change({ timeFormat })} />
         <p className="text-[11px]" style={{ color: 'var(--xp-txt3)' }}>Applies to the calendar, agenda, event details and the Start/End time lists.</p>
       </div>
     </Shell>

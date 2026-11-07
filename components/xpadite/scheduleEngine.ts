@@ -310,21 +310,47 @@ export function deleteCategory(categories: ScheduleCategory[], events: ScheduleE
 export const BUILT_IN_CATEGORIES = SCHEDULE_CATEGORIES
 
 
-// -- Mobile filter panel: one consistent draft of (what to show, which categories are visible) -----------------
+// -- Phone filter sheet: one draft of (which categories show, which calendars show) -----------------------------
 
-export interface FilterState { filter: string; hidden: string[] }
-export const NO_FILTER: FilterState = { filter: 'all', hidden: [] }
+export interface FilterState { filter: string; hidden: string[]; hiddenSources: string[] }
+export const NO_FILTER: FilterState = { filter: 'all', hidden: [], hiddenSources: [] }
 
-/** True when anything narrows the calendar (a category/calendar chosen, or any category switched off). */
-export function isFilterActive(s: FilterState): boolean { return s.filter !== 'all' || s.hidden.length > 0 }
+/** The calendars the sheet can switch on/off. Events created in XPadite have no external source. */
+export const FILTER_SOURCES: { id: string; label: string }[] = [
+  { id: 'xpadite', label: 'XPadite events' },
+  { id: 'google', label: 'Google Calendar' },
+  { id: 'microsoft', label: 'Outlook' },
+]
+
+/** True when anything narrows the calendar (a category/calendar chosen, or any category / calendar switched off). */
+export function isFilterActive(s: FilterState): boolean { return s.filter !== 'all' || s.hidden.length > 0 || s.hiddenSources.length > 0 }
+
+/**
+ * The checkbox view of the applied filter. The tablet/desktop dropdown is single-choice ("only Study", "only Google"); that choice
+ * is shown here as the equivalent checkboxes so nothing is lost when the same state is opened on a phone.
+ */
+export function toCheckboxState(s: FilterState, allCategoryIds: string[]): FilterState {
+  const isSource = FILTER_SOURCES.some(x => x.id === s.filter)
+  if (s.filter === 'all') return { filter: 'all', hidden: [...s.hidden], hiddenSources: [...s.hiddenSources] }
+  if (isSource) return { filter: 'all', hidden: [...s.hidden], hiddenSources: FILTER_SOURCES.map(x => x.id).filter(id => id !== s.filter) }
+  return { filter: 'all', hidden: allCategoryIds.filter(id => id !== s.filter), hiddenSources: [...s.hiddenSources] }
+}
+
+export function toggleCategoryVisible(s: FilterState, id: string): FilterState {
+  return { ...s, hidden: s.hidden.includes(id) ? s.hidden.filter(x => x !== id) : [...s.hidden, id] }
+}
+
+export function toggleSourceVisible(s: FilterState, id: string): FilterState {
+  return { ...s, hiddenSources: s.hiddenSources.includes(id) ? s.hiddenSources.filter(x => x !== id) : [...s.hiddenSources, id] }
+}
 
 /** Choose what to show. A category that was switched off is switched back on, so the choice can never show nothing. */
 export function selectFilter(s: FilterState, value: string): FilterState {
-  return { filter: value, hidden: s.hidden.filter(id => id !== value) }
+  return { ...s, filter: value, hidden: s.hidden.filter(id => id !== value) }
 }
 
 /** Show/hide one category. Hiding the category that is currently chosen resets the choice to All. */
 export function toggleHiddenCategory(s: FilterState, id: string): FilterState {
   const hidden = s.hidden.includes(id) ? s.hidden.filter(x => x !== id) : [...s.hidden, id]
-  return { filter: !s.hidden.includes(id) && s.filter === id ? 'all' : s.filter, hidden }
+  return { ...s, filter: !s.hidden.includes(id) && s.filter === id ? 'all' : s.filter, hidden }
 }

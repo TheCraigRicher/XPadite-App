@@ -374,6 +374,6 @@ test('frontend-only: no persistence, backend, migrations or recurrence expansion
   assert.ok(!/supabase|fetch\(|localStorage|sessionStorage/i.test(code))
   assert.ok(!/expandRecurr|rrule/i.test(read('components/xpadite/scheduleEngine.ts') + read('components/xpadite/scheduleLogic.ts')), 'recurrence is still stored/displayed only')
   assert.ok(/aren’t saved yet|isn’t saved yet|not saved yet/.test(V() + P() + read('components/xpadite/ScheduleDialogs.tsx')), 'temporary data is labelled as such')
-  assert.ok(/Preview — custom categories last only while My Schedule is open/.test(read('components/xpadite/ScheduleDialogs.tsx')) && /Preview — these apply right away but only while My Schedule is open/.test(read('components/xpadite/ScheduleDialogs.tsx')))
+  assert.ok(/Preview — custom categories last only while My Schedule is open/.test(read('components/xpadite/ScheduleDialogs.tsx')), 'Manage Categories still says its categories are not saved (the Preferences preview note was removed in v1.327 by request; preferences stay session-only)')
 })
 

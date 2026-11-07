@@ -103,16 +103,16 @@ test('phone toolbar: rounded-square arrows (not bare triangles), Today + Filter 
   const rest = v.slice(v.indexOf(') : (\n              <>'), v.indexOf('{/* Grid */}'))
   assert.ok(/<NavGroup label=\{monthYearLabel\(anchor\)\} shortLabel=\{monthYearShort\(anchor\)\} minWidth=\{64\}/.test(rest) && /<FilterSelect/.test(rest), 'tablet/desktop navigation and filter dropdown untouched')
 })
-test('Filter is a bottom sheet over the calendar (not a push-down panel): slides up, dimmed backdrop, rounded top, swipe/backdrop/Close', () => {
+test('Filter is a bottom sheet over the calendar (not a push-down panel): slides up, dimmed backdrop, rounded top, swipe/backdrop/Cancel', () => {
   const v = src('MyScheduleView.tsx'), mb = src('ScheduleMobile.tsx'), s = src('ScheduleSheet.tsx')
   assert.ok(/<FilterSheet open=\{panel\.kind === 'filter'\}/.test(v) && !/<FilterPanel/.test(v + mb), 'the icon and the menu drive the same sheet')
   assert.ok(/<SlideDown open=\{panel\.kind === 'search'\}/.test(v), 'only Search uses the slide-down bar; opening Filter never pushes the calendar')
   assert.ok(/<SheetFrame phone visible=\{visible\} variant="sheet" label="Filter events"/.test(mb), 'bottom-sheet variant')
   assert.ok(/borderTopLeftRadius: full \? 0 : 22/.test(s) && /rgba\(15,10,30,0\.5\)/.test(s) && /maxHeight: full \? '100%' : '88%'/.test(s) && /env\(safe-area-inset-bottom/.test(s), 'rounded top, dim backdrop, height cap, safe area')
   assert.ok(/onClick=\{onClose\} data-testid="sheet-backdrop"/.test(s) && /data-testid="sheet-handle"/.test(s) && /if \(d > 90\) onClose\(\)/.test(s), 'backdrop tap and swipe-down dismiss')
-  assert.ok(/data-testid="filter-close"/.test(mb) && /data-testid="filter-apply"/.test(mb) && /data-testid="filter-reset"/.test(mb) && /filterOptions\(categories\)\.map/.test(mb) && /Visible categories/.test(mb) && /overflow-y-auto/.test(mb), 'Close / Apply / Reset, all sources and categories, scrollable')
+  assert.ok(/data-testid="filter-cancel"/.test(mb) && /data-testid="filter-apply"/.test(mb) && /data-testid="filter-reset"/.test(mb) && /categories\.map\(c =>/.test(mb) && /FILTER_SOURCES\.map/.test(mb) && /overflow-y-auto/.test(mb), 'Cancel / Apply / Reset, categories and calendars, scrollable (list redesigned in v1.327)')
   assert.ok(/top: sheetTop/.test(v) && /new ResizeObserver\(measure\)/.test(v), 'the sheet starts below the toolbar so the header and both rows stay clear')
-  assert.ok(/isFilterActive\(\{ filter, hidden \}\)/.test(v) && /data-testid="filter-active-dot"/.test(mb), 'active-filter indicator')
+  assert.ok(/isFilterActive\(\{ filter, hidden, hiddenSources \}\)/.test(v) && /data-testid="filter-active-dot"/.test(mb), 'active-filter indicator')
   assert.ok(/useSheetEscape\(visible, onClose\)/.test(mb), 'Escape closes it')
 })
 test('Search (not redesigned) keeps working: menu entry, shared query, bar under row 2, chip, one-panel-at-a-time', () => {

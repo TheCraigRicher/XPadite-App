@@ -32,6 +32,9 @@ const HOUR_PX = 56
 const INITIAL_SCROLL_HOUR = 5
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 // The time column is narrower on phones (--xp-sch-tc, see the <style> block) so the seven day columns get the room.
+// Phone navigation: label slots are reserved at the widest label ("Nov 30–Dec 6" / "Sep 2026"), so the boxes never resize or shift between dates.
+const NAV_WEEK_EM = 6.6
+const NAV_MONTH_EM = 4.7
 const GRID_COLS = 'var(--xp-sch-tc) repeat(7, minmax(0, 1fr))'
 const DRAG_THRESHOLD_PX = 5        // mouse: movement before a press becomes a drag
 const LONG_PRESS_MS = 450          // touch: hold this long (without moving) to pick an event up
@@ -39,13 +42,13 @@ const LONG_PRESS_SLOP_PX = 10      // touch: moving more than this first means "
 
 // ── Small pieces ────────────────────────────────────────────────────────────
 
-function NavGroup({ label, shortLabel, onPrev, onNext, prevLabel, nextLabel, minWidth, compact }: { label: string; shortLabel?: string; onPrev: () => void; onNext: () => void; prevLabel: string; nextLabel: string; minWidth: number; compact?: boolean }) {
+function NavGroup({ label, shortLabel, onPrev, onNext, prevLabel, nextLabel, minWidth, compact, labelEm }: { label: string; shortLabel?: string; onPrev: () => void; onNext: () => void; prevLabel: string; nextLabel: string; minWidth: number; compact?: boolean; labelEm?: number }) {
   if (compact) {
     // Phones: the same rounded-square arrows, tightened so month, week, Today and Filter share one row down to 320px.
     return (
-      <div className="flex items-center gap-px min-[361px]:gap-1 p-px min-[361px]:p-[2px]" data-testid="nav-group" style={{ borderRadius: 10, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
+      <div className="flex items-center justify-between gap-px min-[361px]:gap-1 p-px min-[361px]:p-[2px] flex-shrink-0" data-testid="nav-group" style={{ borderRadius: 10, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
         <button type="button" onClick={onPrev} aria-label={prevLabel} className="xp-nav-sq" style={{ ...iconBtn, width: undefined, height: undefined, background: 'var(--xp-card)' }}><Chevron dir="left" /></button>
-        <span className="text-[11px] min-[361px]:text-[12px] font-semibold text-center whitespace-nowrap px-px" style={{ color: 'var(--xp-txt)', minWidth }} aria-live="polite" aria-label={label}>{shortLabel ?? label}</span>
+        <span className="text-[11px] min-[361px]:text-[12px] font-semibold text-center whitespace-nowrap overflow-hidden" style={{ color: 'var(--xp-txt)', minWidth, ...(labelEm ? { width: `${labelEm}em`, flexShrink: 0 } : null) }} aria-live="polite" aria-label={label} data-testid="nav-label">{shortLabel ?? label}</span>
         <button type="button" onClick={onNext} aria-label={nextLabel} className="xp-nav-sq" style={{ ...iconBtn, width: undefined, height: undefined, background: 'var(--xp-card)' }}><Chevron dir="right" /></button>
       </div>
     )
@@ -200,11 +203,12 @@ export interface MyScheduleViewProps {
   /** Phone only: which slide-down panel is open under the toolbar's second row. `nonce` changes each time one is opened. */
   panel: { kind: 'search' | 'filter' | null; nonce: number }
   onPanelChange: (kind: 'search' | 'filter' | null) => void
+  /** Calendars switched off in the phone Filter sheet ('xpadite' | 'google' | 'microsoft'). */
+  hiddenSources: string[]
   onApplyFilter: (s: FilterState) => void
-  onResetFilter: () => void
 }
 
-export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggleCategory, now, focus, onEdit, onDelete, onDuplicate, onActiveDayChange, onSelectionChange, onAddAt, onMove, onNotice, query, onQueryChange, panel, onPanelChange, onApplyFilter, onResetFilter }: MyScheduleViewProps) {
+export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggleCategory, now, focus, onEdit, onDelete, onDuplicate, onActiveDayChange, onSelectionChange, onAddAt, onMove, onNotice, query, onQueryChange, panel, onPanelChange, hiddenSources, onApplyFilter }: MyScheduleViewProps) {
   const { categories, prefs, fmt } = useSchedule()
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()))
   const [selectedDay, setSelectedDay] = useState<Date | null>(null)
@@ -242,8 +246,8 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
   const days = useMemo(() => weekDays(anchor, prefs.weekStart), [anchor, prefs.weekStart])
   const parts = splitFilter(filter)
   const visible = useMemo(
-    () => filterScheduleEvents(events, { query, category: parts.category, source: parts.source, hidden, categories }),
-    [events, query, parts.category, parts.source, hidden, categories],
+    () => filterScheduleEvents(events, { query, category: parts.category, source: parts.source, hidden, hiddenSources, categories }),
+    [events, query, parts.category, parts.source, hidden, hiddenSources, categories],
   )
   const layouts = useMemo(() => days.map(d => layoutDayEvents(visible, d)), [days, visible])
   const selected = useMemo(() => events.find(e => e.id === selectedId) ?? null, [events, selectedId])
@@ -466,7 +470,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
         .xp-sch-ev { padding: 2px 3px; line-height: 1.12; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
         .xp-sch-ev-title { font-size: 9px; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow-wrap: break-word; }
         .xp-sch-ev-sub { font-size: 8px; opacity: .82; margin-top: 1px; }
-        .xp-nav-sq { width: 22px; height: 28px; position: relative; }
+        .xp-nav-sq { width: 22px; height: 28px; position: relative; flex-shrink: 0; }
         .xp-nav-sq::after { content: ''; position: absolute; inset: -7px -2px; }   /* tap area ≈ 26×42 */
         @media (min-width: 361px) { .xp-nav-sq { width: 28px; height: 30px; } }
         .xp-sch-col { touch-action: manipulation; user-select: none; -webkit-user-select: none; }
@@ -497,15 +501,15 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
             {phone ? (
               <div ref={phoneToolbarRef}>
                 <div className="flex items-center justify-between gap-0.5 min-[361px]:gap-1 pb-2 flex-shrink-0" data-testid="toolbar-row2">
-                  <NavGroup compact label={monthYearLabel(anchor)} shortLabel={monthYearShort(anchor)} minWidth={0} prevLabel="Previous month" nextLabel="Next month"
+                  <NavGroup compact labelEm={NAV_MONTH_EM} label={monthYearLabel(anchor)} shortLabel={monthYearShort(anchor)} minWidth={0} prevLabel="Previous month" nextLabel="Next month"
                     onPrev={() => setAnchor(a => shiftMonth(a, -1))} onNext={() => setAnchor(a => shiftMonth(a, 1))} />
-                  <NavGroup compact label={weekRangeLabel(anchor, prefs.weekStart)} shortLabel={weekRangeShort(anchor, prefs.weekStart)} minWidth={0} prevLabel="Previous week" nextLabel="Next week"
+                  <NavGroup compact labelEm={NAV_WEEK_EM} label={weekRangeLabel(anchor, prefs.weekStart)} shortLabel={weekRangeShort(anchor, prefs.weekStart)} minWidth={0} prevLabel="Previous week" nextLabel="Next week"
                     onPrev={() => setAnchor(a => addDays(a, -7))} onNext={() => setAnchor(a => addDays(a, 7))} />
                   <button type="button" onClick={() => { goToDate(new Date()); setSelectedDay(startOfDay(new Date())) }} data-testid="today-btn"
                     className="text-[11.5px] min-[361px]:text-[12px] font-semibold flex-shrink-0 px-1 min-[361px]:px-2" style={{ paddingTop: 6, paddingBottom: 6, borderRadius: 8, color: '#7c3aed', background: 'rgba(124,58,237,0.10)', border: '0.5px solid rgba(124,58,237,0.28)' }}>
                     Today
                   </button>
-                  <FilterIconButton active={isFilterActive({ filter, hidden })} open={panel.kind === 'filter'} onClick={() => onPanelChange(panel.kind === 'filter' ? null : 'filter')} />
+                  <FilterIconButton active={isFilterActive({ filter, hidden, hiddenSources })} open={panel.kind === 'filter'} onClick={() => onPanelChange(panel.kind === 'filter' ? null : 'filter')} />
                 </div>
                 <SlideDown open={panel.kind === 'search'} onEscape={() => onPanelChange(null)}>
                   <SearchPanel query={query} onChange={onQueryChange} onClose={() => onPanelChange(null)} open={panel.kind === 'search'} focusNonce={panel.nonce} />
@@ -700,8 +704,8 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
         {phone && (
           <div className="absolute left-0 right-0 bottom-0 pointer-events-none" style={{ top: sheetTop }}>
             <div className="absolute inset-0 pointer-events-auto" style={{ pointerEvents: 'none' }}>
-              <FilterSheet open={panel.kind === 'filter'} filter={filter} hidden={hidden}
-                onApply={st => { onApplyFilter(st); onPanelChange(null) }} onReset={onResetFilter} onClose={() => onPanelChange(null)} />
+              <FilterSheet open={panel.kind === 'filter'} filter={filter} hidden={hidden} hiddenSources={hiddenSources}
+                onApply={st => { onApplyFilter(st); onPanelChange(null) }} onClose={() => onPanelChange(null)} />
             </div>
           </div>
         )}

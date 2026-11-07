@@ -358,6 +358,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   // The single combined filter (All · categories · Google Calendar · Outlook) and the legend's hidden categories.
   const [filter, setFilter] = useState<CombinedFilter>('all')
   const [hidden, setHidden] = useState<ScheduleCategoryId[]>([])
+  const [hiddenSources, setHiddenSources] = useState<string[]>([])   // calendars unticked in the phone Filter sheet
   const [todaySelId, setTodaySelId] = useState<string | null>(null)
   // Phones show either the agenda or the details; Back returns to the agenda WITHOUT clearing the selected event.
   const [detailOpen, setDetailOpen] = useState(false)
@@ -451,8 +452,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   function changePanel(kind: 'search' | 'filter' | null) {
     setPanel(p => (kind === null ? { ...p, kind: null } : { kind, nonce: p.nonce + 1 }))
   }
-  function applyFilter(st: FilterState) { setFilter(st.filter); setHidden(st.hidden) }
-  function resetFilter() { setFilter('all'); setHidden([]) }
+  function applyFilter(st: FilterState) { setFilter(st.filter); setHidden(st.hidden); setHiddenSources(st.hiddenSources) }
 
   function toggleCategory(id: ScheduleCategoryId) {
     setHidden(h => (h.includes(id) ? h.filter(x => x !== id) : [...h, id]))
@@ -700,8 +700,8 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
             onQueryChange={setQuery}
             panel={panel}
             onPanelChange={changePanel}
+            hiddenSources={hiddenSources}
             onApplyFilter={applyFilter}
-            onResetFilter={resetFilter}
           />
         ) : (
           <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
@@ -720,6 +720,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
                 expanded={calExpanded}
                 onToggle={toggleCalendar}
                 weekStart={prefs.weekStart}
+                onToday={() => selectTodayDate(new Date())}
               />
               <div className="flex items-center justify-between gap-2 flex-shrink-0 px-1">
                 <p className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: '#9ca3af', letterSpacing: '0.06em' }}>
@@ -790,7 +791,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
         {lastDialog === 'categories' && (
           <ManageCategoriesDialog open={dialog === 'categories'} categories={categories} events={scheduleEvents} onAdd={handleAddCategory} onRename={handleRenameCategory} onRecolor={handleRecolorCategory} onDelete={handleDeleteCategory} onClose={() => setDialog(null)} />
         )}
-        {lastDialog === 'prefs' && <PreferencesDialog open={dialog === 'prefs'} prefs={prefs} onChange={patch => setPrefs(prev => sanitizePrefs({ ...prev, ...patch }))} onClose={() => setDialog(null)} />}
+        {lastDialog === 'prefs' && <PreferencesDialog open={dialog === 'prefs'} prefs={prefs} onApply={next => { setPrefs(sanitizePrefs(next)); setDialog(null) }} onClose={() => setDialog(null)} />}
         {confirming && <ConfirmDelete ev={confirming} onCancel={() => setConfirmId(null)} onConfirm={confirmDelete} />}
       </div>
     </div>

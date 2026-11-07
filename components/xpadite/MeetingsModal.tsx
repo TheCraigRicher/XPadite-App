@@ -18,6 +18,7 @@ import { ScheduleMiniCalendar } from './ScheduleMiniCalendar'
 import { ConfirmDelete, EventDetails, EventForm, FilterSelect, LAYER_ATTR } from './ScheduleParts'
 import { ScheduleMenu } from './ScheduleMenu'
 import { useIsPhone } from './ScheduleMobile'
+import { useIsDesktop } from './ScheduleSheet'
 import { ManageCategoriesDialog, PreferencesDialog } from './ScheduleDialogs'
 import { ScheduleContext, useSchedule } from './scheduleContext'
 import { buildSampleScheduleEvents } from './scheduleMockData'
@@ -389,6 +390,11 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   const [weekSelId, setWeekSelId] = useState<string | null>(null)
   // Search text (shared by the phone slide-down bar and the tablet/desktop field) and the phone's slide-down panel (one at a time).
   const phone = useIsPhone()
+  // Desktop-only Maximize/Restore (≥ 1024px). A pure size/style change: nothing remounts, so date, tab, search, filters, selection and scroll all survive.
+  const desktop = useIsDesktop()
+  const [maxRequested, setMaxRequested] = useState(false)
+  if (!desktop && maxRequested) setMaxRequested(false)          // shrinking below 1024px returns to the normal responsive layout
+  const maximized = desktop && maxRequested
   const [query, setQuery] = useState('')
   const [panel, setPanel] = useState<{ kind: 'search' | 'filter' | null; nonce: number }>({ kind: null, nonce: 0 })
 
@@ -589,8 +595,9 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   return (
     <ScheduleContext.Provider value={ctx}>
     <div
-      className="fixed inset-0 z-[70] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:p-3 sm:pt-4"
-      style={{ background: 'rgba(0,0,0,0.55)' }}
+      className="fixed inset-0 z-[70] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:p-3 sm:pt-4 lg:transition-[padding] lg:duration-200 lg:motion-reduce:transition-none"
+      style={{ background: 'rgba(0,0,0,0.55)', ...(maximized ? { padding: 0 } : null) }}
+      data-maximized={maximized ? 'true' : 'false'}
       onClick={onClose}
     >
       <style>{`
@@ -606,6 +613,11 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
         }
         @keyframes xp-meet-overlay-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
         .xp-meet-overlay { animation: xp-meet-overlay-in 160ms ease-out; }
+        .xp-hdr-btn { transition: background-color 120ms ease, transform 120ms ease; }
+        .xp-hdr-btn:hover { background: rgba(255,255,255,0.26) !important; }
+        .xp-hdr-btn:active { transform: scale(0.93); }
+        .xp-hdr-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+        @media (prefers-reduced-motion: reduce) { .xp-hdr-btn { transition: none; } }
         /* phone sheets (Filter, Manage Categories, Preferences, Add/Edit): one easing + duration for all of them */
         .xp-sheet-fade { transition: opacity 260ms ease; }
         .xp-sheet-panel { transition: transform 280ms cubic-bezier(0.32, 0.72, 0, 1); }
@@ -616,8 +628,13 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="xp-meet-title"
-        className="relative w-full h-full sm:h-[calc(100dvh-28px)] sm:max-w-[640px] md:max-w-[900px] lg:max-w-[1296px] rounded-none sm:rounded-2xl max-sm:border-0! overflow-hidden flex flex-col"
-        style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.32)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+        className="relative w-full h-full sm:h-[calc(100dvh-28px)] sm:max-w-[640px] md:max-w-[900px] lg:max-w-[1296px] rounded-none sm:rounded-2xl max-sm:border-0! overflow-hidden flex flex-col lg:transition-[max-width,height,border-radius] lg:duration-200 lg:motion-reduce:transition-none"
+        style={{
+          background: 'var(--xp-card)', border: maximized ? 'none' : '0.5px solid var(--xp-bdr2)', boxShadow: maximized ? 'none' : '0 24px 64px rgba(0,0,0,0.32)', paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          // maximised: true edge-to-edge (no margins, no radius, whole viewport); the lg:* classes above are the normal size
+          ...(maximized ? { maxWidth: '100%', height: '100dvh', borderRadius: 0 } : null),
+        }}
+        data-testid="schedule-dialog" data-maximized={maximized ? 'true' : 'false'}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -634,14 +651,35 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
               <p className="truncate" style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 1 }}>Schedule your day, all in one place.</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="flex items-center justify-center flex-shrink-0"
-            style={{ width: 30, height: 30, borderRadius: '50%', background: 'rgba(255,255,255,0.14)', color: 'rgba(255,255,255,0.88)', border: '0.5px solid rgba(255,255,255,0.25)' }}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12"><line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" /><line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" /></svg>
-          </button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {desktop && (
+              <button
+                type="button"
+                onClick={() => setMaxRequested(m => !m)}
+                aria-label={maximized ? 'Restore' : 'Maximize'}
+                title={maximized ? 'Restore' : 'Maximize'}
+                data-testid="maximize-btn"
+                className="xp-hdr-btn flex items-center justify-center flex-shrink-0"
+                style={{ width: 30, height: 30, borderRadius: '50%', background: 'rgba(255,255,255,0.14)', color: 'rgba(255,255,255,0.88)', border: '0.5px solid rgba(255,255,255,0.25)' }}
+              >
+                {maximized ? (
+                  // four corners pointing inward = Restore
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="15" height="15" aria-hidden="true"><path d="M10 4v6H4M10 10 4 4" /><path d="M14 4v6h6M14 10l6-6" /><path d="M10 20v-6H4M10 14l-6 6" /><path d="M14 20v-6h6M14 14l6 6" /></svg>
+                ) : (
+                  // four corners pointing outward = Maximize
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="15" height="15" aria-hidden="true"><path d="M4 9V4h5M4 4l6 6" /><path d="M20 9V4h-5M20 4l-6 6" /><path d="M4 15v5h5M4 20l6-6" /><path d="M20 15v5h-5M20 20l-6-6" /></svg>
+                )}
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              className="xp-hdr-btn flex items-center justify-center flex-shrink-0"
+              style={{ width: 30, height: 30, borderRadius: '50%', background: 'rgba(255,255,255,0.14)', color: 'rgba(255,255,255,0.88)', border: '0.5px solid rgba(255,255,255,0.25)' }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12"><line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" /><line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" /></svg>
+            </button>
+          </div>
         </div>
 
         {/* Tabs + the one Add Event button (shared by both tabs) */}

@@ -25,6 +25,19 @@ export function useIsPhone(): boolean {
   return useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE_QUERY).matches, () => false)
 }
 
+/** Desktop: 1024px and up (the only size where My Schedule can be maximised). */
+export const DESKTOP_QUERY = '(min-width: 1024px)'
+
+function subscribeDesktop(cb: () => void) {
+  const mq = window.matchMedia(DESKTOP_QUERY)
+  mq.addEventListener('change', cb)
+  return () => mq.removeEventListener('change', cb)
+}
+
+export function useIsDesktop(): boolean {
+  return useSyncExternalStore(subscribeDesktop, () => window.matchMedia(DESKTOP_QUERY).matches, () => false)
+}
+
 export const SHEET_MS = 280
 
 /**

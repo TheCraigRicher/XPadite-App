@@ -117,7 +117,7 @@ test('Filter is a bottom sheet over the calendar (not a push-down panel): slides
 })
 test('Search (not redesigned) keeps working: menu entry, shared query, bar under row 2, chip, one-panel-at-a-time', () => {
   const m = src('MeetingsModal.tsx'), v = src('MyScheduleView.tsx'), mb = src('ScheduleMobile.tsx')
-  assert.ok(/onSearch=\{phone && tab === 'schedule'/.test(m) && /onFilter=\{phone && tab === 'schedule'/.test(m))
+  assert.ok(/onSearch=\{phone && tab !== 'today'/.test(m) && /onFilter=\{phone && tab !== 'today'/.test(m))
   assert.ok(/kind === null \? \{ \.\.\.p, kind: null \} : \{ kind, nonce: p\.nonce \+ 1 \}/.test(m), 'opening one panel replaces the other')
   assert.ok(/<SearchPanel query=\{query\}/.test(v) && /<ActiveSearchChip/.test(v) && /data-testid="search-clear"/.test(mb) && /const \[query, setQuery\] = useState\(''\)/.test(m))
   assert.ok(/<FilterSheet key=/.test(v) === false && /key=\{panel\.nonce\}/.test(v) === false, 'sheet unmounts itself after closing, so every open starts from the applied filter')

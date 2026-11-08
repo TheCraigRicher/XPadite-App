@@ -24,6 +24,9 @@ import { useSchedule } from './scheduleContext'
 import { isFilterActive } from './scheduleEngine'
 import type { FilterState } from './scheduleEngine'
 import { ActiveSearchChip, FilterIconButton, FilterSheet, SearchPanel, SlideDown, useIsPhone } from './ScheduleMobile'
+import { MonthDaySheet, MonthGrid } from './ScheduleMonthGrid'
+import { buildMonthGrid, monthDayEvents } from './scheduleMonth'
+import type { MonthCell } from './scheduleMonth'
 import { Chevron, EmptyDetails, EventDetails, EventSheet, FilterSelect, LAYER_ATTR, iconBtn } from './ScheduleParts'
 
 // ── Layout constants ────────────────────────────────────────────────────────
@@ -35,6 +38,7 @@ const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 // Phone navigation: label slots are reserved at the widest label ("Nov 30–Dec 6" / "Sep 2026"), so the boxes never resize or shift between dates.
 const NAV_WEEK_EM = 6.6
 const NAV_MONTH_EM = 4.7
+const NAV_MONTH_FULL_EM = 8.6   // Month View shows the full month name in the slot the week range uses
 const GRID_COLS = 'var(--xp-sch-tc) repeat(7, minmax(0, 1fr))'
 const DRAG_THRESHOLD_PX = 5        // mouse: movement before a press becomes a drag
 const LONG_PRESS_MS = 450          // touch: hold this long (without moving) to pick an event up
@@ -206,12 +210,17 @@ export interface MyScheduleViewProps {
   /** Calendars switched off in the phone Filter sheet ('xpadite' | 'google' | 'microsoft'). */
   hiddenSources: string[]
   onApplyFilter: (s: FilterState) => void
+  /** 'week' (default) = the weekly time grid; 'month' = the Month View. Both share this component's date, selection and the modal's filters. */
+  mode?: 'week' | 'month'
+  /** The date being browsed and the tapped date. Owned by the modal so they survive switching to the Today tab and back. */
+  anchor: Date
+  onAnchorChange: React.Dispatch<React.SetStateAction<Date>>
+  selectedDay: Date | null
+  onSelectedDayChange: React.Dispatch<React.SetStateAction<Date | null>>
 }
 
-export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggleCategory, now, focus, onEdit, onDelete, onDuplicate, onActiveDayChange, onSelectionChange, onAddAt, onMove, onNotice, query, onQueryChange, panel, onPanelChange, hiddenSources, onApplyFilter }: MyScheduleViewProps) {
+export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggleCategory, now, focus, onEdit, onDelete, onDuplicate, onActiveDayChange, onSelectionChange, onAddAt, onMove, onNotice, query, onQueryChange, panel, onPanelChange, hiddenSources, onApplyFilter, mode = 'week', anchor, onAnchorChange: setAnchor, selectedDay, onSelectedDayChange: setSelectedDay }: MyScheduleViewProps) {
   const { categories, prefs, fmt } = useSchedule()
-  const [anchor, setAnchor] = useState(() => startOfDay(new Date()))
-  const [selectedDay, setSelectedDay] = useState<Date | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const phone = useIsPhone()
   const [filterOpen, setFilterOpen] = useState(false)
@@ -221,6 +230,9 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
   // The details bottom sheet (below lg) opens when an event is tapped — not after a drag-drop, so the result stays visible.
   const [sheetOpen, setSheetOpen] = useState(false)
   const [drag, setDrag] = useState<DragView | null>(null)
+  // Month View: the date whose expanded day list is open (null = closed).
+  const [daySheet, setDaySheet] = useState<Date | null>(null)
+  const month = mode === 'month'
 
   // Jump to an event the modal just added/edited (adjusting state during render — no effect needed).
   if (focus && focus.nonce !== seenFocus) {
@@ -260,9 +272,11 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
   const nowMin = today.getHours() * 60 + today.getMinutes()
 
   // The modal's single add button defaults to the day the user tapped, else today if it's in view, else the first day shown.
-  const defaultAddDay = selectedDay && days.some(d => isSameLocalDay(d, selectedDay))
+  const monthWeeksGrid = useMemo(() => buildMonthGrid(month ? visible : [], anchor, new Date(now), prefs.weekStart), [month, visible, anchor, now, prefs.weekStart])
+  const addPool = month ? monthWeeksGrid.flat().filter(c => c.inMonth).map(c => c.date) : days
+  const defaultAddDay = selectedDay && addPool.some(d => isSameLocalDay(d, selectedDay))
     ? selectedDay
-    : (days.find(d => isSameLocalDay(d, today)) ?? days[0])
+    : (addPool.find(d => isSameLocalDay(d, today)) ?? addPool[0])
   const defaultAddKey = defaultAddDay.getTime()
   useEffect(() => { onActiveDayChange(new Date(defaultAddKey)) }, [defaultAddKey, onActiveDayChange])
   useEffect(() => { onSelectionChange(selectedId) }, [selectedId, onSelectionChange])
@@ -273,7 +287,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
     if (!el) return
     el.scrollTop = INITIAL_SCROLL_HOUR * HOUR_PX
     updateEdges()
-  }, [])
+  }, [mode])
 
   function updateEdges() {
     const el = scrollerRef.current
@@ -310,7 +324,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
     function block(e: TouchEvent) { if (dragRef.current?.active && e.cancelable) e.preventDefault() }
     el.addEventListener('touchmove', block, { passive: false })
     return () => el.removeEventListener('touchmove', block)
-  }, [])
+  }, [mode])
 
   function goToDate(d: Date) { setAnchor(startOfDay(d)) }
 
@@ -321,6 +335,16 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
     setSelectedDay(startOfDay(new Date(ev.startAt)))
     setSlot(null)
   }
+
+  // ── Month View: tapping a date / "+N more" opens the day list; an empty date on tablet/desktop opens the Add form directly ──
+  function onMonthCell(cell: MonthCell) {
+    setSelectedDay(cell.date)
+    setSlot(null)
+    if (phone || cell.events.length > 0) setDaySheet(cell.date)
+    else onAddAt(cell.date, 9 * 60)
+  }
+  function onMonthMore(cell: MonthCell) { setSelectedDay(cell.date); setDaySheet(cell.date) }
+  function onMonthEvent(ev: ScheduleEvent) { setDaySheet(null); selectEvent(ev) }
 
   // ── Empty slot: tap → highlight + "+ Add"; second tap on it (or double-click) → Add form ──
 
@@ -501,10 +525,10 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
             {phone ? (
               <div ref={phoneToolbarRef}>
                 <div className="flex items-center justify-between gap-0.5 min-[361px]:gap-1 pb-2 flex-shrink-0" data-testid="toolbar-row2">
-                  <NavGroup compact labelEm={NAV_MONTH_EM} label={monthYearLabel(anchor)} shortLabel={monthYearShort(anchor)} minWidth={0} prevLabel="Previous month" nextLabel="Next month"
+                  <NavGroup compact labelEm={month ? NAV_MONTH_FULL_EM : NAV_MONTH_EM} label={monthYearLabel(anchor)} shortLabel={month ? undefined : monthYearShort(anchor)} minWidth={0} prevLabel="Previous month" nextLabel="Next month"
                     onPrev={() => setAnchor(a => shiftMonth(a, -1))} onNext={() => setAnchor(a => shiftMonth(a, 1))} />
-                  <NavGroup compact labelEm={NAV_WEEK_EM} label={weekRangeLabel(anchor, prefs.weekStart)} shortLabel={weekRangeShort(anchor, prefs.weekStart)} minWidth={0} prevLabel="Previous week" nextLabel="Next week"
-                    onPrev={() => setAnchor(a => addDays(a, -7))} onNext={() => setAnchor(a => addDays(a, 7))} />
+                  {!month && <NavGroup compact labelEm={NAV_WEEK_EM} label={weekRangeLabel(anchor, prefs.weekStart)} shortLabel={weekRangeShort(anchor, prefs.weekStart)} minWidth={0} prevLabel="Previous week" nextLabel="Next week"
+                    onPrev={() => setAnchor(a => addDays(a, -7))} onNext={() => setAnchor(a => addDays(a, 7))} />}
                   <button type="button" onClick={() => { goToDate(new Date()); setSelectedDay(startOfDay(new Date())) }} data-testid="today-btn"
                     className="text-[11.5px] min-[361px]:text-[12px] font-semibold flex-shrink-0 px-1 min-[361px]:px-2" style={{ paddingTop: 6, paddingBottom: 6, borderRadius: 8, color: '#7c3aed', background: 'rgba(124,58,237,0.10)', border: '0.5px solid rgba(124,58,237,0.28)' }}>
                     Today
@@ -523,8 +547,8 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
             <div className="flex flex-wrap items-center gap-x-2 gap-y-2 pb-2.5 flex-shrink-0">
               <NavGroup label={monthYearLabel(anchor)} shortLabel={monthYearShort(anchor)} minWidth={64} prevLabel="Previous month" nextLabel="Next month"
                 onPrev={() => setAnchor(a => shiftMonth(a, -1))} onNext={() => setAnchor(a => shiftMonth(a, 1))} />
-              <NavGroup label={weekRangeLabel(anchor, prefs.weekStart)} minWidth={92} prevLabel="Previous week" nextLabel="Next week"
-                onPrev={() => setAnchor(a => addDays(a, -7))} onNext={() => setAnchor(a => addDays(a, 7))} />
+              {!month && <NavGroup label={weekRangeLabel(anchor, prefs.weekStart)} minWidth={92} prevLabel="Previous week" nextLabel="Next week"
+                onPrev={() => setAnchor(a => addDays(a, -7))} onNext={() => setAnchor(a => addDays(a, 7))} />}
               <button type="button" onClick={() => { goToDate(new Date()); setSelectedDay(startOfDay(new Date())) }}
                 className="text-[12px] font-semibold" style={{ padding: '6px 9px', borderRadius: 8, color: '#7c3aed', background: 'rgba(124,58,237,0.10)', border: '0.5px solid rgba(124,58,237,0.28)' }}>
                 Today
@@ -564,6 +588,11 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
             )}
 
             {/* Grid */}
+            {month ? (
+              <div className="relative flex-1 min-h-0" style={{ border: '1px solid rgba(124,58,237,0.45)', borderRadius: 14, background: 'var(--xp-card)', overflow: 'hidden' }} data-testid="month-view">
+                <MonthGrid weeks={monthWeeksGrid} weekStart={prefs.weekStart} selectedDay={selectedDay} selectedId={selectedId} onCell={onMonthCell} onEvent={onMonthEvent} onMore={onMonthMore} />
+              </div>
+            ) : (
             <div className="relative flex-1 min-h-0" style={{ border: '1px solid rgba(124,58,237,0.45)', borderRadius: 14, background: 'var(--xp-card)', overflow: 'hidden' }} data-testid="schedule-grid">
               <div ref={scrollerRef} onScroll={updateEdges} className="h-full overflow-y-auto overflow-x-hidden" style={{ overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch', cursor: drag ? 'grabbing' : undefined, userSelect: drag ? 'none' : undefined }} data-testid="schedule-scroller">
                 {/* Sticky weekday header — same column template as the body, so columns line up exactly */}
@@ -671,6 +700,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
                 </div>
               )}
             </div>
+            )}
           </div>
 
           {/* ── Sidebar (large screens): same top and bottom edges as the calendar ── */}
@@ -717,6 +747,11 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
           <p className="text-[10.5px]" style={{ color: 'var(--xp-txt3)' }}>Preview — sample events; anything you add, move or change isn’t saved yet.</p>
         </div>
       </div>
+
+      {month && (
+        <MonthDaySheet day={daySheet} open={!!daySheet} events={daySheet ? monthDayEvents(visible, daySheet) : []} onClose={() => setDaySheet(null)}
+          onPick={onMonthEvent} onAdd={d => { setDaySheet(null); onAddAt(d, 9 * 60) }} />
+      )}
 
       {/* Details bottom sheet (below lg; the sidebar shows them on large screens) */}
       {selected && sheetOpen && !drag && (

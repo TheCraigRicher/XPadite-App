@@ -9,6 +9,8 @@
 // fetch without this file needing a rewrite. See the mock-data file for the
 // full field-level rationale (provider vs calendarSource vs meetingProvider).
 
+import { readViewPref, writeViewPref } from './scheduleMonth'
+import type { ScheduleViewKey } from './scheduleMonth'
 import { useEffect, useMemo, useState } from 'react'
 import { useApp } from './AppContext'
 import { useLockBodyScroll } from './useLockBodyScroll'
@@ -35,7 +37,7 @@ import {
 import type { FilterState } from './scheduleEngine'
 import type { XpaditeMeeting, MeetingProviderId, MeetingPlatform } from './meetingsMockData'
 
-type TabKey = 'schedule' | 'today'
+type TabKey = ScheduleViewKey   // 'schedule' | 'today' | 'month'
 type MeetingPhase = 'cancelled' | 'live' | 'starting-soon' | 'upcoming' | 'past'
 
 // ── Small brand marks — source (calendar account) vs platform (call link) ──
@@ -142,6 +144,7 @@ function Pill({ color, bg, border, label, pulse }: { color: string; bg: string; 
 const TABS: { key: TabKey; label: (n: number) => string }[] = [
   { key: 'schedule', label: () => 'My Schedule' },
   { key: 'today',    label: n => `Today (${n})` },
+  { key: 'month',    label: () => 'Month' },
 ]
 
 // ── Meeting detail ──────────────────────────────────────────────────────────
@@ -355,7 +358,9 @@ type DialogKey = 'categories' | 'prefs' | null
 export function MeetingsModal({ onClose }: MeetingsModalProps) {
   const { setToast } = useApp()
   const [meetings, setMeetings] = useState<XpaditeMeeting[]>(() => MOCK_MEETINGS)
-  const [tab, setTab] = useState<TabKey>('schedule')
+  // The last view the user picked is remembered on this device only (a plain local preference — no account data, no migration).
+  const [tab, setTabState] = useState<TabKey>(() => readViewPref() ?? 'schedule')
+  const setTab = (k: TabKey) => { setTabState(k); writeViewPref(k) }
   // The single combined filter (All · categories · Google Calendar · Outlook) and the legend's hidden categories.
   const [filter, setFilter] = useState<CombinedFilter>('all')
   const [hidden, setHidden] = useState<ScheduleCategoryId[]>([])
@@ -375,6 +380,9 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   // Add/Edit/Delete dialogs (shared by both tabs) and the "jump to this event" signal for the weekly view.
   const [activeDay, setActiveDay] = useState(() => startOfDay(new Date()))
   const [form, setForm] = useState<FormState>(null)
+  // My Schedule's browsed date and tapped date live here (not inside the view) so Today ↔ My Schedule ↔ Month never resets them.
+  const [schedAnchor, setSchedAnchor] = useState(() => startOfDay(new Date()))
+  const [schedSelDay, setSchedSelDay] = useState<Date | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [focus, setFocus] = useState<{ id: string; at: number; nonce: number; quiet?: boolean } | null>(null)
   // Custom categories + preferences: in-memory for this preview (nothing is saved). The built-in six always come first.
@@ -683,13 +691,14 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
         </div>
 
         {/* Tabs + the one Add Event button (shared by both tabs) */}
-        <div className="flex items-center justify-between gap-2 px-3 sm:px-4 pt-3 pb-2.5 flex-shrink-0">
+        <div className="flex items-center justify-between gap-2 px-2 sm:px-4 pt-3 pb-2.5 flex-shrink-0" data-testid="toolbar-row1">
           <div className="flex items-center gap-0.5 sm:gap-1" style={{ padding: 3, borderRadius: 10, background: 'var(--xp-bg3)', width: 'fit-content' }}>
             {TABS.map(t => (
               <button
                 key={t.key}
-                onClick={() => { setTab(t.key); setWeekSelId(null); setPanel(p => ({ ...p, kind: null })) }}
-                className="text-[11.5px] sm:text-[12px] whitespace-nowrap px-2 min-[361px]:px-2.5 sm:px-3"
+                onClick={() => { if (t.key === tab) return; if (t.key === 'today' || tab === 'today') setWeekSelId(null); setTab(t.key); setPanel(p => ({ ...p, kind: null })) }}
+                aria-pressed={tab === t.key}
+                className="text-[11px] min-[341px]:text-[11.5px] sm:text-[12px] whitespace-nowrap px-1.5 min-[361px]:px-2.5 sm:px-3"
                 style={{
                   paddingTop: 6, paddingBottom: 6, borderRadius: 7,
                   fontWeight: tab === t.key ? 700 : 500,
@@ -701,24 +710,29 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-            <button type="button" onClick={openAdd} aria-label="Add Event" className="flex items-center gap-1 text-[12px] min-[361px]:text-[12.5px] font-semibold text-white flex-shrink-0 px-2.5 min-[361px]:px-[13px]" style={{ paddingTop: 7, paddingBottom: 7, borderRadius: 10, background: '#7c3aed' }}>
-              <span aria-hidden="true" className="text-[15px] leading-none">+</span> Add Event
+          <div className="flex items-center gap-1 min-[341px]:gap-1.5 sm:gap-2 flex-shrink-0">
+            <button type="button" onClick={openAdd} aria-label="Add Event" className="flex items-center gap-1 text-[12px] min-[361px]:text-[12.5px] font-semibold text-white flex-shrink-0 px-2 min-[341px]:px-2.5 min-[361px]:px-[13px]" style={{ paddingTop: 7, paddingBottom: 7, borderRadius: 10, background: '#7c3aed' }}>
+              <span aria-hidden="true" className="text-[15px] leading-none">+</span> <span className="max-[340px]:hidden">Add Event</span><span className="hidden max-[340px]:inline">Add</span>
             </button>
             <ScheduleMenu
               onManageCategories={() => setDialog('categories')}
               onDuplicate={() => { if (menuSel) openDuplicate(menuSel) }}
               onPreferences={() => setDialog('prefs')}
               duplicateHint={duplicateHint}
-              onSearch={phone && tab === 'schedule' ? () => changePanel('search') : undefined}
-              onFilter={phone && tab === 'schedule' ? () => changePanel('filter') : undefined}
+              onSearch={phone && tab !== 'today' ? () => changePanel('search') : undefined}
+              onFilter={phone && tab !== 'today' ? () => changePanel('filter') : undefined}
             />
           </div>
         </div>
 
         {/* Body */}
-        {tab === 'schedule' ? (
+        {tab !== 'today' ? (
           <MyScheduleView
+            mode={tab === 'month' ? 'month' : 'week'}
+            anchor={schedAnchor}
+            onAnchorChange={setSchedAnchor}
+            selectedDay={schedSelDay}
+            onSelectedDayChange={setSchedSelDay}
             events={allEvents}
             filter={filter}
             onFilterChange={setFilter}

@@ -323,7 +323,7 @@ test('hamburger menu: sits beside the single Add Event button, with exactly the 
   assert.ok(/aria-label="Add Event"[\s\S]*<ScheduleMenu/.test(navRow), 'menu immediately follows Add Event in the same row')
   assert.equal((m.match(/aria-label="Add Event"/g) || []).length, 1, 'still one Add Event button')
   assert.deepEqual([...menu.matchAll(/role="menuitem"[\s\S]*?>\s*([A-Z][A-Za-z ]+?)\s*(?:\{|<)/g)].map(x => x[1]), ['Search Events', 'Filter Events', 'Manage Categories', 'Duplicate Event', 'Schedule Preferences'], 'source order; Search/Filter are phone-only')
-  assert.ok(/onSearch=\{phone && tab === 'schedule'/.test(m) && /onFilter=\{phone && tab === 'schedule'/.test(m) && /\{onSearch && \(/.test(menu) && /\{onFilter && \(/.test(menu), 'tablet/desktop never receive the two extra entries — their menu stays the original three')
+  assert.ok(/onSearch=\{phone && tab !== 'today'/.test(m) && /onFilter=\{phone && tab !== 'today'/.test(m) && /\{onSearch && \(/.test(menu) && /\{onFilter && \(/.test(menu), 'tablet/desktop never receive the two extra entries — their menu stays the original three')
   assert.ok(!/go to date/i.test(m + menu + V() + P() + read('components/xpadite/ScheduleDialogs.tsx')), 'Go to Date was rejected and must not exist')
   assert.ok(/aria-label="Schedule menu"/.test(menu) && /aria-haspopup="menu"/.test(menu) && /aria-expanded=\{open\}/.test(menu), 'accessible, and distinct from the app’s main burger menu')
   assert.ok(/aria-disabled=\{duplicateOff\}/.test(menu) && /Select one of your events first/.test(m) && /Synced calendar events can/.test(m), 'Duplicate is disabled with an explanation when nothing eligible is selected')

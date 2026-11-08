@@ -165,7 +165,7 @@ test('filter state helpers: active detection, consistent choices, reset', () => 
   assert.deepEqual(run({ filter: 'all', hidden: ['other'] }, 'stu'), ['Study'], 'search + filter together'); assert.deepEqual(run(E.NO_FILTER, 'stu'), ['Study'], 'clearing the filter keeps the search')
 })
 test('row 1 stays one line down to 320px (tighter padding below 361px)', () => {
-  const m = M(); assert.ok(/px-2 min-\[361px\]:px-2\.5 sm:px-3/.test(m) && /px-2\.5 min-\[361px\]:px-\[13px\]/.test(m))
+  const m = M(); assert.ok(/px-1\.5 min-\[361px\]:px-2\.5 sm:px-3/.test(m) && /px-2 min-\[341px\]:px-2\.5 min-\[361px\]:px-\[13px\]/.test(m))
 })
 test('desktop/tablet regression guard: existing toolbar, sidebar, drag, slot and sizing code is still present and unchanged', () => {
   const v = V(), m = M()

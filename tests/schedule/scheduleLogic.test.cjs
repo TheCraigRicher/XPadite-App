@@ -237,10 +237,10 @@ test('Meetings → My Schedule: naming, exactly two tabs, banners gone, integrat
   assert.ok(/label: 'My Schedule',\s+action: 'meetings'/.test(side) && !/label: 'Meetings'/.test(side), 'burger menu renamed, same action')
   assert.ok(/>My Schedule<\/h2>/.test(m) && /Schedule your day, all in one place\./.test(m))
   const tabsBlock = m.slice(m.indexOf('const TABS'), m.indexOf('\n]', m.indexOf('const TABS')))
-  assert.deepEqual([...tabsBlock.matchAll(/key: '(\w+)'/g)].map(x => x[1]), ['schedule', 'today'], 'exactly two tabs in order: My Schedule | Today')
-  assert.ok(/type TabKey = 'schedule' \| 'today'\r?\n/.test(m), 'tab state no longer knows an upcoming tab')
+  assert.deepEqual([...tabsBlock.matchAll(/key: '(\w+)'/g)].map(x => x[1]), ['schedule', 'today', 'month'], 'three tabs in order: My Schedule | Today | Month')
+  assert.ok(/type TabKey = ScheduleViewKey[^\n]*\r?\n/.test(m) && /export type ScheduleViewKey = 'schedule' \| 'today' \| 'month'/.test(read('components/xpadite/scheduleMonth.ts')), 'tab state no longer knows an upcoming tab')
   assert.ok(!/key: 'upcoming'|Upcoming \(|selectTab|SourceFilter\b|setSourceFilter|All Sources/.test(m), 'no stale Upcoming-tab / All-Sources references in the modal')
-  assert.ok(/useState<TabKey>\('schedule'\)/.test(m), 'My Schedule is the default tab')
+  assert.ok(/useState<TabKey>\(\(\) => readViewPref\(\) \?\? 'schedule'\)/.test(m), 'My Schedule is the default tab (unless a last-used view was remembered on this device)')
   assert.ok(!/Past \(/.test(m) && !/Monthly Meetings/.test(m), 'Past and Monthly tabs removed from the UI')
   assert.ok(!/Automatically add meetings to Task Manager/.test(m) && !/are read-only\. You can view them, join them/.test(m), 'both banners removed')
   // preserved behaviour

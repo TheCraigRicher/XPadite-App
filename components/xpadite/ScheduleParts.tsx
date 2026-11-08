@@ -7,8 +7,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   REMINDER_OPTIONS, RECURRENCE_OPTIONS, filterOptions, formatTimeValue, parseTimeText, timeOptions,
-  durationLabel, longDateLabel, meetingLinkLabel, recurrenceLabel, reminderLabel, safeHttpUrl,
-  timeRangeLabel, validateScheduleForm,
+  clockLabel, durationLabel, longDateLabel, meetingLinkLabel, recurrenceLabel, reminderLabel, safeHttpUrl,
+  timeRangeLabel, validateScheduleForm, addSavedLocation, normalizeLocation, removeSavedLocation,
 } from './scheduleLogic'
 import type { CombinedFilter, ScheduleCategoryId, ScheduleEvent, ScheduleFormErrors, ScheduleFormValues } from './scheduleLogic'
 import { withDateChange, withStartChange } from './scheduleEngine'
@@ -46,7 +46,7 @@ export function DetailRow({ label, children }: { label: string; children: React.
 }
 
 export function EventDetails({ ev, onEdit, onDelete, onDuplicate }: { ev: ScheduleEvent; onEdit: () => void; onDelete: () => void; onDuplicate?: () => void }) {
-  const { meta, fmt } = useSchedule()
+  const { meta, fmt, restoreTask, taskSync } = useSchedule()
   const cat = meta(ev.category)
   const link = safeHttpUrl(ev.meetingUrl)
   const reminder = reminderLabel(ev.reminderMins)
@@ -75,6 +75,28 @@ export function EventDetails({ ev, onEdit, onDelete, onDuplicate }: { ev: Schedu
       <dl className="flex flex-col gap-2">
         <DetailRow label="Date">{longDateLabel(ev.startAt)}</DetailRow>
         <DetailRow label="Time">{timeRangeLabel(ev.startAt, ev.endAt, fmt)} <span style={{ color: 'var(--xp-txt3)' }}>({durationLabel(ev.startAt, ev.endAt)})</span></DetailRow>
+        {ev.isDeadline && (
+          <DetailRow label="Due">
+            <span data-testid="deadline-badge" className="inline-flex items-center gap-1.5 font-semibold" style={{ padding: '1px 8px', borderRadius: 999, background: 'rgba(239,68,68,0.12)', border: '0.5px solid rgba(239,68,68,0.4)', color: '#b91c1c' }}>
+              <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true"><path d="M5 21V4M5 4h11l-2 4 2 4H5" /></svg>
+              {longDateLabel(ev.endAt)} · {clockLabel(ev.endAt, fmt)}
+            </span>
+          </DetailRow>
+        )}
+        {(ev.isDeadline || taskSync) && !ev.readOnly && (
+          <DetailRow label="Task">
+            {ev.taskLink === 'detached' ? (
+              <span className="inline-flex flex-wrap items-center gap-2" data-testid="task-removed">
+                <span style={{ color: 'var(--xp-txt3)' }}>Not in your Task Manager</span>
+                {restoreTask && (
+                  <button type="button" data-testid="restore-task" onClick={() => restoreTask(ev.id)} className="font-semibold" style={{ padding: '2px 9px', borderRadius: 999, background: 'rgba(124,58,237,0.10)', border: '0.5px solid rgba(124,58,237,0.3)', color: '#7c3aed', fontSize: 11.5 }}>
+                    Add back to Task Manager
+                  </button>
+                )}
+              </span>
+            ) : <span style={{ color: 'var(--xp-txt3)' }}>{ev.isDeadline ? 'Linked task in your Task Manager (on the due date)' : 'Linked task in your Task Manager (on the start date)'}</span>}
+          </DetailRow>
+        )}
         <DetailRow label="Category"><span className="inline-flex items-center gap-1.5"><CategoryDot id={ev.category} />{cat.label}</span></DetailRow>
         {ev.location && <DetailRow label="Location">{ev.location}</DetailRow>}
         {ev.meetingUrl && (
@@ -157,7 +179,7 @@ export function ConfirmDelete({ ev, onCancel, onConfirm }: { ev: ScheduleEvent; 
     <div {...{ [LAYER_ATTR]: '' }} className="absolute inset-0 z-40 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onCancel}>
       <div role="alertdialog" aria-modal="true" aria-label="Delete event" className="w-full max-w-[340px] text-center" style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', borderRadius: 16, padding: '20px 18px', boxShadow: '0 20px 50px rgba(0,0,0,0.35)' }} onClick={e => e.stopPropagation()}>
         <p className="text-[15px] font-bold mb-1" style={{ color: 'var(--xp-txt)' }}>Delete this event?</p>
-        <p className="text-[12.5px] mb-4 break-words" style={{ color: 'var(--xp-txt2)' }}>“{ev.title}” on {longDateLabel(ev.startAt)} will be removed from this preview.</p>
+        <p className="text-[12.5px] mb-4 break-words" style={{ color: 'var(--xp-txt2)' }}>“{ev.title}” on {longDateLabel(ev.startAt)} will be deleted.{ev.isDeadline ? ' Its linked task is removed too, unless it holds your work (then it is kept as an ordinary task).' : ''}</p>
         <div className="flex gap-2">
           <button type="button" onClick={onCancel} className="flex-1 text-[13px] font-medium" style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)', color: 'var(--xp-txt)' }}>Cancel</button>
           <button type="button" onClick={onConfirm} className="flex-1 text-[13px] font-semibold text-white" style={{ padding: '10px 12px', borderRadius: 10, background: '#dc2626' }}>Delete</button>
@@ -333,6 +355,88 @@ function CategorySelect({ id, value, onChange }: { id: string; value: ScheduleCa
   )
 }
 
+/** Compact, toggleable "Set as Due Date" pill (v1.328). ON = this event's end date/time is a deadline. */
+function DueDatePill({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} onClick={onToggle} data-testid="due-pill" data-on={on ? 'true' : 'false'}
+      className="self-start inline-flex items-center gap-1.5 text-[12px] font-semibold"
+      style={{ padding: '5px 11px', borderRadius: 999, minHeight: 28, background: on ? 'rgba(239,68,68,0.14)' : 'var(--xp-bg3)', border: `1px solid ${on ? 'rgba(239,68,68,0.5)' : 'var(--xp-bdr2)'}`, color: on ? '#b91c1c' : 'var(--xp-txt2)' }}>
+      {on && <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="4 12 10 18 20 6" /></svg>}
+      {on ? 'Due Date Set' : 'Set as Due Date'}
+    </button>
+  )
+}
+
+/**
+ * Location input with reusable saved locations: "+ Add" saves what is typed, the chevron lists saved places to pick from (typing anything
+ * else is always fine), "Remove" forgets a saved place (an undo is offered; events keep their own copy of the text, so none change).
+ */
+function LocationField({ value, onChange, saved, onSavedChange }: { value: string; onChange: (t: string) => void; saved?: string[]; onSavedChange?: (next: string[]) => void }) {
+  const [open, setOpen] = useState(false)
+  const [msg, setMsg] = useState<{ text: string; tone: 'ok' | 'warn'; undo?: string[] } | null>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const box = usePopupBox(open, wrapRef, 240)
+  const enabled = !!saved && !!onSavedChange
+  const list = saved ?? []
+  useEffect(() => { if (!msg) return; const t = window.setTimeout(() => setMsg(null), 6000); return () => window.clearTimeout(t) }, [msg])
+  const isSaved = !!value.trim() && list.some(l => normalizeLocation(l) === normalizeLocation(value))
+
+  function add() {
+    const r = addSavedLocation(list, value)
+    if (r.status === 'added') { onSavedChange?.(r.list); setMsg({ text: `Saved \u201c${r.value}\u201d`, tone: 'ok' }) }
+    else setMsg({ text: r.status === 'empty' ? 'Type a location first.' : r.status === 'duplicate' ? 'Already in your saved locations.' : 'Your saved locations list is full.', tone: 'warn' })
+  }
+  function remove(name: string) {
+    const before = list
+    onSavedChange?.(removeSavedLocation(list, name))
+    setMsg({ text: `Removed \u201c${name}\u201d from saved locations.`, tone: 'ok', undo: before })
+  }
+  const pill: React.CSSProperties = { padding: '3px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 700, background: 'rgba(124,58,237,0.10)', border: '0.5px solid rgba(124,58,237,0.3)', color: '#7c3aed', minHeight: 24 }
+
+  return (
+    <div className="flex flex-col gap-1 min-w-0">
+      <div className="flex items-center justify-between gap-2">
+        <label htmlFor="sch-location" className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt2)' }}>Location (optional)</label>
+        {enabled && (
+          <div className="flex items-center gap-1.5">
+            <button type="button" data-testid="loc-add" onClick={add} style={pill}>+ Add</button>
+            <button type="button" data-testid="loc-remove" disabled={!isSaved} onClick={() => remove(value)} aria-label="Remove this saved location" style={{ ...pill, opacity: isSaved ? 1 : 0.45, background: 'rgba(220,38,38,0.08)', borderColor: 'rgba(220,38,38,0.3)', color: '#dc2626' }}>Remove</button>
+          </div>
+        )}
+      </div>
+      <div ref={wrapRef} className="relative">
+        <input id="sch-location" value={value} maxLength={120} onChange={e => onChange(e.target.value)} placeholder="Room, classroom or venue" autoComplete="off"
+          role={enabled ? 'combobox' : undefined} aria-expanded={enabled ? open : undefined} aria-controls={enabled ? 'sch-location-list' : undefined}
+          onKeyDown={e => { if (enabled && e.key === 'Escape' && open) { e.preventDefault(); e.stopPropagation(); setOpen(false) } else if (enabled && e.key === 'ArrowDown' && list.length) { e.preventDefault(); setOpen(true) } }}
+          style={{ ...fieldStyle, paddingRight: enabled ? 34 : undefined }} />
+        {enabled && (
+          <button type="button" tabIndex={-1} aria-label="Saved locations" data-testid="loc-arrow" onMouseDown={e => e.preventDefault()} onClick={() => setOpen(o => !o)}
+            className="absolute top-0 bottom-0 right-0 flex items-center justify-center" style={{ width: 34, color: 'var(--xp-txt3)' }}>
+            <ChevronDown />
+          </button>
+        )}
+        {enabled && open && box && (
+          <ul id="sch-location-list" role="listbox" aria-label="Saved locations" data-testid="loc-list" style={popupStyle(box)}>
+            {list.length === 0 && <li className="text-[12.5px]" style={{ padding: '10px 12px', color: 'var(--xp-txt3)' }}>No saved locations yet. Type one and tap &ldquo;+ Add&rdquo;.</li>}
+            {list.map(l => (
+              <li key={l} role="option" aria-selected={normalizeLocation(l) === normalizeLocation(value)} className="flex items-center gap-2" style={{ padding: '2px 4px 2px 12px', borderRadius: 8, fontSize: 14, color: 'var(--xp-txt)' }}>
+                <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => { onChange(l); setOpen(false) }} className="flex-1 min-w-0 truncate text-left" style={{ padding: '8px 0' }}>{l}</button>
+                <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => remove(l)} aria-label={`Remove saved location ${l}`} data-testid="loc-item-remove" style={{ width: 28, height: 28, color: 'var(--xp-txt3)' }}>&#10005;</button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {msg && (
+        <p role="status" data-testid="loc-msg" className="text-[11px] flex items-center gap-2" style={{ color: msg.tone === 'warn' ? '#dc2626' : 'var(--xp-txt2)' }}>
+          <span>{msg.text}</span>
+          {msg.undo && <button type="button" onClick={() => { onSavedChange?.(msg.undo as string[]); setMsg(null) }} className="font-bold" style={{ color: '#7c3aed' }}>Undo</button>}
+        </p>
+      )}
+    </div>
+  )
+}
+
 interface EventFormProps {
   mode: 'add' | 'edit'
   initial: ScheduleFormValues
@@ -344,6 +448,12 @@ interface EventFormProps {
   hint?: string
   /** Keep rendering with open={false} so the phone exit animation can play; the form unmounts (and resets) afterwards. */
   open?: boolean
+  /** The user's saved locations (v1.328) and how to change them; the parent persists. Omitted = the controls are hidden. */
+  savedLocations?: string[]
+  onSavedLocationsChange?: (next: string[]) => void
+  /** Set while a save is in flight / after it failed, so the form keeps the user's input and says so. */
+  saving?: boolean
+  saveError?: string | null
 }
 
 /** Phones: a full-screen panel that slides up and back down. Tablet/desktop: the original centred dialog. */
@@ -354,8 +464,8 @@ export function EventForm(props: EventFormProps) {
   return <EventFormInner {...props} phone={phone} visible={visible} />
 }
 
-function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, heading, hint, phone, visible }: EventFormProps & { phone: boolean; visible: boolean }) {
-  const { categories, fmt } = useSchedule()
+function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, heading, hint, phone, visible, savedLocations, onSavedLocationsChange, saving, saveError }: EventFormProps & { phone: boolean; visible: boolean }) {
+  const { fmt } = useSchedule()
   const [showEndDate, setShowEndDate] = useState(() => !!initial.endDate && initial.endDate !== initial.date)
   const [v, setV] = useState<ScheduleFormValues>(initial)
   const [errors, setErrors] = useState<ScheduleFormErrors>({})
@@ -399,10 +509,18 @@ function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, headin
           <Field label="Title *" htmlFor="sch-title" error={errors.title}>
             <input id="sch-title" value={v.title} maxLength={120} onChange={e => set('title', e.target.value)} placeholder="e.g. Study session" style={fieldStyle} autoFocus />
           </Field>
-          <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-3">
+          {/* Phones: Date on its own row, then Start | End side by side (each labelled). Tablet / desktop: the original Date | Start | End row. */}
+          {phone && (
             <Field label="Date *" htmlFor="sch-date" error={errors.date}>
               <input id="sch-date" type="date" value={v.date} onChange={e => set('date', e.target.value)} style={fieldStyle} />
             </Field>
+          )}
+          <div data-testid="time-row" className={phone ? 'grid grid-cols-2 gap-3' : 'grid grid-cols-1 min-[420px]:grid-cols-3 gap-3'}>
+            {!phone && (
+              <Field label="Date *" htmlFor="sch-date" error={errors.date}>
+                <input id="sch-date" type="date" value={v.date} onChange={e => set('date', e.target.value)} style={fieldStyle} />
+              </Field>
+            )}
             <Field label="Start *" htmlFor="sch-start" error={errors.start}>
               <TimeField id="sch-start" value={v.start} fmt={fmt} onChange={t => set('start', t)} />
             </Field>
@@ -419,25 +537,11 @@ function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, headin
               + Ends on a different day
             </button>
           )}
+          <DueDatePill on={!!v.isDeadline} onToggle={() => set('isDeadline', !v.isDeadline)} />
           <Field label="Category" htmlFor="sch-category">
-            {phone ? <CategorySelect id="sch-category" value={v.category} onChange={c => set('category', c)} /> : (
-            <div id="sch-category" role="radiogroup" aria-label="Category" className="flex flex-wrap gap-1.5">
-              {categories.map(c => {
-                const on = v.category === c.id
-                return (
-                  <button key={c.id} type="button" role="radio" aria-checked={on} onClick={() => set('category', c.id)}
-                    className="inline-flex items-center gap-1.5 text-[12px]"
-                    style={{ padding: '6px 10px', borderRadius: 999, background: on ? c.bg : 'var(--xp-bg3)', border: `1.5px solid ${on ? c.edge : 'var(--xp-bdr2)'}`, color: on ? c.text : 'var(--xp-txt2)', fontWeight: on ? 700 : 500 }}>
-                    <CategoryDot id={c.id} size={9} />{c.label}
-                  </button>
-                )
-              })}
-            </div>
-            )}
+            <CategorySelect id="sch-category" value={v.category} onChange={c => set('category', c)} />
           </Field>
-          <Field label="Location (optional)" htmlFor="sch-location">
-            <input id="sch-location" value={v.location} maxLength={120} onChange={e => set('location', e.target.value)} placeholder="Room, classroom or venue" style={fieldStyle} />
-          </Field>
+          <LocationField value={v.location} onChange={t => set('location', t)} saved={savedLocations} onSavedChange={onSavedLocationsChange} />
           <Field label="Online meeting link (optional)" htmlFor="sch-url" error={errors.meetingUrl}>
             <input id="sch-url" type="url" inputMode="url" value={v.meetingUrl} maxLength={300} onChange={e => set('meetingUrl', e.target.value)} placeholder="Google Meet, Zoom or Teams link" style={fieldStyle} />
           </Field>
@@ -456,11 +560,11 @@ function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, headin
               </select>
             </Field>
           </div>
-          <p className="text-[11px] leading-snug" style={{ color: 'var(--xp-txt3)' }}>
-            Preview only — events you add here aren’t saved or synced yet and disappear when you close My Schedule.
-          </p>
         </div>
 
+        {saveError && (
+          <div role="alert" data-testid="schedule-save-error" className="mx-4 mb-1 flex-shrink-0 text-[12px]" style={{ padding: '9px 11px', borderRadius: 10, background: 'rgba(220,38,38,0.09)', border: '0.5px solid rgba(220,38,38,0.4)', color: '#dc2626' }}>{saveError}</div>
+        )}
         {conflict && (
           <div role="alert" data-testid="schedule-conflict" className="mx-4 mb-1 flex-shrink-0" style={{ padding: '9px 11px', borderRadius: 10, background: 'rgba(220,38,38,0.09)', border: '0.5px solid rgba(220,38,38,0.4)' }}>
             <p className="text-[12px] font-bold" style={{ color: '#dc2626' }}>Scheduling Conflict</p>
@@ -469,7 +573,7 @@ function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, headin
         )}
         <div className="flex gap-2 px-4 py-3 flex-shrink-0" style={{ borderTop: '0.5px solid var(--xp-bdr)' }}>
           <button type="button" onClick={onCancel} className="flex-1 text-[13px] font-medium" style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)', color: 'var(--xp-txt)' }}>Cancel</button>
-          <button type="submit" aria-disabled={!!conflict} className="flex-1 text-[13px] font-semibold text-white" style={{ padding: '10px 12px', borderRadius: 10, background: '#7c3aed', opacity: conflict ? 0.55 : 1 }}>{mode === 'add' ? 'Add Event' : 'Save Changes'}</button>
+          <button type="submit" aria-disabled={!!conflict || !!saving} disabled={!!saving} className="flex-1 text-[13px] font-semibold text-white" style={{ padding: '10px 12px', borderRadius: 10, background: '#7c3aed', opacity: conflict || saving ? 0.55 : 1 }}>{saving ? 'Saving…' : mode === 'add' ? 'Add Event' : 'Save Changes'}</button>
         </div>
       </div>
     </SheetFrame>

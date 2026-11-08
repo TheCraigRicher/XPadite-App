@@ -92,6 +92,39 @@ export async function fetchCalendarDay(
   return data.day_data as DayData
 }
 
+/** Every day with its server revision (migration 024). If 024 is not applied yet, falls back to revision-less rows (every revision null). */
+export async function fetchCalendarDaysWithRev(
+  supabase: Supabase,
+  userId: string,
+): Promise<{ data: CalendarData; revs: Record<string, number | null> }> {
+  type Row = { date_key: string; day_data: unknown; rev?: number | null }
+  let rows: Row[] = []
+  const withRev = await supabase.from('calendar_days').select('date_key, day_data, rev').eq('user_id', userId)
+  if (!withRev.error) rows = (withRev.data ?? []) as Row[]
+  else {
+    const plain = await supabase.from('calendar_days').select('date_key, day_data').eq('user_id', userId)
+    if (plain.error || !plain.data) return { data: {}, revs: {} }
+    rows = plain.data as Row[]
+  }
+  const data: CalendarData = {}, revs: Record<string, number | null> = {}
+  for (const row of rows) { data[row.date_key] = row.day_data as DayData; revs[row.date_key] = typeof row.rev === 'number' ? row.rev : null }
+  return { data, revs }
+}
+
+export type DaySaveResult = { ok: true; rev: number } | { ok: false; rev: number; doc: DayData | null }
+
+/**
+ * Compare-and-swap write of one day (migration 024, calendar_day_save). Writes only if the server's revision is still `expectedRev`
+ * (null = "no row yet"); otherwise returns the server's current revision and document and writes NOTHING.
+ * Throws if the function does not exist (migration 024 not applied) — the caller decides how to degrade.
+ */
+export async function saveDayCas(supabase: Supabase, key: string, doc: DayData, expectedRev: number | null): Promise<DaySaveResult> {
+  const { data, error } = await supabase.rpc('calendar_day_save', { p_date_key: key, p_doc: doc, p_expected_rev: expectedRev })
+  if (error) throw Object.assign(new Error(error.message || 'save failed'), { code: error.code })
+  const r = data as { ok: boolean; rev: number; doc?: DayData | null }
+  return r.ok ? { ok: true, rev: r.rev } : { ok: false, rev: r.rev, doc: (r.doc as DayData | null) ?? null }
+}
+
 export async function upsertDayData(
   supabase: Supabase,
   userId: string,

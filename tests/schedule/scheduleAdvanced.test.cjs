@@ -317,13 +317,13 @@ test('time format: 12-hour (default) and 24-hour labels for hours, clock times a
 
 // ── structure: wiring that unit tests can't see ─────────────────────────────
 const M = () => read('components/xpadite/MeetingsModal.tsx'), V = () => read('components/xpadite/MyScheduleView.tsx'), P = () => read('components/xpadite/ScheduleParts.tsx')
-test('hamburger menu: sits beside the single Add Event button, with exactly the three approved items in order — and no Go to Date', () => {
+test('hamburger menu: sits beside the single Add Event button, with exactly the approved items in order (v1.328 adds Sync with Task Manager last) — and no Go to Date', () => {
   const m = M(), menu = read('components/xpadite/ScheduleMenu.tsx')
   const navRow = m.slice(m.indexOf('Tabs + the one Add Event button'), m.indexOf('{/* Body */}'))
   assert.ok(/aria-label="Add Event"[\s\S]*<ScheduleMenu/.test(navRow), 'menu immediately follows Add Event in the same row')
   assert.equal((m.match(/aria-label="Add Event"/g) || []).length, 1, 'still one Add Event button')
-  assert.deepEqual([...menu.matchAll(/role="menuitem"[\s\S]*?>\s*([A-Z][A-Za-z ]+?)\s*(?:\{|<)/g)].map(x => x[1]), ['Search Events', 'Filter Events', 'Manage Categories', 'Duplicate Event', 'Schedule Preferences'], 'source order; Search/Filter are phone-only')
-  assert.ok(/onSearch=\{phone && tab !== 'today'/.test(m) && /onFilter=\{phone && tab !== 'today'/.test(m) && /\{onSearch && \(/.test(menu) && /\{onFilter && \(/.test(menu), 'tablet/desktop never receive the two extra entries — their menu stays the original three')
+  assert.deepEqual([...menu.matchAll(/role="menuitem"[\s\S]*?>\s*([A-Z][A-Za-z ]+?)\s*(?:\{|<)/g)].map(x => x[1]), ['Search Events', 'Filter Events', 'Manage Categories', 'Duplicate Event', 'Schedule Preferences', 'Sync with Task Manager'], 'source order; Search/Filter are phone-only')
+  assert.ok(/onSearch=\{phone && tab !== 'today'/.test(m) && /onFilter=\{phone && tab !== 'today'/.test(m) && /\{onSearch && \(/.test(menu) && /\{onFilter && \(/.test(menu), 'tablet/desktop never receive the two extra entries — their menu stays the original three plus Sync with Task Manager (all sizes)')
   assert.ok(!/go to date/i.test(m + menu + V() + P() + read('components/xpadite/ScheduleDialogs.tsx')), 'Go to Date was rejected and must not exist')
   assert.ok(/aria-label="Schedule menu"/.test(menu) && /aria-haspopup="menu"/.test(menu) && /aria-expanded=\{open\}/.test(menu), 'accessible, and distinct from the app’s main burger menu')
   assert.ok(/aria-disabled=\{duplicateOff\}/.test(menu) && /Select one of your events first/.test(m) && /Synced calendar events can/.test(m), 'Duplicate is disabled with an explanation when nothing eligible is selected')
@@ -373,7 +373,7 @@ test('frontend-only: no persistence, backend, migrations or recurrence expansion
   const code = M().replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
   assert.ok(!/supabase|fetch\(|localStorage|sessionStorage/i.test(code))
   assert.ok(!/expandRecurr|rrule/i.test(read('components/xpadite/scheduleEngine.ts') + read('components/xpadite/scheduleLogic.ts')), 'recurrence is still stored/displayed only')
-  assert.ok(/aren’t saved yet|isn’t saved yet|not saved yet/.test(V() + P() + read('components/xpadite/ScheduleDialogs.tsx')), 'temporary data is labelled as such')
-  assert.ok(/Preview — custom categories last only while My Schedule is open/.test(read('components/xpadite/ScheduleDialogs.tsx')), 'Manage Categories still says its categories are not saved (the Preferences preview note was removed in v1.327 by request; preferences stay session-only)')
+  assert.ok(/Sample events are demos/.test(V()), 'demo data is still labelled as such (v1.328: real events are now saved)')
+  assert.ok(/Custom categories are saved to your account/.test(read('components/xpadite/ScheduleDialogs.tsx')), 'Manage Categories still says its categories are not saved (the Preferences preview note was removed in v1.327 by request; preferences stay session-only)')
 })
 

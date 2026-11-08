@@ -299,9 +299,9 @@ test('grid structure: 24 hours, 5 AM initial scroll, sticky header sharing the b
 test('burger menu: My Schedule sits right after Task Manager, once, with its icon, label and handler intact', () => {
   const side = read('components/xpadite/AppSidebar.tsx')
   const order = [...side.match(/const FINAL_ORDER[^=]*=\s*\[([\s\S]*?)\]/)[1].matchAll(/'([\w-]+)'/g)].map(x => x[1])
-  assert.deepEqual(order.slice(0, 5), ['profile', 'tasks', 'meetings', 'activities', 'journal-notes'], 'Profile, Task Manager, My Schedule, Activity Manager, Planner/Journal')
+  assert.deepEqual(order.slice(0, 6), ['profile', 'tasks', 'meetings', 'activities', 'journal-notes', 'mind-mapping'], 'Profile, Task Manager, My Schedule, Activity Manager, Planner/Journal, then Mind Mapping (v1.328) directly below Planner/Journal')
   assert.equal(order.filter(a => a === 'meetings').length, 1, 'no duplicate')
-  assert.deepEqual(order.slice(5), ['analytics', 'goal-manager', 'notifications', 'qotd', 'ai-coach', 'motivate', 'gallery', 'sync-calendar', 'settings', 'tutorials', 'help', 'whats-new'], 'every other item keeps its relative order')
+  assert.deepEqual(order.slice(6), ['analytics', 'goal-manager', 'notifications', 'qotd', 'ai-coach', 'motivate', 'gallery', 'sync-calendar', 'settings', 'tutorials', 'help', 'whats-new'], 'every other item keeps its relative order')
   assert.ok(/icon: '👥', label: 'My Schedule',\s+action: 'meetings'/.test(side) && /case 'meetings':\s+onMeetings\?\.\(\)/.test(side), 'icon, label and handler preserved')
   assert.ok(/onMeetings=\{\(\) => setMeetingsOpen\(true\)\}/.test(read('components/xpadite/XpaditeApp.tsx')))
 })

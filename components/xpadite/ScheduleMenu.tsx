@@ -14,11 +14,13 @@ export interface ScheduleMenuProps {
   onManageCategories: () => void
   onDuplicate: () => void
   onPreferences: () => void
+  /** Opens the "Sync with Task Manager" settings dialog. */
+  onSync: () => void
   /** Duplicate is only available for a selected XPadite event; otherwise this explains why it is off. */
   duplicateHint: string | null
 }
 
-export function ScheduleMenu({ onSearch, onFilter, onManageCategories, onDuplicate, onPreferences, duplicateHint }: ScheduleMenuProps) {
+export function ScheduleMenu({ onSearch, onFilter, onManageCategories, onDuplicate, onPreferences, onSync, duplicateHint }: ScheduleMenuProps) {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
   const firstRef = useRef<HTMLButtonElement>(null)
@@ -69,6 +71,12 @@ export function ScheduleMenu({ onSearch, onFilter, onManageCategories, onDuplica
           </button>
           <button type="button" role="menuitem" className={item} style={itemStyle} onClick={() => { setOpen(false); onPreferences() }}>
             Schedule Preferences
+          </button>
+          <button type="button" role="menuitem" data-testid="menu-sync-task-manager" className="w-full text-left flex items-center gap-2 text-[13px] font-medium" style={itemStyle} onClick={() => { setOpen(false); onSync() }}>
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#7c3aed" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="flex-shrink-0">
+              <path d="M20 11a8 8 0 0 0-14.3-4.6L4 8" /><path d="M4 4v4h4" /><path d="M4 13a8 8 0 0 0 14.3 4.6L20 16" /><path d="M20 20v-4h-4" />
+            </svg>
+            Sync with Task Manager
           </button>
         </div>
       )}

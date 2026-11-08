@@ -30,7 +30,7 @@ import { BillingProvider, TrialExpiredGate } from './BillingContext'
 import { TrialReminderBanner } from './TrialReminderBanner'
 import { TrialWelcome } from './TrialWelcome'
 import { ActivityManagerModal } from './ActivityManagerModal'
-import { dateKey, todayKey, APP_YEAR } from './utils'
+import { dateKey, todayKey, todayKeyInTz, APP_YEAR } from './utils'
 import { YearShareModal } from './YearProgressShare'
 import type { MobileTab } from './MobileBottomNav'
 import type { XpaditeNotification } from './NotificationsModal'
@@ -692,6 +692,13 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [notificationsOpen, setNotificationsOpen]       = useState(false)
   const [syncOpen, setSyncOpen]                         = useState(false)
   const [meetingsOpen, setMeetingsOpen]                 = useState(false)
+  const { scheduleFocusRequest, requestMindMap, effectiveTimezone: appTz } = useApp()
+  // "Edit in My Schedule" (Task Manager deadline popup): open My Schedule on top (the Day view stays open underneath, unsaved notes safe)
+  useEffect(() => {
+    if (!scheduleFocusRequest) return
+    const t = window.setTimeout(() => setMeetingsOpen(true), 0)
+    return () => window.clearTimeout(t)
+  }, [scheduleFocusRequest])
   const [helpOpen, setHelpOpen]                         = useState(false)
 
   // ── Mobile tab ────────────────────────────────────────────────────────────────
@@ -1034,6 +1041,15 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
           } else {
             setJournalNotesOpen(true)
           }
+        }}
+        onMindMapping={() => {
+          // The SAME Planner/Journal workspace and the SAME Mind Mapping Canvas: jump to today's page and ask its editor to open the canvas
+          // (mobile: the Planner tab, exactly like Planner/Journal; tablet/desktop: the Planner/Journal overlay).
+          const today = todayKeyInTz(appTz)
+          setPlannerDestDate(today)
+          requestMindMap(today)
+          if (typeof window !== 'undefined' && window.innerWidth < 640) handleMobileNav('planner')
+          else setJournalNotesOpen(true)
         }}
         onNotifications={() => setNotificationsOpen(true)}
         onSync={() => setSyncOpen(true)}

@@ -31,6 +31,13 @@ export interface ScheduleEvent {
   /** Which connected calendar a synced event came from (undefined for events made in XPadite). */
   source?: ScheduleSource
   isCancelled?: boolean
+  /**
+   * v1.328 — the event is also a deadline. The due date/time is NOT stored separately: it is always this event's own endAt
+   * (the authoritative end instant), so editing the end moves the deadline and nothing can drift.
+   */
+  isDeadline?: boolean
+  /** v1.328: 'detached' = the user removed this deadline's Task Manager task on purpose (the deadline itself stays). */
+  taskLink?: 'linked' | 'detached'
 }
 
 export interface ScheduleCategory {
@@ -427,6 +434,8 @@ export interface ScheduleFormValues {
   notes: string
   reminderMins: number | null
   recurrence: ScheduleRecurrence
+  /** "Set as Due Date" pill: the end date/time above is the due date/time. */
+  isDeadline?: boolean
 }
 
 export type ScheduleFormErrors = Partial<Record<'title' | 'date' | 'endDate' | 'start' | 'end' | 'meetingUrl', string>>
@@ -497,6 +506,7 @@ export function formToEventFields(v: ScheduleFormValues): Omit<ScheduleEvent, 'i
     notes: v.notes.trim() || undefined,
     reminderMins: v.reminderMins,
     recurrence: v.recurrence,
+    isDeadline: v.isDeadline ? true : undefined,
   }
 }
 
@@ -513,6 +523,7 @@ export function eventToForm(ev: ScheduleEvent): ScheduleFormValues {
     notes: ev.notes ?? '',
     reminderMins: ev.reminderMins ?? null,
     recurrence: ev.recurrence ?? 'none',
+    isDeadline: ev.isDeadline ? true : false,
   }
 }
 
@@ -524,7 +535,7 @@ export function blankFormAt(day: Date, startMin: number, durationMins = DEFAULT_
   const e = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, eMin)
   return {
     title: '', date: toDateInput(s.getTime()), endDate: toDateInput(s.getTime()), start: toTimeInput(s.getTime()), end: toTimeInput(e.getTime()),
-    category: 'meeting', location: '', meetingUrl: '', notes: '', reminderMins: null, recurrence: 'none',
+    category: 'meeting', location: '', meetingUrl: '', notes: '', reminderMins: null, recurrence: 'none', isDeadline: false,
   }
 }
 
@@ -532,6 +543,41 @@ export function blankFormAt(day: Date, startMin: number, durationMins = DEFAULT_
 export function blankForm(day: Date, requestedHour = 9, durationMins = DEFAULT_PREFS.defaultDurationMins): ScheduleFormValues {
   const latestStart = Math.floor((24 * 60 - 1 - Math.max(1, durationMins)) / 15) * 15
   return blankFormAt(day, Math.min(Math.max(requestedHour, 0) * 60, Math.max(0, latestStart)), durationMins)
+}
+
+// -- Saved locations (v1.328) -------------------------------------------------------------------------------------
+
+export const MAX_SAVED_LOCATIONS = 50
+
+/** Comparison key: trimmed, inner whitespace collapsed, case-insensitive. "Room  204" and "room 204" are the same place. */
+export function normalizeLocation(s: string): string {
+  return s.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+export type SaveLocationStatus = 'added' | 'empty' | 'duplicate' | 'full'
+
+/** Adds `raw` to the saved list (never mutates). Empty / duplicate / over-limit entries leave the list unchanged and say why. */
+export function addSavedLocation(list: string[], raw: string): { list: string[]; status: SaveLocationStatus; value: string } {
+  const value = raw.trim().replace(/\s+/g, ' ').slice(0, 120)
+  if (!value) return { list, status: 'empty', value }
+  const key = normalizeLocation(value)
+  if (list.some(l => normalizeLocation(l) === key)) return { list, status: 'duplicate', value }
+  if (list.length >= MAX_SAVED_LOCATIONS) return { list, status: 'full', value }
+  return { list: [...list, value], status: 'added', value }
+}
+
+/** Removes one saved location. Scheduled events keep their own copy of the text, so none are touched. */
+export function removeSavedLocation(list: string[], value: string): string[] {
+  const key = normalizeLocation(value)
+  return list.filter(l => normalizeLocation(l) !== key)
+}
+
+/** Coerces whatever was stored into a clean, de-duplicated list of strings. */
+export function sanitizeSavedLocations(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  let out: string[] = []
+  for (const r of raw) if (typeof r === 'string') out = addSavedLocation(out, r).list
+  return out
 }
 
 // -- Time text (24-hour values in the form, shown in the user's chosen format) ----------------------------------

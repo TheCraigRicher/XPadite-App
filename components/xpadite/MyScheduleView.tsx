@@ -164,6 +164,10 @@ function EventBlock({ p, dayStart, selected, dragging, onSelect, onPress }: {
       {ev.readOnly && heightPx >= 30 && (
         <svg data-testid="readonly-lock" viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="2.6" aria-hidden="true" className="absolute" style={{ top: 3, right: 3, opacity: 0.7 }}><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" strokeLinecap="round" /></svg>
       )}
+      {ev.isDeadline && heightPx >= 30 && (
+        // compact deadline flag: the card keeps its category colours (never turned red)
+        <svg data-testid="deadline-flag" viewBox="0 0 24 24" width="10" height="10" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" aria-label="Deadline" className="absolute" style={{ top: 3, right: ev.readOnly ? 14 : 3, color: '#dc2626' }}><path d="M5 21V4M5 4h11l-2 4 2 4H5" /></svg>
+      )}
       {showTime && <span className="xp-sch-ev-sub block truncate">{timeRangeLabel(ev.startAt, ev.endAt, fmt)}</span>}
       {showPlace && <span className="xp-sch-ev-sub hidden sm:block truncate">📍 {ev.location}</span>}
     </button>
@@ -252,15 +256,21 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
   if (seenMode !== mode) { setSeenMode(mode); setPickerOpen(false) }
   const monthPicker: MonthPickerBinding = { open: pickerOpen, onOpenChange: setPickerOpen, month: anchor, onPick: (y, m) => setAnchor(a => pickMonthAnchor(a, y, m, !month)) }
 
-  // Jump to an event the modal just added/edited (adjusting state during render — no effect needed).
+  // Jump to an event the modal just added/edited. This view's OWN state is adjusted during render; the browsed date and tapped date
+  // belong to the modal (they survive tab switches), and a component must not update its parent while rendering, so those two move in an effect.
   if (focus && focus.nonce !== seenFocus) {
     setSeenFocus(focus.nonce)
     setSelectedId(focus.id)
     setSheetOpen(!focus.quiet)
-    setAnchor(startOfDay(new Date(focus.at)))
-    setSelectedDay(startOfDay(new Date(focus.at)))
     setSlot(null)
   }
+  const focusDoneRef = useRef(focus?.nonce ?? 0)
+  useEffect(() => {
+    if (!focus || focus.nonce === focusDoneRef.current) return
+    focusDoneRef.current = focus.nonce
+    setAnchor(startOfDay(new Date(focus.at)))
+    setSelectedDay(startOfDay(new Date(focus.at)))
+  }, [focus, setAnchor, setSelectedDay])
 
   const scrollerRef = useRef<HTMLDivElement>(null)
   const phoneToolbarRef = useRef<HTMLDivElement>(null)
@@ -768,7 +778,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
           {visible.length === 0 && (
             <p className="text-center text-[11.5px] pb-1" style={{ color: 'var(--xp-txt3)' }}>No events match your search or filters.</p>
           )}
-          <p className="text-[10.5px]" style={{ color: 'var(--xp-txt3)' }}>Preview — sample events; anything you add, move or change isn’t saved yet.</p>
+          <p className="text-[10.5px]" style={{ color: 'var(--xp-txt3)' }}>Sample events are demos. Your own events are saved to your account.</p>
         </div>
       </div>
 

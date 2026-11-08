@@ -111,7 +111,7 @@ test('Preferences: X and preview text removed; Cancel | Done; draft state; all c
   assert.ok(/const \[draft, setDraft\] = useState<SchedulePrefs>\(prefs\)/.test(inner) && /value=\{draft\.defaultDurationMins\}/.test(inner) && /value=\{draft\.weekStart\}/.test(inner) && /value=\{draft\.timeFormat\}/.test(inner), 'every control edits the draft, not the live preferences')
   assert.ok(/useLayerEscape\(onClose\)/.test(inner) && /<Shell title="Schedule Preferences" onClose=\{onClose\}/.test(inner), 'Escape and backdrop/swipe (Shell/SheetFrame onClose) are Cancel')
   const m = src('MeetingsModal.tsx')
-  assert.ok(/onApply=\{next => \{ setPrefs\(sanitizePrefs\(next\)\); setDialog\(null\) \}\}/.test(m) && !/onChange=\{patch => setPrefs/.test(m), 'only Done writes the preferences (still session-only state)')
+  assert.ok(/onApply=\{next => \{ const p = sanitizePrefs\(next\); setPrefs\(p\); setScheduleTimeFormat\(p\.timeFormat\); setDialog\(null\) \}\}/.test(m) && !/onChange=\{patch => setPrefs/.test(m), 'only Done writes the preferences (still session-only state; v1.328 also shares the time format app-wide for the session)')
   assert.ok(/<SheetFrame phone=\{phone\} visible=\{visible\} variant="sheet"/.test(d) && /useSheetPhase\(props\.open \?\? true, phone\)/.test(d), 'phones keep the animated bottom sheet; tablet/desktop keep the centred dialog')
 })
 test('Preferences values stay valid after Done: sanitised, session-only, defaults preserved', () => {

@@ -16,7 +16,7 @@ const app = read('components/xpadite/XpaditeApp.tsx')
 test('persistence: no fire-and-forget day upsert that only console.errors (the original silent-loss path)', () => {
   assert.ok(!/pendingDaySync(Timers|Data)Ref/.test(ctx), 'old debounce maps are gone')
   assert.ok(!/upsertDayData\(createClient\(\), uid, key, (dayData|updated)\)\.catch/.test(ctx), 'no swallow-and-forget upsert')
-  assert.ok(/new DaySyncQueue<DayData>/.test(ctx) && /await upsertDayData\(createClient\(\), uid, data|await upsertDayData\(createClient\(\), uid, key, data\)/.test(ctx), 'writes go through the queue and are awaited')
+  assert.ok(/new DaySyncQueue<DayData>/.test(ctx) && /write: \(key, data\) => writeDayRef\.current\(key, data\)/.test(ctx) && /await saveDayCas\(sb, key, mine,/.test(ctx) && /await upsertDayData\(sb, uid, key, (data|mine)\)/.test(ctx), 'writes go through the queue and are awaited (v1.328: compare-and-swap; the plain upsert is only the fallback for a database without migration 024)')
 })
 
 test('hydration and realtime never overwrite a day whose latest edit is unconfirmed (pending, in flight OR failed)', () => {

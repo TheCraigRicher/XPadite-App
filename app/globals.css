@@ -35,6 +35,25 @@ body {
     0 0 0 var(--xp-prod-ring-spread, 4.5px) var(--xp-ring-outer, transparent);
 }
 
+/* ─── Calendar deadline corner marker (v1.328) — see components/xpadite/DeadlineMark.tsx ─────────────
+   A small rounded square flush in a day cell's top-right corner (bottom-right on a Target day, whose dart feathers occupy the
+   top-right). Flush, because the productive circle's outer ring leaves free room only right in the corner; sized from the cell
+   (22%, 3-13px; 14% / max 9px in the Month Zoom, whose circles are larger). It sits BELOW every existing indicator in z-order. */
+.xp-dl-corner {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: clamp(3px, 22%, 13px);
+  height: clamp(3px, 22%, 13px);
+}
+.xp-dl-corner[data-size="sm"] { width: clamp(3px, 14%, 9px); height: clamp(3px, 14%, 9px); }
+.xp-dl-corner[data-pos="br"] { top: auto; bottom: 0; }
+@media (max-width: 639px) {
+  /* 3-4px: a hairline-bordered translucent square would vanish, so on the tiny phone cells it is a small, firmer (still soft red) square */
+  .xp-calendar-card .xp-dl-corner { border-radius: 1px; background: rgba(239, 68, 68, 0.88) !important; border-color: rgba(185, 28, 28, 0.9) !important; }
+  .xp-calendar-card .xp-dl-corner[data-dark="true"] { background: rgba(248, 113, 113, 0.95) !important; border-color: rgba(254, 202, 202, 0.9) !important; }
+}
+
 /* ─── Year calendar: mobile productive-ring thinning (Pass 1) ──────────────
    Scoped to .xp-calendar-card so the expanded Monthly Calendar is unaffected.
    Ring is now plain CSS (no inline), so no !important needed. */

@@ -22,6 +22,14 @@ const LogoutIcon = () => (
   </svg>
 )
 
+/** Connected nodes (a mind map). Same size/colour language as the other custom menu icons. */
+const MindMapIcon = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 inline-block align-middle" style={{ transform: 'translateY(-1px)' }} aria-hidden="true">
+    <circle cx="12" cy="12" r="2.6" /><circle cx="4.5" cy="5.5" r="1.9" /><circle cx="19.5" cy="5.5" r="1.9" /><circle cx="4.5" cy="18.5" r="1.9" /><circle cx="19.5" cy="18.5" r="1.9" />
+    <path d="M10 10.3 5.9 6.8M14 10.3l4.1-3.5M10 13.7l-4.1 3.5M14 13.7l4.1 3.5" />
+  </svg>
+)
+
 const TaskCheckIcon = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2" className="w-5 h-5 inline-block align-middle" style={{ transform: 'translateY(-1px)' }}>
     <rect x="3" y="3" width="18" height="18" rx="4" strokeLinecap="round" strokeLinejoin="round" />
@@ -76,6 +84,7 @@ type MenuAction =
   | 'motivate'
   | 'qotd'
   | 'journal-notes'
+  | 'mind-mapping'
   | 'notifications'
   | 'tutorials'
   | 'help'
@@ -102,6 +111,7 @@ const MENU_ITEMS: MenuItem[] = [
   { icon: '🔥', label: 'Motivate Me',           action: 'motivate',      dividerBefore: true                                         },
   { icon: '💬', label: 'Quote of the Day | QOTD', action: 'qotd'                                                                     },
   { icon: '📝', label: 'Planner/Journal',        action: 'journal-notes'                                                              },
+  { icon: '🧠', label: 'Mind Mapping',           action: 'mind-mapping'                                                               },
   { icon: '🔔', label: 'Notifications',         action: 'notifications'                                                              },
   { icon: '🎓', label: 'XPadite Tutorials',     action: 'tutorials',     dividerBefore: true, href: 'https://www.youtube.com/@Xpadite' },
   { icon: '⚙️', label: 'Settings',             action: 'settings'                                                                    },
@@ -110,7 +120,7 @@ const MENU_ITEMS: MenuItem[] = [
 
 // Finalized order, labels and icons — used at every screen size.
 const FINAL_ORDER: MenuAction[] = [
-  'profile', 'tasks', 'meetings', 'activities', 'journal-notes', 'analytics', 'goal-manager', 'notifications', 'qotd',
+  'profile', 'tasks', 'meetings', 'activities', 'journal-notes', 'mind-mapping', 'analytics', 'goal-manager', 'notifications', 'qotd',
   'ai-coach', 'motivate', 'gallery', 'sync-calendar', 'settings', 'tutorials', 'help', 'whats-new',
 ]
 
@@ -119,6 +129,7 @@ const FINAL_MENU_ITEMS: MenuItem[] = FINAL_ORDER.map(action => {
   if (action === 'tasks') return { ...item, icon: <TaskCheckIcon /> }
   if (action === 'activities') return { ...item, icon: <ActivityManagerIcon /> }
   if (action === 'ai-coach') return { ...item, icon: <AICoachMenuIcon /> }
+  if (action === 'mind-mapping') return { ...item, icon: <MindMapIcon /> }
   if (action === 'qotd')  return { ...item, label: 'Quote of the Day' }
   if (action === 'sync-calendar') return { ...item, label: 'Sync' }
   return item
@@ -138,6 +149,7 @@ interface AppSidebarProps {
   onActivities?: () => void
   onAICoach?: () => void
   onJournalNotes?: () => void
+  onMindMapping?: () => void
   onNotifications?: () => void
   onTasks?: () => void
   onSync?: () => void
@@ -157,6 +169,7 @@ export function AppSidebar({
   onActivities,
   onAICoach,
   onJournalNotes,
+  onMindMapping,
   onNotifications,
   onTasks,
   onSync,
@@ -316,6 +329,7 @@ export function AppSidebar({
       case 'qotd':           onQotd?.(); break
       case 'ai-coach':       onAICoach?.(); break
       case 'journal-notes':  onJournalNotes?.(); break
+      case 'mind-mapping':   onMindMapping?.(); break
       case 'notifications':  onNotifications?.(); break
       case 'sync-calendar':  onSync?.(); break
       case 'meetings':       onMeetings?.(); break

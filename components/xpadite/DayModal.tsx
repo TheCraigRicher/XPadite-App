@@ -7,6 +7,9 @@ import { useApp, EMPTY_DAY } from './AppContext'
 import type { Task, TaskSession, Activity, TaskAttachment, DayData, JournalBlock } from './types'
 import { parseJournalDoc, mkId } from './journalUtils'
 import { formatMs, formatHMS, formatTime, formatTime12, isProductiveActivity, APP_YEAR, todayKey, nowH12InTz } from './utils'
+import { dueStatus, DUE_LABEL, isDeadlineTask, isEventTask } from './deadlineLink'
+import { clockLabel, longDateLabel, timeRangeLabel } from './scheduleLogic'
+import type { TimeFormat } from './scheduleLogic'
 import { ReminderModal } from './ReminderModal'
 import { TransferTaskModal } from './TransferTaskModal'
 import { SendToPlannerModal } from './SendToPlannerModal'
@@ -929,6 +932,29 @@ interface TaskRowProps {
   onPlannerNotes?: () => void
 }
 
+/** Due-date line inside the task-title popup: status chip (Due Today / Upcoming / Overdue), full date and exact time. */
+function DeadlineInfoLine({ dueAt, done, now, fmt }: { dueAt: number; done: boolean; now: number; fmt: TimeFormat }) {
+  const status = dueStatus(dueAt, now)
+  const tone = status === 'overdue' ? { fg: '#b91c1c', bg: 'rgba(239,68,68,0.14)', bd: 'rgba(239,68,68,0.45)' }
+    : status === 'today' ? { fg: '#b45309', bg: 'rgba(245,158,11,0.16)', bd: 'rgba(245,158,11,0.5)' }
+    : { fg: '#1d4ed8', bg: 'rgba(59,130,246,0.13)', bd: 'rgba(59,130,246,0.4)' }
+  return (
+    <div data-testid="task-due-info" style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--xp-txt2)' }}>
+      {!done && <span data-testid="task-due-status" style={{ padding: '1px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, color: tone.fg, background: tone.bg, border: `0.5px solid ${tone.bd}` }}>{DUE_LABEL[status]}</span>}
+      <span>{longDateLabel(dueAt)} · {clockLabel(dueAt, fmt)}</span>
+    </div>
+  )
+}
+
+/** Popup line for a synced ordinary event: when it is scheduled (start – end), in the user's chosen time format. */
+function EventInfoLine({ start, end, fmt }: { start: number; end: number; fmt: TimeFormat }) {
+  return (
+    <div data-testid="task-event-info" style={{ marginTop: 8, fontSize: 12, color: 'var(--xp-txt2)' }}>
+      {longDateLabel(start)} · {timeRangeLabel(start, end, fmt)}
+    </div>
+  )
+}
+
 function TaskRow({
   task, index, isActive, blockedByOtherTimer, now, isEditing, onEditStart, onEditEnd, dateKey,
   expanded, onExpandToggle,
@@ -944,7 +970,19 @@ function TaskRow({
   onTransfer, transferDisabled,
   onPlannerNotes,
 }: TaskRowProps) {
-  const { activities, reminders, isDark, setToast } = useApp()
+  const { activities, reminders, isDark, setToast, scheduleEvents, requestScheduleEvent, scheduleTimeFormat } = useApp()
+  // v1.328: a task linked to a My Schedule deadline gets the SAME red urgent look as a priority task (applied once, priority value untouched).
+  // Two kinds of schedule-linked task (deadlineLink.ts): a DEADLINE task ('dl-', due date) gets the urgent look; an ordinary synced EVENT task ('ev-',
+  // start date) keeps the normal look — enabling "Sync with Task Manager" never turns tasks red.
+  const linkedEvent = task.sourceEventId ? scheduleEvents.find(e => e.id === task.sourceEventId) : undefined
+  const deadlineEvent = isDeadlineTask(task) && linkedEvent?.isDeadline ? linkedEvent : undefined
+  const eventTaskEvent = isEventTask(task) ? linkedEvent : undefined
+  const urgent = !!task.isPriority || isDeadlineTask(task)
+  // A deadline task's title belongs to its My Schedule event (the next sync would overwrite a local rename): explain instead of editing.
+  const startEdit = () => {
+    if (task.sourceEventId) { setToast('This task\u2019s title comes from its My Schedule event. Open it with \u201cEdit in My Schedule\u201d (tap the title).'); return }
+    onEditStart()
+  }
   const attachments = task.attachments ?? []
   const [uploading,   setUploading]   = useState(false)
   const [lightbox,    setLightbox]    = useState<string | null>(null)
@@ -1057,7 +1095,7 @@ function TaskRow({
   }
   function handleTitleClick() {
     if (isEditing) return
-    if (!task.text) { onEditStart(); return }
+    if (!task.text) { startEdit(); return }
     setShowTooltip(false); setTooltipPos(null)
     setShowPopover(true)
   }
@@ -1410,10 +1448,10 @@ function TaskRow({
   const multiSession   = (task.sessions?.filter(s => s.endTs !== null).length ?? 0) > 1
 
   // ── Card visuals: purple accent for active (not green) ─────────────────────
-  const cardBorder = expanded ? 'rgba(124,58,237,0.28)' : task.isPriority ? 'rgba(239,68,68,0.28)' : 'var(--xp-bdr)'
+  const cardBorder = expanded ? 'rgba(124,58,237,0.28)' : urgent ? 'rgba(239,68,68,0.28)' : 'var(--xp-bdr)'
 
   // Priority overrides custom color visually; custom color overrides default
-  const colorOverlay = task.isPriority
+  const colorOverlay = urgent
     ? (isDark ? PRIORITY_TINT.D : PRIORITY_TINT.L)
     : (task.taskColor && task.taskColor !== 'default' && TASK_COLOR_CONFIG[task.taskColor])
     ? (isDark ? TASK_COLOR_CONFIG[task.taskColor].tintD : TASK_COLOR_CONFIG[task.taskColor].tintL)
@@ -1480,8 +1518,8 @@ function TaskRow({
           )}
 
           {/* Priority indicator */}
-          {task.isPriority && (
-            <span className="flex-shrink-0 font-bold leading-none" style={{ fontSize: 11, color: '#ef4444' }} title="Priority task">!</span>
+          {urgent && (
+            <span className="flex-shrink-0 font-bold leading-none" style={{ fontSize: 11, color: '#ef4444' }} title={task.isPriority ? 'Priority task' : 'Deadline task'}>!</span>
           )}
 
           {/* Task N / Sub-Task N */}
@@ -1563,7 +1601,7 @@ function TaskRow({
             }} className="p-1.5 rounded-lg hover:bg-black/5 transition-colors" style={{ color: 'var(--xp-txt3)' }}><DotsIcon /></button>
             {menuOpen && menuAnchorRect && (
               <TaskMenu
-                onEdit={() => { onEditStart(); setMenuOpen(false) }}
+                onEdit={() => { startEdit(); setMenuOpen(false) }}
                 onSetReminder={onSetReminder}
                 onAdjustTime={() => setAdjustOpen(true)}
                 onDuplicate={onDuplicate}
@@ -1948,6 +1986,17 @@ function TaskRow({
         <div style={{ position: 'fixed', inset: 0, zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, background: 'rgba(0,0,0,0.25)' }} onClick={() => setShowPopover(false)}>
           <div style={{ background: isDark ? '#1e1830' : '#ffffff', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.10)'}`, borderRadius: 14, padding: '14px 16px', maxWidth: 320, width: '100%', boxShadow: '0 16px 48px rgba(0,0,0,0.22), 0 4px 16px rgba(0,0,0,0.10)' }} onClick={e => e.stopPropagation()}>
             <p style={{ fontSize: 13, color: isDark ? 'rgba(255,255,255,0.88)' : '#111827', lineHeight: 1.55, wordBreak: 'break-word', fontWeight: 500, margin: 0 }}>{task.text}</p>
+            {deadlineEvent && <DeadlineInfoLine dueAt={deadlineEvent.endAt} done={task.done} now={now} fmt={scheduleTimeFormat} />}
+            {eventTaskEvent && <EventInfoLine start={eventTaskEvent.startAt} end={eventTaskEvent.endAt} fmt={scheduleTimeFormat} />}
+            {task.sourceEventId && (
+              <div data-testid="task-deadline-owner" style={{ marginTop: 8, fontSize: 11, color: 'var(--xp-txt3)', lineHeight: 1.45 }}>
+                {isDeadlineTask(task) ? 'The title and due date come from your My Schedule deadline.' : 'The title and time come from your My Schedule event.'}
+                <button type="button" data-testid="edit-in-schedule" onClick={() => { setShowPopover(false); requestScheduleEvent(task.sourceEventId as string) }}
+                  style={{ display: 'block', marginTop: 6, fontSize: 11.5, fontWeight: 700, color: '#7c3aed', padding: '3px 0', cursor: 'pointer', background: 'none', border: 'none' }}>
+                  Edit in My Schedule \u2192
+                </button>
+              </div>
+            )}
             <button onClick={() => setShowPopover(false)} style={{ marginTop: 10, fontSize: 11, color: 'var(--xp-txt3)', padding: '3px 12px', borderRadius: 6, border: '0.5px solid var(--xp-bdr2)', background: 'var(--xp-bg2)', cursor: 'pointer' }}>Dismiss</button>
           </div>
         </div>
@@ -2278,7 +2327,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   const {
     calData, updateDay, flushDays, activeTaskTimer, setActiveTaskTimer,
     activities, activeSession, setActiveSession, selectedActId,
-    reminders, isDark, setToast, sessions, effectiveTimezone, effectiveLocale,
+    reminders, isDark, setToast, sessions, effectiveTimezone, effectiveLocale, detachDeadlineTask,
   } = useApp()
 
   useLockBodyScroll()
@@ -2739,9 +2788,21 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     doDeleteTask(id)
   }
 
-  function doDeleteTask(id: string) {
+  /** Deleting a deadline task removes only its Task Manager representation: the choice is saved first (so it is never silently recreated),
+   *  and the deadline stays in My Schedule and the Calendar. If the choice can not be saved the task is NOT deleted. */
+  async function detachLinked(ids: Set<string>): Promise<boolean> {
+    const linked = dayData.tasks.filter(t => ids.has(t.id) && t.sourceEventId).map(t => t.sourceEventId as string)
+    if (linked.length === 0) return true
+    try { await Promise.all([...new Set(linked)].map(eid => detachDeadlineTask(eid))) }
+    catch { setToast('Couldn\u2019t remove the deadline task \u2014 check your connection and try again.'); return false }
+    setToast('Task removed. The event stays in My Schedule \u2014 add the task back from the event\u2019s details.')
+    return true
+  }
+
+  async function doDeleteTask(id: string) {
     const childIds = dayData.tasks.filter(t => t.parentTaskId === id).map(t => t.id)
     const idsToDelete = new Set([id, ...childIds])
+    if (!(await detachLinked(idsToDelete))) { setPendingDeleteId(null); return }
     childIds.forEach(cid => { if (activeTaskTimer?.taskId === cid) setActiveTaskTimer(null) })
     if (activeTaskTimer?.taskId === id) setActiveTaskTimer(null)
     updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.filter(t => !idsToDelete.has(t.id)) }))
@@ -2768,15 +2829,17 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   }
 
   function toggleMoveSelect(taskId: string) {
+    if (dayData.tasks.find(t => t.id === taskId)?.sourceEventId) { setToast('A deadline task stays on its due day \u2014 change the due date in My Schedule.'); return }
     setSelectedForMove(prev => { const n = new Set(prev); n.has(taskId) ? n.delete(taskId) : n.add(taskId); return n })
   }
 
-  function executeDeleteSelected() {
+  async function executeDeleteSelected() {
     const toDelete = new Set<string>()
     selectedForDel.forEach(id => {
       toDelete.add(id)
       dayData.tasks.forEach(t => { if (t.parentTaskId === id) toDelete.add(t.id) })
     })
+    if (!(await detachLinked(toDelete))) { setDeleteConfirm(false); return }
     toDelete.forEach(id => { if (activeTaskTimer?.taskId === id) setActiveTaskTimer(null) })
     updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.filter(t => !toDelete.has(t.id)) }))
     setDirtyNotesMap(prev => { const n = { ...prev }; toDelete.forEach(id => delete n[id]); return n })
@@ -3394,7 +3457,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                     transferDisabled: (() => {
                       const childIds = dayData.tasks.filter(c => c.parentTaskId === t.id).map(c => c.id)
                       const familyIds = new Set([t.id, ...childIds])
-                      return !!activeTaskTimer && activeTaskTimer.dateKey === dateKey && familyIds.has(activeTaskTimer.taskId)
+                      // a deadline task lives on its due day (set by its My Schedule event): it can not be moved to another date
+                      return (!!activeTaskTimer && activeTaskTimer.dateKey === dateKey && familyIds.has(activeTaskTimer.taskId)) || !!t.sourceEventId
                     })(),
                     isChild, childIndex: childIdx,
                     onChooseColor: (color: string) => setTaskColor(t.id, color),

@@ -156,17 +156,17 @@ test('empty-date click re-uses the EXISTING add form (onAddAt) — no second for
   assert.ok(!/EventForm|<form/.test(g), 'the month files never define their own form')
 })
 
-test('Month View is frontend-only: no Supabase, RPC, migration, billing or v1.328 sync dependency in any file it adds or changes', () => {
-  const files = ['scheduleMonth.ts', 'ScheduleMonthGrid.tsx', 'MyScheduleView.tsx', 'MeetingsModal.tsx']
+test('Month View / Month Picker stay presentation-only: no Supabase, RPC, billing or sync code inside their own files (persistence arrives through the shared events)', () => {
+  const files = ['scheduleMonth.ts', 'ScheduleMonthGrid.tsx', 'ScheduleMonthPicker.tsx']
   const forbidden = /supabase|\.rpc\(|schedule_apply|calendar_day_save|schedule_set_sync|schedule_events|schedule-data|dayMerge|deadlineLink|DayConflict|DeadlineMark|taskSync|stripe|fetch\(/i
   for (const f of files) { const s = read(`components/xpadite/${f}`).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''); assert.ok(!forbidden.test(s), `${f} must not reference ${s.match(forbidden)}`) }
-  assert.ok(!fs.readdirSync(path.join(ROOT, 'supabase/migrations')).some(n => /^02[2-9]_/.test(n)), 'no 022+ migrations on this branch')
+  assert.deepEqual(fs.readdirSync(path.join(ROOT, 'supabase/migrations')).filter(n => /^02[2-9]_/.test(n)), ['022_schedule_events.sql', '023_schedule_sync.sql', '024_schedule_task_sync.sql'], 'the backend migrations are present, in order, and nothing newer')
 })
 
 test('accessibility + motion hooks: grid roles, labelled cells, focus rings, reduced motion', () => {
   const g = read('components/xpadite/ScheduleMonthGrid.tsx')
   for (const s of ['role="grid"', 'role="gridcell"', 'role="columnheader"', 'aria-label={label}', ':focus-visible', 'prefers-reduced-motion', 'aria-pressed', "e.key === 'Enter'"]) assert.ok(g.includes(s), s)
-  assert.ok(!/#[0-9a-f]{6}/i.test(g.replace(/#7c3aed/gi, '').replace(/#ffffff/gi, '')), 'only the existing purple/white + category/CSS-variable colours — no new palette')
+  assert.ok(!/#[0-9a-f]{6}/i.test(g.replace(/#7c3aed/gi, '').replace(/#ffffff/gi, '').replace(/#dc2626/gi, '')), 'only the existing purple/white, the existing deadline red + category/CSS-variable colours — no new palette')
 })
 
 // ── month picker dropdown (Week + Month views) ──
@@ -191,4 +191,11 @@ test('month picker: only the center label is the trigger; arrows, Today and layo
   assert.match(v, /\{month \? <div className="flex items-center gap-0\.5 min-\[361px\]:gap-1">\{phoneTodayFilter\}<\/div> : phoneTodayFilter\}/)
   assert.ok(/12/.test(p) && /grid-cols-3/.test(p) && /role="dialog"/.test(p) && /LAYER_ATTR/.test(p) && /key === 'Escape'/.test(p) && /pointerdown/.test(p) && /prefers-reduced-motion/.test(p) && /aria-pressed/.test(p))
   assert.ok(!/supabase|fetch\(|\.rpc\(|localStorage/i.test(p), 'presentation only')
+})
+
+test('Month View marks deadline events with the same red flag the week view uses (chips and day list), without changing the chip layout', () => {
+  const g = read('components/xpadite/ScheduleMonthGrid.tsx')
+  assert.match(g, /ev\.isDeadline && <DeadlineFlag size=\{phone \? 8 : 10\} \/>/)
+  assert.match(g, /M5 21V4M5 4h11l-2 4 2 4H5/); assert.match(g, /flex-shrink-0/); assert.match(g, /, deadline/); assert.match(g, / · Deadline/)
+  assert.ok(read('components/xpadite/MyScheduleView.tsx').includes('M5 21V4M5 4h11l-2 4 2 4H5'), 'same glyph as the week view')
 })

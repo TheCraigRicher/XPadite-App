@@ -5,7 +5,7 @@
 // for this preview and is labelled as not saved. The rules (naming, colours, protected built-ins, replacement on delete)
 // are in scheduleEngine.ts; these components only collect input and show the result.
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { DURATION_CHOICES } from './scheduleLogic'
 import type { ScheduleCategory, ScheduleEvent, SchedulePrefs } from './scheduleLogic'
 import { CATEGORY_NAME_MAX, CATEGORY_SWATCHES, categoryUsage, isHexColor } from './scheduleEngine'
@@ -139,7 +139,7 @@ function ManageCategoriesInner({ categories, events, onAdd, onRename, onRecolor,
 
   return (
     <Shell title="Manage Categories" onClose={onClose} phone={phone} visible={visible}
-      footer={<div className="flex items-center justify-between gap-3"><p className="text-[11px] leading-snug" style={{ color: 'var(--xp-txt3)' }}>Preview — custom categories last only while My Schedule is open; they aren’t saved yet.</p><button type="button" onClick={onClose} className="text-[13px] font-semibold text-white flex-shrink-0" style={{ padding: '9px 16px', borderRadius: 10, background: '#7c3aed' }}>Done</button></div>}>
+      footer={<div className="flex items-center justify-between gap-3"><p className="text-[11px] leading-snug" style={{ color: 'var(--xp-txt3)' }}>Custom categories are saved to your account.</p><button type="button" onClick={onClose} className="text-[13px] font-semibold text-white flex-shrink-0" style={{ padding: '9px 16px', borderRadius: 10, background: '#7c3aed' }}>Done</button></div>}>
       <form onSubmit={add} className="flex flex-col gap-2" aria-label="Add a category" style={{ padding: 10, borderRadius: 12, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
         <label htmlFor="sch-cat-name" className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt2)' }}>New category</label>
         <div className="flex gap-2">
@@ -213,7 +213,7 @@ function ManageCategoriesInner({ categories, events, onAdd, onRename, onRecolor,
                 </select>
               </>
             ) : (
-              <p className="text-[12.5px] mb-2" style={{ color: 'var(--xp-txt2)' }}>No events use this category. It will be removed from this preview.</p>
+              <p className="text-[12.5px] mb-2" style={{ color: 'var(--xp-txt2)' }}>No events use this category. It will be removed.</p>
             )}
             {deleteError && <p role="alert" className="text-[11.5px] mt-1" style={{ color: '#dc2626' }}>{deleteError}</p>}
             <div className="flex gap-2 mt-3">
@@ -239,6 +239,75 @@ function Segmented<T extends string | number>({ label, value, options, onChange 
         </button>
       ))}
     </div>
+  )
+}
+
+// ── Sync with Task Manager ───────────────────────────────────────────────────
+
+/** A real sliding switch (not a checkbox): grey track + knob left = OFF, purple track + knob right = ON. */
+export function Switch({ checked, onChange, id, label, disabled }: { checked: boolean; onChange: (v: boolean) => void; id: string; label: string; disabled?: boolean }) {
+  return (
+    <>
+      <style>{`
+        .xp-switch { transition: background-color 180ms ease; }
+        .xp-switch-knob { transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1); }
+        .xp-switch:focus-visible { outline: 2px solid #7c3aed; outline-offset: 3px; }
+        @media (prefers-reduced-motion: reduce) { .xp-switch, .xp-switch-knob { transition: none; } }
+      `}</style>
+      <button
+        type="button" role="switch" id={id} aria-checked={checked} aria-label={label} disabled={disabled} data-testid="sync-switch" data-on={checked ? 'true' : 'false'}
+        onClick={() => onChange(!checked)}
+        className="xp-switch relative flex-shrink-0"
+        style={{ width: 52, height: 30, borderRadius: 999, border: 'none', padding: 0, cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.6 : 1, background: checked ? '#7c3aed' : '#9ca3af' }}
+      >
+        <span aria-hidden="true" className="xp-switch-knob absolute"
+          style={{ top: 3, left: 3, width: 24, height: 24, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.3)', transform: checked ? 'translateX(22px)' : 'translateX(0)' }} />
+      </button>
+    </>
+  )
+}
+
+type SyncProps = { enabled: boolean; onSave: (next: boolean) => Promise<void>; onClose: () => void }
+
+export function SyncTaskManagerDialog(props: SyncProps & { open?: boolean }) {
+  const phone = useIsPhone()
+  const { mounted, visible } = useSheetPhase(props.open ?? true, phone)
+  if (!mounted) return null
+  return <SyncInner {...props} phone={phone} visible={visible} />
+}
+
+/** Edited as a DRAFT of the last SAVED value. Save persists it (closing only after success); Cancel, backdrop, swipe-down and Esc discard it. */
+function SyncInner({ enabled, onSave, onClose, phone, visible }: SyncProps & { phone: boolean; visible: boolean }) {
+  const [draft, setDraft] = useState(enabled)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const busy = useRef(false)                               // synchronous guard: two clicks in the same instant can not both pass `pending`
+  const cancel = () => { if (!pending) onClose() }        // a save in flight can not be "cancelled" half-way
+  useLayerEscape(cancel)
+  async function save() {
+    if (busy.current || pending) return
+    busy.current = true; setPending(true); setError(null)
+    try { await onSave(draft); busy.current = false; setPending(false); onClose() }
+    catch (err) { busy.current = false; setPending(false); setError(err instanceof Error && err.message ? err.message : 'Could not save \u2014 please check your connection and try again.') }
+  }
+  return (
+    <Shell title="Sync with Task Manager" onClose={cancel} phone={phone} visible={visible} showClose={false}
+      footer={<div className="flex gap-2">
+        <button type="button" onClick={cancel} disabled={pending} data-testid="sync-cancel" className="flex-1 text-[13px] font-medium" style={{ padding: '10px 12px', borderRadius: 10, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)', color: 'var(--xp-txt)', opacity: pending ? 0.6 : 1 }}>Cancel</button>
+        <button type="button" onClick={save} disabled={pending} aria-disabled={pending} data-testid="sync-save" className="flex-1 text-[13px] font-semibold text-white" style={{ padding: '10px 12px', borderRadius: 10, background: '#7c3aed', opacity: pending ? 0.6 : 1 }}>{pending ? 'Saving\u2026' : 'Save'}</button>
+      </div>}>
+      <p className="text-[12.5px] leading-snug" style={{ color: 'var(--xp-txt2)' }}>Automatically display your scheduled events as linked tasks in Task Manager.</p>
+      <div className="flex items-center justify-between gap-3" style={{ padding: '10px 12px', borderRadius: 12, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)' }}>
+        <label htmlFor="sync-switch" className="text-[13.5px] font-semibold" style={{ color: 'var(--xp-txt)' }}>
+          Sync with Task Manager
+          <span data-testid="sync-state" className="ml-2 text-[11px] font-bold" style={{ color: draft ? '#7c3aed' : 'var(--xp-txt3)' }}>{draft ? 'ON' : 'OFF'}</span>
+        </label>
+        <Switch id="sync-switch" label="Sync with Task Manager" checked={draft} onChange={setDraft} disabled={pending} />
+      </div>
+      <p data-testid="sync-status" className="text-[12px] leading-snug" style={{ color: 'var(--xp-txt2)' }}>{draft ? 'Scheduled events also appear in Task Manager.' : 'Scheduled events remain in My Schedule only.'}</p>
+      <p className="text-[11px] leading-snug" style={{ color: 'var(--xp-txt3)' }}>Events marked &ldquo;Set as Due Date&rdquo; always stay linked to Task Manager, whatever this setting is. A task you delete from Task Manager stays removed until you add it back from the event&rsquo;s details.</p>
+      {error && <p role="alert" data-testid="sync-error" className="text-[12px]" style={{ padding: '8px 10px', borderRadius: 9, background: 'rgba(220,38,38,0.09)', border: '0.5px solid rgba(220,38,38,0.4)', color: '#dc2626' }}>{error}</p>}
+    </Shell>
   )
 }
 

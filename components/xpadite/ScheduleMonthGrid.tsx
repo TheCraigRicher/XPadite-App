@@ -17,6 +17,15 @@ const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const DAY_INITIALS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 const MIN_ROW_PX = 64
 
+/** Red flag for a deadline ("Set as Due Date") event — the same glyph and colour the week view uses on its cards. */
+function DeadlineFlag({ size }: { size: number }) {
+  return (
+    <svg data-testid="month-deadline-flag" viewBox="0 0 24 24" width={size} height={size} fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" aria-hidden="true" className="flex-shrink-0" style={{ color: '#dc2626' }}>
+      <path d="M5 21V4M5 4h11l-2 4 2 4H5" />
+    </svg>
+  )
+}
+
 /** "9:00 AM" → "9a", "2:30 PM" → "2:30p" (24-hour times are left alone) — keeps the title readable in a narrow chip. */
 export function compactClock(label: string): string {
   return label.replace(/:00(?= ?[AP]M)/i, '').replace(/ ?AM$/i, 'a').replace(/ ?PM$/i, 'p')
@@ -35,7 +44,7 @@ function Chip({ ev, cell, phone, selected, onOpen }: { ev: ScheduleEvent; cell: 
       onClick={e => { e.stopPropagation(); onOpen(ev) }}
       onDoubleClick={e => e.stopPropagation()}
       title={`${ev.title} · ${timeRangeLabel(ev.startAt, ev.endAt, fmt)}`}
-      aria-label={`${ev.title}, ${timeRangeLabel(ev.startAt, ev.endAt, fmt)}${ev.recurrence && ev.recurrence !== 'none' ? ', repeats ' + ev.recurrence : ''}${ev.isCancelled ? ', cancelled' : ''}`}
+      aria-label={`${ev.title}, ${timeRangeLabel(ev.startAt, ev.endAt, fmt)}${ev.isDeadline ? ', deadline' : ''}${ev.recurrence && ev.recurrence !== 'none' ? ', repeats ' + ev.recurrence : ''}${ev.isCancelled ? ', cancelled' : ''}`}
       aria-pressed={selected}
       className="xp-mo-chip w-full text-left flex items-center gap-0.5 min-w-0"
       style={{
@@ -50,6 +59,7 @@ function Chip({ ev, cell, phone, selected, onOpen }: { ev: ScheduleEvent; cell: 
       <span className="truncate font-semibold" style={{ textDecoration: ev.isCancelled ? 'line-through' : 'none' }}>
         {marks}{ev.title}
       </span>
+      {ev.isDeadline && <DeadlineFlag size={phone ? 8 : 10} />}
       {!phone && ev.recurrence && ev.recurrence !== 'none' && <span aria-hidden="true" className="flex-shrink-0" style={{ opacity: 0.75 }}>↻</span>}
       {!phone && pos.intoLater && <span aria-hidden="true" className="flex-shrink-0" style={{ opacity: 0.75 }}>▸</span>}
     </button>
@@ -188,7 +198,7 @@ export function MonthDaySheet({ day, events, open, onClose, onPick, onAdd }: {
               style={{ padding: '8px 10px', borderRadius: 10, background: 'var(--xp-bg3)', borderLeft: `4px solid ${cat.edge}` }}>
               <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--xp-txt)', textDecoration: ev.isCancelled ? 'line-through' : 'none' }}>{ev.title}</p>
               <p className="text-[11.5px] truncate" style={{ color: 'var(--xp-txt3)' }}>
-                {timeRangeLabel(ev.startAt, ev.endAt, fmt)} · {cat.label}{ev.recurrence && ev.recurrence !== 'none' ? ` · ↻ ${ev.recurrence}` : ''}{ev.sourceLabel ? ` · ${ev.sourceLabel}` : ''}
+                {timeRangeLabel(ev.startAt, ev.endAt, fmt)} · {cat.label}{ev.isDeadline ? ' · Deadline' : ''}{ev.recurrence && ev.recurrence !== 'none' ? ` · ↻ ${ev.recurrence}` : ''}{ev.sourceLabel ? ` · ${ev.sourceLabel}` : ''}
               </p>
             </button>
           )

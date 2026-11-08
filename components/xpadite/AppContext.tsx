@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { CalendarData, WorkSession, Activity, ActiveSession, DayData, ActiveTaskTimer, Reminder, JournalLabel, JournalFolder } from './types'
 import { normalizeHexColor, todayKey, detectBrowserTimezone } from './utils'
 import { resolveLocale, type Locale } from './i18n'
@@ -14,7 +14,8 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { trackFeature } from '@/lib/analytics/client'
 import {
-  fetchCalendarDays,
+  fetchCalendarDaysWithRev,
+  saveDayCas,
   fetchCalendarDay,
   upsertDayData,
   fetchWorkSessions,
@@ -33,11 +34,22 @@ import {
   deleteJournalFolder,
 } from '@/lib/supabase/core-data'
 
-import { DaySyncQueue } from './daySync'
+import { DaySyncQueue, DaySyncParked } from './daySync'
+import { mergeDay } from './dayMerge'
+import type { MergeConflict } from './dayMerge'
+import { DayConflictDialog } from './DayConflictDialog'
+import { fetchScheduleEvents, applyScheduleChange, setScheduleTaskLink, fetchScheduleExtras, saveScheduleExtras, fetchScheduleSyncPref, setScheduleSyncPref, ScheduleConflictError, ScheduleSetupError } from '@/lib/supabase/schedule-data'
+import type { StoredScheduleEvent } from '@/lib/supabase/schedule-data'
+import { planDeadlineSync, deadlineDayMap, reconcileDeadlines, batchItems, opKeys, applyOpsLocal } from './deadlineLink'
+import type { TaskOp } from './deadlineLink'
+import type { TimeFormat } from './scheduleLogic'
+import type { ScheduleCategory, ScheduleEvent } from './scheduleLogic'
 
 // { uid, keys }: days whose latest edit the server has not confirmed. Survives a refresh so the edit is
 // re-sent instead of being replaced by the older server copy. Ignored unless it belongs to this account.
 const UNSYNCED_KEY = 'xp9d-unsynced'
+const BASE_KEY = 'xp9d-base'
+const CONFLICT_BACKUP_KEY = 'xp9d-conflict-backup'
 
 const DEFAULT_ACTIVITIES: Activity[] = [
   { id: 'a1',      name: 'Work',                 color: '#7c3aed' },
@@ -144,6 +156,44 @@ interface AppContextValue {
   removeReminderCtx: (id: string) => Promise<void>
   fireReminderCtx: (id: string) => Promise<void>
   setReminderNotificationsEnabled: (id: string, enabled: boolean) => Promise<void>
+  // My Schedule (v1.328): the persisted events — the single source of truth the Calendar and Task Manager read deadlines from.
+  scheduleEvents: StoredScheduleEvent[]
+  // 'loading' until the first fetch finishes; 'unavailable' when the table can't be read (e.g. migration 022 not applied yet).
+  scheduleStatus: 'loading' | 'ready' | 'unavailable'
+  // Deadline events by the local day they fall due ("YYYY-MM-DD"), derived from scheduleEvents — what the Calendar markers read.
+  deadlineDays: Record<string, StoredScheduleEvent[]>
+  // Resolves only once the server confirmed the write; rejects (leaving everything unchanged) otherwise.
+  saveScheduleEvent: (ev: ScheduleEvent) => Promise<void>
+  deleteScheduleEvent: (id: string) => Promise<void>
+  // The user removed a deadline's Task Manager task: remember it (reconciliation must not recreate it), keep the deadline everywhere else.
+  detachDeadlineTask: (eventId: string) => Promise<void>
+  // ...and the explicit way back: re-link and recreate the task.
+  restoreDeadlineTask: (eventId: string) => Promise<void>
+  // Set when linked-task repairs keep failing (after a few tries); null when everything agrees. retry resets the attempts.
+  scheduleSyncIssue: string | null
+  retryScheduleSync: () => Promise<void>
+  // One time-format choice for deadline displays. SESSION-ONLY (the schedule preferences are not persisted anywhere yet).
+  scheduleTimeFormat: TimeFormat
+  setScheduleTimeFormat: (f: TimeFormat) => void
+  // "Edit in My Schedule" from the Task Manager: asks the app to open My Schedule focused on this event.
+  scheduleFocusRequest: { eventId: string; nonce: number } | null
+  requestScheduleEvent: (eventId: string) => void
+  clearScheduleFocusRequest: () => void
+  // "Mind Mapping" in the main menu: asks the Planner/Journal editor for that date to open its EXISTING Mind Mapping Canvas.
+  // "Sync with Task Manager" (per user, saved in Supabase, default OFF): ordinary events get a linked task on their START date while ON.
+  scheduleTaskSync: boolean
+  // Saves the switch, then reconciles every existing event with the Task Manager. Rejects (changing nothing) if the preference can not be saved.
+  setScheduleTaskSyncPref: (next: boolean) => Promise<void>
+  // A day edited on two devices in conflicting ways: the user is asked (see DayConflictDialog); resolved here.
+  dayConflicts: { key: string; mine: DayData; theirs: DayData | null; theirsRev: number; conflicts: MergeConflict[] }[]
+  resolveDayConflict: (key: string, choice: 'mine' | 'theirs') => void
+  mindMapRequest: { dateKey: string; nonce: number } | null
+  requestMindMap: (dateKey: string) => void
+  clearMindMapRequest: () => void
+  savedLocations: string[]
+  setSavedLocations: (next: string[]) => Promise<void>
+  scheduleCategories: ScheduleCategory[]
+  setScheduleCategories: (next: ScheduleCategory[]) => Promise<void>
 }
 
 const AppContext = createContext<AppContextValue | null>(null)
@@ -174,6 +224,19 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const [journalLabels, setJournalLabelsState] = useState<JournalLabel[]>([])
   const [journalFolders, setJournalFoldersState] = useState<JournalFolder[]>([])
   const [hydrated, setHydrated] = useState(false)
+  const [scheduleEvents, setScheduleEventsState] = useState<StoredScheduleEvent[]>([])
+  const [scheduleStatus, setScheduleStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading')
+  const deadlineDays = useMemo(() => deadlineDayMap(scheduleEvents) as Record<string, StoredScheduleEvent[]>, [scheduleEvents])
+  const [savedLocations, setSavedLocationsState] = useState<string[]>([])
+  const [calHydrated, setCalHydrated] = useState(false)
+  const [scheduleTaskSync, setScheduleTaskSyncState] = useState(false)
+  type DayConflict = { key: string; mine: DayData; theirs: DayData | null; theirsRev: number; conflicts: MergeConflict[] }
+  const [dayConflicts, setDayConflicts] = useState<DayConflict[]>([])
+  const [scheduleSyncIssue, setScheduleSyncIssue] = useState<string | null>(null)
+  const [scheduleTimeFormat, setScheduleTimeFormat] = useState<TimeFormat>('12h')
+  const [scheduleFocusRequest, setScheduleFocusRequest] = useState<{ eventId: string; nonce: number } | null>(null)
+  const [mindMapRequest, setMindMapRequest] = useState<{ dateKey: string; nonce: number } | null>(null)
+  const [scheduleCategories, setScheduleCategoriesState] = useState<ScheduleCategory[]>([])
 
   const [reminders, setReminders] = useState<Reminder[]>([])
   const [userId, setUserId] = useState('')
@@ -184,6 +247,28 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   remindersRef.current = reminders
   const userIdRef = useRef(userId)
   userIdRef.current = userId
+  // My Schedule callbacks read the latest values through refs, synced after each commit (never written during render)
+  const calDataRef = useRef(calData)
+  const scheduleEventsRef = useRef(scheduleEvents)
+  const scheduleStatusRef = useRef(scheduleStatus)
+  const savedLocationsRef = useRef(savedLocations)
+  const scheduleCategoriesRef = useRef(scheduleCategories)
+  const scheduleTaskSyncRef = useRef(scheduleTaskSync)
+  // Stale-write protection: for each day, the SERVER revision + document this device last synced (what local edits are made on top of),
+  // the conflicts waiting for the user, and the writer (swapped in after each render; the default refuses so a stub can never "save").
+  const serverBaseRef = useRef(new Map<string, { rev: number | null; doc: DayData }>())
+  const dayConflictsRef = useRef<DayConflict[]>([])
+  const casAvailableRef = useRef(true)
+  const writeDayRef = useRef<(key: string, data: DayData) => Promise<void>>(async () => { throw new Error('day-writer-not-ready') })
+  useEffect(() => {
+    calDataRef.current = calData
+    scheduleEventsRef.current = scheduleEvents
+    scheduleStatusRef.current = scheduleStatus
+    savedLocationsRef.current = savedLocations
+    scheduleCategoriesRef.current = scheduleCategories
+    scheduleTaskSyncRef.current = scheduleTaskSync
+    dayConflictsRef.current = dayConflicts
+  })
   const activitiesRef = useRef(activities)
   activitiesRef.current = activities
   const journalLabelsRef = useRef(journalLabels)
@@ -206,11 +291,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const daySyncRef = useRef<DaySyncQueue<DayData> | null>(null)
   if (daySyncRef.current === null) {
     daySyncRef.current = new DaySyncQueue<DayData>({
-      write: async (key, data) => {
-        const uid = userIdRef.current
-        if (!uid) throw new Error('no-user')
-        await upsertDayData(createClient(), uid, key, data)
-      },
+      write: (key, data) => writeDayRef.current(key, data),
       onError: (key, err) => {
         console.error('[CalData] Supabase sync error for', key, err)
         setToast('⚠ Couldn’t save to the cloud — your changes are kept on this device and will retry automatically')
@@ -218,10 +299,85 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       onRecovered: () => setToast('Changes synced ✓'),
       onUnsyncedChange: keys => {
         try { localStorage.setItem(UNSYNCED_KEY, JSON.stringify({ uid: userIdRef.current, keys })) } catch {}
+        // remember the version each unsynced day was based on, so a refresh mid-edit can still merge instead of guessing
+        try {
+          const bases: Record<string, { rev: number | null; doc: DayData }> = {}
+          for (const k of keys) { const b = serverBaseRef.current.get(k); if (b) bases[k] = b }
+          localStorage.setItem(BASE_KEY, JSON.stringify({ uid: userIdRef.current, bases }))
+        } catch {}
       },
     })
   }
   const daySync = daySyncRef.current
+
+  // ── Stale-write protection (migration 024) ─────────────────────────────────────────────────────────────────────────
+  // A day is written only if the server still holds the revision this device based its edits on (calendar_day_save, compare-and-swap). If the day
+  // has moved on, the server hands back its current copy and the two are merged THREE ways (dayMerge.ts): changes to different tasks/fields all
+  // survive; the same field of the same task changed differently is NOT guessed — the day is parked and the user chooses (DayConflictDialog).
+  const isMissingFn = (err: unknown) => { const c = (err as { code?: string } | null)?.code; return c === 'PGRST202' || c === '42883' || c === '404' }
+
+  /** After a confirmed write: record the new base, and bring the screen up to what was written when a merge changed it. */
+  function finishWrite(key: string, sent: DayData, written: DayData, rev: number) {
+    if (written === sent) { serverBaseRef.current.set(key, { rev, doc: sent }); return }
+    const queued = daySync.peek(key)
+    if (queued === undefined || queued === sent) {
+      serverBaseRef.current.set(key, { rev, doc: written })               // nothing newer typed meanwhile: show the merged day
+      setCalData(prev => { const next = { ...prev, [key]: written }; try { localStorage.setItem('xp9d', JSON.stringify(next)) } catch {}; return next })
+    } else {
+      // the user kept editing while this saved: those edits were made on the PRE-merge screen. Make the next write merge them against the server copy.
+      serverBaseRef.current.set(key, { rev: Math.max(0, rev - 1), doc: sent })
+    }
+  }
+
+  async function writeDay(key: string, data: DayData): Promise<void> {
+    const uid = userIdRef.current
+    if (!uid) throw new Error('no-user')
+    if (dayConflictsRef.current.some(c => c.key === key)) throw new DaySyncParked()     // waiting for the user: no network, no retry storm
+    const sb = createClient()
+    if (!casAvailableRef.current) { await upsertDayData(sb, uid, key, data); return }  // database without migration 024: the previous behaviour
+    let mine = data
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const base = serverBaseRef.current.get(key)
+      let res: Awaited<ReturnType<typeof saveDayCas>>
+      try { res = await saveDayCas(sb, key, mine, base?.rev ?? null) }
+      catch (err) {
+        if (isMissingFn(err)) { casAvailableRef.current = false; await upsertDayData(sb, uid, key, mine); return }
+        throw err
+      }
+      if (res.ok) { finishWrite(key, data, mine, res.rev); return }
+      if (res.doc === null) { serverBaseRef.current.delete(key); continue }             // the row no longer exists: write it fresh
+      const merged = mergeDay(base?.doc ?? null, mine, res.doc)
+      if (merged.conflicts.length > 0) {
+        const c: DayConflict = { key, mine, theirs: res.doc, theirsRev: res.rev, conflicts: merged.conflicts }
+        dayConflictsRef.current = [...dayConflictsRef.current.filter(x => x.key !== key), c]
+        setDayConflicts(dayConflictsRef.current)
+        throw new DaySyncParked()
+      }
+      serverBaseRef.current.set(key, { rev: res.rev, doc: res.doc })                      // merged cleanly: try again on top of the server's copy
+      mine = merged.doc
+    }
+    throw new Error('day-sync-contended')                                                  // bounded; the queue retries later at its normal back-off
+  }
+  useEffect(() => { writeDayRef.current = writeDay })
+
+  const resolveDayConflict = useCallback((key: string, choice: 'mine' | 'theirs') => {
+    const c = dayConflictsRef.current.find(x => x.key === key)
+    if (!c) return
+    dayConflictsRef.current = dayConflictsRef.current.filter(x => x.key !== key)
+    setDayConflicts(dayConflictsRef.current)
+    if (c.theirs) serverBaseRef.current.set(key, { rev: c.theirsRev, doc: c.theirs }); else serverBaseRef.current.delete(key)
+    if (choice === 'mine') {
+      void daySync.resolve(key)                          // the user chose this device's version: it is written over the other one
+    } else {
+      try {                                              // the discarded version is kept on this device — nothing is lost silently
+        const raw = JSON.parse(localStorage.getItem(CONFLICT_BACKUP_KEY) ?? '[]') as unknown[]
+        localStorage.setItem(CONFLICT_BACKUP_KEY, JSON.stringify([{ key, savedAt: Date.now(), doc: c.mine }, ...raw].slice(0, 5)))
+      } catch {}
+      daySync.discard(key)
+      const theirs = c.theirs
+      if (theirs) setCalData(prev => { const next = { ...prev, [key]: theirs }; try { localStorage.setItem('xp9d', JSON.stringify(next)) } catch {}; return next })
+    }
+  }, [daySync])
 
   // ─── Load from localStorage on mount ────────────────────────────────────────
 
@@ -332,6 +488,10 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     // Resume days whose last edit never reached the server (failed write, or a refresh mid-write): re-send the
     // LOCAL copy and keep hydration from replacing it with the older server row.
     try {
+      const stored = JSON.parse(localStorage.getItem(BASE_KEY) ?? 'null') as { uid?: string; bases?: Record<string, { rev: number | null; doc: DayData }> } | null
+      if (stored && stored.uid === userId && stored.bases) for (const [k, b] of Object.entries(stored.bases)) serverBaseRef.current.set(k, b)
+    } catch {}
+    try {
       const marker = JSON.parse(localStorage.getItem(UNSYNCED_KEY) ?? 'null') as { uid?: string; keys?: string[] } | null
       if (marker && marker.uid === userId && Array.isArray(marker.keys)) {
         const local = JSON.parse(localStorage.getItem('xp9d') ?? '{}') as CalendarData
@@ -342,14 +502,15 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     } catch {}
 
     Promise.all([
-      fetchCalendarDays(supabase, userId),
+      fetchCalendarDaysWithRev(supabase, userId),
       fetchWorkSessions(supabase, userId),
       fetchUserActivities(supabase, userId),
       fetchUserPreferences(supabase, userId),
       supabaseFetchReminders(),
       fetchJournalLabels(supabase, userId),
       fetchJournalFolders(supabase, userId),
-    ]).then(([sbCalData, sbSessions, sbActivities, sbPrefs, sbReminders, sbJournalLabels, sbJournalFolders]) => {
+    ]).then(([sbCalRes, sbSessions, sbActivities, sbPrefs, sbReminders, sbJournalLabels, sbJournalFolders]) => {
+      const sbCalData = sbCalRes.data
 
       // Calendar days: merge if Supabase has rows; Supabase data wins per date key.
       // Skip days that have a pending local write to avoid a race between a fast
@@ -366,6 +527,10 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
           return merged
         })
       }
+
+      // every day the server sent us is now the version this device is based on — EXCEPT days with unsent local edits, which keep the base they were edited on
+      for (const [key, doc] of Object.entries(sbCalData)) if (!daySync.hasUnsynced(key)) serverBaseRef.current.set(key, { rev: sbCalRes.revs[key] ?? null, doc })
+      setCalHydrated(true)   // the calendar (and so every task) has been read from the server: schedule/task reconciliation may run
 
       // Work sessions: merge if Supabase has rows; Supabase wins per session id
       if (sbSessions.length > 0) {
@@ -623,7 +788,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
         { event: '*', schema: 'public', table: 'calendar_days', filter: `user_id=eq.${userId}` },
         (payload) => {
           if (payload.eventType === 'DELETE') return
-          const row = payload.new as { date_key?: string; day_data?: DayData }
+          const row = payload.new as { date_key?: string; day_data?: DayData; rev?: number }
           if (!row.date_key || !row.day_data) return
 
           const dateKey = row.date_key
@@ -632,6 +797,8 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
           // Accept remote calData only when we have no pending local write for this date.
           // This prevents echoes of our own debounce writes from clobbering optimistic state.
           if (!daySync.hasUnsynced(dateKey)) {
+            const b0 = serverBaseRef.current.get(dateKey)
+            if (typeof row.rev === 'number' && (!b0 || b0.rev == null || row.rev >= b0.rev)) serverBaseRef.current.set(dateKey, { rev: row.rev, doc: dayData })
             setCalData(prev => {
               const next = { ...prev, [dateKey]: dayData }
               try { localStorage.setItem('xp9d', JSON.stringify(next)) } catch {}
@@ -816,6 +983,220 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const results = await Promise.all(keys.map(k => daySync.flush(k)))
     return results.every(Boolean)
   }, [daySync])
+
+  // ─── My Schedule (v1.328): events, deadline→task sync, saved locations ───────────────────────────────────────────
+
+  const loadSchedule = useCallback(async () => {
+    const uid = userIdRef.current
+    if (!uid) return
+    const supabase = createClient()
+    try {
+      const [events, extras, syncPref] = await Promise.all([
+        fetchScheduleEvents(supabase, uid),
+        fetchScheduleExtras(supabase, uid).catch(() => null),   // columns missing ≠ events unavailable
+        fetchScheduleSyncPref(supabase, uid).catch(() => null), // migration 024 not applied yet → stays OFF
+      ])
+      setScheduleEventsState(events)
+      if (syncPref !== null) { scheduleTaskSyncRef.current = syncPref; setScheduleTaskSyncState(syncPref) }
+      if (extras) { setSavedLocationsState(extras.savedLocations); setScheduleCategoriesState(extras.categories) }
+      setScheduleStatus('ready')
+    } catch (err) {
+      console.error('[Schedule] load failed:', err)
+      // keep whatever we already had on a refresh failure; only the very first failure marks it unavailable
+      setScheduleStatus(s => (s === 'ready' ? s : 'unavailable'))
+    }
+  }, [])
+
+  useEffect(() => { if (userId) void loadSchedule() }, [userId, loadSchedule])
+
+  // Other devices: re-read when the app comes back to the foreground (no realtime subscription → no extra egress).
+  useEffect(() => {
+    if (!userId) return
+    let last = Date.now()
+    function onVisible() {
+      if (document.visibilityState !== 'visible' || Date.now() - last < 60_000) return
+      last = Date.now()
+      void loadSchedule()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [userId, loadSchedule])
+
+  // ── Atomic event + linked-task writes (migration 023: schedule_apply) ──────────────────────────────────────────────
+  // Every schedule write runs through ONE queue in this tab (so two quick actions never interleave), flushes the affected days'
+  // pending local edits first, then asks the server to apply the event write AND the by-id task ops in a single transaction.
+  // The server's resulting day documents are adopted locally — so what is on screen is what is stored.
+
+  const syncChainRef = useRef<Promise<unknown>>(Promise.resolve())
+  const exclusive = useCallback(<T,>(fn: () => Promise<T>): Promise<T> => {
+    const run = syncChainRef.current.then(() => fn())
+    syncChainRef.current = run.catch(() => undefined)
+    return run
+  }, [])
+
+  const fail = (code: 'conflict' | 'setup' | 'sync_pending' | 'signed_out' | 'unavailable', message: string) => Object.assign(new Error(message), { code })
+  const scheduleError = (err: unknown): Error => {
+    if (err instanceof ScheduleConflictError) { void loadSchedule(); return fail('conflict', 'This event was changed on another device or tab. The latest version has been loaded \u2014 review it and save again.') }
+    if (err instanceof ScheduleSetupError) { setScheduleStatus('unavailable'); return fail('setup', 'The schedule database is not fully set up yet (migrations 022 and 023). Nothing was saved.') }
+    return err instanceof Error ? err : new Error('request failed')
+  }
+
+  const commitEvents = useCallback((fn: (l: StoredScheduleEvent[]) => StoredScheduleEvent[]) => {
+    scheduleEventsRef.current = fn(scheduleEventsRef.current)     // visible to the next queued action immediately, not after a re-render
+    setScheduleEventsState(scheduleEventsRef.current)
+  }, [])
+
+  /** Puts the server's resulting days on screen. A day with an unsent local edit keeps it (the ops are replayed on top instead). */
+  const adoptServerDays = useCallback((days: Record<string, DayData>, ops: TaskOp[], revs: Record<string, number> = {}) => {
+    const keys = Object.keys(days)
+    if (keys.length === 0) return
+    const adopt: Record<string, DayData> = {}
+    for (const k of keys) {
+      if (!daySync.hasUnsynced(k)) { adopt[k] = days[k]; serverBaseRef.current.set(k, { rev: revs[k] ?? null, doc: days[k] }); continue }
+      updateDay(k, d => {
+        const mine = ops.filter(o => o.date_key === k || (o.kind === 'move' && o.from_key === k))
+        let cur = d
+        for (const o of mine) {
+          if (o.kind === 'move') cur = o.from_key === k ? { ...cur, tasks: cur.tasks.filter(t => t.id !== o.task_id) } : (applyOpsLocal({ [k]: cur }, [{ ...o, kind: 'upsert' }])[k] ?? cur)
+          else cur = applyOpsLocal({ [k]: cur }, [o])[k] ?? cur
+        }
+        return cur
+      })
+    }
+    if (Object.keys(adopt).length === 0) return
+    calDataRef.current = { ...calDataRef.current, ...adopt }
+    setCalData(prev => {
+      const next = { ...prev, ...adopt }
+      try { localStorage.setItem('xp9d', JSON.stringify(next)) } catch {}
+      return next
+    })
+  }, [daySync, updateDay])
+
+  const flushFor = useCallback(async (ops: TaskOp[]) => {
+    if (ops.length === 0) return
+    if (!(await flushDays(opKeys(ops)))) throw fail('sync_pending', 'Your latest task changes have not finished syncing yet \u2014 please try again in a moment. Nothing was saved.')
+  }, [flushDays])
+
+  const saveInner = useCallback(async (ev: ScheduleEvent): Promise<void> => {
+    const uid = userIdRef.current
+    if (!uid) throw fail('signed_out', 'You are signed out, so this could not be saved.')
+    if (scheduleStatusRef.current === 'unavailable') throw fail('unavailable', 'Saving is not available yet (the schedule database is not set up). Nothing was saved.')
+    const prev = scheduleEventsRef.current.find(e => e.id === ev.id)
+    const link = prev?.taskLink ?? 'linked'
+    // the per-event opt-out ('detached') survives every edit, including toggling the deadline flag; only the explicit "Add back" clears it
+    const plan = planDeadlineSync(calDataRef.current, ev.id, ev, prev?.taskDateKey ?? null, activitiesRef.current[0]?.id ?? '', undefined, link, scheduleTaskSyncRef.current)
+    const stored: StoredScheduleEvent = { ...ev, taskDateKey: plan.taskDateKey, rev: prev?.rev, taskLink: link }
+    try {
+      await flushFor(plan.ops)
+      const res = await applyScheduleChange(createClient(), { userId: uid, event: stored, expectedRev: prev?.rev ?? null, ops: plan.ops })
+      commitEvents(list => (list.some(e => e.id === ev.id) ? list.map(e => (e.id === ev.id ? { ...stored, rev: res.rev ?? stored.rev } : e)) : [...list, { ...stored, rev: res.rev ?? undefined }]))
+      adoptServerDays(res.days, plan.ops, res.revs)
+    } catch (err) { throw scheduleError(err) }
+  }, [adoptServerDays, commitEvents, flushFor])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveScheduleEvent = useCallback((ev: ScheduleEvent) => exclusive(() => saveInner(ev)), [exclusive, saveInner])
+
+  const deleteScheduleEvent = useCallback((id: string) => exclusive(async () => {
+    const uid = userIdRef.current
+    if (!uid) throw fail('signed_out', 'You are signed out, so this could not be deleted.')
+    const prev = scheduleEventsRef.current.find(e => e.id === id)
+    const plan = planDeadlineSync(calDataRef.current, id, null, prev?.taskDateKey ?? null, activitiesRef.current[0]?.id ?? '', undefined, prev?.taskLink ?? 'linked', scheduleTaskSyncRef.current)
+    try {
+      await flushFor(plan.ops)
+      const res = await applyScheduleChange(createClient(), { userId: uid, deleteEventId: id, expectedRev: null, ops: plan.ops })   // one transaction: event + task
+      commitEvents(list => list.filter(e => e.id !== id))
+      adoptServerDays(res.days, plan.ops, res.revs)
+    } catch (err) { throw scheduleError(err) }
+  }), [exclusive, flushFor, commitEvents, adoptServerDays])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const detachDeadlineTask = useCallback((eventId: string) => exclusive(async () => {
+    if (!userIdRef.current) throw fail('signed_out', 'You are signed out.')
+    try {
+      const rev = await setScheduleTaskLink(createClient(), eventId, 'detached')
+      commitEvents(list => list.map(e => (e.id === eventId ? { ...e, taskLink: 'detached', taskDateKey: null, rev: rev ?? e.rev } : e)))
+    } catch (err) { throw scheduleError(err) }
+  }), [exclusive, commitEvents])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const restoreDeadlineTask = useCallback((eventId: string) => exclusive(async () => {
+    if (!userIdRef.current) throw fail('signed_out', 'You are signed out.')
+    const ev = scheduleEventsRef.current.find(e => e.id === eventId)
+    if (!ev) return
+    try {
+      const rev = await setScheduleTaskLink(createClient(), eventId, 'linked')
+      commitEvents(list => list.map(e => (e.id === eventId ? { ...e, taskLink: 'linked', rev: rev ?? e.rev } : e)))
+    } catch (err) { throw scheduleError(err) }
+    await saveInner({ ...(scheduleEventsRef.current.find(e => e.id === eventId) as StoredScheduleEvent) })   // recreates the task through the same atomic path
+  }), [exclusive, commitEvents, saveInner])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Reconciliation ───────────────────────────────────────────────────────────────────────────────────────────────
+  // Whenever schedule data is loaded or changes, compare events with tasks and repair drift through the SAME server-merged ops
+  // (so it can never overwrite other tasks or another device's edits). Each event gets at most 3 failed attempts per session —
+  // no timers, no loops: it re-runs only when events change, the app refocuses, or the user taps Retry.
+  const reconcileAttemptsRef = useRef(new Map<string, number>())
+
+  const reconcileInner = useCallback(async (force = false) => {
+    const uid = userIdRef.current
+    if (!uid || scheduleStatusRef.current !== 'ready') return
+    if (force) reconcileAttemptsRef.current.clear()
+    const attempts = reconcileAttemptsRef.current
+    const items = reconcileDeadlines(calDataRef.current, scheduleEventsRef.current, activitiesRef.current[0]?.id ?? '', scheduleTaskSyncRef.current)
+    const todo = items.filter(it => (attempts.get(it.eventId) ?? 0) < 3)
+    let bad = items.length - todo.length
+    for (const batch of batchItems(todo)) {
+      const ops = batch.flatMap(i => i.ops)
+      try {
+        await flushFor(ops)
+        const res = await applyScheduleChange(createClient(), { userId: uid, ops })
+        adoptServerDays(res.days, ops, res.revs)
+        for (const it of batch) attempts.delete(it.eventId)
+      } catch (err) {
+        console.error('[Schedule] reconcile failed:', err)
+        for (const it of batch) attempts.set(it.eventId, (attempts.get(it.eventId) ?? 0) + 1)
+        bad += batch.length
+      }
+    }
+    setScheduleSyncIssue(bad > 0 ? `${bad} deadline${bad === 1 ? '' : 's'} could not be synced to your Task Manager.` : null)
+  }, [flushFor, adoptServerDays])
+  const reconcileSchedule = useCallback((force = false) => exclusive(() => reconcileInner(force)), [exclusive, reconcileInner])
+
+  useEffect(() => {
+    if (scheduleStatus === 'ready' && calHydrated) void reconcileSchedule().catch(() => {})
+  }, [scheduleStatus, calHydrated, scheduleEvents, scheduleTaskSync, reconcileSchedule])
+
+  const retryScheduleSync = useCallback(async () => { await reconcileSchedule(true) }, [reconcileSchedule])
+
+  // "Sync with Task Manager": persist the switch per user, THEN reconcile every existing event with it (create/convert/move or remove-safely).
+  // If the preference can not be saved this rejects and nothing changes; if some tasks then can not be synced the Retry banner says so.
+  const setScheduleTaskSyncPref = useCallback((next: boolean) => exclusive(async () => {
+    if (!userIdRef.current) throw fail('signed_out', 'You are signed out, so this could not be saved.')
+    if (scheduleStatusRef.current !== 'ready') throw fail('unavailable', 'My Schedule is not ready yet \u2014 try again in a moment. Nothing was changed.')
+    try { await setScheduleSyncPref(createClient(), next) } catch (err) { throw scheduleError(err) }
+    scheduleTaskSyncRef.current = next; setScheduleTaskSyncState(next)
+    await reconcileInner(true)
+  }), [exclusive, reconcileInner])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const requestScheduleEvent = useCallback((eventId: string) => setScheduleFocusRequest({ eventId, nonce: Date.now() }), [])
+  const clearScheduleFocusRequest = useCallback(() => setScheduleFocusRequest(null), [])
+  const requestMindMap = useCallback((dateKey: string) => setMindMapRequest({ dateKey, nonce: Date.now() }), [])
+  const clearMindMapRequest = useCallback(() => setMindMapRequest(null), [])
+
+  const setSavedLocations = useCallback(async (next: string[]): Promise<void> => {
+    const prev = savedLocationsRef.current
+    setSavedLocationsState(next)
+    const uid = userIdRef.current
+    if (!uid) return
+    try { await saveScheduleExtras(createClient(), uid, { savedLocations: next }) }
+    catch (err) { console.error('[Schedule] saved locations:', err); setSavedLocationsState(prev); setToast('Could not save your locations \u2014 please try again.') }
+  }, [])
+
+  const setScheduleCategories = useCallback(async (next: ScheduleCategory[]): Promise<void> => {
+    const prev = scheduleCategoriesRef.current
+    setScheduleCategoriesState(next)
+    const uid = userIdRef.current
+    if (!uid) return
+    try { await saveScheduleExtras(createClient(), uid, { categories: next }) }
+    catch (err) { console.error('[Schedule] categories:', err); setScheduleCategoriesState(prev); setToast('Could not save your categories \u2014 please try again.') }
+  }, [])
 
   const addSession = useCallback((s: WorkSession) => {
     trackFeature('activity_time_tracker') // analytics: a finished tracked session (no-op without consent)
@@ -1262,8 +1643,15 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       journalFolders, addJournalFolder, removeJournalFolder,
       reminders, userEmail,
       upsertReminderCtx, removeReminderCtx, fireReminderCtx, setReminderNotificationsEnabled,
+      scheduleEvents, scheduleStatus, deadlineDays, saveScheduleEvent, deleteScheduleEvent,
+      scheduleTaskSync, setScheduleTaskSyncPref, dayConflicts, resolveDayConflict,
+      detachDeadlineTask, restoreDeadlineTask, scheduleSyncIssue, retryScheduleSync, scheduleTimeFormat, setScheduleTimeFormat,
+      scheduleFocusRequest, requestScheduleEvent, clearScheduleFocusRequest,
+      mindMapRequest, requestMindMap, clearMindMapRequest,
+      savedLocations, setSavedLocations, scheduleCategories, setScheduleCategories,
     }}>
       {children}
+      {dayConflicts[0] && <DayConflictDialog conflict={dayConflicts[0]} others={dayConflicts.length - 1} onChoose={choice => resolveDayConflict(dayConflicts[0].key, choice)} />}
     </AppContext.Provider>
   )
 }

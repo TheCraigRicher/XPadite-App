@@ -26,6 +26,12 @@
 //   - versions: a confirmation only clears the entry if no newer edit arrived
 //     while the write was in flight.
 
+/**
+ * Thrown by `write` when a day can not be saved until the USER decides something (a merge conflict). The queue keeps the data, stops
+ * retrying that day (no timers, no network) and reports it as unsynced until `resolve`/`discard` is called.
+ */
+export class DaySyncParked extends Error { constructor() { super('day-sync-parked') } }
+
 export interface DaySyncOptions<T> {
   write: (key: string, data: T) => Promise<void>
   debounceMs?: number
@@ -44,6 +50,7 @@ interface Entry<T> {
   timer: ReturnType<typeof setTimeout> | null
   flight: Promise<boolean> | null
   failures: number
+  parked: boolean              // waiting for the user to resolve a conflict: never retried automatically
   after: Map<string, number>   // dependency key → version that must be confirmed first
 }
 
@@ -64,7 +71,7 @@ export class DaySyncQueue<T = unknown> {
 
   /** Record the latest value for a day and (re)start its debounce. */
   schedule(key: string, data: T, o?: { after?: string[] }): void {
-    const e = this.entries.get(key) ?? { data, version: 0, timer: null, flight: null, failures: 0, after: new Map<string, number>() }
+    const e = this.entries.get(key) ?? { data, version: 0, timer: null, flight: null, failures: 0, parked: false, after: new Map<string, number>() }
     const isNew = !this.entries.has(key)
     e.data = data
     e.version = ++this.counter
@@ -93,6 +100,28 @@ export class DaySyncQueue<T = unknown> {
 
   retryNow(): void { void this.flushAll() }
 
+  /** The newest value scheduled for a day (undefined when nothing is pending). A write compares it with what it sent to learn whether edits arrived meanwhile. */
+  peek(key: string): T | undefined { return this.entries.get(key)?.data }
+
+  isParked(key: string): boolean { return this.entries.get(key)?.parked === true }
+
+  /** The user resolved the conflict: write the day again now (the caller has already fixed whatever made `write` throw DaySyncParked). */
+  resolve(key: string): Promise<boolean> {
+    const e = this.entries.get(key)
+    if (e) e.parked = false
+    return this.writeKey(key)
+  }
+
+  /** The user chose to drop this device's version of the day: forget it (the caller adopts the server's version). */
+  discard(key: string): void {
+    const e = this.entries.get(key)
+    if (!e) return
+    if (e.timer) clearTimeout(e.timer)
+    this.entries.delete(key)
+    this.opts.onUnsyncedChange?.(this.unsyncedKeys())
+    if (this.outage && this.entries.size === 0) { this.outage = false; this.opts.onRecovered?.() }
+  }
+
   private confirmedAtLeast(key: string, v: number): boolean { return (this.confirmed.get(key) ?? 0) >= v }
 
   private async writeKey(key: string): Promise<boolean> {
@@ -118,6 +147,7 @@ export class DaySyncQueue<T = unknown> {
           e.failures = 0
           return true
         } catch (err) {
+          if (err instanceof DaySyncParked) { e.parked = true; return false }   // needs the user: keep the data, stay quiet, do not retry
           e.failures++
           if (!this.outage) { this.outage = true; this.opts.onError?.(key, err) }
           return false
@@ -126,6 +156,7 @@ export class DaySyncQueue<T = unknown> {
       const ok = await e.flight
       e.flight = null
       if (!ok) {
+        if (e.parked) { if (e.timer) { clearTimeout(e.timer); e.timer = null }; return false }
         if (e.timer) clearTimeout(e.timer)
         const delays = this.opts.retryDelaysMs
         e.timer = setTimeout(() => { void this.writeKey(key) }, delays[Math.min(e.failures - 1, delays.length - 1)])

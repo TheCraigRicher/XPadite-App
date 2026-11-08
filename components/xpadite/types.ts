@@ -24,6 +24,7 @@ export interface Task {
   taskColor?: string         // user-chosen highlight color key (e.g. 'yellow', 'blue')
   isPriority?: boolean       // user-marked as urgent/important
   plannerSectionId?: string  // block.id of the linked Planner section for this task on its date
+  sourceEventId?: string     // v1.328: set while this task is the linked task of a My Schedule deadline event (task id is 'dl-<eventId>')
 }
 
 export interface DeadlineInfo {

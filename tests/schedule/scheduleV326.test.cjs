@@ -151,9 +151,9 @@ test('Add/Edit on phones: full-screen with sticky actions, safe areas, keyboard 
 })
 
 // ── Task 9: category dropdown ───────────────────────────────────────────────
-test('phone category dropdown lists built-in + custom categories with colours; desktop keeps the pills', () => {
+test('category dropdown (every size since v1.328) lists built-in + custom categories with colours', () => {
   const p = src('ScheduleParts.tsx')
-  assert.ok(/\{phone \? <CategorySelect id="sch-category" value=\{v\.category\}/.test(p) && /role="radiogroup" aria-label="Category"/.test(p), 'dropdown on phones, pills elsewhere')
+  assert.ok(/<CategorySelect id="sch-category" value=\{v\.category\}/.test(p) && !/\{phone \? <CategorySelect/.test(p) && !/role="radiogroup" aria-label="Category"/.test(p), 'one dropdown at every size; the desktop/tablet pills are gone')
   const c = p.slice(p.indexOf('function CategorySelect'), p.indexOf('interface EventFormProps'))
   assert.ok(/categories\.map\(\(c, i\)/.test(c) && /role="listbox"/.test(c) && /overflowY|popupStyle/.test(c) && /onChange\(categories\[i\]\.id\)/.test(c), 'every category, by id')
   assert.ok(/aria-expanded=\{open\}/.test(c) && /e\.key === 'ArrowDown'/.test(c) && /e\.key === 'Escape'/.test(c), 'keyboard + ARIA')

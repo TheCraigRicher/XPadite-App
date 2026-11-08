@@ -2244,7 +2244,7 @@ export function JournalEditorContent({
 }: JournalEditorContentProps) {
 
   // ── App context (for Task Manager integration) ───────────────────────────────
-  const { calData, updateDay, flushDays, activeTaskTimer, setActiveTaskTimer, setToast } = useApp()
+  const { calData, updateDay, flushDays, activeTaskTimer, setActiveTaskTimer, setToast, mindMapRequest, clearMindMapRequest } = useApp()
 
   // ── Transfer Section modal (Move/Copy a section to another date) ─────────────
   const [transferBlockId, setTransferBlockId] = useState<string | null>(null)
@@ -2337,6 +2337,13 @@ export function JournalEditorContent({
   }, [closeIntent])
   const showExitDialogRef = useRef(false)  // for ESC handler stable closure
   const drawStateRef = useRef<typeof drawState>(null)  // lets the capture-phase ESC/Ctrl+S handler know the Mind Mapping Canvas owns the key right now
+  // Main menu → "Mind Mapping": open the SAME canvas the "🧠 Mind Map" button opens (same state, same save/gallery rules). Only the editor showing the
+  // requested date answers, and only once its blocks have loaded (so the new map is inserted before the trailing text block, as the button does).
+  useEffect(() => {
+    if (!mindMapRequest || mindMapRequest.dateKey !== dateKey || blocks.length === 0) return
+    const t = window.setTimeout(() => { setDrawState({ insertAt: blocks.length - 1, editingBlock: null }); clearMindMapRequest() }, 0)
+    return () => window.clearTimeout(t)
+  }, [mindMapRequest, dateKey, blocks.length, clearMindMapRequest])
   // The Mind Map block this canvas session has already saved. handleDrawSave records it synchronously, so two saves that land
   // before React has re-rendered (a quick double Ctrl+S) still see "this Mind Map exists" and update it instead of creating a
   // second Planner block + Gallery item. Cleared whenever the canvas closes.

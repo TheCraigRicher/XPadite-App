@@ -82,3 +82,18 @@ export function readViewPref(): ScheduleViewKey | null {
 export function writeViewPref(v: ScheduleViewKey): void {
   try { window.localStorage.setItem(VIEW_PREF_KEY, v) } catch { /* private mode / blocked storage: just don't remember */ }
 }
+
+/**
+ * The date the calendar should anchor on after picking `month` of `year`. Same day-of-month as now (clamped to the target month's
+ * length — exactly what the previous/next arrows do). In week view (`keepWeekday`) it then slides to the nearest date in that month with
+ * the current weekday, so the visible week stays a sensible one inside the chosen month.
+ */
+export function pickMonthAnchor(anchor: Date, year: number, month: number, keepWeekday: boolean): Date {
+  const dim = new Date(year, month + 1, 0).getDate()
+  const d = new Date(year, month, Math.min(anchor.getDate(), dim))
+  if (!keepWeekday || d.getDay() === anchor.getDay()) return d
+  const fwd = (anchor.getDay() - d.getDay() + 7) % 7
+  const cands = [fwd, fwd - 7].map(o => ({ o, date: addDays(d, o) })).filter(c => c.date.getMonth() === month)
+    .sort((a, b) => Math.abs(a.o) - Math.abs(b.o) || b.o - a.o)
+  return cands.length ? cands[0].date : d
+}

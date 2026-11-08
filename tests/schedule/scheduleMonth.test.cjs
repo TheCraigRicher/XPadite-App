@@ -168,3 +168,27 @@ test('accessibility + motion hooks: grid roles, labelled cells, focus rings, red
   for (const s of ['role="grid"', 'role="gridcell"', 'role="columnheader"', 'aria-label={label}', ':focus-visible', 'prefers-reduced-motion', 'aria-pressed', "e.key === 'Enter'"]) assert.ok(g.includes(s), s)
   assert.ok(!/#[0-9a-f]{6}/i.test(g.replace(/#7c3aed/gi, '').replace(/#ffffff/gi, '')), 'only the existing purple/white + category/CSS-variable colours — no new palette')
 })
+
+// ── month picker dropdown (Week + Month views) ──
+test('pickMonthAnchor: day-of-month clamps like the arrows; week view keeps the weekday inside the chosen month', () => {
+  const sat = new Date(2026, 10, 7)                                               // Sat Nov 7 2026
+  const dec = M.pickMonthAnchor(sat, 2026, 11, false); assert.equal(`${dec.getMonth() + 1}/${dec.getDate()}`, '12/7')
+  const decW = M.pickMonthAnchor(sat, 2026, 11, true); assert.equal(decW.getDay(), 6); assert.equal(decW.getMonth(), 11); assert.equal(decW.getDate(), 5)
+  const feb = M.pickMonthAnchor(new Date(2027, 0, 31), 2027, 1, false); assert.equal(`${feb.getMonth() + 1}/${feb.getDate()}`, '2/28')
+  const leap = M.pickMonthAnchor(new Date(2027, 0, 31), 2028, 1, false); assert.equal(`${leap.getMonth() + 1}/${leap.getDate()}`, '2/29')
+  for (let y = 2025; y <= 2030; y++) for (let m = 0; m < 12; m++) for (const d of [1, 15, 28, 29, 30, 31]) {
+    const a = new Date(2026, 5, Math.min(d, 30)); const r = M.pickMonthAnchor(a, y, m, true)
+    assert.equal(r.getMonth(), m); assert.equal(r.getFullYear(), y); assert.equal(r.getDay(), a.getDay())
+    const r2 = M.pickMonthAnchor(a, y, m, false); assert.equal(r2.getMonth(), m)
+  }
+})
+
+test('month picker: only the center label is the trigger; arrows, Today and layout wiring untouched; Today+Filter grouped only for phone Month View', () => {
+  const v = read('components/xpadite/MyScheduleView.tsx'), p = read('components/xpadite/ScheduleMonthPicker.tsx')
+  assert.equal((v.match(/picker=\{monthPicker\}/g) || []).length, 2, 'phone + tablet/desktop month NavGroups (the week-range NavGroups get none)')
+  assert.ok(!/Previous week[^\n]*picker=|picker=[^\n]*Next week/.test(v))
+  assert.match(v, /onPrev=\{\(\) => setAnchor\(a => shiftMonth\(a, -1\)\)\} onNext=\{\(\) => setAnchor\(a => shiftMonth\(a, 1\)\)\}/, 'month arrows keep their existing handlers')
+  assert.match(v, /\{month \? <div className="flex items-center gap-0\.5 min-\[361px\]:gap-1">\{phoneTodayFilter\}<\/div> : phoneTodayFilter\}/)
+  assert.ok(/12/.test(p) && /grid-cols-3/.test(p) && /role="dialog"/.test(p) && /LAYER_ATTR/.test(p) && /key === 'Escape'/.test(p) && /pointerdown/.test(p) && /prefers-reduced-motion/.test(p) && /aria-pressed/.test(p))
+  assert.ok(!/supabase|fetch\(|\.rpc\(|localStorage/i.test(p), 'presentation only')
+})

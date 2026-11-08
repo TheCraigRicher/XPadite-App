@@ -25,7 +25,8 @@ import { isFilterActive } from './scheduleEngine'
 import type { FilterState } from './scheduleEngine'
 import { ActiveSearchChip, FilterIconButton, FilterSheet, SearchPanel, SlideDown, useIsPhone } from './ScheduleMobile'
 import { MonthDaySheet, MonthGrid } from './ScheduleMonthGrid'
-import { buildMonthGrid, monthDayEvents } from './scheduleMonth'
+import { MonthPicker } from './ScheduleMonthPicker'
+import { buildMonthGrid, monthDayEvents, pickMonthAnchor } from './scheduleMonth'
 import type { MonthCell } from './scheduleMonth'
 import { Chevron, EmptyDetails, EventDetails, EventSheet, FilterSelect, LAYER_ATTR, iconBtn } from './ScheduleParts'
 
@@ -46,24 +47,36 @@ const LONG_PRESS_SLOP_PX = 10      // touch: moving more than this first means "
 
 // ── Small pieces ────────────────────────────────────────────────────────────
 
-function NavGroup({ label, shortLabel, onPrev, onNext, prevLabel, nextLabel, minWidth, compact, labelEm }: { label: string; shortLabel?: string; onPrev: () => void; onNext: () => void; prevLabel: string; nextLabel: string; minWidth: number; compact?: boolean; labelEm?: number }) {
+interface MonthPickerBinding { open: boolean; onOpenChange: (open: boolean) => void; month: Date; onPick: (year: number, month: number) => void }
+
+function NavGroup({ label, shortLabel, onPrev, onNext, prevLabel, nextLabel, minWidth, compact, labelEm, picker }: { label: string; shortLabel?: string; onPrev: () => void; onNext: () => void; prevLabel: string; nextLabel: string; minWidth: number; compact?: boolean; labelEm?: number; picker?: MonthPickerBinding }) {
+  const labelRef = useRef<HTMLSpanElement>(null)
+  const closePicker = (refocus: boolean) => { picker?.onOpenChange(false); if (refocus) labelRef.current?.focus() }
+  const labelProps = picker ? {
+    ref: labelRef, role: 'button' as const, tabIndex: 0, 'data-mp-label': '', 'data-testid': 'month-label', 'aria-haspopup': 'dialog' as const, 'aria-expanded': picker.open,
+    onClick: () => picker.onOpenChange(!picker.open),
+    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') { e.preventDefault(); picker.onOpenChange(true) } },
+  } : null
+  const pickerPopup = picker?.open ? <MonthPicker current={picker.month} onPick={(y, m) => { picker.onPick(y, m); closePicker(true) }} onClose={closePicker} /> : null
   if (compact) {
     // Phones: the same rounded-square arrows, tightened so month, week, Today and Filter share one row down to 320px.
     return (
-      <div className="flex items-center justify-between gap-px min-[361px]:gap-1 p-px min-[361px]:p-[2px] flex-shrink-0" data-testid="nav-group" style={{ borderRadius: 10, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
+      <div className="relative flex items-center justify-between gap-px min-[361px]:gap-1 p-px min-[361px]:p-[2px] flex-shrink-0" data-testid="nav-group" style={{ borderRadius: 10, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
         <button type="button" onClick={onPrev} aria-label={prevLabel} className="xp-nav-sq" style={{ ...iconBtn, width: undefined, height: undefined, background: 'var(--xp-card)' }}><Chevron dir="left" /></button>
-        <span className="text-[11px] min-[361px]:text-[12px] font-semibold text-center whitespace-nowrap overflow-hidden" style={{ color: 'var(--xp-txt)', minWidth, ...(labelEm ? { width: `${labelEm}em`, flexShrink: 0 } : null) }} aria-live="polite" aria-label={label} data-testid="nav-label">{shortLabel ?? label}</span>
+        <span {...labelProps} className="text-[11px] min-[361px]:text-[12px] font-semibold text-center whitespace-nowrap overflow-hidden" style={{ color: 'var(--xp-txt)', minWidth, ...(labelEm ? { width: `${labelEm}em`, flexShrink: 0 } : null), ...(picker ? { cursor: 'pointer' } : null) }} aria-live="polite" aria-label={label} data-testid="nav-label">{shortLabel ?? label}</span>
         <button type="button" onClick={onNext} aria-label={nextLabel} className="xp-nav-sq" style={{ ...iconBtn, width: undefined, height: undefined, background: 'var(--xp-card)' }}><Chevron dir="right" /></button>
+      {pickerPopup}
       </div>
     )
   }
   return (
-    <div className="flex items-center gap-1 sm:gap-1.5" style={{ padding: 3, borderRadius: 10, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
+    <div className="relative flex items-center gap-1 sm:gap-1.5" style={{ padding: 3, borderRadius: 10, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr)' }}>
       <button type="button" onClick={onPrev} aria-label={prevLabel} style={{ ...iconBtn, width: 26, height: 26, background: 'var(--xp-card)' }}><Chevron dir="left" /></button>
-      <span className="text-[12px] sm:text-[12.5px] font-semibold text-center whitespace-nowrap" style={{ color: 'var(--xp-txt)', minWidth }} aria-live="polite" aria-label={label}>
+      <span {...labelProps} className="text-[12px] sm:text-[12.5px] font-semibold text-center whitespace-nowrap" style={{ color: 'var(--xp-txt)', minWidth, ...(picker ? { cursor: 'pointer' } : null) }} aria-live="polite" aria-label={label}>
         {shortLabel ? <><span className="sm:hidden">{shortLabel}</span><span className="hidden sm:inline">{label}</span></> : label}
       </span>
       <button type="button" onClick={onNext} aria-label={nextLabel} style={{ ...iconBtn, width: 26, height: 26, background: 'var(--xp-card)' }}><Chevron dir="right" /></button>
+    {pickerPopup}
     </div>
   )
 }
@@ -233,6 +246,11 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
   // Month View: the date whose expanded day list is open (null = closed).
   const [daySheet, setDaySheet] = useState<Date | null>(null)
   const month = mode === 'month'
+  // The month picker dropdown under the month label (Week and Month views). Closed whenever the view changes.
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [seenMode, setSeenMode] = useState(mode)
+  if (seenMode !== mode) { setSeenMode(mode); setPickerOpen(false) }
+  const monthPicker: MonthPickerBinding = { open: pickerOpen, onOpenChange: setPickerOpen, month: anchor, onPick: (y, m) => setAnchor(a => pickMonthAnchor(a, y, m, !month)) }
 
   // Jump to an event the modal just added/edited (adjusting state during render — no effect needed).
   if (focus && focus.nonce !== seenFocus) {
@@ -484,6 +502,16 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
     if (s.touch) s.timer = window.setTimeout(() => { s.timer = null; if (dragRef.current === s && !s.active) activate() }, LONG_PRESS_MS)
   }
 
+  const phoneTodayFilter = (
+    <>
+                  <button type="button" onClick={() => { goToDate(new Date()); setSelectedDay(startOfDay(new Date())) }} data-testid="today-btn"
+                    className="text-[11.5px] min-[361px]:text-[12px] font-semibold flex-shrink-0 px-1 min-[361px]:px-2" style={{ paddingTop: 6, paddingBottom: 6, borderRadius: 8, color: '#7c3aed', background: 'rgba(124,58,237,0.10)', border: '0.5px solid rgba(124,58,237,0.28)' }}>
+                    Today
+                  </button>
+                  <FilterIconButton active={isFilterActive({ filter, hidden, hiddenSources })} open={panel.kind === 'filter'} onClick={() => onPanelChange(panel.kind === 'filter' ? null : 'filter')} />
+    </>
+  )
+
   const dragEv = drag ? events.find(e => e.id === drag.id) ?? null : null
   const dragDur = dragEv ? dragEv.endAt - dragEv.startAt : 0
 
@@ -525,15 +553,11 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
             {phone ? (
               <div ref={phoneToolbarRef}>
                 <div className="flex items-center justify-between gap-0.5 min-[361px]:gap-1 pb-2 flex-shrink-0" data-testid="toolbar-row2">
-                  <NavGroup compact labelEm={month ? NAV_MONTH_FULL_EM : NAV_MONTH_EM} label={monthYearLabel(anchor)} shortLabel={month ? undefined : monthYearShort(anchor)} minWidth={0} prevLabel="Previous month" nextLabel="Next month"
+                  <NavGroup compact labelEm={month ? NAV_MONTH_FULL_EM : NAV_MONTH_EM} label={monthYearLabel(anchor)} shortLabel={month ? undefined : monthYearShort(anchor)} minWidth={0} prevLabel="Previous month" nextLabel="Next month" picker={monthPicker}
                     onPrev={() => setAnchor(a => shiftMonth(a, -1))} onNext={() => setAnchor(a => shiftMonth(a, 1))} />
                   {!month && <NavGroup compact labelEm={NAV_WEEK_EM} label={weekRangeLabel(anchor, prefs.weekStart)} shortLabel={weekRangeShort(anchor, prefs.weekStart)} minWidth={0} prevLabel="Previous week" nextLabel="Next week"
                     onPrev={() => setAnchor(a => addDays(a, -7))} onNext={() => setAnchor(a => addDays(a, 7))} />}
-                  <button type="button" onClick={() => { goToDate(new Date()); setSelectedDay(startOfDay(new Date())) }} data-testid="today-btn"
-                    className="text-[11.5px] min-[361px]:text-[12px] font-semibold flex-shrink-0 px-1 min-[361px]:px-2" style={{ paddingTop: 6, paddingBottom: 6, borderRadius: 8, color: '#7c3aed', background: 'rgba(124,58,237,0.10)', border: '0.5px solid rgba(124,58,237,0.28)' }}>
-                    Today
-                  </button>
-                  <FilterIconButton active={isFilterActive({ filter, hidden, hiddenSources })} open={panel.kind === 'filter'} onClick={() => onPanelChange(panel.kind === 'filter' ? null : 'filter')} />
+                  {month ? <div className="flex items-center gap-0.5 min-[361px]:gap-1">{phoneTodayFilter}</div> : phoneTodayFilter}
                 </div>
                 <SlideDown open={panel.kind === 'search'} onEscape={() => onPanelChange(null)}>
                   <SearchPanel query={query} onChange={onQueryChange} onClose={() => onPanelChange(null)} open={panel.kind === 'search'} focusNonce={panel.nonce} />
@@ -545,7 +569,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
             ) : (
               <>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-2 pb-2.5 flex-shrink-0">
-              <NavGroup label={monthYearLabel(anchor)} shortLabel={monthYearShort(anchor)} minWidth={64} prevLabel="Previous month" nextLabel="Next month"
+              <NavGroup label={monthYearLabel(anchor)} shortLabel={monthYearShort(anchor)} minWidth={64} prevLabel="Previous month" nextLabel="Next month" picker={monthPicker}
                 onPrev={() => setAnchor(a => shiftMonth(a, -1))} onNext={() => setAnchor(a => shiftMonth(a, 1))} />
               {!month && <NavGroup label={weekRangeLabel(anchor, prefs.weekStart)} minWidth={92} prevLabel="Previous week" nextLabel="Next week"
                 onPrev={() => setAnchor(a => addDays(a, -7))} onNext={() => setAnchor(a => addDays(a, 7))} />}

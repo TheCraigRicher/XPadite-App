@@ -130,7 +130,7 @@ test('Sync dialog: sliding switch (not a checkbox), draft of the last SAVED valu
   const sw = dlg.slice(dlg.indexOf('export function Switch'), dlg.indexOf('type SyncProps'))
   assert.ok(/role="switch"/.test(sw) && /aria-checked=\{checked\}/.test(sw) && !/type="checkbox"/.test(sw) && /width: 52, height: 30/.test(sw) && /'#7c3aed' : '#9ca3af'/.test(sw) && /translateX\(22px\)/.test(sw) && /focus-visible/.test(sw) && /prefers-reduced-motion: reduce/.test(sw), 'accessible switch: 52×30, grey OFF / purple ON, knob slides, focus ring, reduced motion')
   assert.ok(/useState\(enabled\)/.test(inner), 'opens on the last saved value'); assert.ok(/data-testid="sync-cancel"[\s\S]*Cancel/.test(inner) && /data-testid="sync-save"[\s\S]*Save/.test(inner) && !/Done|Apply/.test(inner.replace(/Saving/g, '')), 'Cancel | Save only')
-  assert.ok(/await onSave\(draft\); busy\.current = false; setPending\(false\); onClose\(\)/.test(inner) && /catch \(err\)/.test(inner) && /role="alert"/.test(inner), 'closes after success; stays open with the draft and a clear error on failure')
+  assert.ok(/await onSave\(draft, \{ backfill: offerBackfill && backfill \}\); busy\.current = false; setPending\(false\); onClose\(\)/.test(inner) && /catch \(err\)/.test(inner) && /role="alert"/.test(inner), 'closes after success; stays open with the draft and a clear error on failure')
   assert.ok(/if \(busy\.current \|\| pending\) return/.test(inner) && /useRef\(false\)/.test(inner) && /disabled=\{pending\}/.test(inner), 'no repeated Save while pending (synchronous ref guard + disabled button)')
   assert.ok(/const cancel = \(\) => \{ if \(!pending\) onClose\(\) \}/.test(inner) && /useLayerEscape\(cancel\)/.test(inner) && /onClose=\{cancel\}/.test(inner), 'Esc / backdrop / swipe-down all act as Cancel (via Shell → SheetFrame)')
   assert.ok(/Automatically display your scheduled events as linked tasks in Task Manager\./.test(inner) && /Scheduled events remain in My Schedule only\./.test(inner) && /Scheduled events also appear in Task Manager\./.test(inner) && /always stay linked to Task Manager, whatever this setting is/.test(inner))
@@ -142,7 +142,7 @@ test('the preference is saved per user in Supabase (never device-local) and appl
   assert.ok(/rpc\('schedule_set_sync'/.test(sd) && /select\('schedule_task_sync'\)/.test(sd))
   assert.ok(!/localStorage[^\n]*(task_?sync|sync-?pref)/i.test(a), 'not device-local or session-only')
   const set = a.slice(a.indexOf('const setScheduleTaskSyncPref'), a.indexOf('const requestScheduleEvent'))
-  assert.ok(set.indexOf('await setScheduleSyncPref') > -1 && set.indexOf('await setScheduleSyncPref') < set.indexOf('setScheduleTaskSyncState(next)') && set.indexOf('setScheduleTaskSyncState(next)') < set.indexOf('await reconcileInner(true)'), 'saved first (a failure changes nothing), then every event is reconciled')
+  assert.ok(set.indexOf('await setScheduleSyncPref') > -1 && set.indexOf('await setScheduleSyncPref') < set.indexOf('setScheduleTaskSyncState(next)') && set.indexOf('setScheduleTaskSyncState(next)') < set.indexOf('await reconcileInner(true, next && !!opts?.backfill)'), 'saved first (a failure changes nothing), then existing links are reconciled (existing events are only back-filled on explicit consent)')
   assert.ok(/syncPref !== null\) \{ scheduleTaskSyncRef\.current = syncPref/.test(a), 'loaded on sign-in; default OFF when unset/unavailable')
 })
 

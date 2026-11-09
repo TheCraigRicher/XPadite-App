@@ -130,6 +130,8 @@ export function findTaskKeys(cal: Record<string, DayData>, tid: string, prevKey:
  * Works out the Task Manager changes for one event save/removal. `next` is the event as saved (null = event deleted); `prevTaskDateKey` is
  * where its task lived before (event row's task_date_key); `taskLink` the user's per-event choice; `syncOn` the user's global switch.
  * Idempotent: running the same plan twice yields the same calendar. Never plans two tasks for one event.
+ * `createMissing` = false means "an ORDINARY (synced-event) event that has no task yet must NOT get one" (consent: turning Sync ON never
+ * back-fills events the user did not ask for). Deadline tasks are unaffected, and an existing task is always kept up to date / moved / removed.
  */
 export function planDeadlineSync(
   cal: Record<string, DayData>,
@@ -140,6 +142,7 @@ export function planDeadlineSync(
   makeId?: (kind: LinkKind) => string,
   taskLink: TaskLink = 'linked',
   syncOn = false,
+  createMissing = true,
 ): DeadlineSyncPlan {
   const kind = wantedKind(next, taskLink, syncOn)
   const targetKey = kind && next ? taskDayFor(next, kind) : null
@@ -162,6 +165,7 @@ export function planDeadlineSync(
   }
 
   const title = (next as PlanEvent).title
+  if (!primary && kind === 'event' && !createMissing) return { ops: [], taskDateKey: null, outcome: 'none', changed: false, kind: null }
   const fresh: Task = { id: wantedId, text: title, done: false, journal: '', timerStart: null, timerEnd: null, actId: defaultActId, sessions: [], sourceEventId: eventId }
   if (!primary) {
     return { ops: [{ kind: 'upsert', date_key: targetKey, task_id: wantedId, event_id: eventId, task: fresh }], taskDateKey: targetKey, outcome: 'created', changed: true, kind }
@@ -246,6 +250,18 @@ export interface ReconcileItem { eventId: string; ops: TaskOp[]; taskDateKey: st
 
 type ReconEvent = PlanEvent & { id: string; taskDateKey?: string | null; taskLink?: TaskLink }
 
+/** Which ordinary events the user may choose to add to the Task Manager when turning Sync ON: still to come (ends today or later), not cancelled,
+ *  not a deadline (those are always linked), not opted out, and with no task yet. Past events are never offered. */
+export function isBackfillEligible(e: Pick<ScheduleEvent, 'endAt' | 'isDeadline' | 'isCancelled'> & { id?: string; taskLink?: TaskLink; taskDateKey?: string | null }, now: number, cal?: Record<string, DayData>): boolean {
+  if (e.isDeadline || e.isCancelled || e.taskLink === 'detached') return false
+  // "has no task yet" is judged from the calendar itself when it is available (the event row's task_date_key can be stale after a task was removed)
+  if (cal && e.id) { if (findCopies(cal, e.id, e.taskDateKey ?? null, null).length > 0) return false }
+  else if (e.taskDateKey) return false
+  const d = new Date(now)
+  return e.endAt >= new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+}
+export const countBackfillEligible = (events: Parameters<typeof isBackfillEligible>[0][], now: number, cal?: Record<string, DayData>): number => events.filter(e => isBackfillEligible(e, now, cal)).length
+
 /**
  * Compares every persisted event with the calendar's tasks and returns the minimal ops that repair drift:
  *   • should have a task (deadline, or ordinary while sync is ON, and not opted out) but has none / it is on the wrong day / wrong kind /
@@ -254,11 +270,11 @@ type ReconEvent = PlanEvent & { id: string; taskDateKey?: string | null; taskLin
  *   • an opted-out ('detached') event is NEVER recreated, whatever the global switch does.
  * Pure and idempotent: once the ops are applied a second pass returns nothing.
  */
-export function reconcileDeadlines(cal: Record<string, DayData>, events: ReconEvent[], defaultActId: string, syncOn = false): ReconcileItem[] {
+export function reconcileDeadlines(cal: Record<string, DayData>, events: ReconEvent[], defaultActId: string, syncOn = false, createMissing: boolean | ((e: ReconEvent) => boolean) = true): ReconcileItem[] {
   const out: ReconcileItem[] = []
   const byId = new Map(events.map(e => [e.id, e]))
   for (const e of events) {
-    const plan = planDeadlineSync(cal, e.id, e, e.taskDateKey ?? null, defaultActId, undefined, e.taskLink ?? 'linked', syncOn)
+    const plan = planDeadlineSync(cal, e.id, e, e.taskDateKey ?? null, defaultActId, undefined, e.taskLink ?? 'linked', syncOn, typeof createMissing === 'function' ? createMissing(e) : createMissing)
     if (plan.ops.length === 0 || !plan.changed) continue
     out.push({ eventId: e.id, ops: plan.ops, taskDateKey: plan.taskDateKey, reason: plan.outcome })
   }

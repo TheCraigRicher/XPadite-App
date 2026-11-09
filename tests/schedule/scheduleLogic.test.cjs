@@ -11,9 +11,8 @@ const ROOT = path.resolve(__dirname, '..', '..')
 const OUT = path.join(ROOT, 'node_modules', '.cache', 'xpadite-schedule'); fs.mkdirSync(OUT, { recursive: true })
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8')
 const compile = f => fs.writeFileSync(path.join(OUT, f + '.js'), ts.transpileModule(read(`components/xpadite/${f}.ts`), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)
-compile('scheduleLogic'); compile('scheduleMockData')
+compile('scheduleLogic')
 const L = require(path.join(OUT, 'scheduleLogic.js'))
-const { buildSampleScheduleEvents } = require(path.join(OUT, 'scheduleMockData.js'))
 
 const at = (y, m, d, h = 0, mi = 0) => new Date(y, m - 1, d, h, mi).getTime()
 const ev = (id, s, e, extra = {}) => ({ id, title: id, category: 'meeting', startAt: s, endAt: e, ...extra })
@@ -168,14 +167,10 @@ test('the six categories keep their agreed names and one colour each', () => {
   assert.equal(L.categoryMeta('meeting').label, 'Meeting')
 })
 
-// ── sample data ─────────────────────────────────────────────────────────────
-test('sample events are valid, categorised, uniquely identified and stay within the displayed week/next week', () => {
-  const today = new Date(2026, 10, 4); const evs = buildSampleScheduleEvents(today)
-  assert.ok(evs.length >= 10); assert.equal(new Set(evs.map(e => e.id)).size, evs.length)
-  const ids = new Set(L.SCHEDULE_CATEGORIES.map(c => c.id))
-  for (const e of evs) { assert.ok(e.endAt > e.startAt, e.title); assert.ok(ids.has(e.category)); assert.ok(e.id.startsWith('sample-sched-')) }
-  const w = L.startOfWeek(today).getTime(); assert.ok(evs.every(e => e.startAt >= w && e.startAt < L.addDays(L.startOfWeek(today), 14).getTime()))
-  assert.ok(evs.some(e => L.daySlice(e, new Date(2026, 10, 6)) && L.layoutDayEvents(evs, new Date(2026, 10, 6)).some(p => p.lanes > 1)), 'the sample week includes overlapping events')
+// ── no built-in sample data (v1.329 fix) ─────────────────────────────────────
+test('there is no built-in sample schedule or mock meeting data any more', () => {
+  assert.ok(!fs.existsSync(path.join(ROOT, 'components/xpadite/scheduleMockData.ts')), 'the sample-event generator is gone')
+  const mm = read('components/xpadite/meetingsMockData.ts'); assert.ok(!/MOCK_MEETINGS|dayAt\(|meeting\(\{/.test(mm), 'no mock meetings')
 })
 
 // ── combined filter (categories + sources) ─────────────────────────────────
@@ -246,7 +241,7 @@ test('Meetings → My Schedule: naming, exactly two tabs, banners gone, integrat
   // preserved behaviour
   assert.ok(/function MeetingDetail/.test(m) && /useLockBodyScroll\(\)/.test(m))
   assert.ok(/const \[autoAdd\] = useState\(true\)/.test(m) && /addedToTaskManager: true, linkedTaskId/.test(m), 'Task Manager add logic kept')
-  assert.ok(/MOCK_MEETINGS/.test(m) && /handleRemove/.test(m) && /handleJoin/.test(m) && /onNotesChange=\{text => updateMeeting/.test(m), 'notes + remove-from-XPadite + join kept')
+  assert.ok(/useState<XpaditeMeeting\[\]>\(\[\]\)/.test(m) && !/MOCK_MEETINGS/.test(m) && /handleRemove/.test(m) && /handleJoin/.test(m) && /onNotesChange=\{text => updateMeeting/.test(m), 'notes + remove-from-XPadite + join kept')
   assert.ok(/setMeetingsOpen\(true\)/.test(read('components/xpadite/XpaditeApp.tsx')) && /<MeetingsModal onClose/.test(read('components/xpadite/XpaditeApp.tsx')), 'opening/closing wiring unchanged')
   assert.ok(/upcoming = useMemo/.test(read('components/xpadite/MyScheduleView.tsx')), 'upcoming events still live in the weekly view (now a scrolling list that fills the sidebar — no View All toggle needed)')
 })
@@ -281,7 +276,7 @@ test('Today tab: dark mini calendar with the purple triangle, agenda, and detail
   assert.ok(/<MeetingDetail/.test(m) && /<EventDetails/.test(m), 'synced meeting detail (read-only + notes) and XPadite event detail (edit/delete)')
 })
 test('My Schedule never touches storage, network, Supabase or the Task Manager', () => {
-  for (const f of ['MyScheduleView.tsx', 'ScheduleParts.tsx', 'ScheduleMiniCalendar.tsx', 'scheduleLogic.ts', 'scheduleMockData.ts']) {
+  for (const f of ['MyScheduleView.tsx', 'ScheduleParts.tsx', 'ScheduleMiniCalendar.tsx', 'scheduleLogic.ts']) {
     const src = read(`components/xpadite/${f}`)
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')   // comments may mention Supabase; code must not use it
     assert.ok(!/supabase|fetch\(|localStorage|sessionStorage|useApp|addTask|XMLHttpRequest/i.test(code), `${f} must stay frontend-only`)

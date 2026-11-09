@@ -267,7 +267,7 @@ export function Switch({ checked, onChange, id, label, disabled }: { checked: bo
   )
 }
 
-type SyncProps = { enabled: boolean; onSave: (next: boolean) => Promise<void>; onClose: () => void }
+type SyncProps = { enabled: boolean; onSave: (next: boolean, opts?: { backfill?: boolean }) => Promise<void>; onClose: () => void; /** Upcoming events that have no Task Manager task yet (offered only when switching ON). */ eligibleCount?: number }
 
 export function SyncTaskManagerDialog(props: SyncProps & { open?: boolean }) {
   const phone = useIsPhone()
@@ -277,8 +277,11 @@ export function SyncTaskManagerDialog(props: SyncProps & { open?: boolean }) {
 }
 
 /** Edited as a DRAFT of the last SAVED value. Save persists it (closing only after success); Cancel, backdrop, swipe-down and Esc discard it. */
-function SyncInner({ enabled, onSave, onClose, phone, visible }: SyncProps & { phone: boolean; visible: boolean }) {
+function SyncInner({ enabled, onSave, onClose, eligibleCount = 0, phone, visible }: SyncProps & { phone: boolean; visible: boolean }) {
   const [draft, setDraft] = useState(enabled)
+  // Existing events are NEVER added unless this is ticked (unticked by default): turning Sync ON only affects events saved from now on.
+  const [backfill, setBackfill] = useState(false)
+  const offerBackfill = draft && !enabled && eligibleCount > 0
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const busy = useRef(false)                               // synchronous guard: two clicks in the same instant can not both pass `pending`
@@ -287,7 +290,7 @@ function SyncInner({ enabled, onSave, onClose, phone, visible }: SyncProps & { p
   async function save() {
     if (busy.current || pending) return
     busy.current = true; setPending(true); setError(null)
-    try { await onSave(draft); busy.current = false; setPending(false); onClose() }
+    try { await onSave(draft, { backfill: offerBackfill && backfill }); busy.current = false; setPending(false); onClose() }
     catch (err) { busy.current = false; setPending(false); setError(err instanceof Error && err.message ? err.message : 'Could not save \u2014 please check your connection and try again.') }
   }
   return (
@@ -305,6 +308,15 @@ function SyncInner({ enabled, onSave, onClose, phone, visible }: SyncProps & { p
         <Switch id="sync-switch" label="Sync with Task Manager" checked={draft} onChange={setDraft} disabled={pending} />
       </div>
       <p data-testid="sync-status" className="text-[12px] leading-snug" style={{ color: 'var(--xp-txt2)' }}>{draft ? 'Scheduled events also appear in Task Manager.' : 'Scheduled events remain in My Schedule only.'}</p>
+      {draft && !enabled && <p data-testid="sync-existing-note" className="text-[11.5px] leading-snug" style={{ color: 'var(--xp-txt3)' }}>Turning this on links only the events you add from now on. Your existing events and tasks are left exactly as they are.</p>}
+      {!draft && enabled && <p data-testid="sync-off-note" className="text-[11.5px] leading-snug" style={{ color: '#b45309', padding: '8px 10px', borderRadius: 10, background: 'rgba(245,158,11,0.10)', border: '0.5px solid rgba(245,158,11,0.45)' }}>Turning this off removes the Task Manager tasks that were created from your events and have no recorded work. Tasks with logged time, notes, attachments, sub-tasks or a completed check are kept (they just stop following their event). Deadline tasks and all your own tasks are not affected. Your events stay in My Schedule.</p>}
+      {offerBackfill && (
+        <label data-testid="sync-backfill" className="flex items-start gap-2 text-[12px] leading-snug" style={{ color: 'var(--xp-txt2)', padding: '8px 10px', borderRadius: 10, background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)' }}>
+          <input type="checkbox" data-testid="sync-backfill-box" checked={backfill} onChange={e => setBackfill(e.target.checked)} disabled={pending} style={{ marginTop: 2 }} />
+          <span>Also add my {eligibleCount} upcoming event{eligibleCount === 1 ? '' : 's'} to Task Manager now. Past events are never added.</span>
+        </label>
+      )}
+      <p className="text-[11px] leading-snug" style={{ color: 'var(--xp-txt3)' }}>A scheduled event and a Task Manager task can share the same time. They never move, replace or change each other, and your logged work sessions stay separate from planned event times.</p>
       <p className="text-[11px] leading-snug" style={{ color: 'var(--xp-txt3)' }}>Events marked &ldquo;Set as Due Date&rdquo; always stay linked to Task Manager, whatever this setting is. A task you delete from Task Manager stays removed until you add it back from the event&rsquo;s details.</p>
       {error && <p role="alert" data-testid="sync-error" className="text-[12px]" style={{ padding: '8px 10px', borderRadius: 9, background: 'rgba(220,38,38,0.09)', border: '0.5px solid rgba(220,38,38,0.4)', color: '#dc2626' }}>{error}</p>}
     </Shell>

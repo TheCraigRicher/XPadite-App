@@ -40,7 +40,7 @@ import type { MergeConflict } from './dayMerge'
 import { DayConflictDialog } from './DayConflictDialog'
 import { fetchScheduleEvents, applyScheduleChange, setScheduleTaskLink, fetchScheduleExtras, saveScheduleExtras, fetchScheduleSyncPref, setScheduleSyncPref, ScheduleConflictError, ScheduleSetupError } from '@/lib/supabase/schedule-data'
 import type { StoredScheduleEvent } from '@/lib/supabase/schedule-data'
-import { planDeadlineSync, deadlineDayMap, reconcileDeadlines, batchItems, opKeys, applyOpsLocal } from './deadlineLink'
+import { planDeadlineSync, deadlineDayMap, reconcileDeadlines, batchItems, opKeys, applyOpsLocal, isBackfillEligible } from './deadlineLink'
 import type { TaskOp } from './deadlineLink'
 import type { TimeFormat } from './scheduleLogic'
 import type { ScheduleCategory, ScheduleEvent } from './scheduleLogic'
@@ -182,8 +182,9 @@ interface AppContextValue {
   // "Mind Mapping" in the main menu: asks the Planner/Journal editor for that date to open its EXISTING Mind Mapping Canvas.
   // "Sync with Task Manager" (per user, saved in Supabase, default OFF): ordinary events get a linked task on their START date while ON.
   scheduleTaskSync: boolean
-  // Saves the switch, then reconciles every existing event with the Task Manager. Rejects (changing nothing) if the preference can not be saved.
-  setScheduleTaskSyncPref: (next: boolean) => Promise<void>
+  // Saves the switch. Existing events get a Task Manager task ONLY when the user explicitly asks (opts.backfill, upcoming events only); otherwise they
+  // are left alone and only events saved from now on are linked. Rejects (changing nothing) if the preference can not be saved.
+  setScheduleTaskSyncPref: (next: boolean, opts?: { backfill?: boolean }) => Promise<void>
   // A day edited on two devices in conflicting ways: the user is asked (see DayConflictDialog); resolved here.
   dayConflicts: { key: string; mine: DayData; theirs: DayData | null; theirsRev: number; conflicts: MergeConflict[] }[]
   resolveDayConflict: (key: string, choice: 'mine' | 'theirs') => void
@@ -1077,14 +1078,15 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     if (!(await flushDays(opKeys(ops)))) throw fail('sync_pending', 'Your latest task changes have not finished syncing yet \u2014 please try again in a moment. Nothing was saved.')
   }, [flushDays])
 
-  const saveInner = useCallback(async (ev: ScheduleEvent): Promise<void> => {
+  const saveInner = useCallback(async (ev: ScheduleEvent, opts?: { addTask?: boolean }): Promise<void> => {
     const uid = userIdRef.current
     if (!uid) throw fail('signed_out', 'You are signed out, so this could not be saved.')
     if (scheduleStatusRef.current === 'unavailable') throw fail('unavailable', 'Saving is not available yet (the schedule database is not set up). Nothing was saved.')
     const prev = scheduleEventsRef.current.find(e => e.id === ev.id)
     const link = prev?.taskLink ?? 'linked'
     // the per-event opt-out ('detached') survives every edit, including toggling the deadline flag; only the explicit "Add back" clears it
-    const plan = planDeadlineSync(calDataRef.current, ev.id, ev, prev?.taskDateKey ?? null, activitiesRef.current[0]?.id ?? '', undefined, link, scheduleTaskSyncRef.current)
+    // a synced-event task is created only for a NEW event (or an explicit "Add back"): re-saving an older event never links it behind the user's back
+    const plan = planDeadlineSync(calDataRef.current, ev.id, ev, prev?.taskDateKey ?? null, activitiesRef.current[0]?.id ?? '', undefined, link, scheduleTaskSyncRef.current, !prev || !!opts?.addTask)
     const stored: StoredScheduleEvent = { ...ev, taskDateKey: plan.taskDateKey, rev: prev?.rev, taskLink: link }
     try {
       await flushFor(plan.ops)
@@ -1125,7 +1127,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       const rev = await setScheduleTaskLink(createClient(), eventId, 'linked')
       commitEvents(list => list.map(e => (e.id === eventId ? { ...e, taskLink: 'linked', rev: rev ?? e.rev } : e)))
     } catch (err) { throw scheduleError(err) }
-    await saveInner({ ...(scheduleEventsRef.current.find(e => e.id === eventId) as StoredScheduleEvent) })   // recreates the task through the same atomic path
+    await saveInner({ ...(scheduleEventsRef.current.find(e => e.id === eventId) as StoredScheduleEvent) }, { addTask: true })   // recreates the task through the same atomic path
   }), [exclusive, commitEvents, saveInner])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Reconciliation ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -1134,12 +1136,14 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   // no timers, no loops: it re-runs only when events change, the app refocuses, or the user taps Retry.
   const reconcileAttemptsRef = useRef(new Map<string, number>())
 
-  const reconcileInner = useCallback(async (force = false) => {
+  const reconcileInner = useCallback(async (force = false, backfill = false) => {
     const uid = userIdRef.current
     if (!uid || scheduleStatusRef.current !== 'ready') return
     if (force) reconcileAttemptsRef.current.clear()
     const attempts = reconcileAttemptsRef.current
-    const items = reconcileDeadlines(calDataRef.current, scheduleEventsRef.current, activitiesRef.current[0]?.id ?? '', scheduleTaskSyncRef.current)
+    // repairs / renames / moves / removes existing links; creates a missing synced-event task ONLY during an explicit, consented back-fill
+    const nowMs = Date.now()
+    const items = reconcileDeadlines(calDataRef.current, scheduleEventsRef.current, activitiesRef.current[0]?.id ?? '', scheduleTaskSyncRef.current, backfill ? (e => isBackfillEligible(e as Parameters<typeof isBackfillEligible>[0], nowMs, calDataRef.current)) : false)
     const todo = items.filter(it => (attempts.get(it.eventId) ?? 0) < 3)
     let bad = items.length - todo.length
     for (const batch of batchItems(todo)) {
@@ -1165,14 +1169,15 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
 
   const retryScheduleSync = useCallback(async () => { await reconcileSchedule(true) }, [reconcileSchedule])
 
-  // "Sync with Task Manager": persist the switch per user, THEN reconcile every existing event with it (create/convert/move or remove-safely).
+  // "Sync with Task Manager": persist the switch per user, THEN reconcile existing links with it (move/rename or remove-safely). Existing events are
+  // only given tasks when `opts.backfill` (the user's explicit choice in the dialog); otherwise turning it ON changes no existing task.
   // If the preference can not be saved this rejects and nothing changes; if some tasks then can not be synced the Retry banner says so.
-  const setScheduleTaskSyncPref = useCallback((next: boolean) => exclusive(async () => {
+  const setScheduleTaskSyncPref = useCallback((next: boolean, opts?: { backfill?: boolean }) => exclusive(async () => {
     if (!userIdRef.current) throw fail('signed_out', 'You are signed out, so this could not be saved.')
     if (scheduleStatusRef.current !== 'ready') throw fail('unavailable', 'My Schedule is not ready yet \u2014 try again in a moment. Nothing was changed.')
     try { await setScheduleSyncPref(createClient(), next) } catch (err) { throw scheduleError(err) }
     scheduleTaskSyncRef.current = next; setScheduleTaskSyncState(next)
-    await reconcileInner(true)
+    await reconcileInner(true, next && !!opts?.backfill)
   }), [exclusive, reconcileInner])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const requestScheduleEvent = useCallback((eventId: string) => setScheduleFocusRequest({ eventId, nonce: Date.now() }), [])

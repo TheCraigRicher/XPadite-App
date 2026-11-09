@@ -1,20 +1,17 @@
 'use client'
 
-// ── XPadite My Schedule (formerly Meetings) — Phase 1 (front-end only, mock data) ──
+// ── XPadite My Schedule (formerly Meetings) ──
 // Tabs: My Schedule (weekly scheduler, MyScheduleView) · Today (dark mini calendar + agenda + details). The Upcoming and Past
 // tabs are gone from the UI, but all meeting data is kept (upcoming events live in the weekly view's sidebar). The Task
 // Manager auto-add setting is unchanged — only its banners were removed from view.
-// No Supabase, no Google/Microsoft OAuth, no real Task Manager writes here.
-// `meetingsMockData.ts` is the seam: Phase 2 swaps MOCK_MEETINGS for a real
-// fetch without this file needing a rewrite. See the mock-data file for the
-// full field-level rationale (provider vs calendarSource vs meetingProvider).
+// Shows ONLY the user's own saved events (a new account starts empty — there is no sample or generated data). Read-only synced
+// calendar meetings (`meetings`) stay empty until a real Google/Outlook integration exists; `meetingsMockData.ts` holds their types.
 
 import { readViewPref, writeViewPref } from './scheduleMonth'
 import type { ScheduleViewKey } from './scheduleMonth'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from './AppContext'
 import { useLockBodyScroll } from './useLockBodyScroll'
-import { MOCK_MEETINGS } from './meetingsMockData'
 import { MyScheduleView } from './MyScheduleView'
 import { ScheduleMiniCalendar } from './ScheduleMiniCalendar'
 import { ConfirmDelete, EventDetails, EventForm, FilterSelect, LAYER_ATTR } from './ScheduleParts'
@@ -23,7 +20,7 @@ import { useIsPhone } from './ScheduleMobile'
 import { useIsDesktop } from './ScheduleSheet'
 import { ManageCategoriesDialog, PreferencesDialog, SyncTaskManagerDialog } from './ScheduleDialogs'
 import { ScheduleContext, useSchedule } from './scheduleContext'
-import { buildSampleScheduleEvents } from './scheduleMockData'
+import { countBackfillEligible } from './deadlineLink'
 import {
   SCHEDULE_CATEGORIES, blankForm, blankFormAt, clockLabel, daySlice, durationLabel, eventToForm, eventsOnDay, filterScheduleEvents,
   formToEventFields, isSameLocalDay, meetingToScheduleEvent, sanitizePrefs, splitFilter, startOfDay, startOfMonth, timeRangeLabel,
@@ -355,7 +352,6 @@ type FormState =
   | null
 type DialogKey = 'categories' | 'prefs' | 'sync' | null
 
-const SAMPLE_PREFIX = 'sample-sched-'
 const newEventId = () => `user-sched-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 /** Why a save/delete did not happen, in words a person can act on. Typed errors come from AppContext (code); anything else is a network/server failure. */
 function saveFailureMessage(err: unknown): string {
@@ -366,9 +362,9 @@ function saveFailureMessage(err: unknown): string {
 }
 
 export function MeetingsModal({ onClose }: MeetingsModalProps) {
-  const { setToast, scheduleEvents: persistedEvents, scheduleStatus, saveScheduleEvent, deleteScheduleEvent, savedLocations, setSavedLocations, scheduleCategories, setScheduleCategories,
+  const { setToast, calData, scheduleEvents: persistedEvents, scheduleStatus, saveScheduleEvent, deleteScheduleEvent, savedLocations, setSavedLocations, scheduleCategories, setScheduleCategories,
     scheduleTaskSync, setScheduleTaskSyncPref, scheduleSyncIssue, retryScheduleSync, restoreDeadlineTask, scheduleFocusRequest, clearScheduleFocusRequest, scheduleTimeFormat, setScheduleTimeFormat } = useApp()
-  const [meetings, setMeetings] = useState<XpaditeMeeting[]>(() => MOCK_MEETINGS)
+  const [meetings, setMeetings] = useState<XpaditeMeeting[]>([])   // read-only synced calendar meetings: none until a real calendar integration exists
   // The last view the user picked is remembered on this device only (a plain local preference — no account data, no migration).
   const [tab, setTabState] = useState<TabKey>(() => readViewPref() ?? 'schedule')
   const setTab = (k: TabKey) => { setTabState(k); writeViewPref(k) }
@@ -381,10 +377,8 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   const [detailOpen, setDetailOpen] = useState(false)
   // Task Manager auto-add stays ON (its toggle banner was removed from the UI; the behaviour in MeetingDetail is unchanged).
   const [autoAdd] = useState(true)
-  // Demo events (in memory only, never saved) + the user's real, persisted events (AppContext → Supabase). Editing, moving or
-  // re-saving a demo event "adopts" it: it is saved as a real event under a new id and the demo copy disappears.
-  const [sampleEvents, setSampleEvents] = useState<ScheduleEvent[]>(() => buildSampleScheduleEvents(new Date()))
-  const scheduleEvents = useMemo<ScheduleEvent[]>(() => [...sampleEvents, ...persistedEvents], [sampleEvents, persistedEvents])
+  // ONLY the user's own saved events (AppContext → Supabase). There is no built-in, sample or generated schedule: a new account starts empty.
+  const scheduleEvents = persistedEvents
   const [saving, setSaving] = useState(false)
   // A NEW event keeps ONE id for the whole life of its form: if the connection drops after the server saved it, pressing Save again
   // re-sends the same id (an idempotent update) instead of creating a second event.
@@ -540,10 +534,9 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
     const fields = formToEventFields(v)
     const editing = form?.mode === 'edit'
     const oldId = form?.mode === 'edit' ? form.id : null
-    const wasSample = !!oldId && oldId.startsWith(SAMPLE_PREFIX)
     if (!attemptRef.current || attemptRef.current.formKey !== lastForm?.id) attemptRef.current = { formKey: lastForm?.id, id: newEventId() }
-    const id = editing && !wasSample ? (oldId as string) : attemptRef.current.id
-    const existing = editing && !wasSample ? persistedEvents.find(e => e.id === id) : undefined
+    const id = editing ? (oldId as string) : attemptRef.current.id
+    const existing = editing ? persistedEvents.find(e => e.id === id) : undefined
     setSaving(true); setSaveError(null)
     try {
       await saveScheduleEvent({ ...existing, id, ...fields })      // resolves only after the server confirmed it
@@ -554,7 +547,6 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
     }
     setSaving(false)
     attemptRef.current = null
-    if (wasSample) setSampleEvents(prev => prev.filter(e => e.id !== oldId))
     setToast(editing ? 'Event updated' : 'Event added')
     setFocus({ id, at: fields.startAt, nonce: Date.now() })
     setTodayDate(startOfDay(new Date(fields.startAt)))
@@ -573,13 +565,10 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
     const endAt = startAt + (cur.endAt - cur.startAt)                 // the exact original duration
     const conflicts = findConflicts({ startAt, endAt, excludeId: cur.id }, allEvents)
     if (conflicts.length > 0) { setToast(conflictMessage(conflicts, startAt, fmt) ?? 'That time is taken.'); return }
-    const wasSample = cur.id.startsWith(SAMPLE_PREFIX)
-    const id = wasSample ? newEventId() : cur.id
     try {
-      await saveScheduleEvent({ ...cur, id, startAt, endAt })       // a moved deadline moves its due date (and its task) with it
+      await saveScheduleEvent({ ...cur, startAt, endAt })       // a moved deadline moves its due date (and its task) with it
     } catch (err) { setToast(saveFailureMessage(err)); return }
-    if (wasSample) { setSampleEvents(prev => prev.filter(e => e.id !== cur.id)); if (todaySelId === cur.id) setTodaySelId(id) }
-    setFocus({ id, at: startAt, nonce: Date.now(), quiet: true })   // keep it selected, but don't pop the details sheet over the result
+    setFocus({ id: cur.id, at: startAt, nonce: Date.now(), quiet: true })   // keep it selected, but don't pop the details sheet over the result
     setTodayDate(startOfDay(new Date(startAt)))
     setViewMonth(startOfMonth(new Date(startAt)))
     setToast('Event moved')
@@ -611,12 +600,11 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
     const r = deleteCategory(categories, scheduleEvents, id, replacementId)
     if (!r.ok) return r.error
     void setScheduleCategories(customOnly(r.categories))
-    // events that used the deleted category move to the replacement: persist each changed real event, update demo ones in memory
+    // events that used the deleted category move to the replacement: each changed event is saved
     for (const e of r.events) {
       const old = scheduleEvents.find(o => o.id === e.id)
       if (!old || old.category === e.category) continue
-      if (e.id.startsWith(SAMPLE_PREFIX)) setSampleEvents(prev => prev.map(s => (s.id === e.id ? e : s)))
-      else void saveScheduleEvent(e).catch(err => setToast(saveFailureMessage(err)))
+      void saveScheduleEvent(e).catch(err => setToast(saveFailureMessage(err)))
     }
     setHidden(h => h.filter(x => x !== id))
     setFilter(f => (f === id ? 'all' : f))
@@ -627,10 +615,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   async function confirmDelete() {
     if (!confirming) return
     const id = confirming.id
-    if (id.startsWith(SAMPLE_PREFIX)) setSampleEvents(prev => prev.filter(e => e.id !== id))
-    else {
-      try { await deleteScheduleEvent(id) } catch (err) { setToast(saveFailureMessage(err)); return }   // still there if the server said no
-    }
+    try { await deleteScheduleEvent(id) } catch (err) { setToast(saveFailureMessage(err)); return }   // still there if the server said no
     if (todaySelId === id) setTodaySelId(null)
     setConfirmId(null)
     setToast('Event deleted')
@@ -907,7 +892,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
         {lastDialog === 'categories' && (
           <ManageCategoriesDialog open={dialog === 'categories'} categories={categories} events={scheduleEvents} onAdd={handleAddCategory} onRename={handleRenameCategory} onRecolor={handleRecolorCategory} onDelete={handleDeleteCategory} onClose={() => setDialog(null)} />
         )}
-        {lastDialog === 'sync' && <SyncTaskManagerDialog open={dialog === 'sync'} enabled={scheduleTaskSync} onSave={setScheduleTaskSyncPref} onClose={() => setDialog(null)} />}
+        {lastDialog === 'sync' && <SyncTaskManagerDialog open={dialog === 'sync'} enabled={scheduleTaskSync} eligibleCount={countBackfillEligible(persistedEvents, now, calData)} onSave={setScheduleTaskSyncPref} onClose={() => setDialog(null)} />}
         {lastDialog === 'prefs' && <PreferencesDialog open={dialog === 'prefs'} prefs={prefs} onApply={next => { const p = sanitizePrefs(next); setPrefs(p); setScheduleTimeFormat(p.timeFormat); setDialog(null) }} onClose={() => setDialog(null)} />}
         {confirming && <ConfirmDelete ev={confirming} onCancel={() => setConfirmId(null)} onConfirm={confirmDelete} />}
       </div>

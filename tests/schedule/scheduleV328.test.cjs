@@ -251,9 +251,9 @@ test('user isolation: every read and write is scoped to the signed-in user (and 
   assert.ok(/user_id: userId,/.test(s), 'rows built for the server carry the owner')
 })
 
-test('demo events are adopted (saved as real ones) when edited or moved; never silently persisted or lost', () => {
+test('no demo events exist, so nothing is ever "adopted": only the user own saved events are shown (see scheduleV329Fix.test.cjs)', () => {
   const m = strip(src('MeetingsModal.tsx'))
-  assert.ok(/const SAMPLE_PREFIX = 'sample-sched-'/.test(m) && /if \(wasSample\) setSampleEvents\(prev => prev\.filter\(e => e\.id !== oldId\)\)/.test(m))
+  assert.ok(!/SAMPLE_PREFIX|sampleEvents|setSampleEvents|wasSample|buildSampleScheduleEvents/.test(m))
 })
 
 // ── Phase 6/8: calendar + category wiring ───────────────────────────────────

@@ -778,7 +778,6 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
           {visible.length === 0 && (
             <p className="text-center text-[11.5px] pb-1" style={{ color: 'var(--xp-txt3)' }}>No events match your search or filters.</p>
           )}
-          <p className="text-[10.5px]" style={{ color: 'var(--xp-txt3)' }}>Sample events are demos. Your own events are saved to your account.</p>
         </div>
       </div>
 

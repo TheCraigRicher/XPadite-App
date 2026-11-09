@@ -11,10 +11,15 @@ const ROOT = path.resolve(__dirname, '..', '..')
 const OUT = path.join(ROOT, 'node_modules', '.cache', 'xpadite-schedule-adv'); fs.mkdirSync(OUT, { recursive: true })
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8')
 const compile = f => fs.writeFileSync(path.join(OUT, f + '.js'), ts.transpileModule(read(`components/xpadite/${f}.ts`), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)
-compile('scheduleLogic'); compile('scheduleEngine'); compile('scheduleMockData')
+compile('scheduleLogic'); compile('scheduleEngine')
 const L = require(path.join(OUT, 'scheduleLogic.js'))
 const E = require(path.join(OUT, 'scheduleEngine.js'))
-const { buildSampleScheduleEvents } = require(path.join(OUT, 'scheduleMockData.js'))
+// A small in-test fixture of OVERLAPPING events (the built-in sample schedule no longer exists in the app).
+const buildSampleScheduleEvents = () => {
+  const t = (d, h, mi = 0) => new Date(2026, 10, d, h, mi).getTime()
+  const e = (id, title, d, h1, m1, h2, m2) => ({ id, title, category: 'meeting', startAt: t(d, h1, m1), endAt: t(d, h2, m2), recurrence: 'none' })
+  return [e('fx-1', 'Presentation', 6, 8, 0, 9, 0), e('fx-2', 'Python Test', 6, 9, 30, 11, 30), e('fx-3', 'Lecture – Databases', 6, 9, 0, 10, 0), e('fx-4', 'Lunch', 6, 12, 0, 13, 0)]
+}
 
 const at = (y, m, d, h = 0, mi = 0) => new Date(y, m - 1, d, h, mi).getTime()
 const ev = (id, s, e, extra = {}) => ({ id, title: id, category: 'meeting', startAt: s, endAt: e, ...extra })
@@ -181,12 +186,12 @@ test('read-only (Google / Outlook) and repeating events cannot be dragged; plain
   assert.match(E.dragBlockReason(g).message, /Google Calendar are read-only/)
   assert.equal(E.dragBlockReason(ev('p', 1, 2)), null); assert.equal(E.dragBlockReason(ev('p', 1, 2, { recurrence: 'none' })), null)
 })
-test('sample data is untouched: its overlapping events remain, and are never rewritten by the engine', () => {
+test('overlapping events are untouched: they remain, and are never rewritten by the engine', () => {
   const evs = buildSampleScheduleEvents(new Date(2026, 10, 4)); const frozen = JSON.stringify(evs)
   const fri = L.layoutDayEvents(evs, day(2026, 11, 6)); assert.ok(fri.some(p => p.lanes > 1), 'Python Test / Lecture – Databases still overlap')
   const py = evs.find(e => e.title === 'Python Test'); E.planMove(py, day(2026, 11, 6), 9 * 60, evs); E.findConflicts({ startAt: py.startAt, endAt: py.endAt }, evs)
   assert.equal(JSON.stringify(evs), frozen)
-  assert.ok(evs.length >= 15)
+  assert.ok(evs.length >= 4)
 })
 
 // ── 12–13. empty-slot add, double-tap, long press ───────────────────────────
@@ -366,14 +371,14 @@ test('Today tab, modal sizing and the single Add Event are unchanged by this mil
   assert.ok(/weekStart=\{prefs\.weekStart\}/.test(m), 'the mini calendar follows the week-start preference')
 })
 test('frontend-only: no persistence, backend, migrations or recurrence expansion were introduced', () => {
-  for (const f of ['MyScheduleView.tsx', 'ScheduleParts.tsx', 'ScheduleMenu.tsx', 'ScheduleDialogs.tsx', 'ScheduleMiniCalendar.tsx', 'scheduleLogic.ts', 'scheduleEngine.ts', 'scheduleContext.ts', 'scheduleMockData.ts']) {
+  for (const f of ['MyScheduleView.tsx', 'ScheduleParts.tsx', 'ScheduleMenu.tsx', 'ScheduleDialogs.tsx', 'ScheduleMiniCalendar.tsx', 'scheduleLogic.ts', 'scheduleEngine.ts', 'scheduleContext.ts']) {
     const code = read(`components/xpadite/${f}`).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
     assert.ok(!/supabase|fetch\(|localStorage|sessionStorage|useApp|addTask|XMLHttpRequest|indexedDB/i.test(code), `${f} must stay frontend-only`)
   }
   const code = M().replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
   assert.ok(!/supabase|fetch\(|localStorage|sessionStorage/i.test(code))
   assert.ok(!/expandRecurr|rrule/i.test(read('components/xpadite/scheduleEngine.ts') + read('components/xpadite/scheduleLogic.ts')), 'recurrence is still stored/displayed only')
-  assert.ok(/Sample events are demos/.test(V()), 'demo data is still labelled as such (v1.328: real events are now saved)')
+  assert.ok(!/Sample events are demos/.test(V()), 'no sample-event messaging: there is no sample data (v1.329 fix)')
   assert.ok(/Custom categories are saved to your account/.test(read('components/xpadite/ScheduleDialogs.tsx')), 'Manage Categories still says its categories are not saved (the Preferences preview note was removed in v1.327 by request; preferences stay session-only)')
 })
 

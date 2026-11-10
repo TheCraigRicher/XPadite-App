@@ -5,6 +5,11 @@ import { trackFeature } from '@/lib/analytics/client'
 import dynamic from 'next/dynamic'
 import { useApp } from './AppContext'
 import { parseJournalDoc, mkId } from './journalUtils'
+import type { JournalDoc } from './types'
+import {
+  buildLibraryEntries, extractFirstLine, extraIdOf, isExtraKey, mergeDocMeta, docsToUnfile, type LibEntry,
+} from './journalDocs'
+import { NotesPane, FoldersPane, MoveToFolderDialog, DragTray, DeleteFolderDialog, NamePrompt, type DragProps } from './LibraryNotesFolders'
 import { exportToTxt, exportToPdf, exportToDocx, makeFilename, type ExportEntry } from './journalExport'
 import { ColorPickerModal } from './ColorPickerModal'
 import { COLOR_PALETTE, normalizeHexColor, hexToRgba } from './utils'
@@ -92,24 +97,6 @@ function accentToBg(hex: string, alpha: number): string {
   const g = parseInt(hex.slice(3, 5), 16)
   const b = parseInt(hex.slice(5, 7), 16)
   return `rgba(${r},${g},${b},${alpha})`
-}
-
-function extractFirstLine(tiptapJson: string | undefined): string {
-  if (!tiptapJson) return ''
-  try {
-    const doc = JSON.parse(tiptapJson)
-    const parts: string[] = []
-    function walk(node: unknown) {
-      const n = node as Record<string, unknown>
-      if (!n || typeof n !== 'object') return
-      if (n.type === 'text' && typeof n.text === 'string') parts.push(n.text)
-      if (n.type === 'paragraph' && parts.length > 0) parts.push('\n')
-      if (Array.isArray(n.content)) (n.content as unknown[]).forEach(walk)
-    }
-    walk(doc)
-    const firstLine = parts.join('').split('\n').find(l => l.trim()) ?? ''
-    return firstLine.trim().slice(0, 52)
-  } catch { return '' }
 }
 
 function getJournalEntrySummaries(notes: string | undefined): JournalEntrySummary[] {
@@ -919,6 +906,7 @@ interface LibraryCardMenuProps {
   onRename: () => void
   onExport: () => void
   onDeleteRequest: () => void
+  onMoveToFolder?: () => void
   categories: LibraryCategory[]
   activeLabelIds: string[]
   onToggleLabel: (id: string) => void
@@ -929,7 +917,7 @@ interface LibraryCardMenuProps {
 
 function LibraryCardMenu({
   isDark, bdr, isOpen, view, onOpenChange, onViewChange,
-  onRename, onExport, onDeleteRequest,
+  onRename, onExport, onDeleteRequest, onMoveToFolder,
   categories, activeLabelIds, onToggleLabel, onDeleteLabel, onCreateLabel,
   wrapperStyle,
 }: LibraryCardMenuProps) {
@@ -1021,6 +1009,7 @@ function LibraryCardMenu({
             <>
               <button onClick={onRename} style={itemStyle}><span>✏️</span>Rename</button>
               <button onClick={onExport} style={itemStyle}><span>📤</span>Export</button>
+              {onMoveToFolder && <button onClick={onMoveToFolder} data-testid="card-move" style={itemStyle}><span>📁</span>Move to Folder</button>}
               <button onClick={() => onViewChange('category')} style={itemStyle}><span>🏷</span>Labels<span style={{ marginLeft: 'auto', opacity: 0.5 }}>›</span></button>
               <div style={dividerStyle} />
               <button onClick={onDeleteRequest} style={{ ...itemStyle, color: '#f87171' }}><span>🗑</span>Delete</button>
@@ -1074,12 +1063,16 @@ interface JournalWorkspaceModalProps {
   closeIntent?: 'save' | 'discard' | null
   jumpToDate?: string | null
   onJumpConsumed?: () => void
+  /** Main menu -> Notes: open Planner Editor -> Library -> Notes. */
+  jumpToLibrary?: 'notes' | null
+  onLibraryJumpConsumed?: () => void
 }
 
-export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, closeIntent, jumpToDate, onJumpConsumed }: JournalWorkspaceModalProps) {
+export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, closeIntent, jumpToDate, onJumpConsumed, jumpToLibrary, onLibraryJumpConsumed }: JournalWorkspaceModalProps) {
   const {
     isDark, calData, updateDay,
     journalLabels, addJournalLabel, removeJournalLabel,
+    journalFolders, addJournalFolder, removeJournalFolder, updateJournalFolder, journalDocs,
     customColors, addCustomColor, removeCustomColor, setToast,
   } = useApp()
 
@@ -1087,6 +1080,15 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   const todayKey  = useMemo(getTodayKey, [])
 
   const [view, setView]             = useState<'calendar' | 'editor' | 'library'>('editor')
+  // v1.330 - Library tabs (Documents = the existing list; Notes; Folders), the folder being browsed, and which document the Editor is on.
+  // activeDocId === null -> the editor shows the day's PRIMARY document (calData[editorDate].notes), exactly as before.
+  const [libTab, setLibTab]         = useState<'documents' | 'notes' | 'folders'>('documents')
+  const [openFolderId, setOpenFolderId] = useState<string | null>(null)
+  const [activeDocId, setActiveDocId]   = useState<string | null>(null)
+  const [dragKey, setDragKey]           = useState<string | null>(null)
+  const [moveKeys, setMoveKeys]         = useState<string[] | null>(null)
+  const [moveNewFolder, setMoveNewFolder] = useState(false)
+  const [deleteFolderId, setDeleteFolderId] = useState<string | null>(null)
   const [calYear, setCalYear]       = useState(todayDate.getFullYear())
   const [openQ, setOpenQ]           = useState<Record<string, boolean>>({ Q1: true, Q2: true, Q3: true, Q4: true })
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
@@ -1120,6 +1122,23 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   const [newLabelColor, setNewLabelColor]           = useState<string>(COLOR_PALETTE[0])
   const [showLabelColorPicker, setShowLabelColorPicker] = useState(false)
 
+  const extraDocsList = journalDocs.docs
+  // allEntries = every document the Library can hold: a day's primary document, extra same-day documents, and Notes. The Documents tab lists
+  // the regular ones (as before, plus extra same-day documents); Notes and Folders have their own views. Each entry's `dateKey` is its unique
+  // Library key (the date for a primary document - exactly as before - or `x:<id>` for an extra one) so every existing handler keeps working.
+  const allEntries = useMemo<LibEntry[]>(() => {
+    const notes: Record<string, string | undefined> = {}
+    for (const [k, d] of Object.entries(calData)) notes[k] = d.notes
+    return buildLibraryEntries(notes, extraDocsList, journalFolders)
+  }, [calData, extraDocsList, journalFolders])
+  const noteEntries = useMemo(() => allEntries.filter(e => e.kind === 'note'), [allEntries])
+  const libraryEntries = useMemo(() => {
+    const entries = allEntries.filter(e => e.kind === 'doc')
+    // same date -> keep creation order so several documents on one day stay stable
+    const cmp = (a: LibEntry, b: LibEntry) => a.docDate.localeCompare(b.docDate) || a.createdAt - b.createdAt || a.key.localeCompare(b.key)
+    return libSortOrder === 'newer' ? entries.sort((a, b) => cmp(b, a)) : entries.sort(cmp)
+  }, [allEntries, libSortOrder])
+
   // Navigate to a specific date when requested externally (e.g. after Send to Planner)
   useEffect(() => {
     if (!jumpToDate) return
@@ -1128,6 +1147,17 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     onJumpConsumed?.()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jumpToDate])
+
+  // Main menu -> Notes: Planner Editor -> Library -> Notes (state is adjusted while rendering, the documented pattern; the parent is told in an effect)
+  const [seenLibJump, setSeenLibJump] = useState<string | null>(null)
+  if ((jumpToLibrary ?? null) !== seenLibJump) {
+    setSeenLibJump(jumpToLibrary ?? null)
+    if (jumpToLibrary) { setLibTab('notes'); setOpenFolderId(null); setView('library') }
+  }
+  useEffect(() => {
+    if (jumpToLibrary) onLibraryJumpConsumed?.()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpToLibrary])
 
   // ── ESC key — calendar view only; editor ESC is owned by JournalEditorContent ─
   const escRef = useRef<() => void>(() => {})
@@ -1142,16 +1172,30 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Persist ───────────────────────────────────────────────────────────────────
+  // The editor owns a document's CONTENT; the Library owns its labels/folder. mergeDocMeta re-attaches the stored labelIds/folderId, so an
+  // autosave can no longer erase them (it used to drop labelIds on every edit).
   const persistEntry = useCallback((dateKey: string, content: string) => {
-    updateDay(dateKey, prev => ({ ...prev, notes: content }))
+    updateDay(dateKey, prev => ({ ...prev, notes: mergeDocMeta(content, prev.notes) }))
     trackFeature('journal_planner_editor')
   }, [updateDay])
+  const saveExtraRaw = journalDocs.saveRaw
+  const persistExtra = useCallback((id: string) => (_dateKey: string, content: string) => {
+    saveExtraRaw(id, content)
+    trackFeature('journal_planner_editor')
+  }, [saveExtraRaw])
 
   // ── Navigation ────────────────────────────────────────────────────────────────
   // NOTE: no flush() on navigation — the child editor owns save/discard via its dirty guard
-  function doOpenEditor(dateKey: string) {
-    setEditorDate(dateKey)
-    setSelectedDate(dateKey)
+  function doOpenEditor(key: string) {
+    if (isExtraKey(key)) {                                   // an extra document / Note: opens in the SAME Planner editor
+      const d = journalDocs.docs.find(x => x.id === extraIdOf(key))
+      if (!d) return
+      setActiveDocId(d.id); setEditorDate(d.dateKey); setSelectedDate(d.dateKey); setView('editor')
+      return
+    }
+    setActiveDocId(null)
+    setEditorDate(key)
+    setSelectedDate(key)
     setView('editor')
   }
 
@@ -1169,13 +1213,21 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     setRenamingEntry(dateKey)
     setRenameValue(title)
   }
+  // One read-modify-write for ANY Library document (a day's primary document or an extra document / Note). The edit is applied to the
+  // document's own JSON; its content blocks are never copied or removed.
+  function updateEntryDoc(key: string, fn: (doc: JournalDoc) => JournalDoc) {
+    const apply = (raw: string | undefined) => JSON.stringify(fn(parseJournalDoc(raw)))
+    const id = extraIdOf(key)
+    if (id) journalDocs.updateRaw(id, raw => apply(raw))
+    else updateDay(key, prev => ({ ...prev, notes: apply(prev.notes) }))
+  }
+  const rawOfKey = (key: string): string | undefined => {
+    const id = extraIdOf(key)
+    return id ? journalDocs.docs.find(d => d.id === id)?.raw : calData[key]?.notes
+  }
   function commitLibRename(dateKey: string) {
     const trimmed = renameValue.trim()
-    const existingDoc = parseJournalDoc(calData[dateKey]?.notes)
-    const updated = { ...existingDoc }
-    if (trimmed) updated.title = trimmed
-    else delete updated.title
-    updateDay(dateKey, prev => ({ ...prev, notes: JSON.stringify(updated) }))
+    updateEntryDoc(dateKey, doc => { const u = { ...doc }; if (trimmed) u.title = trimmed; else delete u.title; return u })
     setRenamingEntry(null)
   }
 
@@ -1184,23 +1236,17 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   // does for `title` — reuses the existing per-day persistence/RLS/cross-device
   // pipeline (updateDay) with zero new sync code for this relationship.
   function toggleDocLabel(dateKey: string, labelId: string) {
-    const doc = parseJournalDoc(calData[dateKey]?.notes)
-    const current = doc.labelIds ?? []
-    const next = current.includes(labelId) ? current.filter(id => id !== labelId) : [...current, labelId]
-    const updated = { ...doc, labelIds: next }
-    updateDay(dateKey, prev => ({ ...prev, notes: JSON.stringify(updated) }))
+    updateEntryDoc(dateKey, doc => {
+      const current = doc.labelIds ?? []
+      return { ...doc, labelIds: current.includes(labelId) ? current.filter(id => id !== labelId) : [...current, labelId] }
+    })
   }
   // Deleting a label only removes its definition + the assignment on any
   // document that used it — the document's content is never touched.
   function handleDeleteLabel(labelId: string) {
     removeJournalLabel(labelId)
-    for (const [key, day] of Object.entries(calData)) {
-      if (!day.notes?.trim()) continue
-      const doc = parseJournalDoc(day.notes)
-      if (doc.labelIds?.includes(labelId)) {
-        const updated = { ...doc, labelIds: doc.labelIds.filter(id => id !== labelId) }
-        updateDay(key, prev => ({ ...prev, notes: JSON.stringify(updated) }))
-      }
+    for (const e of allEntries) {
+      if (e.labelIds.includes(labelId)) updateEntryDoc(e.key, doc => ({ ...doc, labelIds: (doc.labelIds ?? []).filter(id => id !== labelId) }))
     }
     if (libCategoryFilter === labelId) setLibCategoryFilter(null)
   }
@@ -1243,8 +1289,8 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     setIsExporting(true)
     try {
       const entries: ExportEntry[] = exportFormatKeys.flatMap(key => {
-        const e = libraryEntries.find(x => x.dateKey === key)
-        return e ? [{ title: e.title, dateKey: key, notes: calData[key]?.notes, year: e.year, month: e.month, day: e.day }] : []
+        const e = allEntries.find(x => x.dateKey === key)
+        return e ? [{ title: e.title, dateKey: e.docDate, notes: rawOfKey(key), year: e.year, month: e.month, day: e.day }] : []
       })
       if (entries.length === 0) return
       const filename = entries.length === 1
@@ -1272,22 +1318,74 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   }
 
   function commitDeleteMany(keys: string[]) {
+    const extraIds: string[] = []
     for (const key of keys) {
-      updateDay(key, prev => ({ ...prev, notes: '' }))
+      const id = extraIdOf(key)
+      if (id) extraIds.push(id)
+      else updateDay(key, prev => ({ ...prev, notes: '' }))
       if (renamingEntry === key) setRenamingEntry(null)
       if (selectedLibEntry === key) setSelectedLibEntry(null)
+    }
+    if (extraIds.length) {
+      journalDocs.deleteDocs(extraIds)
+      if (activeDocId && extraIds.includes(activeDocId)) setActiveDocId(null)
     }
     setDeleteConfirmKeys(null)
     exitSelectMode()
   }
 
+  // -- v1.330: extra documents, Notes, folders ------------------------------------------------------------------------------------------
+  function createExtra(kind: 'doc' | 'note') {
+    if (journalDocs.status === 'unavailable') { setToast('Notes and extra documents need a one-time database update first'); return }
+    // 'doc' = a NEW independent document on the day being edited (never another section of the current one); 'note' = a new single-section Note.
+    const d = journalDocs.createDoc(kind, kind === 'note' ? todayKey : editorDate)
+    setActiveDocId(d.id); setEditorDate(d.dateKey); setSelectedDate(d.dateKey); setView('editor')
+  }
+  function moveDocs(keys: string[], folderId: string | null) {
+    // Only the document's folder field changes: no copy is made and no content is touched. A document already there is left alone.
+    for (const key of keys) {
+      if ((allEntries.find(e => e.key === key)?.folderId ?? null) === folderId) continue
+      updateEntryDoc(key, doc => { const u = { ...doc }; if (folderId) u.folderId = folderId; else delete u.folderId; return u })
+    }
+    setMoveKeys(null)
+    setToast(folderId ? `Moved to \u201C${journalFolders.find(f => f.id === folderId)?.name ?? 'folder'}\u201D` : 'Removed from folder')
+  }
+  function createFolder(name: string): string {
+    const id = mkId()
+    addJournalFolder({ id, name, createdAt: Date.now() })
+    return id
+  }
+  function deleteFolderSafely(id: string) {
+    // Safe deletion: every document in the folder is un-filed FIRST (kept, content untouched); only then is the folder itself removed.
+    for (const key of docsToUnfile(allEntries, id)) updateEntryDoc(key, doc => { const u = { ...doc }; delete u.folderId; return u })
+    removeJournalFolder(id)
+    if (openFolderId === id) setOpenFolderId(null)
+    setDeleteFolderId(null)
+  }
+  const dragProps = (key: string): DragProps => ({
+    draggable: true,
+    onDragStart: e => { e.dataTransfer.setData('text/xp-doc', key); e.dataTransfer.effectAllowed = 'move'; setDragKey(key) },
+    onDragEnd: () => setDragKey(null),
+  })
+  const onDropOnFolder = (key: string, folderId: string | null) => { setDragKey(null); moveDocs([key], folderId) }
+  const dragFooter = (currentFolderId: string | null, bleedX: number, bleedBottom: number) => dragKey
+    ? <DragTray isDark={isDark} folders={journalFolders} currentFolderId={currentFolderId} bleedX={bleedX} bleedBottom={bleedBottom} onDrop={fid => onDropOnFolder(dragKey, fid)} />
+    : null
+  // if the document the editor was on disappears (deleted on another device) the editor simply falls back to the day's own document
+  const activeExtra = activeDocId ? journalDocs.docs.find(d => d.id === activeDocId) ?? null : null
+  const activeExtraId = activeExtra ? activeExtra.id : null
+  // bound to ONE document id (a pending autosave of document A can never land in document B) and stable, so the editor's memoised blocks stay memoised
+  const extraPersist = useMemo(() => (activeExtraId ? persistExtra(activeExtraId) : null), [activeExtraId, persistExtra])
+
   function navigateDay(delta: number) {
     const key = shiftDay(editorDate, delta)
+    setActiveDocId(null)
     setEditorDate(key)
     setSelectedDate(key)
   }
 
   function navigateToday() {
+    setActiveDocId(null)
     setEditorDate(todayKey)
     setSelectedDate(todayKey)
     setCalYear(todayDate.getFullYear())
@@ -1332,27 +1430,13 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     return () => document.removeEventListener('click', close)
   }, [showMoreMenu])
 
-  const getEntrySummaries = useCallback((dateKey: string): JournalEntrySummary[] => {
-    return getJournalEntrySummaries(calData[dateKey]?.notes)
-  }, [calData])
+  const getEntrySummaries = useCallback((key: string): JournalEntrySummary[] => {
+    const id = extraIdOf(key)
+    return getJournalEntrySummaries(id ? extraDocsList.find(d => d.id === id)?.raw : calData[key]?.notes)
+  }, [calData, extraDocsList])
 
   // ── Library entries — all dates with journal content ────────────────────────
-  const libraryEntries = useMemo(() => {
-    const entries = Object.entries(calData)
-      .filter(([, d]) => d.notes?.trim())
-      .map(([key]) => {
-        const [y, m, d] = fromKey(key)
-        const parsedDoc = parseJournalDoc(calData[key]?.notes)
-        const title = parsedDoc.title?.trim() || extractFirstLine(calData[key]?.notes) || 'Untitled'
-        return {
-          dateKey: key, year: y, month: m, day: d, title,
-          labelIds: parsedDoc.labelIds ?? [],
-        }
-      })
-    return libSortOrder === 'newer'
-      ? entries.sort((a, b) => b.dateKey.localeCompare(a.dateKey))
-      : entries.sort((a, b) => a.dateKey.localeCompare(b.dateKey))
-  }, [calData, libSortOrder])
+  // (allEntries / noteEntries / libraryEntries are declared at the top of the component, before the handlers that use them)
 
   // Month/Year (from the "All" date filter) AND Labels (independent, from
   // "🏷 Labels ▾") combine — e.g. newer Priority docs in September 2026 —
@@ -1767,7 +1851,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       }}>
         {([
           { key: 'calendar' as const, icon: '📅', label: 'Journal Calendar', action: () => setView('calendar') },
-          { key: 'library'  as const, icon: '📚', label: 'Library',          action: () => setView('library')  },
+          { key: 'library'  as const, icon: '📚', label: 'Library',          action: () => { setLibTab('documents'); setOpenFolderId(null); setView('library') }  },
           { key: 'editor'   as const, icon: '✏️', label: 'Editor',           action: () => setView('editor')   },
         ]).map(item => {
           const active = view === item.key
@@ -1856,6 +1940,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         </button>
       </div>
 
+      {libTab === 'documents' ? (<>
       {/* Controls bar — wraps to a second line on narrow viewports instead of scrolling,
           so the "⋮ More menu" dropdown (which opens downward, below the bar) never gets
           clipped by a scroll container; this keeps everything on-screen with no page overflow. */}
@@ -1986,53 +2071,53 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
 
             <div style={{ flex: 1 }} />
 
-            {/* Delete button */}
-            <button
-              onClick={enterSelectMode}
-              style={{
-                padding: '4px 7px', borderRadius: 6, fontSize: 11, fontWeight: 500,
-                cursor: 'pointer', flexShrink: 0,
-                background: 'transparent',
-                border: '0.5px solid rgba(239,68,68,0.30)',
-                color: 'rgba(239,68,68,0.55)',
-                whiteSpace: 'nowrap',
-              }}
-            >🗑️ Delete</button>
-
-            {/* ⋮ More menu */}
+            {/* v1.330 - ONE top-right burger menu: Notes, Folders, Delete Selected (the old standalone Delete button lives here now), plus Export. */}
             <div style={{ position: 'relative', flexShrink: 0 }}>
               <button
                 onClick={e => { e.stopPropagation(); setShowMoreMenu(v => !v) }}
+                data-testid="library-menu-btn"
+                aria-haspopup="menu" aria-expanded={showMoreMenu}
                 style={{
-                  padding: '4px 7px', borderRadius: 6, fontSize: 16, fontWeight: 700,
+                  padding: '4px 9px', borderRadius: 6, fontSize: 16, fontWeight: 700,
                   lineHeight: '14px', cursor: 'pointer',
                   background: showMoreMenu ? (isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.07)') : 'transparent',
                   border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`,
                   color: isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.50)',
                 }}
-                title="More actions"
+                title="Library menu"
+                aria-label="Library menu"
               >⋮</button>
               {showMoreMenu && (
-                <div style={{
+                <div role="menu" data-testid="library-menu" style={{
                   position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 60,
                   background: isDark ? '#1a1530' : '#ffffff',
                   border: `0.5px solid ${bdr}`,
                   borderRadius: 10, overflow: 'hidden',
                   boxShadow: '0 4px 24px rgba(0,0,0,0.30)',
-                  minWidth: 170,
+                  minWidth: 190,
                 }}>
-                  <button
-                    onClick={() => { setShowMoreMenu(false); enterExportMode() }}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      width: '100%', padding: '10px 14px',
-                      background: 'transparent', border: 'none', cursor: 'pointer',
-                      fontSize: 12, fontWeight: 500, textAlign: 'left',
-                      color: isDark ? 'rgba(255,255,255,0.80)' : 'rgba(0,0,0,0.70)',
-                    }}
-                  >
-                    <span>📤</span>Export documents
-                  </button>
+                  {([
+                    { id: 'notes',   icon: '\uD83D\uDDD2\uFE0F', label: 'Notes',           danger: false, run: () => { setLibTab('notes'); setOpenFolderId(null) } },
+                    { id: 'folders', icon: '\uD83D\uDCC1', label: 'Folders',         danger: false, run: () => { setLibTab('folders'); setOpenFolderId(null) } },
+                    { id: 'delete',  icon: '\uD83D\uDDD1\uFE0F', label: 'Delete Selected', danger: true,  run: () => enterSelectMode() },
+                    { id: 'export',  icon: '\uD83D\uDCE4', label: 'Export documents', danger: false, run: () => enterExportMode() },
+                  ]).map(it => (
+                    <button
+                      key={it.id}
+                      role="menuitem"
+                      data-testid={`library-menu-${it.id}`}
+                      onClick={() => { setShowMoreMenu(false); it.run() }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        width: '100%', padding: '10px 14px',
+                        background: 'transparent', border: 'none', cursor: 'pointer',
+                        fontSize: 12, fontWeight: 500, textAlign: 'left',
+                        color: it.danger ? '#f87171' : (isDark ? 'rgba(255,255,255,0.80)' : 'rgba(0,0,0,0.70)'),
+                      }}
+                    >
+                      <span>{it.icon}</span>{it.label}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
@@ -2094,6 +2179,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
+                  {...(isSelectMode ? {} : dragProps(entry.dateKey))}
                   onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => doOpenEditor(entry.dateKey)}
                   onKeyDown={e => {
                     if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
@@ -2137,6 +2223,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
                       onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      onMoveToFolder={() => { setMoveKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       categories={allCategories} activeLabelIds={entry.labelIds}
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
                       onDeleteLabel={handleDeleteLabel}
@@ -2202,6 +2289,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
+                  {...(isSelectMode ? {} : dragProps(entry.dateKey))}
                   onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => doOpenEditor(entry.dateKey)}
                   onKeyDown={e => {
                     if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
@@ -2289,6 +2377,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
                       onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      onMoveToFolder={() => { setMoveKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       categories={allCategories} activeLabelIds={entry.labelIds}
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
                       onDeleteLabel={handleDeleteLabel}
@@ -2318,6 +2407,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
+                  {...(isSelectMode ? {} : dragProps(entry.dateKey))}
                   onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => doOpenEditor(entry.dateKey)}
                   onKeyDown={e => {
                     if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
@@ -2360,6 +2450,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
                       onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      onMoveToFolder={() => { setMoveKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       categories={allCategories} activeLabelIds={entry.labelIds}
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
                       onDeleteLabel={handleDeleteLabel}
@@ -2432,6 +2523,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
+                  {...(isSelectMode ? {} : dragProps(entry.dateKey))}
                   onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => doOpenEditor(entry.dateKey)}
                   onKeyDown={e => {
                     if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
@@ -2474,6 +2566,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
                       onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      onMoveToFolder={() => { setMoveKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       categories={allCategories} activeLabelIds={entry.labelIds}
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
                       onDeleteLabel={handleDeleteLabel}
@@ -2537,7 +2630,26 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             })}
           </div>
         )}
+        {dragFooter(null, 20, 16)}
       </div>
+
+      </>) : libTab === 'notes' ? (
+        <NotesPane
+          isDark={isDark} notes={noteEntries} unavailable={journalDocs.status === 'unavailable'}
+          onBack={() => setLibTab('documents')} onCreate={() => createExtra('note')} onOpen={doOpenEditor}
+          onRename={(key, title) => updateEntryDoc(key, doc => { const u = { ...doc }; if (title.trim()) u.title = title.trim(); else delete u.title; return u })}
+          onDelete={key => setDeleteConfirmKeys([key])} onMove={key => setMoveKeys([key])}
+          dragProps={dragProps} footer={dragFooter(null, 14, 18)}
+        />
+      ) : (
+        <FoldersPane
+          isDark={isDark} folders={journalFolders} entries={allEntries} openFolderId={openFolderId} unavailable={false}
+          onOpenFolder={setOpenFolderId} onBack={() => { setLibTab('documents'); setOpenFolderId(null) }}
+          onCreate={name => { createFolder(name) }} onRename={(id, name) => { const f = journalFolders.find(x => x.id === id); if (f) updateJournalFolder({ ...f, name }) }}
+          onDelete={id => setDeleteFolderId(id)} onOpenDoc={doOpenEditor} onMove={key => setMoveKeys([key])} onUnfile={key => moveDocs([key], null)}
+          onDropOnFolder={(key, fid) => onDropOnFolder(key, fid)} dragProps={dragProps} footer={dragFooter(openFolderId, 14, 18)}
+        />
+      )}
 
       {/* ── Delete confirmation dialog ───────────────────────────────────── */}
       {deleteConfirmKeys && deleteConfirmKeys.length > 0 && (
@@ -2561,10 +2673,12 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             }}
           >
             <div style={{ fontSize: 15, fontWeight: 600, color: isDark ? 'rgba(255,255,255,0.90)' : 'rgba(0,0,0,0.85)' }}>
-              {deleteConfirmKeys.length === 1 ? 'Delete this document?' : `Delete ${deleteConfirmKeys.length} documents?`}
+              {deleteConfirmKeys.length === 1
+                ? (allEntries.find(e => e.dateKey === deleteConfirmKeys[0])?.kind === 'note' ? 'Delete this note?' : 'Delete this document?')
+                : `Delete ${deleteConfirmKeys.length} documents?`}
             </div>
             {deleteConfirmKeys.length === 1 && (() => {
-              const entry = libraryEntries.find(e => e.dateKey === deleteConfirmKeys[0])
+              const entry = allEntries.find(e => e.dateKey === deleteConfirmKeys[0])
               return entry ? (
                 <div style={{ fontSize: 13, color: muted, lineHeight: 1.4 }}>
                   <strong style={{ color: isDark ? 'rgba(255,255,255,0.80)' : 'rgba(0,0,0,0.75)' }}>{entry.title}</strong>
@@ -2605,6 +2719,27 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           </div>
         </div>
       )}
+
+      {/* -- v1.330: Move to Folder / Delete Folder / create-folder-while-moving ----------------------------------------------------- */}
+      {moveKeys && moveKeys.length > 0 && !moveNewFolder && (
+        <MoveToFolderDialog
+          isDark={isDark} folders={journalFolders} count={moveKeys.length}
+          currentFolderId={moveKeys.length === 1 ? (allEntries.find(e => e.key === moveKeys[0])?.folderId ?? null) : null}
+          onPick={fid => moveDocs(moveKeys, fid)} onCreate={() => setMoveNewFolder(true)} onClose={() => setMoveKeys(null)}
+        />
+      )}
+      {moveKeys && moveNewFolder && (
+        <NamePrompt isDark={isDark} title="Create Folder" initial="" confirmLabel="Create & move"
+          onSubmit={name => { const id = createFolder(name); setMoveNewFolder(false); moveDocs(moveKeys, id) }}
+          onClose={() => setMoveNewFolder(false)} />
+      )}
+      {deleteFolderId && (() => {
+        const f = journalFolders.find(x => x.id === deleteFolderId)
+        return f ? (
+          <DeleteFolderDialog isDark={isDark} folder={f} itemCount={docsToUnfile(allEntries, f.id).length}
+            onConfirm={() => deleteFolderSafely(f.id)} onClose={() => setDeleteFolderId(null)} />
+        ) : null
+      })()}
 
       {/* ── Export format picker ────────────────────────────────────────── */}
       {exportFormatKeys && exportFormatKeys.length > 0 && !isExporting && (
@@ -2837,7 +2972,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       }}>
         {([
           { key: 'calendar' as const, icon: '📅', label: 'Journal Calendar', action: () => setView('calendar') },
-          { key: 'library'  as const, icon: '📚', label: 'Library',          action: () => setView('library')  },
+          { key: 'library'  as const, icon: '📚', label: 'Library',          action: () => { setLibTab('documents'); setOpenFolderId(null); setView('library') }  },
           { key: 'editor'   as const, icon: '✏️', label: 'Editor',           action: () => setView('editor')   },
         ]).map(item => {
           const active = view === item.key
@@ -2890,18 +3025,22 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
 
   const editorView = (
     <JournalEditorContent
-      dateKey={editorDate}
-      rawContent={calData[editorDate]?.notes ?? ''}
+      key={activeExtra ? activeExtra.id : 'day'}
+      dateKey={activeExtra ? activeExtra.dateKey : editorDate}
+      rawContent={activeExtra ? activeExtra.raw : (calData[editorDate]?.notes ?? '')}
       isDark={isDark}
       isEditorOnToday={editorDate === todayKey}
+      isNote={activeExtra?.kind === 'note'}
+      onCreateNew={() => createExtra('doc')}
+      onCreateNote={() => createExtra('note')}
       onContentChange={() => {/* child owns all persistence via onPersist */}}
-      onPersist={persistEntry}
+      onPersist={activeExtra && extraPersist ? extraPersist : persistEntry}
       onNavigateDay={navigateDay}
       onNavigateToday={navigateToday}
       onBack={doGoCalendar}
       onClose={doClose}
-      attachments={calData[editorDate]?.attachments ?? []}
-      onAttachmentsChange={atts => updateDay(editorDate, prev => ({ ...prev, attachments: atts }))}
+      attachments={activeExtra ? [] : (calData[editorDate]?.attachments ?? [])}
+      onAttachmentsChange={atts => { if (!activeExtra) updateDay(editorDate, prev => ({ ...prev, attachments: atts })) }}
       onJournalCalendar={() => setView('calendar')}
       onLibrary={() => setView('library')}
       onEditor={() => setView('editor')}

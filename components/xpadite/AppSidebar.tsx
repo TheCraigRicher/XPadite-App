@@ -84,6 +84,7 @@ type MenuAction =
   | 'motivate'
   | 'qotd'
   | 'journal-notes'
+  | 'notes'
   | 'mind-mapping'
   | 'notifications'
   | 'tutorials'
@@ -111,6 +112,7 @@ const MENU_ITEMS: MenuItem[] = [
   { icon: '🔥', label: 'Motivate Me',           action: 'motivate',      dividerBefore: true                                         },
   { icon: '💬', label: 'Quote of the Day | QOTD', action: 'qotd'                                                                     },
   { icon: '📝', label: 'Planner/Journal',        action: 'journal-notes'                                                              },
+  { icon: '🗒️', label: 'Notes',                  action: 'notes'                                                                      },
   { icon: '🧠', label: 'Mind Mapping',           action: 'mind-mapping'                                                               },
   { icon: '🔔', label: 'Notifications',         action: 'notifications'                                                              },
   { icon: '🎓', label: 'XPadite Tutorials',     action: 'tutorials',     dividerBefore: true, href: 'https://www.youtube.com/@Xpadite' },
@@ -120,7 +122,7 @@ const MENU_ITEMS: MenuItem[] = [
 
 // Finalized order, labels and icons — used at every screen size.
 const FINAL_ORDER: MenuAction[] = [
-  'profile', 'tasks', 'meetings', 'activities', 'journal-notes', 'mind-mapping', 'analytics', 'goal-manager', 'notifications', 'qotd',
+  'profile', 'tasks', 'meetings', 'activities', 'journal-notes', 'mind-mapping', 'notes', 'analytics', 'goal-manager', 'notifications', 'qotd',
   'ai-coach', 'motivate', 'gallery', 'sync-calendar', 'settings', 'tutorials', 'help', 'whats-new',
 ]
 
@@ -149,6 +151,7 @@ interface AppSidebarProps {
   onActivities?: () => void
   onAICoach?: () => void
   onJournalNotes?: () => void
+  onNotes?: () => void
   onMindMapping?: () => void
   onNotifications?: () => void
   onTasks?: () => void
@@ -169,6 +172,7 @@ export function AppSidebar({
   onActivities,
   onAICoach,
   onJournalNotes,
+  onNotes,
   onMindMapping,
   onNotifications,
   onTasks,
@@ -329,6 +333,7 @@ export function AppSidebar({
       case 'qotd':           onQotd?.(); break
       case 'ai-coach':       onAICoach?.(); break
       case 'journal-notes':  onJournalNotes?.(); break
+      case 'notes':          onNotes?.(); break
       case 'mind-mapping':   onMindMapping?.(); break
       case 'notifications':  onNotifications?.(); break
       case 'sync-calendar':  onSync?.(); break

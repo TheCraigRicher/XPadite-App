@@ -173,6 +173,7 @@ export interface JournalFolder {
   id: string
   name: string
   color?: string // hex string — either one of the curated presets or a custom picker value
+  createdAt?: number // epoch ms — when the folder was created (server created_at; shown on the Folders card)
 }
 
 export interface TaskAttachment {

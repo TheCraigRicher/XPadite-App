@@ -29,12 +29,13 @@ import {
   fetchJournalLabels,
   upsertAllJournalLabels,
   deleteJournalLabel,
-  fetchJournalFolders,
   upsertAllJournalFolders,
   deleteJournalFolder,
 } from '@/lib/supabase/core-data'
 
 import { DaySyncQueue, DaySyncParked } from './daySync'
+import { useJournalDocs, type JournalDocsApi } from './useJournalDocs'
+import { fetchJournalFoldersStrict } from '@/lib/supabase/journal-docs'
 import { mergeDay } from './dayMerge'
 import type { MergeConflict } from './dayMerge'
 import { DayConflictDialog } from './DayConflictDialog'
@@ -149,6 +150,10 @@ interface AppContextValue {
   journalFolders: JournalFolder[]
   addJournalFolder: (f: JournalFolder) => void
   removeJournalFolder: (id: string) => void
+  /** Rename / recolour an existing folder (same id). */
+  updateJournalFolder: (f: JournalFolder) => void
+  /** v1.330: extra Planner documents (several per day) and Notes — see useJournalDocs.ts */
+  journalDocs: JournalDocsApi
   // Reminders
   reminders: Reminder[]
   userEmail: string
@@ -247,6 +252,8 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const remindersRef = useRef(reminders)
   remindersRef.current = reminders
   const userIdRef = useRef(userId)
+  // v1.330: extra Planner documents + Notes (own table, own sync; the existing day pipeline is untouched)
+  const journalDocs = useJournalDocs(userId, setToast)
   userIdRef.current = userId
   // My Schedule callbacks read the latest values through refs, synced after each commit (never written during render)
   const calDataRef = useRef(calData)
@@ -509,7 +516,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       fetchUserPreferences(supabase, userId),
       supabaseFetchReminders(),
       fetchJournalLabels(supabase, userId),
-      fetchJournalFolders(supabase, userId),
+      fetchJournalFoldersStrict(supabase, userId),
     ]).then(([sbCalRes, sbSessions, sbActivities, sbPrefs, sbReminders, sbJournalLabels, sbJournalFolders]) => {
       const sbCalData = sbCalRes.data
 
@@ -603,7 +610,8 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
         setJournalLabelsState(sbJournalLabels)
         try { localStorage.setItem('xp9jl', JSON.stringify(sbJournalLabels)) } catch {}
       }
-      if (sbJournalFolders.length > 0) {
+      // null = could not load (keep what this device has). [] = the account really has no folders (e.g. the last one was deleted on another device).
+      if (sbJournalFolders !== null) {
         setJournalFoldersState(sbJournalFolders)
         try { localStorage.setItem('xp9jf', JSON.stringify(sbJournalFolders)) } catch {}
       }
@@ -1478,6 +1486,18 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     }
   }, [])
 
+  const updateJournalFolder = useCallback((f: JournalFolder) => {
+    const next = journalFoldersRef.current.map(x => (x.id === f.id ? { ...x, ...f } : x))
+    try { localStorage.setItem('xp9jf', JSON.stringify(next)) } catch {}
+    setJournalFoldersState(next)
+    const uid = userIdRef.current
+    if (uid) {
+      upsertAllJournalFolders(createClient(), uid, next).catch(err =>
+        console.error('[JournalFolders] Supabase sync error:', err)
+      )
+    }
+  }, [])
+
   const removeJournalFolder = useCallback((id: string) => {
     const next = journalFoldersRef.current.filter(f => f.id !== id)
     try { localStorage.setItem('xp9jf', JSON.stringify(next)) } catch {}
@@ -1645,7 +1665,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       customColors, addCustomColor, removeCustomColor,
       legendVisible, setLegendVisible,
       journalLabels, addJournalLabel, removeJournalLabel,
-      journalFolders, addJournalFolder, removeJournalFolder,
+      journalFolders, addJournalFolder, removeJournalFolder, updateJournalFolder, journalDocs,
       reminders, userEmail,
       upsertReminderCtx, removeReminderCtx, fireReminderCtx, setReminderNotificationsEnabled,
       scheduleEvents, scheduleStatus, deadlineDays, saveScheduleEvent, deleteScheduleEvent,

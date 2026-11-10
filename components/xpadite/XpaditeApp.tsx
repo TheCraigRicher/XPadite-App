@@ -726,6 +726,8 @@ function ThemedApp(_props: XpaditeAppProps) {
   const [dayModalCloseIntent, setDayModalCloseIntent]     = useState<'save' | 'discard' | null>(null)
   const [plannerCloseIntent, setPlannerCloseIntent]       = useState<'save' | 'discard' | null>(null)
   const [plannerDestDate,    setPlannerDestDate]          = useState<string | null>(null)
+  // Main menu -> Notes: opens Planner Editor -> Library -> Notes (the same workspace; no separate Notes modal or editor)
+  const [plannerLibraryJump, setPlannerLibraryJump]          = useState<'notes' | null>(null)
 const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'discard' | null>(null)
   const [settingsCloseIntent, setSettingsCloseIntent]     = useState<'save' | 'discard' | null>(null)
 
@@ -1042,6 +1044,11 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
             setJournalNotesOpen(true)
           }
         }}
+        onNotes={() => {
+          setPlannerLibraryJump('notes')
+          if (typeof window !== 'undefined' && window.innerWidth < 640) handleMobileNav('planner')
+          else setJournalNotesOpen(true)
+        }}
         onMindMapping={() => {
           // The SAME Planner/Journal workspace and the SAME Mind Mapping Canvas: jump to today's page and ask its editor to open the canvas
           // (mobile: the Planner tab, exactly like Planner/Journal; tablet/desktop: the Planner/Journal overlay).
@@ -1194,6 +1201,8 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
               closeIntent={plannerCloseIntent}
               jumpToDate={plannerDestDate}
               onJumpConsumed={() => setPlannerDestDate(null)}
+              jumpToLibrary={plannerLibraryJump}
+              onLibraryJumpConsumed={() => setPlannerLibraryJump(null)}
             />
           </div>
         )}
@@ -1377,7 +1386,7 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
 
       {activityManagerOpen && <ActivityManagerModal onClose={() => setActivityManagerOpen(false)} />}
 
-      {journalNotesOpen && <JournalWorkspaceModal onClose={() => setJournalNotesOpen(false)} jumpToDate={plannerDestDate} onJumpConsumed={() => setPlannerDestDate(null)} />}
+      {journalNotesOpen && <JournalWorkspaceModal onClose={() => setJournalNotesOpen(false)} jumpToDate={plannerDestDate} onJumpConsumed={() => setPlannerDestDate(null)} jumpToLibrary={plannerLibraryJump} onLibraryJumpConsumed={() => setPlannerLibraryJump(null)} />}
 
       {syncOpen && <SyncModal onClose={() => setSyncOpen(false)} />}
 

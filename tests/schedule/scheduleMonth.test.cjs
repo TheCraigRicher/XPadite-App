@@ -160,7 +160,7 @@ test('Month View / Month Picker stay presentation-only: no Supabase, RPC, billin
   const files = ['scheduleMonth.ts', 'ScheduleMonthGrid.tsx', 'ScheduleMonthPicker.tsx']
   const forbidden = /supabase|\.rpc\(|schedule_apply|calendar_day_save|schedule_set_sync|schedule_events|schedule-data|dayMerge|deadlineLink|DayConflict|DeadlineMark|taskSync|stripe|fetch\(/i
   for (const f of files) { const s = read(`components/xpadite/${f}`).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, ''); assert.ok(!forbidden.test(s), `${f} must not reference ${s.match(forbidden)}`) }
-  assert.deepEqual(fs.readdirSync(path.join(ROOT, 'supabase/migrations')).filter(n => /^02[2-9]_/.test(n)), ['022_schedule_events.sql', '023_schedule_sync.sql', '024_schedule_task_sync.sql'], 'the backend migrations are present, in order, and nothing newer')
+  assert.deepEqual(fs.readdirSync(path.join(ROOT, 'supabase/migrations')).filter(n => /^02[2-9]_/.test(n)), ['022_schedule_events.sql', '023_schedule_sync.sql', '024_schedule_task_sync.sql', '025_journal_documents.sql'], 'the backend migrations are present, in order, and nothing newer (025 = v1.330 Library Notes & Folders)')
 })
 
 test('accessibility + motion hooks: grid roles, labelled cells, focus rings, reduced motion', () => {

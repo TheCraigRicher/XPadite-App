@@ -39,6 +39,8 @@ import { createDictation, prefersSingleUtterance, type Dictation } from './speec
 import { formatDictation } from './speechPunctuation'
 import type { PlannerTaskNode } from './plannerTaskBridge'
 import type { SectionColorKey } from './journalUtils'
+import { canInsertBlock, canAddSection } from './journalDocs'
+import { PlannerHeaderMenu } from './PlannerHeaderMenu'
 
 // Re-export for backward compat — JournalEditorEmbed imports these
 export { parseJournalContent, serializeJournalContent }
@@ -644,6 +646,8 @@ interface JournalTextBlockProps {
   canMoveDown: boolean
   onMoveUp: () => void
   onMoveDown: () => void
+  /** v1.330: this is a Note's single section - Split / Duplicate / Move Section stay visible but dimmed and inactive */
+  noteLocked?: boolean
 }
 
 const JournalTextBlock = React.memo(function JournalTextBlock({
@@ -652,7 +656,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
   onDelete, onDuplicate, onTransferSection,
   onMoveActivate, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
   onPasteImage, onSplitSection, onMergeSection, onUpdateBlock, onCellResizeStart, onDeleteImageCell, onEditMindMapCell,
-  canMoveUp, canMoveDown, onMoveUp, onMoveDown,
+  canMoveUp, canMoveDown, onMoveUp, onMoveDown, noteLocked = false,
 }: JournalTextBlockProps) {
   const { updateDay, setToast } = useApp()
   const [menuOpen,       setMenuOpen]       = useState(false)
@@ -1146,7 +1150,9 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                       ▦ Add Table
                     </button>
                     {!block.partitions ? (
-                      <button onClick={() => { onSplitSection?.(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                      <button onClick={() => { if (noteLocked) return; onSplitSection?.(); setMenuOpen(false) }} disabled={noteLocked} aria-disabled={noteLocked}
+                        title={noteLocked ? 'A Note has a single section' : undefined} data-testid="menu-split-section"
+                        style={{ ...menuItemStyle(isDark), ...(noteLocked ? { opacity: 0.38, cursor: 'not-allowed' } : null) }}>
                         ⬓ Split Section
                       </button>
                     ) : (
@@ -1158,12 +1164,16 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                       🎨 Change Color
                     </button>
                     {!!onDuplicate && (
-                      <button onClick={() => { onDuplicate(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                      <button onClick={() => { if (noteLocked) return; onDuplicate(); setMenuOpen(false) }} disabled={noteLocked} aria-disabled={noteLocked}
+                        title={noteLocked ? 'A Note has a single section' : undefined} data-testid="menu-duplicate-section"
+                        style={{ ...menuItemStyle(isDark), ...(noteLocked ? { opacity: 0.38, cursor: 'not-allowed' } : null) }}>
                         📑 Duplicate
                       </button>
                     )}
                     {!!onTransferSection && (
-                      <button onClick={() => { onTransferSection(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                      <button onClick={() => { if (noteLocked) return; onTransferSection(); setMenuOpen(false) }} disabled={noteLocked} aria-disabled={noteLocked}
+                        title={noteLocked ? 'A Note has a single section' : undefined} data-testid="menu-move-section"
+                        style={{ ...menuItemStyle(isDark), ...(noteLocked ? { opacity: 0.38, cursor: 'not-allowed' } : null) }}>
                         📅 Move Section
                       </button>
                     )}
@@ -2228,6 +2238,10 @@ interface JournalEditorContentProps {
   onDirtyChange?: (dirty: boolean) => void
   closeIntent?: 'save' | 'discard' | null
   flushRef?: React.MutableRefObject<(() => void) | null>
+  // v1.330: a Note is this same editor limited to exactly ONE section (the rule is enforced in the block logic below, not only in the UI)
+  isNote?: boolean
+  onCreateNew?: () => void       // header menu: a new independent document on the current day
+  onCreateNote?: () => void      // header menu: a new single-section Note
   // Legacy props — accepted for backward compat; attachments now live as inline blocks
   attachments?: TaskAttachment[]
   onAttachmentsChange?: (atts: TaskAttachment[]) => void
@@ -2241,6 +2255,7 @@ export function JournalEditorContent({
   onNavigateDay, onNavigateToday, onBack, onClose,
   onJournalCalendar, onLibrary, onEditor,
   onDirtyChange, closeIntent, flushRef,
+  isNote = false, onCreateNew, onCreateNote,
 }: JournalEditorContentProps) {
 
   // ── App context (for Task Manager integration) ───────────────────────────────
@@ -2735,6 +2750,7 @@ export function JournalEditorContent({
   // IMPORTANT: always update blocksRef.current BEFORE calling buildDocStr()
 
   function insertBlock(block: JournalBlock, atIndex: number) {
+    if (isNote && !canInsertBlock('note', block)) return   // a Note holds exactly one section: nothing may add another (images / Mind Maps are not sections)
     const next = [...blocksRef.current]
     next.splice(atIndex + 1, 0, block)
     blocksRef.current = next
@@ -2745,6 +2761,8 @@ export function JournalEditorContent({
   }
 
   function deleteBlock(id: string) {
+    // a Note's one and only section can never be removed (that would leave it with none)
+    if (isNote) { const t = blocksRef.current.find(b => b.id === id); if (t && (t.type === 'section' || t.type === 'text')) return }
     contentMapRef.current.delete(id)
     const filtered = blocksRef.current.filter(b => b.id !== id)
     const next = filtered.length > 0 ? filtered : [createSectionBlock('lavender')]
@@ -2779,6 +2797,7 @@ export function JournalEditorContent({
   // custom collision math needed, and on mobile the grid already collapses to a
   // single stacked column, so the duplicate always lands below there too.
   function duplicateBlock(id: string) {
+    if (isNote) return                                      // duplicating a section would add a second one
     const idx = blocksRef.current.findIndex(b => b.id === id)
     if (idx < 0) return
     const original = blocksRef.current[idx]
@@ -2811,6 +2830,7 @@ export function JournalEditorContent({
   // before deleteBlock removes the origin, so Move never drops content into a
   // gap between the two.
   function transferSection(mode: 'move' | 'copy', id: string, destKey: string) {
+    if (isNote) return                                      // moving would remove the Note's only section
     const block = blocksRef.current.find(b => b.id === id)
     if (!block) return
     const liveContent = contentMapRef.current.get(id) ?? block.content ?? ''
@@ -3128,6 +3148,7 @@ export function JournalEditorContent({
   }
 
   function handleSplitSection(blockId: string) {
+    if (isNote) return                                      // Split Section is inactive in a Note
     const block = blocksRef.current.find(b => b.id === blockId)
     if (!block || block.partitions) return
     const currentCell: SectionCell = block.sectionImage ?? mkContentCell(block.content ?? '')
@@ -4103,10 +4124,17 @@ export function JournalEditorContent({
         </div>
       )}
 
-      <div className={drawState ? 'xp-j-hdr-normal' : undefined} style={{
+      <div className={drawState ? 'xp-j-hdr-normal xp-j-hdr-row' : 'xp-j-hdr-row'} style={{
         position: 'relative', display: 'flex', alignItems: 'center',
         height: 52, padding: '0 14px', gap: 6,
       }}>
+        {/* v1.330: top-left burger — Mind Mapping / + Create New / + Create Note (desktop, tablet and mobile) */}
+        <PlannerHeaderMenu
+          onMindMap={() => setDrawState({ insertAt: blocks.length - 1, editingBlock: null })}
+          onCreateNew={() => guardedNavigate(() => onCreateNew?.())}
+          onCreateNote={() => guardedNavigate(() => onCreateNote?.())}
+        />
+
         {/* Left: back — mobile only (bottom nav handles close on mobile; hidden on desktop/tablet) */}
         <button
           onClick={() => guardedNavigate(onBack)}
@@ -4129,14 +4157,14 @@ export function JournalEditorContent({
             position: 'absolute', left: 0, right: 0, top: '50%', transform: 'translateY(-50%)',
             textAlign: 'center',
             color: '#fff', fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap',
-          }}>
-            {fmtEditorDate(dateKey)}
+          }} className="xp-j-hdr-date">
+            {isNote ? `🗒️ Note · ${fmtShortDate(dateKey)}` : fmtEditorDate(dateKey)}
           </span>
-          <button
+          {!isNote && <button
             onClick={() => guardedNavigate(() => onNavigateDay(-1))}
             title="Previous day"
             style={{
-              position: 'absolute', left: 'calc(50% - 132px)', top: '50%', transform: 'translateY(-50%)',
+              position: 'absolute', left: 'calc(50% - var(--xp-j-nav-off, 132px))', top: '50%', transform: 'translateY(-50%)',
               width: 32, height: 32, flexShrink: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: 'transparent', border: 'none',
@@ -4151,12 +4179,12 @@ export function JournalEditorContent({
             <svg width="9" height="12" viewBox="0 0 9 12" fill="#fff" aria-hidden="true">
               <path d="M9 0 L0 6 L9 12 Z" />
             </svg>
-          </button>
-          <button
+          </button>}
+          {!isNote && <button
             onClick={() => guardedNavigate(() => onNavigateDay(1))}
             title="Next day"
             style={{
-              position: 'absolute', right: 'calc(50% - 132px)', top: '50%', transform: 'translateY(-50%)',
+              position: 'absolute', right: 'calc(50% - var(--xp-j-nav-off, 132px))', top: '50%', transform: 'translateY(-50%)',
               width: 32, height: 32, flexShrink: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               background: 'transparent', border: 'none',
@@ -4171,12 +4199,12 @@ export function JournalEditorContent({
             <svg width="9" height="12" viewBox="0 0 9 12" fill="#fff" aria-hidden="true">
               <path d="M0 0 L9 6 L0 12 Z" />
             </svg>
-          </button>
+          </button>}
         </div>
 
         {/* Right: today + close */}
         <div style={{ flex: 1 }} />
-        {!isEditorOnToday && (
+        {!isEditorOnToday && !isNote && (
           <button
             onClick={() => guardedNavigate(onNavigateToday)}
             title="Go to today"
@@ -4528,6 +4556,11 @@ export function JournalEditorContent({
         @media (max-width: 640px) {
           .xp-j-draw-mobile-hdr { display: flex !important; }
           .xp-j-hdr-normal { display: none !important; }
+          /* v1.330: the top-left burger takes the left edge — on the narrowest phones the day arrows move in so the burger never covers "previous day" */
+          @media (max-width: 340px) {
+            .xp-j-hdr-row { --xp-j-nav-off: 106px; }
+            .xp-j-hdr-row .xp-j-hdr-date { font-size: 12px !important; }
+          }
         }
       `}</style>
 
@@ -4655,7 +4688,8 @@ export function JournalEditorContent({
                             onContentChange={onBlockContentChange}
                             onFocus={onEditorFocus}
                             onSelectionUpdate={onEditorSelectionUpdate}
-                            onDelete={blocks.length > 1 ? () => deleteBlock(block.id) : undefined}
+                            noteLocked={isNote && block.type === 'section'}
+                            onDelete={blocks.length > 1 && !(isNote && (block.type === 'section' || block.type === 'text')) ? () => deleteBlock(block.id) : undefined}
                             onDuplicate={block.type === 'section' ? () => duplicateBlock(block.id) : undefined}
                             onTransferSection={block.type === 'section' ? () => setTransferBlockId(block.id) : undefined}
                             onMoveActivate={block.type === 'section' ? () => {
@@ -4833,7 +4867,7 @@ export function JournalEditorContent({
 
                 {/* + Section — mobile primary slot (desktop version lives after Draw) */}
                 <div className="xp-jd-sec-mo">
-                  <SectionPicker isDark={isDark} onPick={color => {
+                  <SectionPicker isDark={isDark} disabled={!canAddSection(isNote ? 'note' : 'day')} onPick={color => {
                     insertBlock(createSectionBlock(color), blocks.length - 1)
                   }} />
                 </div>
@@ -4942,17 +4976,11 @@ export function JournalEditorContent({
 
                 <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />
 
-                {/* Mind Map — opens the Mind Mapping Canvas (internal name stays drawState/createDrawingBlock) */}
-                <button
-                  className="xp-jd-btn"
-                  style={dockBtn()}
-                  onClick={() => setDrawState({ insertAt: blocks.length - 1, editingBlock: null })}
-                  title="Open Mind Mapping Canvas"
-                >🧠 Mind Map</button>
+                {/* v1.330: Mind Mapping moved to the top-left header menu (same canvas, same state - openMindMapCanvas below) */}
 
                 {/* + Section — desktop slot (mobile version is before Undo/Redo) */}
                 <div className="xp-jd-sec-dt" style={{ display: 'contents' }}>
-                  <SectionPicker isDark={isDark} onPick={color => {
+                  <SectionPicker isDark={isDark} disabled={!canAddSection(isNote ? 'note' : 'day')} onPick={color => {
                     insertBlock(createSectionBlock(color), blocks.length - 1)
                   }} />
                 </div>
@@ -5477,7 +5505,7 @@ function ListPicker({ activeType, onPick }: { activeType: 'bullet' | 'numbers' |
 
 // ─── Section picker inline component ─────────────────────────────────────────
 
-function SectionPicker({ isDark, onPick }: { isDark: boolean; onPick: (c: SectionColorKey) => void }) {
+function SectionPicker({ isDark, onPick, disabled = false }: { isDark: boolean; onPick: (c: SectionColorKey) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false)
   const [hoveredKey, setHoveredKey] = useState<string | null>(null)
   const [popPos, setPopPos] = useState<{ left: number; bottom: number } | null>(null)
@@ -5499,6 +5527,7 @@ function SectionPicker({ isDark, onPick }: { isDark: boolean; onPick: (c: Sectio
   }, [open])
 
   function handleToggle() {
+    if (disabled) return
     if (open) { setOpen(false); return }
     const rect = btnRef.current?.getBoundingClientRect()
     if (rect) {
@@ -5519,9 +5548,13 @@ function SectionPicker({ isDark, onPick }: { isDark: boolean; onPick: (c: Sectio
           color: '#c4b5fd',
           fontSize: 12, fontWeight: open ? 600 : 500,
           transition: 'all 120ms', flexShrink: 0, whiteSpace: 'nowrap' as const,
+          ...(disabled ? { opacity: 0.38, cursor: 'not-allowed' } : null),
         }}
         onClick={handleToggle}
-        title="Add a colored section"
+        disabled={disabled}
+        aria-disabled={disabled}
+        data-testid="add-section-btn"
+        title={disabled ? 'A Note has a single section' : 'Add a colored section'}
       >+ Section</button>
 
       {open && popPos && (

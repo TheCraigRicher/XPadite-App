@@ -372,6 +372,27 @@ export function eventsOnDay(events: ScheduleEvent[], day: Date): ScheduleEvent[]
   return events.filter(e => daySlice(e, day) !== null).sort((a, b) => a.startAt - b.startAt || a.endAt - b.endAt)
 }
 
+/** v1.331: has this event's end time passed? Purely a display rule (a subtle strikethrough) — nothing about the event is stored or changed. */
+export function isPastEvent(ev: { endAt: number }, now: number): boolean {
+  return ev.endAt <= now
+}
+
+/**
+ * v1.331: the event the Today view selects by itself when it opens (or the date changes): the one in progress; otherwise the next one to start;
+ * otherwise the most recent one that already finished. Works for any date's events (a future day → its first event, a past day → its last).
+ * With several in progress at once the most recently started wins. Cancelled events are never chosen on their own. Synced calendar events and
+ * single occurrences of repeating events are just events here (this model stores one occurrence per event, it does not expand repeats).
+ */
+export function pickAutoSelection<T extends { id: string; startAt: number; endAt: number; isCancelled?: boolean }>(events: T[], now: number): T | null {
+  const live = events.filter(e => !e.isCancelled && e.endAt > e.startAt)
+  if (live.length === 0) return null
+  const active = live.filter(e => e.startAt <= now && now < e.endAt)
+  if (active.length) return [...active].sort((a, b) => b.startAt - a.startAt || a.endAt - b.endAt || a.id.localeCompare(b.id))[0]
+  const upcoming = live.filter(e => e.startAt > now)
+  if (upcoming.length) return [...upcoming].sort((a, b) => a.startAt - b.startAt || a.endAt - b.endAt || a.id.localeCompare(b.id))[0]
+  return [...live].sort((a, b) => b.endAt - a.endAt || b.startAt - a.startAt || a.id.localeCompare(b.id))[0]
+}
+
 export function startOfMonth(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), 1)
 }

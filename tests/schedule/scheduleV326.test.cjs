@@ -45,7 +45,7 @@ test('time list data: every 15 minutes, 96 entries, both formats round-trip, 24-
 test('time picker UI: a real listbox (not a datalist), highlight + scroll to the selected time, manual entry and keys kept', () => {
   const p = src('ScheduleParts.tsx')
   assert.ok(!/<datalist/.test(p) && /role="listbox"/.test(p) && /role="combobox"/.test(p) && /data-testid="time-list"/.test(p))
-  assert.ok(/aria-selected=\{sel\}/.test(p) && /ul\.scrollTop = el\.offsetTop - ul\.clientHeight \/ 2/.test(p), 'selected row highlighted and centred')
+  assert.ok(/aria-selected=\{sel\}/.test(p) && /useCenteredList\(open, !!box, box\?\.maxHeight, active\)/.test(p) && /ul\.scrollTop = el\.offsetTop - ul\.clientHeight \/ 2/.test(src('ScheduleSheet.tsx')), 'selected row highlighted and centred (v1.331: by the shared useCenteredList, which no longer fights the own scrolling of the user)')
   assert.ok(/overflowY: 'auto'/.test(p) && /overscrollBehavior: 'contain'/.test(p), 'mouse-wheel and touch scrolling')
   assert.ok(/onClick=\{\(\) => \{ if \(!open\) openList\(\) \}\}/.test(p) && /data-testid=\{`\$\{id\}-arrow`\}/.test(p), 'tapping the field or its arrow opens the list')
   assert.ok(/parseTimeText\(t\)/.test(p) && /e\.key === 'Enter' && draft !== null/.test(p) && /e\.key === 'ArrowDown' \|\| e\.key === 'ArrowUp'/.test(p) && /e\.key === 'Escape'/.test(p), 'typing, Enter, arrows, Escape')
@@ -110,7 +110,7 @@ test('Filter is a bottom sheet over the calendar (not a push-down panel): slides
   assert.ok(/<SlideDown open=\{panel\.kind === 'search'\}/.test(v), 'only Search uses the slide-down bar; opening Filter never pushes the calendar')
   assert.ok(/<SheetFrame phone visible=\{visible\} variant="sheet" label="Filter events"/.test(mb), 'bottom-sheet variant')
   assert.ok(/borderTopLeftRadius: full \? 0 : 22/.test(s) && /rgba\(15,10,30,0\.5\)/.test(s) && /maxHeight: full \? '100%' : '88%'/.test(s) && /env\(safe-area-inset-bottom/.test(s), 'rounded top, dim backdrop, height cap, safe area')
-  assert.ok(/onClick=\{onClose\} data-testid="sheet-backdrop"/.test(s) && /data-testid="sheet-handle"/.test(s) && /if \(d > 90\) onClose\(\)/.test(s), 'backdrop tap and swipe-down dismiss')
+  assert.ok(/onClick=\{backdropDismiss \? onClose : undefined\} data-testid="sheet-backdrop"/.test(s) && /backdropDismiss = true/.test(s) && !/backdropDismiss/.test(mb) && /data-testid="sheet-handle"/.test(s) && /if \(d > 90\) onClose\(\)/.test(s), 'backdrop tap and swipe-down dismiss')
   assert.ok(/data-testid="filter-cancel"/.test(mb) && /data-testid="filter-apply"/.test(mb) && /data-testid="filter-reset"/.test(mb) && /categories\.map\(c =>/.test(mb) && /FILTER_SOURCES\.map/.test(mb) && /overflow-y-auto/.test(mb), 'Cancel / Apply / Reset, categories and calendars, scrollable (list redesigned in v1.327)')
   assert.ok(/top: sheetTop/.test(v) && /new ResizeObserver\(measure\)/.test(v), 'the sheet starts below the toolbar so the header and both rows stay clear')
   assert.ok(/isFilterActive\(\{ filter, hidden, hiddenSources \}\)/.test(v) && /data-testid="filter-active-dot"/.test(mb), 'active-filter indicator')

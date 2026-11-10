@@ -42,6 +42,8 @@ export interface MonthCell {
   key: string                 // local YYYY-MM-DD
   inMonth: boolean
   isToday: boolean
+  /** v1.331: strictly before today (the grid dims these; every cell stays fully clickable). */
+  isPast: boolean
   events: ScheduleEvent[]
 }
 
@@ -54,7 +56,7 @@ export function buildMonthGrid(events: ScheduleEvent[], month: Date, today: Date
   const m = startOfMonth(month)
   return monthGridWeeks(m, weekStart).map(row => row.map(date => ({
     date, key: dateKey(date), inMonth: date.getMonth() === m.getMonth() && date.getFullYear() === m.getFullYear(),
-    isToday: isSameLocalDay(date, today), events: monthDayEvents(events, date),
+    isToday: isSameLocalDay(date, today), isPast: startOfDay(date).getTime() < startOfDay(today).getTime(), events: monthDayEvents(events, date),
   })))
 }
 

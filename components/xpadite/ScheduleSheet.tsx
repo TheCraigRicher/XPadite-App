@@ -7,7 +7,7 @@
 // unchanged when `phone` is false. Also the positioning helper used by the time and category dropdowns.
 // Frontend only; nothing here stores anything.
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 /** Marker so the modal's Escape handler lets an open My Schedule layer close first. */
 export const LAYER_ATTR = 'data-xp-sched-layer'
@@ -66,7 +66,7 @@ export function useSheetPhase(open: boolean, animate: boolean) {
  * The overlay + panel. Phones: `variant="sheet"` (bottom sheet with a grab handle; drag it down, tap the backdrop or Close to
  * dismiss) or `variant="full"` (full-screen). Everything else: the original centred dialog. `as="form"` makes the panel a <form>.
  */
-export function SheetFrame({ phone, visible, variant, label, onClose, children, as = 'div', onSubmit, desktopClass = 'sm:max-w-[480px]', zClass = 'z-40' }: {
+export function SheetFrame({ phone, visible, variant, label, onClose, children, as = 'div', onSubmit, desktopClass = 'sm:max-w-[480px]', zClass = 'z-40', backdropDismiss = true }: {
   phone: boolean
   visible: boolean
   variant: 'sheet' | 'full'
@@ -78,6 +78,12 @@ export function SheetFrame({ phone, visible, variant, label, onClose, children, 
   /** Desktop/tablet panel width class (default 480px). */
   desktopClass?: string
   zClass?: string
+  /**
+   * v1.331: false = a click/tap on the dimmed backdrop does NOT close the dialog (Add/Edit Event, Manage Categories, Preferences, Sync: a stray tap, or a
+   * text-selection drag that ends outside the panel, used to discard what the user was typing). Explicit Close / Cancel / Save, Esc and the sheet's
+   * swipe-down handle still work. Default true keeps every other overlay exactly as before.
+   */
+  backdropDismiss?: boolean
 }) {
   const [dragY, setDragY] = useState<number | null>(null)
   const startY = useRef<number | null>(null)
@@ -88,7 +94,7 @@ export function SheetFrame({ phone, visible, variant, label, onClose, children, 
   if (!phone) {
     // Tablet / desktop: unchanged centred dialog.
     return (
-      <div {...{ [LAYER_ATTR]: '' }} className={`absolute inset-0 ${zClass} flex items-end sm:items-center justify-center sm:p-4`} style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+      <div {...{ [LAYER_ATTR]: '' }} className={`absolute inset-0 ${zClass} flex items-end sm:items-center justify-center sm:p-4`} style={{ background: 'rgba(0,0,0,0.5)' }} onClick={backdropDismiss ? onClose : undefined}>
         <Tag {...common} {...formProps} className={`xp-sch-sheet w-full ${desktopClass} flex flex-col`}
           style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', borderRadius: 18, maxHeight: '94%', boxShadow: '0 24px 60px rgba(0,0,0,0.38)' }}>
           {children}
@@ -101,7 +107,7 @@ export function SheetFrame({ phone, visible, variant, label, onClose, children, 
   const dragging = dragY !== null
   return (
     <div {...(visible ? { [LAYER_ATTR]: '' } : {})} className={`absolute inset-0 ${zClass} flex items-end`} style={{ pointerEvents: visible ? 'auto' : 'none' }}>
-      <div aria-hidden="true" onClick={onClose} data-testid="sheet-backdrop" className="absolute inset-0 xp-sheet-fade"
+      <div aria-hidden="true" onClick={backdropDismiss ? onClose : undefined} data-testid="sheet-backdrop" data-dismiss={backdropDismiss ? 'true' : 'false'} className="absolute inset-0 xp-sheet-fade"
         style={{ background: 'rgba(15,10,30,0.5)', opacity: visible ? Math.max(0, 1 - (dragY ?? 0) / 600) : 0, transition: dragging ? 'none' : undefined }} />
       <Tag {...common} {...formProps} data-testid="sheet-panel" data-visible={visible ? 'true' : 'false'}
         className="xp-sheet-panel relative w-full flex flex-col"
@@ -163,8 +169,17 @@ export function usePopupBox(open: boolean, anchorRef: React.RefObject<HTMLElemen
   const [box, setBox] = useState<PopupBox | null>(null)
   useEffect(() => {
     if (!open) return
-    const measure = () => { if (anchorRef.current) setBox(measurePopup(anchorRef.current, wanted)) }
-    const raf = requestAnimationFrame(measure)
+    // Root cause of the old jitter: this listener is capture-phase, so it also heard the popup LIST scrolling, re-measured, published a brand-new box
+    // object every time, and the list's "centre the highlighted row" effect (which depended on that object) snapped the list back under the user's finger.
+    // Now: scrolling inside a listbox is ignored, and an unchanged box is never re-published.
+    const measure = (ev?: Event) => {
+      const t = ev?.target
+      if (t instanceof Element && t.closest('[role="listbox"]')) return
+      if (!anchorRef.current) return
+      const next = measurePopup(anchorRef.current, wanted)
+      setBox(prev => (prev && prev.top === next.top && prev.left === next.left && prev.width === next.width && prev.maxHeight === next.maxHeight ? prev : next))
+    }
+    const raf = requestAnimationFrame(() => measure())
     window.addEventListener('resize', measure)
     window.addEventListener('scroll', measure, true)
     window.visualViewport?.addEventListener('resize', measure)
@@ -176,4 +191,28 @@ export function usePopupBox(open: boolean, anchorRef: React.RefObject<HTMLElemen
     }
   }, [open, anchorRef, wanted])
   return open ? box : null
+}
+
+/**
+ * Keeps the highlighted row of a popup list in view: centred when the list opens and whenever the highlight itself moves (arrow keys, typing),
+ * but NEVER pulled back once the user has scrolled or pressed the list. A keyboard appearing or a window resize only re-centres a list the user
+ * has not touched yet. Spread `userScroll` on the <ul> and attach `listRef`.
+ */
+export function useCenteredList(open: boolean, shown: boolean, height: number | undefined, active: number) {
+  const listRef = useRef<HTMLUListElement>(null)
+  const touched = useRef(false)
+  const lastActive = useRef(-1)
+  useEffect(() => { if (!open) { touched.current = false; lastActive.current = -1 } }, [open])
+  useEffect(() => {
+    if (!open || !shown) return
+    const ul = listRef.current, el = ul?.children[active] as HTMLElement | undefined
+    if (!ul || !el) return
+    const moved = lastActive.current !== active
+    if (touched.current && !moved) return              // layout changed, but the user is browsing: leave the list where they put it
+    lastActive.current = active
+    if (moved) touched.current = false
+    ul.scrollTop = el.offsetTop - ul.clientHeight / 2 + el.offsetHeight / 2
+  }, [open, shown, height, active])
+  const markTouched = useCallback(() => { touched.current = true }, [])
+  return { listRef, userScroll: { onWheel: markTouched, onTouchStart: markTouched, onPointerDown: markTouched } }
 }

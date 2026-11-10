@@ -13,7 +13,7 @@ import {
 import type { CombinedFilter, ScheduleCategoryId, ScheduleEvent, ScheduleFormErrors, ScheduleFormValues } from './scheduleLogic'
 import { withDateChange, withStartChange } from './scheduleEngine'
 import { useSchedule } from './scheduleContext'
-import { LAYER_ATTR, SheetFrame, useIsPhone, usePopupBox, useSheetPhase } from './ScheduleSheet'
+import { LAYER_ATTR, SheetFrame, useCenteredList, useIsPhone, usePopupBox, useSheetPhase } from './ScheduleSheet'
 
 export { LAYER_ATTR } from './ScheduleSheet'
 
@@ -227,17 +227,11 @@ function TimeField({ id, value, fmt, onChange }: { id: string; value: string; fm
   const [active, setActive] = useState(0)
   const wrapRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const listRef = useRef<HTMLUListElement>(null)
   const options = timeOptions(TIME_STEP_MIN)
   const shown = draft ?? formatTimeValue(value, fmt)
   const box = usePopupBox(open, wrapRef)
-
-  // keep the highlighted row centred in the list (on open, and as the arrow keys move it)
-  useEffect(() => {
-    if (!open || !box) return
-    const ul = listRef.current, el = ul?.children[active] as HTMLElement | undefined
-    if (ul && el) ul.scrollTop = el.offsetTop - ul.clientHeight / 2 + el.offsetHeight / 2
-  }, [open, box, active])
+  // keep the highlighted row centred on open and as the arrow keys move it — but never fight the user's own scrolling (v1.331)
+  const { listRef, userScroll } = useCenteredList(open, !!box, box?.maxHeight, active)
 
   const nearest = (hhmm: string) => /^\d\d:\d\d$/.test(hhmm) ? Math.min(options.length - 1, Math.round((+hhmm.slice(0, 2) * 60 + +hhmm.slice(3)) / TIME_STEP_MIN)) : 36
   function openList() { setActive(nearest(parseTimeText(draft ?? '') ?? value)); setOpen(true) }
@@ -288,7 +282,7 @@ function TimeField({ id, value, fmt, onChange }: { id: string; value: string; fm
         <ChevronDown />
       </button>
       {open && box && (
-        <ul ref={listRef} id={`${id}-list`} role="listbox" aria-label="Times" data-testid="time-list" style={popupStyle(box)}>
+        <ul ref={listRef} {...userScroll} id={`${id}-list`} role="listbox" aria-label="Times" data-testid="time-list" style={popupStyle(box)}>
           {options.map((o, i) => {
             const sel = o === value
             return (
@@ -310,14 +304,9 @@ function CategorySelect({ id, value, onChange }: { id: string; value: ScheduleCa
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
   const btnRef = useRef<HTMLButtonElement>(null)
-  const listRef = useRef<HTMLUListElement>(null)
   const box = usePopupBox(open, btnRef as React.RefObject<HTMLElement>, 280)
   const cur = meta(value)
-  useEffect(() => {
-    if (!open || !box) return
-    const ul = listRef.current, el = ul?.children[active] as HTMLElement | undefined
-    if (ul && el) ul.scrollTop = el.offsetTop - ul.clientHeight / 2 + el.offsetHeight / 2
-  }, [open, box, active])
+  const { listRef, userScroll } = useCenteredList(open, !!box, box?.maxHeight, active)
   function openList() { setActive(Math.max(0, categories.findIndex(c => c.id === value))); setOpen(true) }
   function choose(i: number) { onChange(categories[i].id); setOpen(false); btnRef.current?.focus() }
   return (
@@ -337,7 +326,7 @@ function CategorySelect({ id, value, onChange }: { id: string; value: ScheduleCa
         <ChevronDown />
       </button>
       {open && box && (
-        <ul ref={listRef} id={`${id}-list`} role="listbox" aria-label="Categories" data-testid="category-list" style={popupStyle(box)}>
+        <ul ref={listRef} {...userScroll} id={`${id}-list`} role="listbox" aria-label="Categories" data-testid="category-list" style={popupStyle(box)}>
           {categories.map((c, i) => {
             const sel = c.id === value
             return (
@@ -491,7 +480,7 @@ function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, headin
   }
 
   return (
-    <SheetFrame phone={phone} visible={visible} variant="full" as="form" onSubmit={submit} label={heading ?? (mode === 'add' ? 'Add event' : 'Edit event')} onClose={onCancel}>
+    <SheetFrame phone={phone} visible={visible} variant="full" as="form" onSubmit={submit} label={heading ?? (mode === 'add' ? 'Add event' : 'Edit event')} onClose={onCancel} backdropDismiss={false}>
       <div className="contents" onFocusCapture={e => {
         // keep the field being typed in clear of the on-screen keyboard
         const t = e.target as HTMLElement

@@ -23,7 +23,7 @@ function CloseX() {
 
 function Shell({ title, onClose, children, footer, label, phone, visible, showClose = true }: { title: string; onClose: () => void; children: React.ReactNode; footer?: React.ReactNode; label?: string; phone: boolean; visible: boolean; showClose?: boolean }) {
   return (
-    <SheetFrame phone={phone} visible={visible} variant="sheet" label={label ?? title} onClose={onClose}>
+    <SheetFrame phone={phone} visible={visible} variant="sheet" label={label ?? title} onClose={onClose} backdropDismiss={false}>
       <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 flex-shrink-0" style={{ borderBottom: '0.5px solid var(--xp-bdr)', paddingTop: phone ? 4 : undefined }}>
         <h3 className="text-[15px] font-bold" style={{ color: 'var(--xp-txt)' }}>{title}</h3>
         {showClose && <button type="button" onClick={onClose} aria-label="Close" style={{ ...iconBtn, width: 28, height: 28 }}><CloseX /></button>}

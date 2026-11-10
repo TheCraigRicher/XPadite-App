@@ -7,7 +7,7 @@
 // Shows ONLY the user's own saved events (a new account starts empty — there is no sample or generated data). Read-only synced
 // calendar meetings (`meetings`) stay empty until a real Google/Outlook integration exists; `meetingsMockData.ts` holds their types.
 
-import { readViewPref, writeViewPref } from './scheduleMonth'
+import { dateKey, readViewPref, writeViewPref } from './scheduleMonth'
 import type { ScheduleViewKey } from './scheduleMonth'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from './AppContext'
@@ -23,7 +23,7 @@ import { ScheduleContext, useSchedule } from './scheduleContext'
 import { countBackfillEligible } from './deadlineLink'
 import {
   SCHEDULE_CATEGORIES, blankForm, blankFormAt, clockLabel, daySlice, durationLabel, eventToForm, eventsOnDay, filterScheduleEvents,
-  formToEventFields, isSameLocalDay, meetingToScheduleEvent, sanitizePrefs, splitFilter, startOfDay, startOfMonth, timeRangeLabel,
+  formToEventFields, isPastEvent, isSameLocalDay, meetingToScheduleEvent, pickAutoSelection, sanitizePrefs, splitFilter, startOfDay, startOfMonth, timeRangeLabel,
   DEFAULT_PREFS,
 } from './scheduleLogic'
 import type { CombinedFilter, ScheduleCategory, ScheduleCategoryId, ScheduleEvent, ScheduleFormValues, SchedulePrefs } from './scheduleLogic'
@@ -308,6 +308,7 @@ function AgendaItem({ ev, meeting, now, selected, onSelect }: { ev: ScheduleEven
   const cat = meta(ev.category)
   const phase = meeting ? getPhase(meeting, now) : null
   const faded = phase === 'past' || phase === 'cancelled' || (!!ev.isCancelled)
+  const past = isPastEvent(ev, now)      // v1.331: subtle strikethrough once the end time has passed (display only — no completion state)
   const source = meeting ? SOURCE_META[meeting.provider] : null
   return (
     <button
@@ -319,13 +320,13 @@ function AgendaItem({ ev, meeting, now, selected, onSelect }: { ev: ScheduleEven
         padding: '10px 12px', borderRadius: 12, background: '#232640', color: '#f3f4f6',
         border: `1.5px solid ${selected ? '#8b5cf6' : 'transparent'}`,
         boxShadow: selected ? '0 0 0 3px rgba(139,92,246,0.22)' : 'none',
-        opacity: faded ? 0.62 : 1,
+        opacity: faded ? 0.62 : past ? 0.82 : 1,
       }}
     >
       <span aria-hidden="true" className="flex-shrink-0" style={{ width: 11, height: 11, borderRadius: '50%', background: cat.edge, marginTop: 5 }} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[13px] font-semibold leading-snug truncate" style={{ textDecoration: ev.isCancelled ? 'line-through' : 'none' }}>{ev.title}</p>
+          <p className="text-[13px] font-semibold leading-snug truncate" data-past={past ? 'true' : undefined} style={{ textDecoration: ev.isCancelled || past ? 'line-through' : 'none', ...(past && !ev.isCancelled ? { textDecorationThickness: '1px' } : null) }}>{ev.title}</p>
           {meeting?.addedToTaskManager && <span className="flex-shrink-0" style={{ fontSize: 9, fontWeight: 700, color: '#4ade80' }} title="Added to Task Manager">✓</span>}
         </div>
         <p className="text-[11px] mt-0.5 truncate" style={{ color: '#9ca3af' }}>{clockLabel(ev.startAt, fmt)} – {clockLabel(ev.endAt, fmt)} · {fmtDuration(ev.startAt, ev.endAt)}</p>
@@ -450,6 +451,31 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   )
   const dayEvents = useMemo(() => eventsOnDay(filtered, todayDate), [filtered, todayDate])
   const todayCount = useMemo(() => eventsOnDay(filtered, new Date(now)).length, [filtered, now])
+
+  // v1.331 — Today selects an event by itself: the one in progress, else the next one, else the most recent past one (pickAutoSelection). It happens
+  // ONCE per "view" of a date: when the Today tab is entered (after the events have loaded) and when the shown date changes. Inside a view the user's
+  // own choice is never replaced — the 30-second clock tick, edits and filters do not re-run it. On phones only the agenda row is highlighted (the
+  // full-screen details are NOT forced open over the agenda).
+  const [autoSelKey, setAutoSelKey] = useState('')
+  const autoViewKey = tab === 'today' && scheduleStatus !== 'loading' ? dateKey(todayDate) : ''
+  if (autoViewKey !== autoSelKey) {
+    setAutoSelKey(autoViewKey)
+    if (autoViewKey) {
+      const pick = pickAutoSelection(dayEvents, now)
+      if (pick) setTodaySelId(pick.id)
+      else if (todaySelId && !dayEvents.some(e => e.id === todaySelId)) setTodaySelId(null)
+    }
+  }
+  useEffect(() => {
+    if (autoSelKey) document.querySelector('[data-testid="today-agenda"] [aria-pressed="true"]')?.scrollIntoView({ block: 'nearest' })
+  }, [autoSelKey])
+  // A date change (midnight) while the Today tab is showing "today" moves it to the new day; a date the user picked stays where they put it.
+  const [nowDayKey, setNowDayKey] = useState(() => dateKey(new Date()))
+  const curDayKey = dateKey(new Date(now))
+  if (curDayKey !== nowDayKey) {
+    setNowDayKey(curDayKey)
+    if (dateKey(todayDate) === nowDayKey) { const d = startOfDay(new Date(now)); setTodayDate(d); setViewMonth(startOfMonth(d)) }
+  }
   const hasEventsOn = (d: Date) => filtered.some(e => daySlice(e, d) !== null)
 
   const selMeeting = todaySelId?.startsWith('meeting:') ? (meetings.find(m => `meeting:${m.id}` === todaySelId) ?? null) : null

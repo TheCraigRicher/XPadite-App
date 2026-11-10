@@ -5,7 +5,7 @@
 // MyScheduleView; this file draws a month of the SAME (already filtered) events and reports taps back to its owner.
 
 import { useLayoutEffect, useRef, useState } from 'react'
-import { clockLabel, longDateLabel, timeRangeLabel } from './scheduleLogic'
+import { clockLabel, isPastEvent, longDateLabel, timeRangeLabel } from './scheduleLogic'
 import type { ScheduleEvent, WeekStart } from './scheduleLogic'
 import { useSchedule } from './scheduleContext'
 import { chipCapacity, multiDayPosition } from './scheduleMonth'
@@ -31,10 +31,11 @@ export function compactClock(label: string): string {
   return label.replace(/:00(?= ?[AP]M)/i, '').replace(/ ?AM$/i, 'a').replace(/ ?PM$/i, 'p')
 }
 
-function Chip({ ev, cell, phone, selected, onOpen }: { ev: ScheduleEvent; cell: MonthCell; phone: boolean; selected: boolean; onOpen: (ev: ScheduleEvent) => void }) {
+function Chip({ ev, cell, phone, selected, now, onOpen }: { ev: ScheduleEvent; cell: MonthCell; phone: boolean; selected: boolean; now: number; onOpen: (ev: ScheduleEvent) => void }) {
   const { meta, fmt } = useSchedule()
   const cat = meta(ev.category)
   const pos = multiDayPosition(ev, cell.date)
+  const past = isPastEvent(ev, now)
   const showTime = !phone && !pos.fromEarlier
   const marks = `${pos.fromEarlier ? '◂ ' : ''}${showTime ? compactClock(clockLabel(ev.startAt, fmt)) + ' ' : ''}`
   return (
@@ -53,10 +54,10 @@ function Chip({ ev, cell, phone, selected, onOpen }: { ev: ScheduleEvent; cell: 
         borderTopLeftRadius: pos.fromEarlier ? 0 : 4, borderBottomLeftRadius: pos.fromEarlier ? 0 : 4,
         borderTopRightRadius: pos.intoLater ? 0 : 4, borderBottomRightRadius: pos.intoLater ? 0 : 4,
         outline: selected ? '2px solid #7c3aed' : 'none', outlineOffset: 0,
-        opacity: ev.isCancelled ? 0.6 : 1, fontSize: phone ? 9 : 11, lineHeight: 1,
+        opacity: ev.isCancelled ? 0.6 : past ? 0.82 : 1, fontSize: phone ? 9 : 11, lineHeight: 1,
       }}
     >
-      <span className="truncate font-semibold" style={{ textDecoration: ev.isCancelled ? 'line-through' : 'none' }}>
+      <span className="truncate font-semibold" data-past={past ? 'true' : undefined} style={{ textDecoration: ev.isCancelled || past ? 'line-through' : 'none', ...(past && !ev.isCancelled ? { textDecorationThickness: '1px' } : null) }}>
         {marks}{ev.title}
       </span>
       {ev.isDeadline && <DeadlineFlag size={phone ? 8 : 10} />}
@@ -66,11 +67,12 @@ function Chip({ ev, cell, phone, selected, onOpen }: { ev: ScheduleEvent; cell: 
   )
 }
 
-export function MonthGrid({ weeks, weekStart, selectedDay, selectedId, onCell, onEvent, onMore, style }: {
+export function MonthGrid({ weeks, weekStart, selectedDay, selectedId, now, onCell, onEvent, onMore, style }: {
   weeks: MonthCell[][]
   weekStart: WeekStart
   selectedDay: Date | null
   selectedId: string | null
+  now: number
   onCell: (cell: MonthCell) => void
   onEvent: (ev: ScheduleEvent) => void
   onMore: (cell: MonthCell) => void
@@ -121,7 +123,7 @@ export function MonthGrid({ weeks, weekStart, selectedDay, selectedId, onCell, o
             return (
               <div
                 key={cell.key} role="gridcell" tabIndex={0} aria-label={label} aria-selected={sel}
-                data-testid="month-cell" data-date={cell.key} data-in-month={cell.inMonth ? 'true' : 'false'} data-today={cell.isToday ? 'true' : 'false'} data-count={cell.events.length}
+                data-testid="month-cell" data-date={cell.key} data-in-month={cell.inMonth ? 'true' : 'false'} data-today={cell.isToday ? 'true' : 'false'} data-past={cell.isPast ? 'true' : 'false'} data-count={cell.events.length}
                 onClick={() => onCell(cell)}
                 onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); onCell(cell) } }}
                 className="xp-mo-cell min-w-0 min-h-0 overflow-hidden flex flex-col cursor-pointer"
@@ -139,13 +141,13 @@ export function MonthGrid({ weeks, weekStart, selectedDay, selectedId, onCell, o
                     style={{
                       minWidth: phone ? 18 : 22, height: phone ? 18 : 22, padding: '0 3px', borderRadius: 11, fontSize: phone ? 10.5 : 12,
                       background: cell.isToday ? '#7c3aed' : 'transparent', color: cell.isToday ? '#ffffff' : cell.inMonth ? 'var(--xp-txt)' : 'var(--xp-txt3)',
-                      opacity: cell.inMonth || cell.isToday ? 1 : 0.7,
+                      opacity: cell.isPast ? (cell.inMonth ? 0.66 : 0.5) : cell.inMonth || cell.isToday ? 1 : 0.7,
                     }}
                   >{cell.date.getDate()}</span>
                 </button>
-                <div className="flex flex-col min-h-0" style={{ gap: 2, opacity: cell.inMonth ? 1 : 0.6 }}>
+                <div className="flex flex-col min-h-0" style={{ gap: 2, opacity: cell.isPast ? (cell.inMonth ? 0.72 : 0.5) : cell.inMonth ? 1 : 0.6 }}>
                   {cell.events.slice(0, shown).map(ev => (
-                    <Chip key={ev.id} ev={ev} cell={cell} phone={phone} selected={selectedId === ev.id} onOpen={onEvent} />
+                    <Chip key={ev.id} ev={ev} cell={cell} phone={phone} selected={selectedId === ev.id} now={now} onOpen={onEvent} />
                   ))}
                   {more > 0 && (
                     <button
@@ -166,8 +168,8 @@ export function MonthGrid({ weeks, weekStart, selectedDay, selectedId, onCell, o
 }
 
 /** The expanded list of one date's events (the "+N more" / tapped-date target). Uses the shared bottom-sheet / dialog frame. */
-export function MonthDaySheet({ day, events, open, onClose, onPick, onAdd }: {
-  day: Date | null; events: ScheduleEvent[]; open: boolean; onClose: () => void; onPick: (ev: ScheduleEvent) => void; onAdd: (day: Date) => void
+export function MonthDaySheet({ day, events, now, open, onClose, onPick, onAdd }: {
+  day: Date | null; events: ScheduleEvent[]; now: number; open: boolean; onClose: () => void; onPick: (ev: ScheduleEvent) => void; onAdd: (day: Date) => void
 }) {
   const phone = useIsPhone()
   const { meta, fmt } = useSchedule()
@@ -196,7 +198,7 @@ export function MonthDaySheet({ day, events, open, onClose, onPick, onAdd }: {
           return (
             <button key={ev.id} type="button" data-testid="day-sheet-row" data-event-id={ev.id} onClick={() => onPick(ev)} className="w-full text-left"
               style={{ padding: '8px 10px', borderRadius: 10, background: 'var(--xp-bg3)', borderLeft: `4px solid ${cat.edge}` }}>
-              <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--xp-txt)', textDecoration: ev.isCancelled ? 'line-through' : 'none' }}>{ev.title}</p>
+              <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--xp-txt)', textDecoration: ev.isCancelled || isPastEvent(ev, now) ? 'line-through' : 'none', ...(isPastEvent(ev, now) && !ev.isCancelled ? { textDecorationThickness: '1px' } : null) }}>{ev.title}</p>
               <p className="text-[11.5px] truncate" style={{ color: 'var(--xp-txt3)' }}>
                 {timeRangeLabel(ev.startAt, ev.endAt, fmt)} · {cat.label}{ev.isDeadline ? ' · Deadline' : ''}{ev.recurrence && ev.recurrence !== 'none' ? ` · ↻ ${ev.recurrence}` : ''}{ev.sourceLabel ? ` · ${ev.sourceLabel}` : ''}
               </p>

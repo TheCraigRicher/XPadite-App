@@ -12,7 +12,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
-  addDays, clockLabel, filterScheduleEvents, hourLabel, isSameLocalDay, layoutDayEvents, monthYearLabel,
+  addDays, clockLabel, filterScheduleEvents, hourLabel, isPastEvent, isSameLocalDay, layoutDayEvents, monthYearLabel,
   monthYearShort, shiftMonth, shortDayLabel, splitFilter, startOfDay, timeRangeLabel, weekDays, weekRangeLabel, weekRangeShort,
 } from './scheduleLogic'
 import type { CombinedFilter, ScheduleCategoryId, ScheduleEvent } from './scheduleLogic'
@@ -119,11 +119,13 @@ function Card({ title, right, children, grow = 0, minHeight = 0, maxHeight, test
 
 // ── Weekly grid ─────────────────────────────────────────────────────────────
 
-function EventBlock({ p, dayStart, selected, dragging, onSelect, onPress }: {
+function EventBlock({ p, dayStart, selected, dragging, past, onSelect, onPress }: {
   p: ReturnType<typeof layoutDayEvents>[number]
   dayStart: number
   selected: boolean
   dragging: boolean
+  /** v1.331: the event's end time has passed — a subtle strikethrough on the title (display only; no completion state exists or is stored). */
+  past: boolean
   onSelect: () => void
   onPress: (e: React.PointerEvent<HTMLButtonElement>, startMin: number, dayStart: number) => void
 }) {
@@ -156,11 +158,11 @@ function EventBlock({ p, dayStart, selected, dragging, onSelect, onPress }: {
         outline: selected ? '2px solid #7c3aed' : 'none', outlineOffset: 0,
         boxShadow: selected ? '0 3px 10px rgba(124,58,237,0.35)' : '0 1px 2px rgba(0,0,0,0.08)',
         zIndex: selected ? 3 : 2,
-        opacity: dragging ? 0.35 : ev.isCancelled ? 0.6 : 1,
+        opacity: dragging ? 0.35 : ev.isCancelled ? 0.6 : past ? 0.82 : 1,
         cursor: movable ? 'grab' : 'pointer',
       }}
     >
-      <span className="xp-sch-ev-title block font-bold" style={{ textDecoration: ev.isCancelled ? 'line-through' : 'none' }}>{ev.title}</span>
+      <span className="xp-sch-ev-title block font-bold" data-past={past ? 'true' : undefined} style={{ textDecoration: ev.isCancelled || past ? 'line-through' : 'none', ...(past && !ev.isCancelled ? { textDecorationThickness: '1px' } : null) }}>{ev.title}</span>
       {ev.readOnly && heightPx >= 30 && (
         <svg data-testid="readonly-lock" viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="2.6" aria-hidden="true" className="absolute" style={{ top: 3, right: 3, opacity: 0.7 }}><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" strokeLinecap="round" /></svg>
       )}
@@ -624,7 +626,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
             {/* Grid */}
             {month ? (
               <div className="relative flex-1 min-h-0" style={{ border: '1px solid rgba(124,58,237,0.45)', borderRadius: 14, background: 'var(--xp-card)', overflow: 'hidden' }} data-testid="month-view">
-                <MonthGrid weeks={monthWeeksGrid} weekStart={prefs.weekStart} selectedDay={selectedDay} selectedId={selectedId} onCell={onMonthCell} onEvent={onMonthEvent} onMore={onMonthMore} />
+                <MonthGrid weeks={monthWeeksGrid} weekStart={prefs.weekStart} selectedDay={selectedDay} selectedId={selectedId} now={now} onCell={onMonthCell} onEvent={onMonthEvent} onMore={onMonthMore} />
               </div>
             ) : (
             <div className="relative flex-1 min-h-0" style={{ border: '1px solid rgba(124,58,237,0.45)', borderRadius: 14, background: 'var(--xp-card)', overflow: 'hidden' }} data-testid="schedule-grid">
@@ -685,7 +687,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
                           </div>
                         )}
                         {layouts[i].map(p => (
-                          <EventBlock key={`${p.event.id}-${d.getDate()}`} p={p} dayStart={dayStart} selected={p.event.id === selectedId} dragging={drag?.id === p.event.id}
+                          <EventBlock key={`${p.event.id}-${d.getDate()}`} p={p} dayStart={dayStart} selected={p.event.id === selectedId} dragging={drag?.id === p.event.id} past={isPastEvent(p.event, now)}
                             onSelect={() => selectEvent(p.event)} onPress={startDragPress} />
                         ))}
                         {ghost && dragEv && (
@@ -782,7 +784,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
       </div>
 
       {month && (
-        <MonthDaySheet day={daySheet} open={!!daySheet} events={daySheet ? monthDayEvents(visible, daySheet) : []} onClose={() => setDaySheet(null)}
+        <MonthDaySheet day={daySheet} now={now} open={!!daySheet} events={daySheet ? monthDayEvents(visible, daySheet) : []} onClose={() => setDaySheet(null)}
           onPick={onMonthEvent} onAdd={d => { setDaySheet(null); onAddAt(d, 9 * 60) }} />
       )}
 

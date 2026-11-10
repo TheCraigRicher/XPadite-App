@@ -124,7 +124,7 @@ function EventBlock({ p, dayStart, selected, dragging, past, onSelect, onPress }
   dayStart: number
   selected: boolean
   dragging: boolean
-  /** v1.331: the event's end time has passed — a subtle strikethrough on the title (display only; no completion state exists or is stored). */
+  /** The event's end time has passed — it is shown slightly dimmed (display only; no completion state exists or is stored). Only the Today agenda strikes ended events through. */
   past: boolean
   onSelect: () => void
   onPress: (e: React.PointerEvent<HTMLButtonElement>, startMin: number, dayStart: number) => void
@@ -162,7 +162,7 @@ function EventBlock({ p, dayStart, selected, dragging, past, onSelect, onPress }
         cursor: movable ? 'grab' : 'pointer',
       }}
     >
-      <span className="xp-sch-ev-title block font-bold" data-past={past ? 'true' : undefined} style={{ textDecoration: ev.isCancelled || past ? 'line-through' : 'none', ...(past && !ev.isCancelled ? { textDecorationThickness: '1px' } : null) }}>{ev.title}</span>
+      <span className="xp-sch-ev-title block font-bold" data-past={past ? 'true' : undefined} style={{ textDecoration: ev.isCancelled ? 'line-through' : 'none' }}>{ev.title}</span>
       {ev.readOnly && heightPx >= 30 && (
         <svg data-testid="readonly-lock" viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="2.6" aria-hidden="true" className="absolute" style={{ top: 3, right: 3, opacity: 0.7 }}><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" strokeLinecap="round" /></svg>
       )}
@@ -784,7 +784,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
       </div>
 
       {month && (
-        <MonthDaySheet day={daySheet} now={now} open={!!daySheet} events={daySheet ? monthDayEvents(visible, daySheet) : []} onClose={() => setDaySheet(null)}
+        <MonthDaySheet day={daySheet} open={!!daySheet} events={daySheet ? monthDayEvents(visible, daySheet) : []} onClose={() => setDaySheet(null)}
           onPick={onMonthEvent} onAdd={d => { setDaySheet(null); onAddAt(d, 9 * 60) }} />
       )}
 

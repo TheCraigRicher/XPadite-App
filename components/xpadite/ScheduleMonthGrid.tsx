@@ -57,7 +57,7 @@ function Chip({ ev, cell, phone, selected, now, onOpen }: { ev: ScheduleEvent; c
         opacity: ev.isCancelled ? 0.6 : past ? 0.82 : 1, fontSize: phone ? 9 : 11, lineHeight: 1,
       }}
     >
-      <span className="truncate font-semibold" data-past={past ? 'true' : undefined} style={{ textDecoration: ev.isCancelled || past ? 'line-through' : 'none', ...(past && !ev.isCancelled ? { textDecorationThickness: '1px' } : null) }}>
+      <span className="truncate font-semibold" data-past={past ? 'true' : undefined} style={{ textDecoration: ev.isCancelled ? 'line-through' : 'none' }}>
         {marks}{ev.title}
       </span>
       {ev.isDeadline && <DeadlineFlag size={phone ? 8 : 10} />}
@@ -168,8 +168,8 @@ export function MonthGrid({ weeks, weekStart, selectedDay, selectedId, now, onCe
 }
 
 /** The expanded list of one date's events (the "+N more" / tapped-date target). Uses the shared bottom-sheet / dialog frame. */
-export function MonthDaySheet({ day, events, now, open, onClose, onPick, onAdd }: {
-  day: Date | null; events: ScheduleEvent[]; now: number; open: boolean; onClose: () => void; onPick: (ev: ScheduleEvent) => void; onAdd: (day: Date) => void
+export function MonthDaySheet({ day, events, open, onClose, onPick, onAdd }: {
+  day: Date | null; events: ScheduleEvent[]; open: boolean; onClose: () => void; onPick: (ev: ScheduleEvent) => void; onAdd: (day: Date) => void
 }) {
   const phone = useIsPhone()
   const { meta, fmt } = useSchedule()
@@ -198,7 +198,7 @@ export function MonthDaySheet({ day, events, now, open, onClose, onPick, onAdd }
           return (
             <button key={ev.id} type="button" data-testid="day-sheet-row" data-event-id={ev.id} onClick={() => onPick(ev)} className="w-full text-left"
               style={{ padding: '8px 10px', borderRadius: 10, background: 'var(--xp-bg3)', borderLeft: `4px solid ${cat.edge}` }}>
-              <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--xp-txt)', textDecoration: ev.isCancelled || isPastEvent(ev, now) ? 'line-through' : 'none', ...(isPastEvent(ev, now) && !ev.isCancelled ? { textDecorationThickness: '1px' } : null) }}>{ev.title}</p>
+              <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--xp-txt)', textDecoration: ev.isCancelled ? 'line-through' : 'none' }}>{ev.title}</p>
               <p className="text-[11.5px] truncate" style={{ color: 'var(--xp-txt3)' }}>
                 {timeRangeLabel(ev.startAt, ev.endAt, fmt)} · {cat.label}{ev.isDeadline ? ' · Deadline' : ''}{ev.recurrence && ev.recurrence !== 'none' ? ` · ↻ ${ev.recurrence}` : ''}{ev.sourceLabel ? ` · ${ev.sourceLabel}` : ''}
               </p>

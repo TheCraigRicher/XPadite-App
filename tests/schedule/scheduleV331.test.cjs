@@ -87,16 +87,19 @@ test('nothing about an event is added or stored: no completion/done field exists
 const sheet = strip(src('ScheduleSheet.tsx')), parts = strip(src('ScheduleParts.tsx')), dlg = strip(src('ScheduleDialogs.tsx')), modal = strip(src('MeetingsModal.tsx'))
 const view = strip(src('MyScheduleView.tsx')), grid = strip(src('ScheduleMonthGrid.tsx')), mobile = strip(src('ScheduleMobile.tsx'))
 
-test('past strikethrough: a subtle line-through (thin, slight dim) in the Today agenda, week grid, Month chips and the day list — display only', () => {
-  for (const [name, s] of [['agenda', modal], ['week grid', view], ['month chips', grid]]) {
-    assert.ok(/isPastEvent\(/.test(s), name + ' computes pastness from the end time')
-    assert.ok(/ev\.isCancelled \|\| past \? 'line-through'/.test(s), name + ' strikes the title')
-    assert.ok(/textDecorationThickness: '1px'/.test(s), name + ': thin line')
-    assert.ok(/past \? 0\.82/.test(s) || /isPastEvent\(ev, now\)/.test(s), name + ': only a slight dim')
+test('ended events: ONLY the Today agenda strikes them through; the week grid and Month (chips + day list) only dim them; cancelled events stay struck everywhere', () => {
+  assert.ok(/isPastEvent\(/.test(modal) && /ev\.isCancelled \|\| past \? 'line-through'/.test(modal), 'Today agenda: pastness strikes the title')
+  assert.ok(/textDecorationThickness: '1px'/.test(modal) && /past \? 0\.82/.test(modal), 'Today agenda: thin line + slight dim, exactly as before')
+  for (const [name, s] of [['week grid', view], ['month chips', grid]]) {
+    assert.ok(/textDecoration: ev\.isCancelled \? 'line-through' : 'none'/.test(s), name + ': only a cancelled event is struck')
+    assert.ok(!/ev\.isCancelled \|\| past/.test(s) && !/textDecorationThickness/.test(s), name + ': pastness never strikes')
+    assert.ok(/past \? 0\.82/.test(s), name + ': the slight dim is kept')
+    assert.ok(/data-past=\{past \? 'true' : undefined\}/.test(s), name + ': still flagged past')
   }
-  assert.ok(/data-past=\{past \? 'true' : undefined\}/.test(view) && /data-past=\{past \? 'true' : undefined\}/.test(modal))
-  assert.ok(/past=\{isPastEvent\(p\.event, now\)\}/.test(view), 'the week grid passes pastness down from the shared clock')
-  assert.ok(/isPastEvent\(ev, now\)/.test(grid.slice(grid.indexOf('export function MonthDaySheet'))), 'the Month day list too')
+  assert.ok(/past=\{isPastEvent\(p\.event, now\)\}/.test(view), 'the week grid still passes pastness down from the shared clock')
+  const day = grid.slice(grid.indexOf('export function MonthDaySheet'))
+  assert.ok(/textDecoration: ev\.isCancelled \? 'line-through' : 'none'/.test(day) && !/isPastEvent/.test(day), 'the Month day list: no strikethrough for ended events')
+  assert.ok(/data-past=\{past \? 'true' : undefined\}/.test(modal))
 })
 
 test('Month dimming: past cells are flagged and dimmed (number ~0.66, chips ~0.72) — never disabled, no pointer-events or tabIndex change', () => {

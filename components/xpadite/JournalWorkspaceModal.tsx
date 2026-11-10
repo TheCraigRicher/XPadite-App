@@ -9,7 +9,7 @@ import type { JournalDoc } from './types'
 import {
   buildLibraryEntries, extractFirstLine, extraIdOf, isExtraKey, mergeDocMeta, docsToUnfile, type LibEntry,
 } from './journalDocs'
-import { NotesLibrary, MoveToFolderDialog, DragTray, DeleteFolderDialog, NamePrompt, useFinePointer, type DragProps } from './LibraryNotesFolders'
+import { NotesLibrary, MoveToFolderDialog, DragTray, DeleteFolderDialog, DeleteSelectionDialog, NamePrompt, useFinePointer, folderSelKey, type DragProps } from './LibraryNotesFolders'
 import { exportToTxt, exportToPdf, exportToDocx, makeFilename, type ExportEntry } from './journalExport'
 import { ColorPickerModal } from './ColorPickerModal'
 import { COLOR_PALETTE, normalizeHexColor, hexToRgba } from './utils'
@@ -750,7 +750,7 @@ function rowTintVars(color: string, isDark: boolean, hoverAlpha: number, selecte
 
 function CategoryFilterDropdown({
   isDark, bdr, categoryFilter, categories,
-  onSelectCategory, onCreateLabel,
+  onSelectCategory, onCreateLabel, onActivate,
 }: {
   isDark: boolean
   bdr: string
@@ -758,6 +758,8 @@ function CategoryFilterDropdown({
   categories: LibraryCategory[]
   onSelectCategory: (id: string | null) => void
   onCreateLabel: () => void
+  /** v1.333: called when the Labels button itself is pressed (before any choice) so it always returns the Library to the document view. */
+  onActivate?: () => void
 }) {
   const [open, setOpen] = useState(false)
   const [closing, setClosing] = useState(false)
@@ -788,6 +790,7 @@ function CategoryFilterDropdown({
   }, [open])
 
   function handleToggle() {
+    onActivate?.()
     if (open) { requestClose(); return }
     const rect = btnRef.current?.getBoundingClientRect()
     if (rect) {
@@ -1340,11 +1343,37 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       if (selectedLibEntry === key) setSelectedLibEntry(null)
     }
     if (extraIds.length) {
-      journalDocs.deleteDocs(extraIds)
+      journalDocs.deleteDocs(extraIds).then(ok => { if (!ok) setToast('⚠ Removed on this device, but the cloud delete did not go through - it will retry automatically') })
       if (activeDocId && extraIds.includes(activeDocId)) setActiveDocId(null)
     }
     setDeleteConfirmKeys(null)
     exitSelectMode()
+  }
+
+  // v1.333 - "Delete Selected" for the CURRENT view. Documents keep their own confirmation; in Notes a dedicated one counts Notes and folders. Deleting a folder
+  // keeps its contents (they are un-filed first - the existing rule); nothing is ever deleted recursively.
+  function requestDeleteSelected() {
+    if (scopedSelected.length === 0) return
+    if (libTab === 'documents') { setDeleteConfirmKeys(scopedSelected); return }
+    setDeleteSel({ folders: scopedSelected.filter(k => k.startsWith('folder:')).map(k => k.slice(7)), notes: scopedSelected.filter(k => !k.startsWith('folder:')) })
+  }
+  function commitDeleteSelection(sel: { notes: string[]; folders: string[] }) {
+    // re-check against the live data: an item another device already removed is simply skipped, and reported as such
+    const notes = sel.notes.filter(k => noteEntries.some(n => n.key === k && scopeKeys.has(k)))
+    const folders = sel.folders.filter(id => journalFolders.some(f => f.id === id))
+    const skipped = sel.notes.length + sel.folders.length - notes.length - folders.length
+    const folderCloud = folders.map(id => deleteFolderSafely(id))
+    const ids = notes.map(extraIdOf).filter((x): x is string => !!x)
+    // the items disappear here at once, but "Deleted" is announced ONLY after the server confirms; a failure gets one warning instead (Note deletes are kept and retried)
+    const noteCloud = ids.length ? journalDocs.deleteDocs(ids) : Promise.resolve(true)
+    if (activeDocId && ids.includes(activeDocId)) setActiveDocId(null)
+    setDeleteSel(null)
+    exitSelectMode()
+    const done = notes.length + folders.length
+    Promise.all([noteCloud, ...folderCloud]).then(oks => {
+      if (oks.every(Boolean)) setToast(skipped > 0 ? `Deleted ${done} of ${done + skipped} - ${skipped} no longer existed` : `Deleted ${done} ${done === 1 ? 'item' : 'items'}`)
+      else setToast(oks[0] === false && ids.length ? '⚠ Removed on this device, but the cloud delete did not go through - it will retry automatically' : FOLDER_DELETE_FAILED)
+    })
   }
 
   // -- v1.330: extra documents, Notes, folders ------------------------------------------------------------------------------------------
@@ -1373,13 +1402,15 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     addJournalFolder({ id, name, createdAt: Date.now() })
     return id
   }
-  function deleteFolderSafely(id: string) {
+  function deleteFolderSafely(id: string): Promise<boolean> {
     // Safe deletion: every document in the folder is un-filed FIRST (kept, content untouched); only then is the folder itself removed.
     for (const key of docsToUnfile(allEntries, id)) updateEntryDoc(key, doc => { const u = { ...doc }; delete u.folderId; return u })
-    removeJournalFolder(id)
+    const cloud = removeJournalFolder(id)
     if (openFolderId === id) setOpenFolderId(null)
     setDeleteFolderId(null)
+    return cloud
   }
+  const FOLDER_DELETE_FAILED = '⚠ Folder removed on this device, but the cloud delete did not go through - it may reappear after a refresh. Your Notes are safe.'
   const dragProps = (key: string): DragProps => !finePointer ? {} : ({
     draggable: true,
     onDragStart: e => { e.dataTransfer.setData('text/xp-doc', key); e.dataTransfer.effectAllowed = 'move'; setDragKey(key) },
@@ -1466,6 +1497,15 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       return true
     })
   }, [libraryEntries, libMonthYearFilter, libCategoryFilter])
+
+  // v1.333 - SELECTION SCOPE. Delete Selected works inside whatever the Library is showing: the documents list, the Notes root (unfiled Notes + folders) or
+  // ONE folder (its Notes). A key can only act if it is in the CURRENT scope, so a selection left over from another view can never delete a hidden item.
+  const scopeKeys: Set<string> = libTab === 'documents' ? new Set(filteredLibraryEntries.map(e => e.dateKey))
+    : openFolderId ? new Set(noteEntries.filter(n => n.folderId === openFolderId).map(n => n.key))
+    : new Set([...noteEntries.filter(n => !n.folderId).map(n => n.key), ...journalFolders.map(fo => folderSelKey(fo.id))])
+  const scopedSelected = [...selectedKeys].filter(k => scopeKeys.has(k))
+  const [deleteSel, setDeleteSel] = useState<{ notes: string[]; folders: string[] } | null>(null)
+  const openFolder = libTab === 'notes' && openFolderId ? journalFolders.find(f => f.id === openFolderId) ?? null : null
 
   // ── Month grouping — same pattern Gallery's own monthGroups/isMonthExpanded/
   // toggleMonth already use (see GalleryModal.tsx), just keyed off each
@@ -1942,10 +1982,25 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           ← Back
         </button>
 
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {/* v1.333 - the ONLY back control inside Notes: from a folder it returns to the Notes root. Hidden everywhere else. */}
+        {openFolder && (
+          <button
+            type="button" data-testid="library-header-back" aria-label="Back to Notes" title="Back to Notes"
+            onClick={() => { exitSelectMode(); setOpenFolderId(null) }}
+            style={{ position: 'absolute', left: 12, width: 38, height: 38, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0,
+              background: 'rgba(255,255,255,0.14)', border: '0.5px solid rgba(255,255,255,0.28)', color: '#fff' }}
+          >
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M12 4 6 10l6 6" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </button>
+        )}
+
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minWidth: 0, padding: openFolder ? '0 52px' : 0 }}>
           <span style={{ color: '#fff', fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em' }}>
             📚 Library
           </span>
+          {openFolder && (
+            <span data-testid="library-header-folder" style={{ color: 'rgba(255,255,255,0.78)', fontSize: 11, lineHeight: 1.2, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📁 {openFolder.name}</span>
+          )}
         </div>
 
         {/* Close — hidden on mobile (bottom nav handles close) */}
@@ -1977,6 +2032,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           <>
             <button
               onClick={isExportMode ? exitExportMode : exitSelectMode}
+              data-testid="select-cancel"
               style={{
                 padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 500,
                 cursor: 'pointer', flexShrink: 0,
@@ -1989,12 +2045,12 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
               flex: 1, textAlign: 'center', fontSize: 12, fontWeight: 600,
               color: isDark ? 'rgba(255,255,255,0.82)' : 'rgba(0,0,0,0.72)',
             }}>
-              {selectedKeys.size} selected
+              {scopedSelected.length} selected
             </span>
             {isExportMode ? (
               <button
-                onClick={() => { if (selectedKeys.size > 0) setExportFormatKeys([...selectedKeys]) }}
-                disabled={selectedKeys.size === 0}
+                onClick={() => { if (scopedSelected.length > 0) setExportFormatKeys(scopedSelected) }}
+                disabled={scopedSelected.length === 0}
                 style={{
                   padding: '5px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600,
                   cursor: selectedKeys.size > 0 ? 'pointer' : 'default', flexShrink: 0,
@@ -2006,17 +2062,18 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
               >Export</button>
             ) : (
               <button
-                onClick={() => { if (selectedKeys.size > 0) setDeleteConfirmKeys([...selectedKeys]) }}
-                disabled={selectedKeys.size === 0}
+                onClick={requestDeleteSelected}
+                disabled={scopedSelected.length === 0}
+                data-testid="delete-selected-btn"
                 style={{
                   padding: '5px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600,
-                  cursor: selectedKeys.size > 0 ? 'pointer' : 'default', flexShrink: 0,
-                  background: selectedKeys.size > 0 ? 'rgba(239,68,68,0.88)' : 'rgba(239,68,68,0.14)',
-                  border: `0.5px solid ${selectedKeys.size > 0 ? 'rgba(239,68,68,0.60)' : 'rgba(239,68,68,0.22)'}`,
-                  color: selectedKeys.size > 0 ? '#fff' : 'rgba(239,68,68,0.38)',
+                  cursor: scopedSelected.length > 0 ? 'pointer' : 'default', flexShrink: 0,
+                  background: scopedSelected.length > 0 ? 'rgba(239,68,68,0.88)' : 'rgba(239,68,68,0.14)',
+                  border: `0.5px solid ${scopedSelected.length > 0 ? 'rgba(239,68,68,0.60)' : 'rgba(239,68,68,0.22)'}`,
+                  color: scopedSelected.length > 0 ? '#fff' : 'rgba(239,68,68,0.38)',
                   transition: 'background 180ms, color 180ms',
                 }}
-              >Delete</button>
+              >Delete Selected</button>
             )}
           </>
         ) : (
@@ -2082,7 +2139,8 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                     isDark={isDark} bdr={bdr}
                     categoryFilter={libCategoryFilter}
                     categories={allCategories}
-                    onSelectCategory={id => { setLibCategoryFilter(id); setLibTab('documents') }}
+                    onActivate={() => { setLibTab('documents'); setOpenFolderId(null) }}
+                    onSelectCategory={id => { setLibCategoryFilter(id); setLibTab('documents'); setOpenFolderId(null) }}
                     onCreateLabel={() => setShowCreateLabel(true)}
                   />
                   {/* v1.332 - Notes is a direct Library tab (after Labels): it swaps the content area to the Notes collection (folders + Notes).
@@ -2104,21 +2162,21 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             <div style={{ flex: 1 }} />
 
             {/* ONE top-right menu: Create Folder (folders live in the Notes collection), Delete Selected, Export. */}
-            <div style={{ position: 'relative', flexShrink: 0 }}>
+            <div style={{ position: 'relative', flexShrink: 0, marginLeft: 'auto' }}>
               <button
                 onClick={e => { e.stopPropagation(); setShowMoreMenu(v => !v) }}
                 data-testid="library-menu-btn"
                 aria-haspopup="menu" aria-expanded={showMoreMenu}
                 style={{
-                  padding: '4px 9px', borderRadius: 6, fontSize: 16, fontWeight: 700,
-                  lineHeight: '14px', cursor: 'pointer',
+                  padding: '5px 8px', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer',
                   background: showMoreMenu ? (isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.07)') : 'transparent',
                   border: `0.5px solid ${isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'}`,
                   color: isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.50)',
                 }}
                 title="Library menu"
                 aria-label="Library menu"
-              >⋮</button>
+              ><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 3.5h12M2 8h12M2 12.5h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg></button>
               {showMoreMenu && (
                 <div role="menu" data-testid="library-menu" style={{
                   position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 60,
@@ -2129,19 +2187,23 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   minWidth: 190,
                 }}>
                   {([
-                    { id: 'create-folder', icon: '\uD83D\uDCC1', label: 'Create Folder',    danger: false, run: () => setCreateFolderOpen(true) },
-                    { id: 'delete',  icon: '\uD83D\uDDD1\uFE0F', label: 'Delete Selected', danger: true,  run: () => { setLibTab('documents'); enterSelectMode() } },
-                    { id: 'export',  icon: '\uD83D\uDCE4', label: 'Export documents', danger: false, run: () => { setLibTab('documents'); enterExportMode() } },
+                    // Create Folder only at the Notes root: folders hold Notes only and are one level (no nesting), so it is off in the documents view and inside a folder
+                    { id: 'create-folder', icon: '\uD83D\uDCC1', label: 'Create Folder',    danger: false, disabled: !(libTab === 'notes' && !openFolderId), run: () => setCreateFolderOpen(true) },
+                    { id: 'delete',  icon: '\uD83D\uDDD1\uFE0F', label: 'Delete Selected', danger: true,  disabled: false, run: () => enterSelectMode() },
+                    { id: 'export',  icon: '\uD83D\uDCE4', label: 'Export documents', danger: false, disabled: false, run: () => { setLibTab('documents'); enterExportMode() } },
                   ]).map(it => (
                     <button
                       key={it.id}
                       role="menuitem"
                       data-testid={`library-menu-${it.id}`}
-                      onClick={() => { setShowMoreMenu(false); it.run() }}
+                      disabled={it.disabled}
+                      aria-disabled={it.disabled || undefined}
+                      title={it.disabled ? 'Folders are created from the Notes tab' : undefined}
+                      onClick={() => { if (it.disabled) return; setShowMoreMenu(false); it.run() }}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 8,
                         width: '100%', padding: '10px 14px',
-                        background: 'transparent', border: 'none', cursor: 'pointer',
+                        background: 'transparent', border: 'none', cursor: it.disabled ? 'not-allowed' : 'pointer', opacity: it.disabled ? 0.38 : 1,
                         fontSize: 12, fontWeight: 500, textAlign: 'left',
                         color: it.danger ? '#f87171' : (isDark ? 'rgba(255,255,255,0.80)' : 'rgba(0,0,0,0.70)'),
                       }}
@@ -2659,6 +2721,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       ) : (
         <NotesLibrary
           isDark={isDark} folders={journalFolders} notes={noteEntries} filedDocs={filedDocEntries} openFolderId={openFolderId} unavailable={journalDocs.status === 'unavailable'}
+          selectMode={isSelectMode && !isExportMode} selected={selectedKeys} onToggle={toggleSelectKey}
           onOpenFolder={setOpenFolderId} onOpen={doOpenEditor}
           onRename={(key, title) => updateEntryDoc(key, doc => { const u = { ...doc }; if (title.trim()) u.title = title.trim(); else delete u.title; return u })}
           onDelete={key => setDeleteConfirmKeys([key])} onMove={key => setMoveKeys([key])} onUnfile={key => moveDocs([key], null)}
@@ -2736,6 +2799,12 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         </div>
       )}
 
+      {deleteSel && (
+        <DeleteSelectionDialog isDark={isDark} notes={deleteSel.notes.length} folders={deleteSel.folders.length}
+          keptInFolders={deleteSel.folders.reduce((n, id) => n + docsToUnfile(allEntries, id).length, 0)}
+          onConfirm={() => commitDeleteSelection(deleteSel)} onClose={() => setDeleteSel(null)} />
+      )}
+
       {/* -- v1.330: Move to Folder / Delete Folder / create-folder-while-moving ----------------------------------------------------- */}
       {moveKeys && moveKeys.length > 0 && !moveNewFolder && (
         <MoveToFolderDialog
@@ -2758,7 +2827,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         const f = journalFolders.find(x => x.id === deleteFolderId)
         return f ? (
           <DeleteFolderDialog isDark={isDark} folder={f} itemCount={docsToUnfile(allEntries, f.id).length}
-            onConfirm={() => deleteFolderSafely(f.id)} onClose={() => setDeleteFolderId(null)} />
+            onConfirm={() => { deleteFolderSafely(f.id).then(ok => { if (!ok) setToast(FOLDER_DELETE_FAILED) }) }} onClose={() => setDeleteFolderId(null)} />
         ) : null
       })()}
 
@@ -2992,9 +3061,9 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         boxShadow: 'inset 0 1px 0 rgba(124,58,237,0.10), 0 -6px 24px rgba(0,0,0,0.40)',
       }}>
         {([
-          { key: 'calendar' as const, icon: '📅', label: 'Journal Calendar', action: () => setView('calendar') },
-          { key: 'library'  as const, icon: '📚', label: 'Library',          action: () => { setLibTab('documents'); setOpenFolderId(null); setView('library') }  },
-          { key: 'editor'   as const, icon: '✏️', label: 'Editor',           action: () => setView('editor')   },
+          { key: 'calendar' as const, icon: '📅', label: 'Journal Calendar', action: () => { exitSelectMode(); setView('calendar') } },
+          { key: 'library'  as const, icon: '📚', label: 'Library',          action: () => { exitSelectMode(); setLibTab('documents'); setOpenFolderId(null); setView('library') }  },
+          { key: 'editor'   as const, icon: '✏️', label: 'Editor',           action: () => { exitSelectMode(); setView('editor') }   },
         ]).map(item => {
           const active = view === item.key
           return (

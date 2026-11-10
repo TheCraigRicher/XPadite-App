@@ -40,7 +40,23 @@ function useTheme(isDark: boolean) {
   }
 }
 
-const GRID: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(124px, 1fr))', gap: 10, alignContent: 'start' }
+// v1.333 — the SAME card metrics as the default Library document cards (110px wide, 52x60 icon, 11px title, 9px date, 6px gaps), so Notes / folders are as compact.
+const CARD_W = 110
+const GRID: React.CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 6, alignContent: 'flex-start' }
+const cardBase = (t: ReturnType<typeof useTheme>): React.CSSProperties => ({ position: 'relative', width: CARD_W, flexShrink: 0, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center',
+  padding: '10px 8px 8px', gap: 5, borderRadius: 10, textAlign: 'center', cursor: 'pointer', userSelect: 'none', background: t.card, border: `0.5px solid ${t.border}`, transition: 'background 120ms' })
+const iconBox = (isDark: boolean, border: string): React.CSSProperties => ({ width: 52, height: 60, borderRadius: 6, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24,
+  background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(124,58,237,0.07)', border: `0.5px solid ${border}` })
+/** Selection keys: a Note is its own Library key (`x:<id>`); a folder is `folder:<id>` (never collides with a document key). */
+export const folderSelKey = (id: string) => `folder:${id}`
+function Check({ isDark, checked }: { isDark: boolean; checked: boolean }) {
+  return (
+    <div data-testid="select-check" data-checked={checked ? 'true' : 'false'} style={{ position: 'absolute', top: 5, right: 5, width: 17, height: 17, borderRadius: 4, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      border: `1.5px solid ${checked ? '#7c3aed' : isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.28)'}`, background: checked ? 'rgba(124,58,237,0.88)' : isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.80)' }}>
+      {checked && <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+    </div>
+  )
+}
 
 // ─── ⋮ menu (viewport-clamped popover, closes on outside tap) ─────────────────
 export interface MenuItem { label: string; icon: string; onClick: () => void; danger?: boolean; testId?: string }
@@ -99,39 +115,41 @@ function RenameInput({ isDark, initial, onCommit, onCancel }: { isDark: boolean;
       onChange={e => setVal(e.target.value)} onBlur={() => onCommit(val)}
       onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); onCommit(val) } if (e.key === 'Escape') { e.stopPropagation(); onCancel() } }}
       onClick={e => e.stopPropagation()}
-      style={{ marginTop: 8, width: '100%', fontSize: 11, padding: '2px 5px', borderRadius: 4, outline: 'none', boxSizing: 'border-box',
+      style={{ width: '100%', fontSize: 11, padding: '2px 5px', borderRadius: 4, outline: 'none', boxSizing: 'border-box',
         background: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.06)', border: '1px solid rgba(124,58,237,0.55)', color: t.text }} />
   )
 }
 
 // ─── Document / Note card ─────────────────────────────────────────────────────
-function DocCard({ isDark, entry, menu, onOpen, drag, renaming, onRenameCommit, onRenameCancel, testId, badge }: {
+function DocCard({ isDark, entry, menu, onOpen, drag, renaming, onRenameCommit, onRenameCancel, testId, badge, selectMode, checked, onToggle }: {
   isDark: boolean; entry: LibEntry; menu: MenuItem[]; onOpen: () => void; drag?: DragProps; badge?: string
+  /** selection mode: the card toggles instead of opening; `onToggle` undefined = not eligible (shown dimmed) */
+  selectMode?: boolean; checked?: boolean; onToggle?: () => void
   renaming?: boolean; onRenameCommit?: (title: string) => void; onRenameCancel?: () => void; testId?: string
 }) {
   const t = useTheme(isDark)
   return (
     <div role="button" tabIndex={0} data-testid={testId} data-doc-key={entry.key} title={entry.title}
-      onClick={() => { if (!renaming) onOpen() }}
-      onKeyDown={e => { if (e.key === 'Enter' && !renaming) onOpen() }}
-      {...drag}
-      style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 8px 8px', borderRadius: 10, textAlign: 'center',
-        cursor: 'pointer', minWidth: 0, background: t.card, border: `0.5px solid ${t.border}`, transition: 'background 120ms' }}
-      onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = t.cardHover }}
-      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = t.card }}>
-      <KebabMenu isDark={isDark} items={menu} label={`${entry.kind === 'note' ? 'Note' : 'Document'} actions`} />
-      <div style={{ width: 52, height: 60, borderRadius: 6, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24,
-        background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(124,58,237,0.07)', border: `0.5px solid ${t.border}` }}>
+      aria-disabled={selectMode && !onToggle ? true : undefined} data-selected={selectMode ? (checked ? 'true' : 'false') : undefined}
+      onClick={() => { if (selectMode) { onToggle?.(); return } if (!renaming) onOpen() }}
+      onKeyDown={e => { if (selectMode) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle?.() } return } if (e.key === 'Enter' && !renaming) onOpen() }}
+      {...(selectMode ? {} : drag)}
+      style={{ ...cardBase(t), ...(selectMode ? (checked ? { background: isDark ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.14)', border: '1.5px solid rgba(124,58,237,0.55)' } : null) : null),
+        ...(selectMode && !onToggle ? { opacity: 0.4, cursor: 'default' } : null) }}
+      onMouseEnter={e => { if (!selectMode) (e.currentTarget as HTMLDivElement).style.background = t.cardHover }}
+      onMouseLeave={e => { if (!selectMode) (e.currentTarget as HTMLDivElement).style.background = t.card }}>
+      {selectMode ? (onToggle ? <Check isDark={isDark} checked={!!checked} /> : null) : <KebabMenu isDark={isDark} items={menu} label={`${entry.kind === 'note' ? 'Note' : 'Document'} actions`} />}
+      <div style={iconBox(isDark, t.border)}>
         {entry.kind === 'note' ? '🗒️' : '📝'}
       </div>
       {renaming ? (
         <RenameInput isDark={isDark} initial={entry.title} onCommit={v => onRenameCommit?.(v)} onCancel={() => onRenameCancel?.()} />
       ) : (
-        <div style={{ marginTop: 8, width: '100%', fontSize: 11.5, fontWeight: 500, lineHeight: 1.3, color: t.text, overflow: 'hidden', overflowWrap: 'anywhere',
+        <div style={{ width: '100%', fontSize: 11, fontWeight: 500, lineHeight: 1.3, color: t.text, overflow: 'hidden', overflowWrap: 'anywhere',
           display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{entry.title}</div>
       )}
-      {badge && <div data-testid="legacy-badge" style={{ marginTop: 4, fontSize: 9.5, fontWeight: 600, padding: '1px 7px', borderRadius: 9, color: isDark ? '#c4b5fd' : '#6d28d9', background: isDark ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.10)' }}>{badge}</div>}
-      <div style={{ marginTop: 'auto', paddingTop: 6, fontSize: 10, color: t.muted }}>{entryDate(entry)}</div>
+      {badge && <div data-testid="legacy-badge" style={{ fontSize: 9, fontWeight: 600, padding: '1px 7px', borderRadius: 9, color: isDark ? '#c4b5fd' : '#6d28d9', background: isDark ? 'rgba(124,58,237,0.20)' : 'rgba(124,58,237,0.10)' }}>{badge}</div>}
+      <div style={{ fontSize: 9, lineHeight: 1.2, color: t.muted }}>{entryDate(entry)}</div>
     </div>
   )
 }
@@ -232,21 +250,6 @@ export function DragTray({ isDark, folders, currentFolderId, bleedX = 14, bleedB
 }
 
 // ─── Pane chrome ──────────────────────────────────────────────────────────────
-function PaneBar({ isDark, back, backLabel, title, count, action }: { isDark: boolean; back: () => void; backLabel: string; title: string; count: string; action?: React.ReactNode }) {
-  const t = useTheme(isDark)
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', flexShrink: 0, flexWrap: 'wrap', minHeight: 44, borderBottom: `0.5px solid ${t.bdr}`,
-      background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)' }}>
-      <button onClick={back} data-testid="pane-back" style={{ padding: '5px 10px', borderRadius: 7, fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0,
-        background: isDark ? 'rgba(124,58,237,0.12)' : 'rgba(124,58,237,0.06)', border: '0.5px solid rgba(124,58,237,0.32)', color: isDark ? '#c4b5fd' : '#7c3aed' }}>‹ {backLabel}</button>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0, flex: '1 1 120px' }}>
-        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</h3>
-        <span style={{ fontSize: 11, color: t.muted, whiteSpace: 'nowrap' }}>{count}</span>
-      </div>
-      {action}
-    </div>
-  )
-}
 const Empty = ({ isDark, children }: { isDark: boolean; children: React.ReactNode }) => (
   <div style={{ textAlign: 'center', padding: '40px 16px', fontSize: 13, lineHeight: 1.5, color: isDark ? 'rgba(255,255,255,0.40)' : 'rgba(0,0,0,0.40)' }}>{children}</div>
 )
@@ -264,8 +267,10 @@ const Unavailable = ({ isDark }: { isDark: boolean }) => (
  * the folder, but never movable INTO one). No nesting: a folder can not contain folders. No "+ Create Note" / "back to Library" controls here — Notes are
  * created from the Planner menu, and the Library tabs are how you return to your documents.
  */
-export function NotesLibrary({ isDark, folders, notes, filedDocs, openFolderId, unavailable, onOpenFolder, onOpen, onRename, onDelete, onMove, onUnfile, onRenameFolder, onDeleteFolder, onDropOnFolder, dragProps, footer }: {
+export function NotesLibrary({ isDark, folders, notes, filedDocs, openFolderId, unavailable, selectMode = false, selected, onToggle, onOpenFolder, onOpen, onRename, onDelete, onMove, onUnfile, onRenameFolder, onDeleteFolder, onDropOnFolder, dragProps, footer }: {
   isDark: boolean; folders: JournalFolder[]; notes: LibEntry[]; filedDocs: LibEntry[]; openFolderId: string | null; unavailable: boolean
+  /** v1.333 selection mode (Delete Selected): Notes and folders toggle instead of opening; Planner documents in a folder are not eligible */
+  selectMode?: boolean; selected?: Set<string>; onToggle?: (key: string) => void
   onOpenFolder: (id: string | null) => void; onOpen: (key: string) => void
   onRename: (key: string, title: string) => void; onDelete: (key: string) => void; onMove: (key: string) => void; onUnfile: (key: string) => void
   onRenameFolder: (id: string, name: string) => void; onDeleteFolder: (id: string) => void
@@ -285,7 +290,7 @@ export function NotesLibrary({ isDark, folders, notes, filedDocs, openFolderId, 
     { label: 'Delete', icon: '🗑', danger: true, onClick: () => onDelete(n.key), testId: 'note-delete' },
   ]
   const noteCard = (n: LibEntry, inFolder: boolean) => (
-    <DocCard key={n.key} isDark={isDark} entry={n} testId="note-card" drag={dragProps(n.key)} onOpen={() => onOpen(n.key)} renaming={renaming === n.key}
+    <DocCard key={n.key} isDark={isDark} entry={n} testId="note-card" drag={dragProps(n.key)} onOpen={() => onOpen(n.key)} selectMode={selectMode} checked={selected?.has(n.key)} onToggle={() => onToggle?.(n.key)} renaming={renaming === n.key}
       onRenameCommit={v => { setRenaming(null); onRename(n.key, v) }} onRenameCancel={() => setRenaming(null)} menu={noteMenu(n, inFolder)} />
   )
   const promptEl = prompt && (
@@ -297,13 +302,12 @@ export function NotesLibrary({ isDark, folders, notes, filedDocs, openFolderId, 
     const total = inside.length + legacy.length
     return (
       <>
-        <PaneBar isDark={isDark} back={() => onOpenFolder(null)} backLabel="Notes" title={`📁 ${open.name}`} count={`${total} ${total === 1 ? 'item' : 'items'}`} />
         <div data-testid="folder-contents" style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 18px', position: 'relative' }}>
           {total === 0 ? <Empty isDark={isDark}>This folder is empty.<br />Move a Note here with its ⋮ menu (Move to Folder){`, or drag it onto the folder.`}</Empty> : (
             <div style={GRID}>
               {inside.map(n => noteCard(n, true))}
               {legacy.map(d => (
-                <DocCard key={d.key} isDark={isDark} entry={d} testId="folder-item-legacy" badge="Planner document" drag={dragProps(d.key)} onOpen={() => onOpen(d.key)}
+                <DocCard key={d.key} isDark={isDark} entry={d} testId="folder-item-legacy" badge="Planner document" drag={dragProps(d.key)} selectMode={selectMode} onOpen={() => onOpen(d.key)}
                   menu={[{ label: 'Open', icon: '📖', onClick: () => onOpen(d.key) }, { label: 'Remove from folder', icon: '↩︎', onClick: () => onUnfile(d.key), testId: 'item-unfile' }]} />
               ))}
             </div>
@@ -326,23 +330,28 @@ export function NotesLibrary({ isDark, folders, notes, filedDocs, openFolderId, 
             <div style={GRID}>
               {folders.map(f => {
                 const n = counts.get(f.id) ?? 0
-                const hot = over === f.id
+                const hot = over === f.id && !selectMode
+                const chk = !!selected?.has(folderSelKey(f.id))
                 return (
                   <div key={f.id} role="button" tabIndex={0} data-testid="folder-card" data-folder-id={f.id} title={f.name}
-                    onClick={() => onOpenFolder(f.id)} onKeyDown={e => { if (e.key === 'Enter') onOpenFolder(f.id) }}
-                    onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setOver(f.id) }}
+                    aria-pressed={selectMode ? chk : undefined}
+                    onClick={() => { if (selectMode) onToggle?.(folderSelKey(f.id)); else onOpenFolder(f.id) }}
+                    onKeyDown={e => { if (selectMode) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle?.(folderSelKey(f.id)) } } else if (e.key === 'Enter') onOpenFolder(f.id) }}
+                    onDragOver={e => { if (selectMode) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setOver(f.id) }}
                     onDragLeave={() => setOver(null)}
-                    onDrop={e => { e.preventDefault(); setOver(null); const k = e.dataTransfer.getData('text/xp-doc'); if (k) onDropOnFolder(k, f.id) }}
-                    style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 8px 8px', borderRadius: 10, textAlign: 'center', cursor: 'pointer', minWidth: 0,
-                      background: hot ? 'rgba(124,58,237,0.30)' : t.card, border: `${hot ? 1.5 : 0.5}px solid ${hot ? '#a78bfa' : t.border}`, transition: 'background 120ms' }}>
-                    <KebabMenu isDark={isDark} label="Folder actions" items={[
-                      { label: 'Rename', icon: '✏️', onClick: () => setPrompt({ id: f.id, name: f.name }), testId: 'folder-rename' },
-                      { label: 'Delete', icon: '🗑', danger: true, onClick: () => onDeleteFolder(f.id), testId: 'folder-delete' },
-                    ]} />
-                    <div style={{ fontSize: 40, lineHeight: '60px', height: 60 }}>📁</div>
-                    <div style={{ marginTop: 6, width: '100%', fontSize: 12, fontWeight: 600, lineHeight: 1.3, color: t.text, overflow: 'hidden', overflowWrap: 'anywhere', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{f.name}</div>
-                    <div style={{ fontSize: 10.5, color: t.muted, marginTop: 2 }}>{n} {n === 1 ? 'item' : 'items'}</div>
-                    <div style={{ marginTop: 'auto', paddingTop: 6, fontSize: 10, color: t.muted }}>{f.createdAt ? fmtDate(new Date(f.createdAt)) : ''}</div>
+                    onDrop={e => { if (selectMode) return; e.preventDefault(); setOver(null); const k = e.dataTransfer.getData('text/xp-doc'); if (k) onDropOnFolder(k, f.id) }}
+                    style={{ ...cardBase(t), background: hot ? 'rgba(124,58,237,0.30)' : chk ? (isDark ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.14)') : t.card,
+                      border: `${hot || chk ? 1.5 : 0.5}px solid ${hot ? '#a78bfa' : chk ? 'rgba(124,58,237,0.55)' : t.border}` }}>
+                    {selectMode ? <Check isDark={isDark} checked={chk} /> : (
+                      <KebabMenu isDark={isDark} label="Folder actions" items={[
+                        { label: 'Rename', icon: '✏️', onClick: () => setPrompt({ id: f.id, name: f.name }), testId: 'folder-rename' },
+                        { label: 'Delete', icon: '🗑', danger: true, onClick: () => onDeleteFolder(f.id), testId: 'folder-delete' },
+                      ]} />
+                    )}
+                    <div style={iconBox(isDark, t.border)}>📁</div>
+                    <div style={{ width: '100%', fontSize: 11, fontWeight: 600, lineHeight: 1.3, color: t.text, overflow: 'hidden', overflowWrap: 'anywhere', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{f.name}</div>
+                    <div style={{ fontSize: 9, lineHeight: 1.2, color: t.muted }}>{n} {n === 1 ? 'item' : 'items'}</div>
+                    <div style={{ fontSize: 9, lineHeight: 1.2, color: t.muted }}>{f.createdAt ? fmtDate(new Date(f.createdAt)) : ''}</div>
                   </div>
                 )
               })}
@@ -353,6 +362,28 @@ export function NotesLibrary({ isDark, folders, notes, filedDocs, openFolderId, 
       </div>
       {promptEl}
     </>
+  )
+}
+
+/** Confirmation for "Delete Selected" in the Notes views. Folders never take their Notes with them: those go back to the Notes list. */
+export function DeleteSelectionDialog({ isDark, notes, folders, keptInFolders, onConfirm, onClose }: { isDark: boolean; notes: number; folders: number; keptInFolders: number; onConfirm: () => void; onClose: () => void }) {
+  const t = useTheme(isDark)
+  const total = notes + folders
+  return (
+    <Overlay onClose={onClose}>
+      <div style={{ ...dialogBox(isDark), border: `1px solid ${isDark ? 'rgba(239,68,68,0.35)' : 'rgba(239,68,68,0.25)'}` }} data-testid="delete-selection-dialog">
+        <div style={{ fontSize: 15, fontWeight: 600, color: t.text }}>Delete {total} {total === 1 ? 'item' : 'items'}?</div>
+        <div style={{ fontSize: 13, lineHeight: 1.5, color: t.muted }}>
+          {notes > 0 && <div><strong style={{ color: t.text }}>{notes} {notes === 1 ? 'note' : 'notes'}</strong> will be deleted. This cannot be undone.</div>}
+          {folders > 0 && <div><strong style={{ color: t.text }}>{folders} {folders === 1 ? 'folder' : 'folders'}</strong> will be removed.{' '}
+            {keptInFolders > 0 ? <>The {keptInFolders} {keptInFolders === 1 ? 'item' : 'items'} inside {keptInFolders === 1 ? 'is' : 'are'} <strong style={{ color: t.text }}>not deleted</strong> — back in your Notes, outside any folder.</> : 'They are empty, so nothing else is affected.'}</div>}
+        </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={btn('ghost', isDark)}>Cancel</button>
+          <button onClick={onConfirm} data-testid="delete-selection-confirm" style={btn('danger', isDark)}>Delete</button>
+        </div>
+      </div>
+    </Overlay>
   )
 }
 

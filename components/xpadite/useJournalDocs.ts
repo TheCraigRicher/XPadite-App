@@ -38,7 +38,8 @@ export interface JournalDocsApi {
   saveRaw: (id: string, raw: string) => void
   /** Library edits (rename, label, folder): transform the stored raw string. */
   updateRaw: (id: string, fn: (raw: string) => string) => void
-  deleteDocs: (ids: string[]) => void
+  /** Removes the documents on this device at once; resolves true when the server delete went through (or the rows were already gone), false when it failed (it is kept and retried). */
+  deleteDocs: (ids: string[]) => Promise<boolean>
   refresh: () => Promise<void>
   flush: () => Promise<boolean>
 }
@@ -217,17 +218,17 @@ export function useJournalDocs(userId: string, setToast: (m: string) => void): J
   }, [updateRaw])
 
   const deleteDocs = useCallback((ids: string[]) => {
-    if (ids.length === 0) return
+    if (ids.length === 0) return Promise.resolve(true)
     const uid = uidRef.current
     for (const id of ids) getQueue().discard(id)
     commit(docsRef.current.filter(d => !ids.includes(d.id)))
-    if (!uid) return
+    if (!uid) return Promise.resolve(true)
     const pend = readJson<{ uid: string; ids: string[] }>(DELETE_KEY)
     const all = Array.from(new Set([...(pend && pend.uid === uid ? pend.ids : []), ...ids]))
     writeJson(DELETE_KEY, { uid, ids: all })
-    deleteJournalDocs(createClient(), uid, ids)
-      .then(() => { const p = readJson<{ uid: string; ids: string[] }>(DELETE_KEY); writeJson(DELETE_KEY, { uid, ids: (p?.ids ?? []).filter(i => !ids.includes(i)) }) })
-      .catch(err => { if (!isMissingObject(err)) console.error('[JournalDocs] delete failed (will retry):', err) })
+    return deleteJournalDocs(createClient(), uid, ids)
+      .then(() => { const p = readJson<{ uid: string; ids: string[] }>(DELETE_KEY); writeJson(DELETE_KEY, { uid, ids: (p?.ids ?? []).filter(i => !ids.includes(i)) }); return true })
+      .catch(err => { if (isMissingObject(err)) return true; console.error('[JournalDocs] delete failed (will retry):', err); return false })
   }, [commit, getQueue])
 
   const refresh = useCallback(() => hydrate(), [hydrate])

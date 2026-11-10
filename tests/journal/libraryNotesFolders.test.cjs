@@ -384,7 +384,12 @@ test('Library (v1.332): Notes is a toolbar tab right after Labels; the ⋮ menu 
   const order = ['create-folder', 'delete', 'export'].map(k => m.indexOf(`id: '${k}'`)); assert.ok(order.every(n => n >= 0) && order.every((n, j) => j === 0 || n > order[j - 1]), 'order')
   assert.ok(!/id: 'notes'|id: 'folders'/.test(m), 'Notes and Folders are no longer menu entries')
   assert.match(m, /id: 'create-folder'[^\n]*setCreateFolderOpen\(true\)/)
-  assert.match(m, /id: 'delete'[^\n]*setLibTab\('documents'\); enterSelectMode\(\)/)
+  // v1.333: Delete Selected stays in the CURRENT view (no setLibTab); Create Folder is only enabled at the Notes root; the trigger is a hamburger icon, not a kebab
+  assert.match(m, /id: 'delete'[^\n]*run: \(\) => enterSelectMode\(\)/); assert.ok(!/id: 'delete'[^\n]*setLibTab/.test(m), 'Delete does not navigate')
+  assert.match(m, /id: 'create-folder'[^\n]*disabled: !\(libTab === 'notes' && !openFolderId\)/)
+  assert.match(m, /disabled=\{it\.disabled\}/); assert.match(m, /aria-disabled=\{it\.disabled \|\| undefined\}/); assert.match(m, /if \(it\.disabled\) return/)
+  const btnSrc = modal.slice(modal.indexOf('data-testid="library-menu-btn"'), modal.indexOf('data-testid="library-menu"'))
+  assert.ok(btnSrc.includes('<svg') && btnSrc.includes('M2 3.5h12M2 8h12M2 12.5h12') && !btnSrc.includes('>⋮<'), 'hamburger icon replaces the three-dot glyph')
   // the existing controls return to the documents
   assert.ok((tb.match(/setLibTab\('documents'\)/g) ?? []).length >= 5, 'Default / Newer / All(+month) / Labels each return to the documents')
   assert.ok(!/libTab === 'documents' \? \(<>/.test(modal), 'the toolbar is NOT inside the documents-only branch')
@@ -401,10 +406,28 @@ test('Library (v1.332): Notes is a toolbar tab right after Labels; the ⋮ menu 
 test('Library (v1.332): the Notes collection has no "+ Create Note", no "‹ Library" back, folders and Notes side by side, ONE folder level, safe delete, drag (mouse only) AND Move-to-Folder', () => {
   const ui = strip(read('components/xpadite/LibraryNotesFolders.tsx'))
   assert.ok(!/data-testid="create-note"|data-testid="create-folder"|backLabel="Library"|onCreate=/.test(ui.slice(ui.indexOf('export function NotesLibrary'))), 'no Create Note button / back-to-Library / in-pane Create Folder')
-  assert.ok(/backLabel="Notes"/.test(ui), 'inside a folder you go back to the Notes collection')
+  // v1.333: NO inline back row - the purple header owns back-navigation
+  assert.ok(!/PaneBar|pane-back|backLabel/.test(ui), 'the inline "‹ Notes" row is gone')
+  const hdr = modal.slice(modal.indexOf('const libraryView = ('), modal.indexOf('Controls bar'))
+  assert.match(hdr, /\{openFolder && \(\s*<button[\s\S]*?data-testid="library-header-back"[\s\S]*?setOpenFolderId\(null\)/, 'header arrow only inside a folder, returns to the Notes root')
+  assert.equal((modal.match(/data-testid="library-header-back"/g) ?? []).length, 1, 'one back control')
+  // card sizing = the default Library document cards
+  assert.match(ui, /const CARD_W = 110/); assert.match(ui, /padding: '10px 8px 8px', gap: 5/); assert.match(ui, /width: 52, height: 60/); assert.ok(!/minmax\(124px/.test(ui), 'no oversized stretching grid')
+  // Labels returns to the documents on press (like Default / Newer), and Delete Selected is scoped to the current view
+  assert.match(modal, /onActivate=\{\(\) => \{ setLibTab\('documents'\); setOpenFolderId\(null\) \}\}/)
+  assert.match(modal, /const scopeKeys: Set<string> = libTab === 'documents'/); assert.match(modal, /filter\(k => scopeKeys\.has\(k\)\)/)
+  assert.match(modal, /function commitDeleteSelection/); assert.match(modal, /no longer existed/)
+  // a failed cloud delete is never reported as a plain success
+  const hook = read('components/xpadite/useJournalDocs.ts')
+  assert.match(hook, /deleteDocs: \(ids: string\[\]\) => Promise<boolean>/); assert.match(hook, /return false \}\)/)
+  // success is announced only AFTER the server confirms (Promise.all of the cloud results); folder deletes report failure too
+  assert.match(modal, /Promise\.all\(\[noteCloud, \.\.\.folderCloud\]\)\.then\(oks => \{\s*if \(oks\.every\(Boolean\)\) setToast\(skipped > 0 \? `Deleted/)
+  assert.ok(!/setToast\(skipped > 0[^\n]*\n\s*Promise\.all/.test(modal), 'no premature success toast')
+  assert.match(read('components/xpadite/AppContext.tsx'), /removeJournalFolder: \(id: string\) => Promise<boolean>/)
+  assert.match(modal, /deleteFolderSafely\(f\.id\)\.then\(ok => \{ if \(!ok\) setToast\(FOLDER_DELETE_FAILED\)/)
   for (const t of ['Rename', 'Delete', 'Move to Folder', 'Remove from folder', 'draggable', 'onDrop', 'not deleted', 'Planner document']) assert.ok(ui.includes(t), t)
   assert.ok(!/folders\.some|parentId|nested|subfolder/i.test(ui), 'no nesting')
-  assert.match(ui, /grid-template|gridTemplateColumns: 'repeat\(auto-fill, minmax\(/)
+  assert.match(ui, /flexWrap: 'wrap'/)   // v1.333: compact fixed-width cards that wrap (same metrics as the default document cards)
   assert.match(ui, /\(hover: hover\) and \(pointer: fine\)/, 'HTML5 drag only for a mouse-like pointer (touch / Capacitor WebView use Move to Folder)')
   assert.match(modal, /!finePointer \? \{\} : \(\{/)
   assert.match(modal, /function deleteFolderSafely[\s\S]*?docsToUnfile\(allEntries, id\)[\s\S]*?removeJournalFolder\(id\)/, 'un-file first, then remove the folder')

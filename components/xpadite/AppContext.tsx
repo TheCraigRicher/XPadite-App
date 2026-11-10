@@ -149,7 +149,8 @@ interface AppContextValue {
   removeJournalLabel: (id: string) => void
   journalFolders: JournalFolder[]
   addJournalFolder: (f: JournalFolder) => void
-  removeJournalFolder: (id: string) => void
+  /** Removes the folder at once; resolves true when the cloud delete went through (or there is no account), false when it failed. */
+  removeJournalFolder: (id: string) => Promise<boolean>
   /** Rename / recolour an existing folder (same id). */
   updateJournalFolder: (f: JournalFolder) => void
   /** v1.330: extra Planner documents (several per day) and Notes — see useJournalDocs.ts */
@@ -1503,11 +1504,11 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     try { localStorage.setItem('xp9jf', JSON.stringify(next)) } catch {}
     setJournalFoldersState(next)
     const uid = userIdRef.current
-    if (uid) {
-      deleteJournalFolder(createClient(), uid, id).catch(err =>
-        console.error('[JournalFolders] Supabase delete error:', err)
-      )
-    }
+    if (!uid) return Promise.resolve(true)
+    return deleteJournalFolder(createClient(), uid, id).then(() => true, err => {
+      console.error('[JournalFolders] Supabase delete error:', err)
+      return false
+    })
   }, [])
 
   // ─── Reminder CRUD (localStorage-primary, Supabase background sync) ──────────

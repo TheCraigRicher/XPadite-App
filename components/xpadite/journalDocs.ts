@@ -121,55 +121,9 @@ export function buildStarterNotes(dateKey: string, now = Date.now()): ExtraDoc[]
   }))
 }
 
-// ─── The one-section rule for Notes ───────────────────────────────────────────
-// A Note is the SAME Planner document, limited to exactly ONE section (the one every empty Planner page starts with). "Section" here means a
-// text-bearing block ('section' = a coloured section, 'text' = a legacy plain writing area). Images / Mind Maps are media blocks, not sections, and stay allowed.
-const isSectionLike = (b: JournalBlock) => b.type === 'text' || b.type === 'section'
-
-/** The single rule every structural operation asks first. Enforced in the editor's block logic AND when a Note is saved/loaded. */
-export function canAddSection(kind: ExtraKind | 'day'): boolean { return kind !== 'note' }
-export function canInsertBlock(kind: ExtraKind | 'day', block: Pick<JournalBlock, 'type'>): boolean {
-  return kind !== 'note' || !(block.type === 'text' || block.type === 'section')
-}
-export const noteSectionCount = (blocks: JournalBlock[]) => blocks.filter(isSectionLike).length
-
-function tiptapNodes(content: string | undefined): unknown[] {
-  if (!content) return []
-  try { const d = JSON.parse(content); return d && d.type === 'doc' && Array.isArray(d.content) ? d.content : [] } catch { return [] }
-}
-const isEmptyPara = (n: unknown) => { const o = n as AnyObj; return o?.type === 'paragraph' && (!Array.isArray(o.content) || o.content.length === 0) }
-
-/**
- * Safety net: guarantee a Note holds exactly ONE section. The first text-bearing block is the Note's section; the text of any extra section-like
- * block is appended to it (never discarded), and image cells inside extra sections become ordinary image blocks. A document with no section
- * gets one empty one. Already-valid notes are returned byte-for-byte unchanged.
- */
-export function normalizeNoteRaw(raw: string): string {
-  const o = parseObj(raw)
-  if (!o || !Array.isArray(o.blocks)) return raw
-  const blocks = o.blocks as JournalBlock[]
-  if (noteSectionCount(blocks) === 1) return raw
-  const now = Date.now()
-  const firstIdx = blocks.findIndex(isSectionLike)
-  if (firstIdx === -1) { o.blocks = [...blocks, sectionBlock(now)]; return JSON.stringify(o) }
-  const first = { ...blocks[firstIdx] }
-  let nodes = tiptapNodes(first.content)
-  const out: JournalBlock[] = []
-  blocks.forEach((b, i) => {
-    if (i === firstIdx) { out.push(first); return }
-    if (!isSectionLike(b)) { out.push(b); return }
-    const cells = [b.sectionImage, ...(b.partitions ?? [])].filter(Boolean) as NonNullable<JournalBlock['sectionImage']>[]
-    const parts = [...tiptapNodes(b.content), ...cells.flatMap(c => (c.kind === 'content' ? tiptapNodes(c.content) : []))]
-    const real = parts.filter(n => !isEmptyPara(n))
-    if (real.length) nodes = [...nodes.filter(n => !isEmptyPara(n)), ...real]
-    for (const c of cells) {
-      if (c.kind === 'image' && c.src) out.push({ id: `b${now.toString(36)}${Math.random().toString(36).slice(2, 8)}`, type: 'image', src: c.src, thumbnail: c.thumbnail, name: c.name, createdAt: now, updatedAt: now })
-    }
-  })
-  first.content = nodes.length ? JSON.stringify({ type: 'doc', content: nodes }) : first.content
-  o.blocks = out
-  return JSON.stringify(o)
-}
+// ─── Notes are ordinary Planner documents (v1.332) ────────────────────────────
+// A Note uses the full Planner editor: any number of sections, in any order. (v1.330 limited Notes to one section; that rule — and the save-time
+// normaliser that enforced it — is gone. Stored Notes need no migration: a one-section Note is simply a Note with one section.)
 
 // ─── Hydration merge (cross-device) ───────────────────────────────────────────
 /**

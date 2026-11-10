@@ -33,33 +33,23 @@ test('starter notes: exactly Ideas, Plans, My Daily Journal — real documents (
 })
 
 // ═════ A2. the one-section rule ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
-test('Notes: the rule — no section / text block may be inserted, images and Mind Maps may; regular documents are unrestricted', () => {
-  assert.equal(D.canAddSection('note'), false); assert.equal(D.canAddSection('doc'), true); assert.equal(D.canAddSection('day'), true)
-  for (const t of ['section', 'text']) { assert.equal(D.canInsertBlock('note', { type: t }), false, t); assert.equal(D.canInsertBlock('doc', { type: t }), true); assert.equal(D.canInsertBlock('day', { type: t }), true) }
-  for (const t of ['image', 'drawing']) assert.equal(D.canInsertBlock('note', { type: t }), true, t)
+test('Notes (v1.332): NO section restriction — the one-section rule and its normaliser are gone; a Note with many sections is stored exactly as written', () => {
+  for (const gone of ['canAddSection', 'canInsertBlock', 'noteSectionCount', 'normalizeNoteRaw']) assert.equal(typeof D[gone], 'undefined', gone + ' no longer exists')
+  const multi = docRaw([sec('a', 'Campaigns'), sec('b', 'Content ideas', { sectionColor: 'blue' }), sec('c', 'Experiments', { sectionColor: 'green' }), { id: 'i', type: 'image', src: 'data:x', createdAt: 1, updatedAt: 1 }], { title: 'XPadite Marketing Strategies' })
+  const stored = docRaw([sec('a', 'old')], { title: 'XPadite Marketing Strategies', folderId: 'f1', labelIds: ['L'] })
+  const saved = parse(D.mergeDocMeta(multi, stored))
+  assert.deepEqual(saved.blocks, parse(multi).blocks, 'every section, colour and image survives a save unchanged')
+  assert.equal(saved.blocks.filter(b => b.type === 'section').length, 3)
+  assert.equal(saved.folderId, 'f1'); assert.deepEqual(saved.labelIds, ['L'])
+  assert.equal(sectionLike(multi).length, 3)
 })
 
-test('Notes: normalizeNoteRaw keeps EXACTLY one section, never loses text or images, and leaves a valid note byte-for-byte unchanged', () => {
-  const valid = docRaw([sec('a', 'hello')], { title: 'T' })
-  assert.equal(D.normalizeNoteRaw(valid), valid, 'valid note untouched')
-  const withMedia = docRaw([sec('a', 'hello'), { id: 'i', type: 'image', src: 'data:x', createdAt: 1, updatedAt: 1 }])
-  assert.equal(D.normalizeNoteRaw(withMedia), withMedia, 'a note with an image is still valid')
-  const bad = docRaw([sec('a', 'one'), sec('b', 'two'), { id: 'x', type: 'text', content: tip('three'), createdAt: 1, updatedAt: 1 }, sec('c', '')], { title: 'T', folderId: 'f1', labelIds: ['L'] })
-  const fixed = D.normalizeNoteRaw(bad)
-  assert.equal(sectionLike(fixed).length, 1, 'collapsed to one')
-  const txt = JSON.stringify(parse(fixed).blocks[0].content)
-  for (const w of ['one', 'two', 'three']) assert.ok(txt.includes(w), `text "${w}" survived`)
-  assert.ok(txt.indexOf('one') < txt.indexOf('two') && txt.indexOf('two') < txt.indexOf('three'), 'order kept')
-  assert.equal(parse(fixed).title, 'T'); assert.equal(parse(fixed).folderId, 'f1'); assert.deepEqual(parse(fixed).labelIds, ['L'])
-  assert.equal(D.normalizeNoteRaw(fixed), fixed, 'idempotent')
-  // an extra section holding an image cell: the image becomes an ordinary image block (not lost)
-  const cell = docRaw([sec('a', 'x'), sec('b', '', { sectionImage: { kind: 'image', src: 'data:img', name: 'p' } })])
-  const f2 = parse(D.normalizeNoteRaw(cell)); assert.equal(f2.blocks.filter(b => b.type === 'section').length, 1); assert.ok(f2.blocks.some(b => b.type === 'image' && b.src === 'data:img'))
-  // a document with no section at all gets one
-  assert.equal(sectionLike(D.normalizeNoteRaw(docRaw([{ id: 'i', type: 'image', src: 's', createdAt: 1, updatedAt: 1 }]))).length, 1)
+test('starter notes and new Notes begin with one section (the editor\'s own default) but nothing keeps them to one', () => {
+  for (const n of D.buildStarterNotes('2026-11-09')) assert.equal(sectionLike(n.raw).length, 1)
+  assert.equal(sectionLike(D.blankDocRaw('X')).length, 1)
 })
 
-// ═════ A3. regular documents (several per day), folders, labels ════════════════════════════════════════════════════════════════════════════
+// ═════ A3. regular documents (several per day), folders, labels ═══════════════════════════════════════════════════════════════════════
 const dayRaw = docRaw([sec('d', 'My day')], { title: 'Day doc' })
 const legacyTiptap = tip('Legacy planner text')
 test('several documents on ONE date are separate Library entries with unique keys; the day\'s own document is untouched; notes are kind "note"', () => {
@@ -348,21 +338,13 @@ const ed = strip(read('components/xpadite/JournalEditorContent.tsx'))
 const modal = strip(read('components/xpadite/JournalWorkspaceModal.tsx'))
 const fnBody = (s, name) => { const i = s.indexOf(`function ${name}(`); assert.ok(i >= 0, name); return s.slice(i, i + 700) }
 
-test('editor: the one-section rule lives in the block LOGIC (insert / delete / duplicate / move / split), not only in the buttons', () => {
-  assert.match(fnBody(ed, 'insertBlock'), /isNote && !canInsertBlock\('note', block\)\) return/)
-  assert.match(fnBody(ed, 'deleteBlock'), /if \(isNote\) \{[^}]*t\.type === 'section'[^}]*\) return \}/)
-  assert.match(fnBody(ed, 'duplicateBlock'), /if \(isNote\) return/)
-  assert.match(fnBody(ed, 'transferSection'), /if \(isNote\) return/)
-  assert.match(fnBody(ed, 'handleSplitSection'), /if \(isNote\) return/)
-})
-
-test('editor: in a Note the section controls stay VISIBLE but dimmed and inert (+ Section at both slots, Split, Duplicate, Move Section); Delete of the only section is withheld', () => {
-  assert.equal((ed.match(/<SectionPicker isDark=\{isDark\} disabled=\{!canAddSection\(isNote \? 'note' : 'day'\)\}/g) ?? []).length, 2, 'mobile + desktop slot')
-  assert.match(ed, /function SectionPicker\([^)]*disabled = false/); assert.match(ed, /function handleToggle\(\) \{\s*if \(disabled\) return/)
-  for (const id of ['menu-split-section', 'menu-duplicate-section', 'menu-move-section']) assert.ok(new RegExp(`disabled=\\{noteLocked\\}[^>]*\\n?[^>]*data-testid="${id}"`).test(ed) || ed.includes(`data-testid="${id}"`), id)
-  assert.match(ed, /noteLocked=\{isNote && block\.type === 'section'\}/)
-  assert.match(ed, /onDelete=\{blocks\.length > 1 && !\(isNote && \(block\.type === 'section' \|\| block\.type === 'text'\)\)/)
-  assert.match(ed, /opacity: 0\.38, cursor: 'not-allowed'/)
+test('editor (v1.332): Notes have NO section restrictions — the block logic and the toolbar behave exactly as for ordinary Planner documents', () => {
+  assert.ok(!/canInsertBlock|canAddSection|noteLocked/.test(ed), 'no restriction helpers remain')
+  for (const name of ['insertBlock', 'deleteBlock', 'duplicateBlock', 'transferSection', 'handleSplitSection']) assert.ok(!/isNote/.test(fnBody(ed, name)), name + ' ignores isNote')
+  assert.ok(!/\bdisabled\b/.test(ed.slice(ed.indexOf('function SectionPicker'), ed.indexOf('function SectionPicker') + 1200)), '+ Section can never be disabled')
+  assert.equal((ed.match(/<SectionPicker isDark=\{isDark\} onPick=/g) ?? []).length, 2, '+ Section at both toolbar slots, always active')
+  assert.ok(/onDelete=\{blocks\.length > 1 \? \(\) => deleteBlock\(block\.id\) : undefined\}/.test(ed), 'any section can be deleted (a document always keeps one)')
+  assert.ok(!/A Note has a single section/.test(ed))
 })
 
 test('editor: writing, formatting, dictation, image insertion and autosave are NOT gated by isNote', () => {
@@ -393,30 +375,59 @@ test('Create New / Create Note: independent documents (never an extra section), 
   assert.match(ed, /function guardedNavigate/); assert.ok(ed.includes('showExitDialog'), 'the existing save/discard guard runs before switching')
 })
 
-test('Library: one top-right ⋮ menu = Notes, Folders, Delete Selected (the old Delete button moved in), Export kept; Notes/Folders open views, create nothing', () => {
-  const i = modal.indexOf("data-testid=\"library-menu\""); const m = modal.slice(i, i + 1600)
-  const order = ['notes', 'folders', 'delete', 'export'].map(k => m.indexOf(`id: '${k}'`)); assert.ok(order.every(n => n >= 0) && order.every((n, j) => j === 0 || n > order[j - 1]), 'order')
-  assert.ok(m.includes("label: 'Delete Selected'") && m.includes('run: () => enterSelectMode()'))
-  assert.match(m, /id: 'notes'[^\n]*setLibTab\('notes'\)/); assert.match(m, /id: 'folders'[^\n]*setLibTab\('folders'\)/)
-  assert.ok(!/id: 'notes'[^\n]*createExtra|id: 'folders'[^\n]*createFolder/.test(m), 'opening a view never creates anything')
-  assert.ok(!/🗑️ Delete<\/button>/.test(modal), 'the standalone Delete button is gone')
-  assert.ok(modal.includes("libTab === 'notes' ?") && modal.includes('<NotesPane') && modal.includes('<FoldersPane'))
+test('Library (v1.332): Notes is a toolbar tab right after Labels; the ⋮ menu is Create Folder / Delete Selected / Export; the toolbar stays on screen in both tabs', () => {
+  const tb = modal.slice(modal.indexOf('<ResponsiveToolbarSelect'))
+  assert.ok(tb.indexOf('<CategoryFilterDropdown') > 0 && tb.indexOf('data-testid="library-notes-tab"') > tb.indexOf('<CategoryFilterDropdown'), 'Notes follows Labels')
+  assert.ok(tb.indexOf('data-testid="library-notes-tab"') < tb.indexOf('data-testid="library-menu-btn"'), '…and precedes the ⋮ menu')
+  assert.match(tb, /aria-pressed=\{libTab === 'notes'\}/); assert.match(tb, /background: '#7c3aed', color: '#ffffff'/, 'selected state is clearly distinguishable')
+  const i = modal.indexOf('data-testid="library-menu"'); const m = modal.slice(i, i + 1700)
+  const order = ['create-folder', 'delete', 'export'].map(k => m.indexOf(`id: '${k}'`)); assert.ok(order.every(n => n >= 0) && order.every((n, j) => j === 0 || n > order[j - 1]), 'order')
+  assert.ok(!/id: 'notes'|id: 'folders'/.test(m), 'Notes and Folders are no longer menu entries')
+  assert.match(m, /id: 'create-folder'[^\n]*setCreateFolderOpen\(true\)/)
+  assert.match(m, /id: 'delete'[^\n]*setLibTab\('documents'\); enterSelectMode\(\)/)
+  // the existing controls return to the documents
+  assert.ok((tb.match(/setLibTab\('documents'\)/g) ?? []).length >= 5, 'Default / Newer / All(+month) / Labels each return to the documents')
+  assert.ok(!/libTab === 'documents' \? \(<>/.test(modal), 'the toolbar is NOT inside the documents-only branch')
+  // Default / Newer ALWAYS return to the documents, even when the picked value is unchanged (a native <select> fires no change event for that)
+  const rts = modal.slice(modal.indexOf('function ResponsiveToolbarSelect'), modal.indexOf('function DateFilterDropdown'))
+  assert.match(rts, /onActivate\?: \(\) => void/); assert.match(rts, /onPointerDown=\{\(\) => onActivate\?\.\(\)\}/, 'native select: pressed/tapped')
+  assert.match(rts, /e\.key === 'Enter' \|\| e\.key === ' ' \|\| e\.key === 'ArrowDown' \|\| e\.key === 'ArrowUp' \|\| e\.key === 'F4'\) onActivate\?\.\(\)/, 'native select: opened with the keyboard')
+  assert.match(rts, /function handleToggle\(\) \{\s*onActivate\?\.\(\)/, 'phone popover button')
+  assert.equal((modal.match(/onActivate=\{\(\) => setLibTab\('documents'\)\}/g) ?? []).length, 2, 'Default and Newer both wired')
+  assert.match(modal, /\{libTab === 'documents' \? \(\s*<div style=\{\{ flex: 1, overflowY: 'auto', padding: '16px 20px' \}\}>/, 'only the content area switches')
+  assert.ok(modal.includes('<NotesLibrary') && !modal.includes('<NotesPane') && !modal.includes('<FoldersPane'))
 })
 
-test('Library: Notes view has + Create Note, cards with rename/delete/move; Folders view has + Create Folder, safe delete, drag-drop AND Move-to-Folder', () => {
+test('Library (v1.332): the Notes collection has no "+ Create Note", no "‹ Library" back, folders and Notes side by side, ONE folder level, safe delete, drag (mouse only) AND Move-to-Folder', () => {
   const ui = strip(read('components/xpadite/LibraryNotesFolders.tsx'))
-  for (const t of ['+ Create Note', '+ Create Folder', 'Rename', 'Delete', 'Move to Folder', 'Remove from folder', 'draggable', 'onDrop']) assert.ok(ui.includes(t), t)
-  assert.match(ui, /not deleted/); assert.match(ui, /grid-template|gridTemplateColumns: 'repeat\(auto-fill, minmax\(/)
+  assert.ok(!/data-testid="create-note"|data-testid="create-folder"|backLabel="Library"|onCreate=/.test(ui.slice(ui.indexOf('export function NotesLibrary'))), 'no Create Note button / back-to-Library / in-pane Create Folder')
+  assert.ok(/backLabel="Notes"/.test(ui), 'inside a folder you go back to the Notes collection')
+  for (const t of ['Rename', 'Delete', 'Move to Folder', 'Remove from folder', 'draggable', 'onDrop', 'not deleted', 'Planner document']) assert.ok(ui.includes(t), t)
+  assert.ok(!/folders\.some|parentId|nested|subfolder/i.test(ui), 'no nesting')
+  assert.match(ui, /grid-template|gridTemplateColumns: 'repeat\(auto-fill, minmax\(/)
+  assert.match(ui, /\(hover: hover\) and \(pointer: fine\)/, 'HTML5 drag only for a mouse-like pointer (touch / Capacitor WebView use Move to Folder)')
+  assert.match(modal, /!finePointer \? \{\} : \(\{/)
   assert.match(modal, /function deleteFolderSafely[\s\S]*?docsToUnfile\(allEntries, id\)[\s\S]*?removeJournalFolder\(id\)/, 'un-file first, then remove the folder')
   assert.ok(!/function deleteFolderSafely[\s\S]{0,400}deleteDocs|function deleteFolderSafely[\s\S]{0,400}notes: ''/.test(modal), 'a folder delete never deletes a document')
-  assert.ok((modal.match(/onMoveToFolder=\{/g) ?? []).length === 4, 'Move to Folder on every Library view mode')
-  assert.ok((modal.match(/\.\.\.\(isSelectMode \? \{\} : dragProps\(entry\.dateKey\)\)/g) ?? []).length === 4, 'drag on every Library view mode')
 })
 
-test('autosave integrity: both persist paths re-attach labels/folder; extra documents go through the CAS queue; notes are normalised on every save', () => {
+test('folders organise NOTES only: a Planner document can leave a (v1.330) folder but never enter one; the Documents tab has no folder actions; legacy filed documents stay visible', () => {
+  assert.match(modal, /if \(folderId && cur\?\.kind !== 'note'\) \{ refused = true; continue \}/)
+  assert.ok(!/onMoveToFolder|dragProps\(entry\.dateKey\)|card-move/.test(modal), 'no Move to Folder / drag on Library document cards')
+  assert.match(modal, /filedDocEntries = useMemo\(\(\) => allEntries\.filter\(e => e\.kind === 'doc' && e\.folderId\)/)
+  const ui = strip(read('components/xpadite/LibraryNotesFolders.tsx'))
+  assert.match(ui, /legacy = filedDocs\.filter\(d => d\.folderId === open\.id\)/); assert.match(ui, /label: 'Remove from folder'/)
+  // pure: a doc filed by v1.330 is still listed with its folder; removing it only clears that one field
+  const raw = D.withFolder(docRaw([sec('a', 'Plan')], { title: 'Day plan', labelIds: ['L1'] }), 'f1')
+  const e = D.buildLibraryEntries({ '2026-11-09': raw }, [], [{ id: 'f1', name: 'Marketing' }])[0]
+  assert.equal(e.kind, 'doc'); assert.equal(e.folderId, 'f1')
+  const out = parse(D.withFolder(raw, null)); assert.ok(!('folderId' in out)); assert.deepEqual(out.labelIds, ['L1']); assert.deepEqual(out.blocks, parse(raw).blocks)
+})
+
+test('autosave integrity: both persist paths re-attach labels/folder; extra documents go through the CAS queue; a Note is saved exactly as written', () => {
   assert.match(modal, /notes: mergeDocMeta\(content, prev\.notes\)/)
   const hook = strip(read('components/xpadite/useJournalDocs.ts'))
-  assert.match(hook, /updateRaw\(id, stored => mergeDocMeta\(raw, stored\)\)/); assert.match(hook, /if \(cur\.kind === 'note'\) next = normalizeNoteRaw\(next\)/)
+  assert.match(hook, /updateRaw\(id, stored => mergeDocMeta\(raw, stored\)\)/); assert.ok(!/normalizeNoteRaw/.test(hook), 'a Note is saved exactly as the editor wrote it (no section collapsing)')
   assert.match(hook, /saveJournalDocCas\(sb, data, cur\.rev\)/); assert.match(hook, /conflictCopy/); assert.match(hook, /new DaySyncQueue<ExtraDoc>/)
   assert.match(hook, /sentRef/); assert.match(hook, /includes\(res\.content\)[\s\S]*?if \(res\.content === data\.raw\) return[\s\S]*?continue/, 'a retry after a LOST response recognises its own earlier write — never a duplicate or a self "conflict copy"')
   assert.match(hook, /fetchJournalDocs[\s\S]*?status === 'error'[\s\S]*?return[\s\S]*?seedStarterNotes/, 'starter notes are requested only AFTER a successful server read')

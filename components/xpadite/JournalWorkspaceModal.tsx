@@ -9,7 +9,7 @@ import type { JournalDoc } from './types'
 import {
   buildLibraryEntries, extractFirstLine, extraIdOf, isExtraKey, mergeDocMeta, docsToUnfile, type LibEntry,
 } from './journalDocs'
-import { NotesPane, FoldersPane, MoveToFolderDialog, DragTray, DeleteFolderDialog, NamePrompt, type DragProps } from './LibraryNotesFolders'
+import { NotesLibrary, MoveToFolderDialog, DragTray, DeleteFolderDialog, NamePrompt, useFinePointer, type DragProps } from './LibraryNotesFolders'
 import { exportToTxt, exportToPdf, exportToDocx, makeFilename, type ExportEntry } from './journalExport'
 import { ColorPickerModal } from './ColorPickerModal'
 import { COLOR_PALETTE, normalizeHexColor, hexToRgba } from './utils'
@@ -418,13 +418,18 @@ function hoverHandlers(isDark: boolean) {
 // takes over, purely as a presentation swap: same options, same onChange,
 // same underlying state. Used for "Default" (view mode) and "New" (sort).
 function ResponsiveToolbarSelect<T extends string>({
-  isDark, bdr, value, options, onChange, style, title,
+  isDark, bdr, value, options, onChange, onActivate, style, title,
 }: {
   isDark: boolean
   bdr: string
   value: T
   options: { value: T; label: string }[]
   onChange: (v: T) => void
+  /**
+   * v1.332: called when the control is pressed / tapped / opened with the keyboard — BEFORE any choice. A native <select> fires no change event when the
+   * already-selected option is picked again, so this is how "touching Default or Newer while Notes is showing" always returns to the documents.
+   */
+  onActivate?: () => void
   style: React.CSSProperties
   title: string
 }) {
@@ -457,6 +462,7 @@ function ResponsiveToolbarSelect<T extends string>({
   }, [open])
 
   function handleToggle() {
+    onActivate?.()
     if (open) { requestClose(); return }
     const rect = btnRef.current?.getBoundingClientRect()
     if (rect) {
@@ -494,6 +500,8 @@ function ResponsiveToolbarSelect<T extends string>({
         className="xp-lib-native-only"
         value={value}
         onChange={e => onChange(e.target.value as T)}
+        onPointerDown={() => onActivate?.()}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'F4') onActivate?.() }}
         style={style}
         title={title}
       >
@@ -543,11 +551,13 @@ function ResponsiveToolbarSelect<T extends string>({
 // than a miniature bespoke prev/next strip. Purely date filtering — Folders
 // are a separate concept and are never listed here.
 function DateFilterDropdown({
-  isDark, bdr, filter, onSelectAll, onSelectMonth,
+  isDark, bdr, filter, onSelectAll, onSelectMonth, returnsToDocuments = false,
 }: {
   isDark: boolean
   bdr: string
   filter: { year: number; month: number } | null
+  /** v1.332: while the Notes tab is showing, "All Documents" is the way back to the documents, so it stays enabled even when no month is applied. */
+  returnsToDocuments?: boolean
   onSelectAll: () => void
   onSelectMonth: (year: number, month: number) => void
 }) {
@@ -597,6 +607,7 @@ function DateFilterDropdown({
   const realMonth = realDate.getMonth()
   const realYear  = realDate.getFullYear()
   const isAll     = filter === null
+  const allInert  = isAll && !returnsToDocuments
 
   return (
     <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
@@ -646,15 +657,15 @@ function DateFilterDropdown({
           <button
             className="xp-lib-all-docs"
             onClick={() => { onSelectAll(); requestClose() }}
-            disabled={isAll}
+            disabled={allInert}
             style={{
               width: '100%', padding: '8px 12px', borderRadius: 9, marginBottom: 10,
-              fontSize: 11.5, fontWeight: isAll ? 500 : 700, textAlign: 'center',
-              cursor: isAll ? 'default' : 'pointer',
-              background: isAll ? (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)') : '#7c3aed',
-              border: `0.5px solid ${isAll ? (isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)') : 'rgba(124,58,237,0.90)'}`,
-              color: isAll ? (isDark ? 'rgba(255,255,255,0.32)' : 'rgba(0,0,0,0.30)') : '#ffffff',
-              boxShadow: isAll ? 'none' : '0 2px 12px rgba(124,58,237,0.40)',
+              fontSize: 11.5, fontWeight: allInert ? 500 : 700, textAlign: 'center',
+              cursor: allInert ? 'default' : 'pointer',
+              background: allInert ? (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)') : '#7c3aed',
+              border: `0.5px solid ${allInert ? (isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)') : 'rgba(124,58,237,0.90)'}`,
+              color: allInert ? (isDark ? 'rgba(255,255,255,0.32)' : 'rgba(0,0,0,0.30)') : '#ffffff',
+              boxShadow: allInert ? 'none' : '0 2px 12px rgba(124,58,237,0.40)',
             }}
           >
             All Documents
@@ -906,7 +917,6 @@ interface LibraryCardMenuProps {
   onRename: () => void
   onExport: () => void
   onDeleteRequest: () => void
-  onMoveToFolder?: () => void
   categories: LibraryCategory[]
   activeLabelIds: string[]
   onToggleLabel: (id: string) => void
@@ -917,7 +927,7 @@ interface LibraryCardMenuProps {
 
 function LibraryCardMenu({
   isDark, bdr, isOpen, view, onOpenChange, onViewChange,
-  onRename, onExport, onDeleteRequest, onMoveToFolder,
+  onRename, onExport, onDeleteRequest,
   categories, activeLabelIds, onToggleLabel, onDeleteLabel, onCreateLabel,
   wrapperStyle,
 }: LibraryCardMenuProps) {
@@ -1009,7 +1019,6 @@ function LibraryCardMenu({
             <>
               <button onClick={onRename} style={itemStyle}><span>✏️</span>Rename</button>
               <button onClick={onExport} style={itemStyle}><span>📤</span>Export</button>
-              {onMoveToFolder && <button onClick={onMoveToFolder} data-testid="card-move" style={itemStyle}><span>📁</span>Move to Folder</button>}
               <button onClick={() => onViewChange('category')} style={itemStyle}><span>🏷</span>Labels<span style={{ marginLeft: 'auto', opacity: 0.5 }}>›</span></button>
               <div style={dividerStyle} />
               <button onClick={onDeleteRequest} style={{ ...itemStyle, color: '#f87171' }}><span>🗑</span>Delete</button>
@@ -1082,13 +1091,15 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   const [view, setView]             = useState<'calendar' | 'editor' | 'library'>('editor')
   // v1.330 - Library tabs (Documents = the existing list; Notes; Folders), the folder being browsed, and which document the Editor is on.
   // activeDocId === null -> the editor shows the day's PRIMARY document (calData[editorDate].notes), exactly as before.
-  const [libTab, setLibTab]         = useState<'documents' | 'notes' | 'folders'>('documents')
+  const [libTab, setLibTab]         = useState<'documents' | 'notes'>('documents')
   const [openFolderId, setOpenFolderId] = useState<string | null>(null)
   const [activeDocId, setActiveDocId]   = useState<string | null>(null)
   const [dragKey, setDragKey]           = useState<string | null>(null)
   const [moveKeys, setMoveKeys]         = useState<string[] | null>(null)
   const [moveNewFolder, setMoveNewFolder] = useState(false)
   const [deleteFolderId, setDeleteFolderId] = useState<string | null>(null)
+  const [createFolderOpen, setCreateFolderOpen] = useState(false)
+  const finePointer = useFinePointer()      // HTML5 drag-and-drop only for a mouse-like pointer; touch uses "Move to Folder"
   const [calYear, setCalYear]       = useState(todayDate.getFullYear())
   const [openQ, setOpenQ]           = useState<Record<string, boolean>>({ Q1: true, Q2: true, Q3: true, Q4: true })
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
@@ -1132,6 +1143,8 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     return buildLibraryEntries(notes, extraDocsList, journalFolders)
   }, [calData, extraDocsList, journalFolders])
   const noteEntries = useMemo(() => allEntries.filter(e => e.kind === 'note'), [allEntries])
+  // ordinary Planner documents that v1.330 allowed into a folder: kept visible inside their folder (never hidden or orphaned), removable but never re-addable
+  const filedDocEntries = useMemo(() => allEntries.filter(e => e.kind === 'doc' && e.folderId), [allEntries])
   const libraryEntries = useMemo(() => {
     const entries = allEntries.filter(e => e.kind === 'doc')
     // same date -> keep creation order so several documents on one day stay stable
@@ -1343,11 +1356,16 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   }
   function moveDocs(keys: string[], folderId: string | null) {
     // Only the document's folder field changes: no copy is made and no content is touched. A document already there is left alone.
+    // Folders organise NOTES only: an ordinary Planner document can be taken OUT of a folder (v1.330 allowed them in) but never moved INTO one.
+    let refused = false
     for (const key of keys) {
-      if ((allEntries.find(e => e.key === key)?.folderId ?? null) === folderId) continue
+      const cur = allEntries.find(e => e.key === key)
+      if (folderId && cur?.kind !== 'note') { refused = true; continue }
+      if ((cur?.folderId ?? null) === folderId) continue
       updateEntryDoc(key, doc => { const u = { ...doc }; if (folderId) u.folderId = folderId; else delete u.folderId; return u })
     }
     setMoveKeys(null)
+    if (refused) { setToast('Only Notes can be moved into folders'); return }
     setToast(folderId ? `Moved to \u201C${journalFolders.find(f => f.id === folderId)?.name ?? 'folder'}\u201D` : 'Removed from folder')
   }
   function createFolder(name: string): string {
@@ -1362,7 +1380,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
     if (openFolderId === id) setOpenFolderId(null)
     setDeleteFolderId(null)
   }
-  const dragProps = (key: string): DragProps => ({
+  const dragProps = (key: string): DragProps => !finePointer ? {} : ({
     draggable: true,
     onDragStart: e => { e.dataTransfer.setData('text/xp-doc', key); e.dataTransfer.effectAllowed = 'move'; setDragKey(key) },
     onDragEnd: () => setDragKey(null),
@@ -1940,7 +1958,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         </button>
       </div>
 
-      {libTab === 'documents' ? (<>
       {/* Controls bar — wraps to a second line on narrow viewports instead of scrolling,
           so the "⋮ More menu" dropdown (which opens downward, below the bar) never gets
           clipped by a scroll container; this keeps everything on-screen with no page overflow. */}
@@ -2022,7 +2039,8 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   <ResponsiveToolbarSelect
                     isDark={isDark} bdr={bdr}
                     value={libViewMode}
-                    onChange={setLibViewMode}
+                    onChange={v => { setLibViewMode(v); setLibTab('documents') }}
+                    onActivate={() => setLibTab('documents')}
                     style={{ ...ss, maxWidth: 62 }}
                     title="View mode"
                     options={[
@@ -2035,7 +2053,8 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   <ResponsiveToolbarSelect
                     isDark={isDark} bdr={bdr}
                     value={libSortOrder}
-                    onChange={setLibSortOrder}
+                    onChange={v => { setLibSortOrder(v); setLibTab('documents') }}
+                    onActivate={() => setLibTab('documents')}
                     style={{ ...ss, maxWidth: 60 }}
                     title="Sort order"
                     options={[
@@ -2048,8 +2067,9 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   <DateFilterDropdown
                     isDark={isDark} bdr={bdr}
                     filter={libMonthYearFilter}
-                    onSelectAll={() => setLibMonthYearFilter(null)}
-                    onSelectMonth={(year, month) => setLibMonthYearFilter({ year, month })}
+                    returnsToDocuments={libTab === 'notes'}
+                    onSelectAll={() => { setLibMonthYearFilter(null); setLibTab('documents') }}
+                    onSelectMonth={(year, month) => { setLibMonthYearFilter({ year, month }); setLibTab('documents') }}
                   />
 
                   {/* 🏷 Labels — FILTERS the Library (finding documents), distinct from the
@@ -2062,16 +2082,28 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                     isDark={isDark} bdr={bdr}
                     categoryFilter={libCategoryFilter}
                     categories={allCategories}
-                    onSelectCategory={id => setLibCategoryFilter(id)}
+                    onSelectCategory={id => { setLibCategoryFilter(id); setLibTab('documents') }}
                     onCreateLabel={() => setShowCreateLabel(true)}
                   />
+                  {/* v1.332 - Notes is a direct Library tab (after Labels): it swaps the content area to the Notes collection (folders + Notes).
+                      Choosing Default / Newer / All / Labels (or the Library button below) returns to the documents. */}
+                  <button
+                    type="button" data-testid="library-notes-tab" aria-pressed={libTab === 'notes'}
+                    onClick={() => { setLibTab('notes'); setOpenFolderId(null) }}
+                    style={{
+                      ...ss, padding: '4px 9px', fontWeight: 700, whiteSpace: 'nowrap',
+                      ...(libTab === 'notes'
+                        ? { background: '#7c3aed', color: '#ffffff', border: '0.5px solid #a78bfa', boxShadow: '0 0 0 2px rgba(124,58,237,0.28)' }
+                        : null),
+                    }}
+                  >Notes</button>
                 </>
               )
             })()}
 
             <div style={{ flex: 1 }} />
 
-            {/* v1.330 - ONE top-right burger menu: Notes, Folders, Delete Selected (the old standalone Delete button lives here now), plus Export. */}
+            {/* ONE top-right menu: Create Folder (folders live in the Notes collection), Delete Selected, Export. */}
             <div style={{ position: 'relative', flexShrink: 0 }}>
               <button
                 onClick={e => { e.stopPropagation(); setShowMoreMenu(v => !v) }}
@@ -2097,10 +2129,9 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   minWidth: 190,
                 }}>
                   {([
-                    { id: 'notes',   icon: '\uD83D\uDDD2\uFE0F', label: 'Notes',           danger: false, run: () => { setLibTab('notes'); setOpenFolderId(null) } },
-                    { id: 'folders', icon: '\uD83D\uDCC1', label: 'Folders',         danger: false, run: () => { setLibTab('folders'); setOpenFolderId(null) } },
-                    { id: 'delete',  icon: '\uD83D\uDDD1\uFE0F', label: 'Delete Selected', danger: true,  run: () => enterSelectMode() },
-                    { id: 'export',  icon: '\uD83D\uDCE4', label: 'Export documents', danger: false, run: () => enterExportMode() },
+                    { id: 'create-folder', icon: '\uD83D\uDCC1', label: 'Create Folder',    danger: false, run: () => setCreateFolderOpen(true) },
+                    { id: 'delete',  icon: '\uD83D\uDDD1\uFE0F', label: 'Delete Selected', danger: true,  run: () => { setLibTab('documents'); enterSelectMode() } },
+                    { id: 'export',  icon: '\uD83D\uDCE4', label: 'Export documents', danger: false, run: () => { setLibTab('documents'); enterExportMode() } },
                   ]).map(it => (
                     <button
                       key={it.id}
@@ -2125,7 +2156,8 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         )}
       </div>
 
-      {/* Entry list */}
+      {/* Entry list (Documents) / Notes collection */}
+      {libTab === 'documents' ? (
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
         {filteredLibraryEntries.length === 0 ? (
           <div style={{ textAlign: 'center', paddingTop: 48, color: muted, fontSize: 13 }}>
@@ -2179,7 +2211,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
-                  {...(isSelectMode ? {} : dragProps(entry.dateKey))}
                   onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => doOpenEditor(entry.dateKey)}
                   onKeyDown={e => {
                     if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
@@ -2223,7 +2254,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
                       onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
-                      onMoveToFolder={() => { setMoveKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       categories={allCategories} activeLabelIds={entry.labelIds}
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
                       onDeleteLabel={handleDeleteLabel}
@@ -2289,7 +2319,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
-                  {...(isSelectMode ? {} : dragProps(entry.dateKey))}
                   onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => doOpenEditor(entry.dateKey)}
                   onKeyDown={e => {
                     if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
@@ -2377,7 +2406,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
                       onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
-                      onMoveToFolder={() => { setMoveKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       categories={allCategories} activeLabelIds={entry.labelIds}
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
                       onDeleteLabel={handleDeleteLabel}
@@ -2407,7 +2435,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
-                  {...(isSelectMode ? {} : dragProps(entry.dateKey))}
                   onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => doOpenEditor(entry.dateKey)}
                   onKeyDown={e => {
                     if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
@@ -2450,7 +2477,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
                       onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
-                      onMoveToFolder={() => { setMoveKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       categories={allCategories} activeLabelIds={entry.labelIds}
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
                       onDeleteLabel={handleDeleteLabel}
@@ -2523,7 +2549,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                   key={entry.dateKey}
                   role="button"
                   tabIndex={0}
-                  {...(isSelectMode ? {} : dragProps(entry.dateKey))}
                   onClick={isSelectMode ? () => toggleSelectKey(entry.dateKey) : () => doOpenEditor(entry.dateKey)}
                   onKeyDown={e => {
                     if (isSelectMode) { if (e.key === 'Enter' || e.key === ' ') toggleSelectKey(entry.dateKey) }
@@ -2566,7 +2591,6 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
                       onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
-                      onMoveToFolder={() => { setMoveKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       categories={allCategories} activeLabelIds={entry.labelIds}
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
                       onDeleteLabel={handleDeleteLabel}
@@ -2630,24 +2654,16 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
             })}
           </div>
         )}
-        {dragFooter(null, 20, 16)}
       </div>
 
-      </>) : libTab === 'notes' ? (
-        <NotesPane
-          isDark={isDark} notes={noteEntries} unavailable={journalDocs.status === 'unavailable'}
-          onBack={() => setLibTab('documents')} onCreate={() => createExtra('note')} onOpen={doOpenEditor}
-          onRename={(key, title) => updateEntryDoc(key, doc => { const u = { ...doc }; if (title.trim()) u.title = title.trim(); else delete u.title; return u })}
-          onDelete={key => setDeleteConfirmKeys([key])} onMove={key => setMoveKeys([key])}
-          dragProps={dragProps} footer={dragFooter(null, 14, 18)}
-        />
       ) : (
-        <FoldersPane
-          isDark={isDark} folders={journalFolders} entries={allEntries} openFolderId={openFolderId} unavailable={false}
-          onOpenFolder={setOpenFolderId} onBack={() => { setLibTab('documents'); setOpenFolderId(null) }}
-          onCreate={name => { createFolder(name) }} onRename={(id, name) => { const f = journalFolders.find(x => x.id === id); if (f) updateJournalFolder({ ...f, name }) }}
-          onDelete={id => setDeleteFolderId(id)} onOpenDoc={doOpenEditor} onMove={key => setMoveKeys([key])} onUnfile={key => moveDocs([key], null)}
-          onDropOnFolder={(key, fid) => onDropOnFolder(key, fid)} dragProps={dragProps} footer={dragFooter(openFolderId, 14, 18)}
+        <NotesLibrary
+          isDark={isDark} folders={journalFolders} notes={noteEntries} filedDocs={filedDocEntries} openFolderId={openFolderId} unavailable={journalDocs.status === 'unavailable'}
+          onOpenFolder={setOpenFolderId} onOpen={doOpenEditor}
+          onRename={(key, title) => updateEntryDoc(key, doc => { const u = { ...doc }; if (title.trim()) u.title = title.trim(); else delete u.title; return u })}
+          onDelete={key => setDeleteConfirmKeys([key])} onMove={key => setMoveKeys([key])} onUnfile={key => moveDocs([key], null)}
+          onRenameFolder={(id, name) => { const f = journalFolders.find(x => x.id === id); if (f) updateJournalFolder({ ...f, name }) }} onDeleteFolder={id => setDeleteFolderId(id)}
+          onDropOnFolder={(key, fid) => onDropOnFolder(key, fid)} dragProps={dragProps} footer={openFolderId ? dragFooter(openFolderId, 14, 18) : null}
         />
       )}
 
@@ -2732,6 +2748,11 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
         <NamePrompt isDark={isDark} title="Create Folder" initial="" confirmLabel="Create & move"
           onSubmit={name => { const id = createFolder(name); setMoveNewFolder(false); moveDocs(moveKeys, id) }}
           onClose={() => setMoveNewFolder(false)} />
+      )}
+      {createFolderOpen && (
+        <NamePrompt isDark={isDark} title="Create Folder" initial="" confirmLabel="Create"
+          onSubmit={name => { createFolder(name); setCreateFolderOpen(false); setLibTab('notes'); setOpenFolderId(null) }}
+          onClose={() => setCreateFolderOpen(false)} />
       )}
       {deleteFolderId && (() => {
         const f = journalFolders.find(x => x.id === deleteFolderId)

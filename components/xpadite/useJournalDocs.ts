@@ -13,7 +13,7 @@ import {
 import { DaySyncQueue } from './daySync'
 import {
   type ExtraDoc, type ExtraKind, blankDocRaw, buildStarterNotes, conflictCopy, mergeDocMeta, mergeServerDocs, newDocId,
-  normalizeNoteRaw, sortDocs,
+  sortDocs,
 } from './journalDocs'
 
 const CACHE_KEY = 'xp9jx'          // { uid, docs, unsynced }
@@ -205,8 +205,7 @@ export function useJournalDocs(userId: string, setToast: (m: string) => void): J
   const updateRaw = useCallback((id: string, fn: (raw: string) => string) => {
     const cur = docsRef.current.find(d => d.id === id)
     if (!cur) return
-    let next = fn(cur.raw)
-    if (cur.kind === 'note') next = normalizeNoteRaw(next)
+    const next = fn(cur.raw)
     if (next === cur.raw) return
     const updated = { ...cur, raw: next }
     commit(docsRef.current.map(d => (d.id === id ? updated : d)))

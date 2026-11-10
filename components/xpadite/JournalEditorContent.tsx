@@ -39,7 +39,6 @@ import { createDictation, prefersSingleUtterance, type Dictation } from './speec
 import { formatDictation } from './speechPunctuation'
 import type { PlannerTaskNode } from './plannerTaskBridge'
 import type { SectionColorKey } from './journalUtils'
-import { canInsertBlock, canAddSection } from './journalDocs'
 import { PlannerHeaderMenu } from './PlannerHeaderMenu'
 
 // Re-export for backward compat — JournalEditorEmbed imports these
@@ -646,8 +645,6 @@ interface JournalTextBlockProps {
   canMoveDown: boolean
   onMoveUp: () => void
   onMoveDown: () => void
-  /** v1.330: this is a Note's single section - Split / Duplicate / Move Section stay visible but dimmed and inactive */
-  noteLocked?: boolean
 }
 
 const JournalTextBlock = React.memo(function JournalTextBlock({
@@ -656,7 +653,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
   onDelete, onDuplicate, onTransferSection,
   onMoveActivate, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
   onPasteImage, onSplitSection, onMergeSection, onUpdateBlock, onCellResizeStart, onDeleteImageCell, onEditMindMapCell,
-  canMoveUp, canMoveDown, onMoveUp, onMoveDown, noteLocked = false,
+  canMoveUp, canMoveDown, onMoveUp, onMoveDown,
 }: JournalTextBlockProps) {
   const { updateDay, setToast } = useApp()
   const [menuOpen,       setMenuOpen]       = useState(false)
@@ -1150,9 +1147,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                       ▦ Add Table
                     </button>
                     {!block.partitions ? (
-                      <button onClick={() => { if (noteLocked) return; onSplitSection?.(); setMenuOpen(false) }} disabled={noteLocked} aria-disabled={noteLocked}
-                        title={noteLocked ? 'A Note has a single section' : undefined} data-testid="menu-split-section"
-                        style={{ ...menuItemStyle(isDark), ...(noteLocked ? { opacity: 0.38, cursor: 'not-allowed' } : null) }}>
+                      <button onClick={() => { onSplitSection?.(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
                         ⬓ Split Section
                       </button>
                     ) : (
@@ -1164,16 +1159,12 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                       🎨 Change Color
                     </button>
                     {!!onDuplicate && (
-                      <button onClick={() => { if (noteLocked) return; onDuplicate(); setMenuOpen(false) }} disabled={noteLocked} aria-disabled={noteLocked}
-                        title={noteLocked ? 'A Note has a single section' : undefined} data-testid="menu-duplicate-section"
-                        style={{ ...menuItemStyle(isDark), ...(noteLocked ? { opacity: 0.38, cursor: 'not-allowed' } : null) }}>
+                      <button onClick={() => { onDuplicate(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
                         📑 Duplicate
                       </button>
                     )}
                     {!!onTransferSection && (
-                      <button onClick={() => { if (noteLocked) return; onTransferSection(); setMenuOpen(false) }} disabled={noteLocked} aria-disabled={noteLocked}
-                        title={noteLocked ? 'A Note has a single section' : undefined} data-testid="menu-move-section"
-                        style={{ ...menuItemStyle(isDark), ...(noteLocked ? { opacity: 0.38, cursor: 'not-allowed' } : null) }}>
+                      <button onClick={() => { onTransferSection(); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
                         📅 Move Section
                       </button>
                     )}
@@ -2238,7 +2229,7 @@ interface JournalEditorContentProps {
   onDirtyChange?: (dirty: boolean) => void
   closeIntent?: 'save' | 'discard' | null
   flushRef?: React.MutableRefObject<(() => void) | null>
-  // v1.330: a Note is this same editor limited to exactly ONE section (the rule is enforced in the block logic below, not only in the UI)
+  // v1.332: a Note is this same editor with no restrictions (any number of sections); `isNote` only changes the header (no day arrows, "Note" label)
   isNote?: boolean
   onCreateNew?: () => void       // header menu: a new independent document on the current day
   onCreateNote?: () => void      // header menu: a new single-section Note
@@ -2750,7 +2741,6 @@ export function JournalEditorContent({
   // IMPORTANT: always update blocksRef.current BEFORE calling buildDocStr()
 
   function insertBlock(block: JournalBlock, atIndex: number) {
-    if (isNote && !canInsertBlock('note', block)) return   // a Note holds exactly one section: nothing may add another (images / Mind Maps are not sections)
     const next = [...blocksRef.current]
     next.splice(atIndex + 1, 0, block)
     blocksRef.current = next
@@ -2761,8 +2751,6 @@ export function JournalEditorContent({
   }
 
   function deleteBlock(id: string) {
-    // a Note's one and only section can never be removed (that would leave it with none)
-    if (isNote) { const t = blocksRef.current.find(b => b.id === id); if (t && (t.type === 'section' || t.type === 'text')) return }
     contentMapRef.current.delete(id)
     const filtered = blocksRef.current.filter(b => b.id !== id)
     const next = filtered.length > 0 ? filtered : [createSectionBlock('lavender')]
@@ -2797,7 +2785,6 @@ export function JournalEditorContent({
   // custom collision math needed, and on mobile the grid already collapses to a
   // single stacked column, so the duplicate always lands below there too.
   function duplicateBlock(id: string) {
-    if (isNote) return                                      // duplicating a section would add a second one
     const idx = blocksRef.current.findIndex(b => b.id === id)
     if (idx < 0) return
     const original = blocksRef.current[idx]
@@ -2830,7 +2817,6 @@ export function JournalEditorContent({
   // before deleteBlock removes the origin, so Move never drops content into a
   // gap between the two.
   function transferSection(mode: 'move' | 'copy', id: string, destKey: string) {
-    if (isNote) return                                      // moving would remove the Note's only section
     const block = blocksRef.current.find(b => b.id === id)
     if (!block) return
     const liveContent = contentMapRef.current.get(id) ?? block.content ?? ''
@@ -3148,7 +3134,6 @@ export function JournalEditorContent({
   }
 
   function handleSplitSection(blockId: string) {
-    if (isNote) return                                      // Split Section is inactive in a Note
     const block = blocksRef.current.find(b => b.id === blockId)
     if (!block || block.partitions) return
     const currentCell: SectionCell = block.sectionImage ?? mkContentCell(block.content ?? '')
@@ -4688,8 +4673,7 @@ export function JournalEditorContent({
                             onContentChange={onBlockContentChange}
                             onFocus={onEditorFocus}
                             onSelectionUpdate={onEditorSelectionUpdate}
-                            noteLocked={isNote && block.type === 'section'}
-                            onDelete={blocks.length > 1 && !(isNote && (block.type === 'section' || block.type === 'text')) ? () => deleteBlock(block.id) : undefined}
+                            onDelete={blocks.length > 1 ? () => deleteBlock(block.id) : undefined}
                             onDuplicate={block.type === 'section' ? () => duplicateBlock(block.id) : undefined}
                             onTransferSection={block.type === 'section' ? () => setTransferBlockId(block.id) : undefined}
                             onMoveActivate={block.type === 'section' ? () => {
@@ -4867,7 +4851,7 @@ export function JournalEditorContent({
 
                 {/* + Section — mobile primary slot (desktop version lives after Draw) */}
                 <div className="xp-jd-sec-mo">
-                  <SectionPicker isDark={isDark} disabled={!canAddSection(isNote ? 'note' : 'day')} onPick={color => {
+                  <SectionPicker isDark={isDark} onPick={color => {
                     insertBlock(createSectionBlock(color), blocks.length - 1)
                   }} />
                 </div>
@@ -4980,7 +4964,7 @@ export function JournalEditorContent({
 
                 {/* + Section — desktop slot (mobile version is before Undo/Redo) */}
                 <div className="xp-jd-sec-dt" style={{ display: 'contents' }}>
-                  <SectionPicker isDark={isDark} disabled={!canAddSection(isNote ? 'note' : 'day')} onPick={color => {
+                  <SectionPicker isDark={isDark} onPick={color => {
                     insertBlock(createSectionBlock(color), blocks.length - 1)
                   }} />
                 </div>
@@ -5505,7 +5489,7 @@ function ListPicker({ activeType, onPick }: { activeType: 'bullet' | 'numbers' |
 
 // ─── Section picker inline component ─────────────────────────────────────────
 
-function SectionPicker({ isDark, onPick, disabled = false }: { isDark: boolean; onPick: (c: SectionColorKey) => void; disabled?: boolean }) {
+function SectionPicker({ isDark, onPick }: { isDark: boolean; onPick: (c: SectionColorKey) => void }) {
   const [open, setOpen] = useState(false)
   const [hoveredKey, setHoveredKey] = useState<string | null>(null)
   const [popPos, setPopPos] = useState<{ left: number; bottom: number } | null>(null)
@@ -5527,7 +5511,6 @@ function SectionPicker({ isDark, onPick, disabled = false }: { isDark: boolean; 
   }, [open])
 
   function handleToggle() {
-    if (disabled) return
     if (open) { setOpen(false); return }
     const rect = btnRef.current?.getBoundingClientRect()
     if (rect) {
@@ -5548,13 +5531,10 @@ function SectionPicker({ isDark, onPick, disabled = false }: { isDark: boolean; 
           color: '#c4b5fd',
           fontSize: 12, fontWeight: open ? 600 : 500,
           transition: 'all 120ms', flexShrink: 0, whiteSpace: 'nowrap' as const,
-          ...(disabled ? { opacity: 0.38, cursor: 'not-allowed' } : null),
         }}
         onClick={handleToggle}
-        disabled={disabled}
-        aria-disabled={disabled}
         data-testid="add-section-btn"
-        title={disabled ? 'A Note has a single section' : 'Add a colored section'}
+        title="Add a colored section"
       >+ Section</button>
 
       {open && popPos && (

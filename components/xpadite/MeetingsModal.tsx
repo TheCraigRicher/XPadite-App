@@ -670,7 +670,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   return (
     <ScheduleContext.Provider value={ctx}>
     <div
-      className="fixed inset-0 z-[70] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:p-3 sm:pt-4 lg:transition-[padding] lg:duration-200 lg:motion-reduce:transition-none"
+      className="xp-tab-overlay fixed inset-0 z-[70] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:p-3 sm:pt-4 lg:transition-[padding] lg:duration-200 lg:motion-reduce:transition-none"
       style={{ background: 'rgba(0,0,0,0.55)', ...(maximized ? { padding: 0 } : null) }}
       data-maximized={maximized ? 'true' : 'false'}
       onClick={onClose}
@@ -703,7 +703,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="xp-meet-title"
-        className="relative w-full h-full sm:h-[calc(100dvh-28px)] sm:max-w-[640px] md:max-w-[900px] lg:max-w-[1296px] rounded-none sm:rounded-2xl max-sm:border-0! overflow-hidden flex flex-col lg:transition-[max-width,height,border-radius] lg:duration-200 lg:motion-reduce:transition-none"
+        className="xp-tab-shell relative w-full h-full sm:h-[calc(100dvh-28px)] sm:max-w-[640px] md:max-w-[900px] lg:max-w-[1296px] rounded-none sm:rounded-2xl max-sm:border-0! overflow-hidden flex flex-col lg:transition-[max-width,height,border-radius] lg:duration-200 lg:motion-reduce:transition-none"
         style={{
           background: 'var(--xp-card)', border: maximized ? 'none' : '0.5px solid var(--xp-bdr2)', boxShadow: maximized ? 'none' : '0 24px 64px rgba(0,0,0,0.32)', paddingBottom: 'env(safe-area-inset-bottom, 0px)',
           // maximised: true edge-to-edge (no margins, no radius, whole viewport); the lg:* classes above are the normal size

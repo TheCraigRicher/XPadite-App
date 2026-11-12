@@ -474,12 +474,12 @@ export function GoalManagerModal({ onClose }: { onClose: () => void }) {
   return (
     <>
       <div
-        className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-50 flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-3 sm:pt-4"
+        className="xp-tab-overlay fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-50 flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-3 sm:pt-4"
         style={{ background: 'rgba(0,0,0,0.55)' }}
         onClick={onClose}
       >
         <div
-          className="flex flex-col w-full h-full sm:h-auto sm:rounded-2xl sm:shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] sm:mb-6"
+          className="xp-tab-shell flex flex-col w-full h-full sm:h-auto sm:rounded-2xl sm:shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] sm:mb-6"
           style={{ background: 'var(--xp-bg)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 20px 50px rgba(0,0,0,0.12)' }}
           onClick={e => e.stopPropagation()}
         >

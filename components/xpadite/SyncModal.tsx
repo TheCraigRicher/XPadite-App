@@ -271,7 +271,7 @@ export function SyncModal({ onClose, connections = {}, onConnect, onManage }: Sy
 
   return (
     <div
-      className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[70] flex items-stretch sm:items-center justify-center p-0 sm:p-4"
+      className="xp-tab-overlay fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[70] flex items-stretch sm:items-center justify-center p-0 sm:p-4"
       style={{ background: 'rgba(0,0,0,0.55)' }}
       onClick={onClose}
     >
@@ -299,7 +299,7 @@ export function SyncModal({ onClose, connections = {}, onConnect, onManage }: Sy
         role="dialog"
         aria-modal="true"
         aria-labelledby="xp-sync-title"
-        className="w-full sm:max-w-[560px] h-full sm:h-auto sm:max-h-[86vh] rounded-none sm:rounded-2xl max-sm:border-0! overflow-hidden flex flex-col"
+        className="xp-tab-shell w-full sm:max-w-[560px] h-full sm:h-auto sm:max-h-[86vh] rounded-none sm:rounded-2xl max-sm:border-0! overflow-hidden flex flex-col"
         style={{
           background: 'var(--xp-card)',
           border: '0.5px solid var(--xp-bdr2)',

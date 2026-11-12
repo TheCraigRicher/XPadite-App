@@ -606,3 +606,49 @@ html, body {
     display: none;
   }
 }
+
+/* ── Tablet modals (v1.334) ───────────────────────────────────────────────
+   TABLET = a TOUCH-FIRST device (pointer: coarse) whose viewport is 640-1400px wide and at least 560px tall. That covers every
+   iPad / Android tablet / Surface-style size in portrait AND landscape (the app's own sm..lg tiers would call a 1024px+ landscape tablet
+   "desktop"), while leaving alone:
+     - phones in portrait (< 640px wide) and in landscape (height < 560px, e.g. 844x390),
+     - any mouse-driven browser window, however narrow (pointer: fine), and every desktop.
+   Modals that opted in (xp-tab-overlay on the backdrop, xp-tab-shell on the card) become edge-to-edge like the phone layout: no outer gutter,
+   the card is exactly the dynamic viewport (100dvh) minus the device safe areas, and each modal's own body scrolls inside it
+   (overflow-y:auto areas get contained touch scrolling). Unlayered, so it beats Tailwind utilities; !important only where inline styles exist. */
+@media (pointer: coarse) and (min-width: 640px) and (max-width: 1400px) and (min-height: 560px) {
+  .xp-tab-overlay {
+    inset: 0 !important;
+    height: 100dvh !important;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px) !important;
+    align-items: stretch !important;
+    justify-content: stretch !important;
+    overflow: hidden !important;
+    box-sizing: border-box;
+  }
+  .xp-tab-shell {
+    width: 100% !important;
+    max-width: none !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    border-width: 0 !important;
+    box-shadow: none !important;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .xp-tab-shell .overflow-y-auto,
+  .xp-tab-shell .overflow-auto {
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  /* AI Coach already sizes itself from these tokens on phones; same tokens here */
+  .xp-aic-overlay {
+    --xp-aic-shell-h: 100%;
+    --xp-aic-shell-mb: 0px;
+  }
+  /* the old +/-/edit strip under the main header is redundant on tablets (Activity Manager covers it) */
+  .xp-tab-hide-activity-btns { display: none !important; }
+}

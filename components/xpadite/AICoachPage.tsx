@@ -3117,7 +3117,7 @@ export function AICoachPage({ onClose, startWithMotivate, hasPremiumAccess = fal
         }
       `}</style>
     <div
-      className={`xp-aic-overlay fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-3 ${isDark ? "xp-dark" : "xp-light"}`}
+      className={`xp-aic-overlay xp-tab-overlay fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-3 ${isDark ? "xp-dark" : "xp-light"}`}
       style={{
         background: isDark ? "rgba(0,0,0,0.88)" : "rgba(0,0,0,0.64)",
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -3161,7 +3161,7 @@ export function AICoachPage({ onClose, startWithMotivate, hasPremiumAccess = fal
 
       {/* Modal shell */}
       <div
-        className="xp-aic-shell w-full rounded-2xl overflow-hidden max-w-[640px]"
+        className="xp-aic-shell xp-tab-shell w-full rounded-2xl overflow-hidden max-w-[640px]"
         style={{
           position: "relative",
           background: S0,

@@ -1080,12 +1080,12 @@ export function GalleryModal({ onClose }: GalleryModalProps) {
   return (
     <>
       <div
-        className="fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[70] flex items-stretch sm:items-center justify-center p-0 sm:p-4"
+        className="xp-tab-overlay fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[70] flex items-stretch sm:items-center justify-center p-0 sm:p-4"
         style={{ background: 'rgba(0,0,0,0.55)' }}
         onClick={onClose}
       >
         <div
-          className="w-full sm:max-w-[1120px] h-full sm:h-[88vh] sm:max-h-[88vh] rounded-none sm:rounded-2xl max-sm:border-0! overflow-hidden flex flex-col"
+          className="xp-tab-shell w-full sm:max-w-[1120px] h-full sm:h-[88vh] sm:max-h-[88vh] rounded-none sm:rounded-2xl max-sm:border-0! overflow-hidden flex flex-col"
           style={{ background: 'var(--xp-card)', border: '0.5px solid var(--xp-bdr2)', boxShadow: '0 24px 64px rgba(0,0,0,0.32)' }}
           onClick={e => e.stopPropagation()}
         >

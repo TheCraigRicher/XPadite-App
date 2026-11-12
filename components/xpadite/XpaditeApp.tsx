@@ -1133,7 +1133,7 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
       {/* +/-/edit buttons — centered strip just below navbar — tablet only now
           (removed on desktop per the main-calendar decluttering below; mobile
           was already hidden). */}
-      <div className="hidden sm:block lg:hidden">
+      <div className="hidden sm:block lg:hidden xp-tab-hide-activity-btns">
         <ActivityButtons />
       </div>
 

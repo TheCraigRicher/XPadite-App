@@ -1054,7 +1054,8 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
           // (mobile: the Planner tab, exactly like Planner/Journal; tablet/desktop: the Planner/Journal overlay).
           const today = todayKeyInTz(appTz)
           setPlannerDestDate(today)
-          requestMindMap(today)
+          // opened straight from the menu (Planner not already showing) -> closing the canvas goes back to the main app, not into the editor
+          requestMindMap(today, !(journalNotesOpen || mobileTab === 'planner'))
           if (typeof window !== 'undefined' && window.innerWidth < 640) handleMobileNav('planner')
           else setJournalNotesOpen(true)
         }}

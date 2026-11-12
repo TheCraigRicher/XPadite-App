@@ -41,3 +41,17 @@ test('phone and desktop code paths are untouched: the original responsive classe
   assert.match(read(C + 'MeetingsModal.tsx'), /sm:h-\[calc\(100dvh-28px\)\] sm:max-w-\[640px\] md:max-w-\[900px\] lg:max-w-\[1296px\]/)
   assert.match(read('app/globals.css'), /@media \(max-width: 639px\) \{\s*\/\* Propagate tokens to the whole AI Coach overlay on mobile \*\//)
 })
+
+test('v1.335: the Expandable Month modal opts in; Mind Mapping from the main menu closes back to the main app, from the Planner back to the editor', () => {
+  const m = read(C + 'MonthFullPage.tsx')
+  assert.match(m, /'fixed inset-0 z-50 overflow-y-auto xp-mfp-overlay xp-tab-overlay'/); assert.match(m, /'w-full rounded-2xl xp-mfp-box xp-tab-shell'/)
+  const css = read('app/globals.css'); assert.match(css, /\.xp-tab-overlay \.xp-mfp-wrap \{[^}]*padding: 0 !important/)
+  // the request records the entry point (existing request/clear flow, no new navigation state)
+  const ctx = read(C + 'AppContext.tsx')
+  assert.match(ctx, /mindMapRequest: \{ dateKey: string; nonce: number; closeOnExit: boolean \} \| null/); assert.match(ctx, /requestMindMap = useCallback\(\(dateKey: string, closeOnExit = false\)/)
+  assert.match(read(C + 'XpaditeApp.tsx'), /requestMindMap\(today, !\(journalNotesOpen \|\| mobileTab === 'planner'\)\)/)
+  const ed = read(C + 'JournalEditorContent.tsx')
+  assert.match(ed, /exitToMainRef\.current = mindMapRequest\.closeOnExit; setDrawState/)
+  assert.match(ed, /const toMain = exitToMainRef\.current; exitToMainRef\.current = false\s*\n\s*setDrawState\(null\); setMmcFit\(false\)\s*\n\s*if \(toMain\) guardedNavigate\(onClose\)/)
+  assert.ok(!/exitToMainRef\.current = true/.test(ed), 'the Planner button path never sets it, so it keeps returning to the editor')
+})

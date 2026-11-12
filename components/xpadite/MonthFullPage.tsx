@@ -1518,12 +1518,12 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
     <>
       <style>{MFP_STYLES}</style>
       <div
-        className={embedded ? 'w-full h-full flex flex-col' : 'fixed inset-0 z-50 overflow-y-auto xp-mfp-overlay'}
+        className={embedded ? 'w-full h-full flex flex-col' : 'fixed inset-0 z-50 overflow-y-auto xp-mfp-overlay xp-tab-overlay'}
         style={embedded ? undefined : { background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(15,23,42,0.60)' }}
       >
         <div className={embedded ? 'w-full h-full flex flex-col' : 'min-h-full flex items-center justify-center py-8 px-4 xp-mfp-wrap'}>
           <div
-            className={embedded ? 'w-full h-full flex flex-col overflow-hidden' : 'w-full rounded-2xl xp-mfp-box'}
+            className={embedded ? 'w-full h-full flex flex-col overflow-hidden' : 'w-full rounded-2xl xp-mfp-box xp-tab-shell'}
             style={embedded ? { background: 'var(--xp-card)' } : {
               maxWidth: 'min(86vw, 1280px)', background: 'var(--xp-card)',
               border: '0.5px solid rgba(124,58,237,0.30)', overflow: 'hidden',

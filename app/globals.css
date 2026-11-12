@@ -649,6 +649,15 @@ html, body {
     --xp-aic-shell-h: 100%;
     --xp-aic-shell-mb: 0px;
   }
+  /* Expandable Month modal: its centring wrapper (py-8 px-4) must not re-introduce a gutter around the full-screen card */
+  .xp-tab-overlay .xp-mfp-wrap {
+    padding: 0 !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    align-items: stretch !important;
+  }
+  /* same page background as the phone layout, so a card taller than its calendar shows no white band underneath */
+  .xp-tab-shell.xp-mfp-box { background: var(--xp-bg) !important; }
   /* the old +/-/edit strip under the main header is redundant on tablets (Activity Manager covers it) */
   .xp-tab-hide-activity-btns { display: none !important; }
 }

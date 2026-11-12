@@ -156,7 +156,7 @@ test('Mind Mapping: menu item directly below Planner/Journal, same icon/typograp
   const order = [...side.match(/const FINAL_ORDER[^=]*=\s*\[([\s\S]*?)\]/)[1].matchAll(/'([\w-]+)'/g)].map(x => x[1])
   assert.equal(order.indexOf('mind-mapping'), order.indexOf('journal-notes') + 1, 'immediately below Planner/Journal'); assert.equal(order.filter(a => a === 'mind-mapping').length, 1)
   assert.ok(/label: 'Mind Mapping',\s+action: 'mind-mapping'/.test(side) && /<MindMapIcon \/>/.test(side) && /case 'mind-mapping':\s+onMindMapping\?\.\(\)/.test(side))
-  assert.ok(/onMindMapping=\{\(\) => \{/.test(app) && /setPlannerDestDate\(today\)/.test(app) && /requestMindMap\(today\)/.test(app) && /handleMobileNav\('planner'\)/.test(app) && /setJournalNotesOpen\(true\)/.test(app), 'same Planner/Journal workspace on every device class')
+  assert.ok(/onMindMapping=\{\(\) => \{/.test(app) && /setPlannerDestDate\(today\)/.test(app) && /requestMindMap\(today, /.test(app) && /handleMobileNav\('planner'\)/.test(app) && /setJournalNotesOpen\(true\)/.test(app), 'same Planner/Journal workspace on every device class')
   assert.ok(/mindMapRequest\.dateKey !== dateKey/.test(ed) && /setDrawState\(\{ insertAt: blocks\.length - 1, editingBlock: null \}\)/.test(ed.slice(ed.indexOf('Main menu → "Mind Mapping"'))), 'launches the same setDrawState the "🧠 Mind Map" button uses')
   assert.equal((strip(ed).match(/<JournalDrawModal(?![A-Za-z])/g) || []).length, 1, 'still exactly one canvas component in the editor')
   assert.ok(!/MindMapModal|MindMappingModal/.test(app + side), 'no second modal/implementation')

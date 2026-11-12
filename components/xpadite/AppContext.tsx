@@ -194,8 +194,9 @@ interface AppContextValue {
   // A day edited on two devices in conflicting ways: the user is asked (see DayConflictDialog); resolved here.
   dayConflicts: { key: string; mine: DayData; theirs: DayData | null; theirsRev: number; conflicts: MergeConflict[] }[]
   resolveDayConflict: (key: string, choice: 'mine' | 'theirs') => void
-  mindMapRequest: { dateKey: string; nonce: number } | null
-  requestMindMap: (dateKey: string) => void
+  // closeOnExit: the canvas was opened straight from the main menu (the Planner was not already showing), so leaving it returns to the main app
+  mindMapRequest: { dateKey: string; nonce: number; closeOnExit: boolean } | null
+  requestMindMap: (dateKey: string, closeOnExit?: boolean) => void
   clearMindMapRequest: () => void
   savedLocations: string[]
   setSavedLocations: (next: string[]) => Promise<void>
@@ -242,7 +243,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const [scheduleSyncIssue, setScheduleSyncIssue] = useState<string | null>(null)
   const [scheduleTimeFormat, setScheduleTimeFormat] = useState<TimeFormat>('12h')
   const [scheduleFocusRequest, setScheduleFocusRequest] = useState<{ eventId: string; nonce: number } | null>(null)
-  const [mindMapRequest, setMindMapRequest] = useState<{ dateKey: string; nonce: number } | null>(null)
+  const [mindMapRequest, setMindMapRequest] = useState<{ dateKey: string; nonce: number; closeOnExit: boolean } | null>(null)
   const [scheduleCategories, setScheduleCategoriesState] = useState<ScheduleCategory[]>([])
 
   const [reminders, setReminders] = useState<Reminder[]>([])
@@ -1191,7 +1192,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
 
   const requestScheduleEvent = useCallback((eventId: string) => setScheduleFocusRequest({ eventId, nonce: Date.now() }), [])
   const clearScheduleFocusRequest = useCallback(() => setScheduleFocusRequest(null), [])
-  const requestMindMap = useCallback((dateKey: string) => setMindMapRequest({ dateKey, nonce: Date.now() }), [])
+  const requestMindMap = useCallback((dateKey: string, closeOnExit = false) => setMindMapRequest({ dateKey, nonce: Date.now(), closeOnExit }), [])
   const clearMindMapRequest = useCallback(() => setMindMapRequest(null), [])
 
   const setSavedLocations = useCallback(async (next: string[]): Promise<void> => {

@@ -16,7 +16,7 @@ const app = read('components/xpadite/XpaditeApp.tsx')
 test('persistence: no fire-and-forget day upsert that only console.errors (the original silent-loss path)', () => {
   assert.ok(!/pendingDaySync(Timers|Data)Ref/.test(ctx), 'old debounce maps are gone')
   assert.ok(!/upsertDayData\(createClient\(\), uid, key, (dayData|updated)\)\.catch/.test(ctx), 'no swallow-and-forget upsert')
-  assert.ok(/new DaySyncQueue<DayData>/.test(ctx) && /write: \(key, data\) => writeDayRef\.current\(key, data\)/.test(ctx) && /await saveDayCas\(sb, key, mine,/.test(ctx) && /await upsertDayData\(sb, uid, key, (data|mine)\)/.test(ctx), 'writes go through the queue and are awaited (v1.328: compare-and-swap; the plain upsert is only the fallback for a database without migration 024)')
+  assert.ok(/new DaySyncQueue<DayData>/.test(ctx) && /write: \(key, data, signal\) => writeDayRef\.current\(key, data, signal\)/.test(ctx) && /await saveDayCas\(sb, key, mine,/.test(ctx) && /await upsertDayData\(sb, uid, key, (data|mine), signal\)/.test(ctx), 'writes go through the queue and are awaited (v1.328: compare-and-swap; the plain upsert is only the fallback for a database without migration 024)')
 })
 
 test('hydration and realtime never overwrite a day whose latest edit is unconfirmed (pending, in flight OR failed)', () => {
@@ -51,18 +51,19 @@ test('MOVE then Cancel / Close Without Saving cannot roll the moved task back on
 })
 
 test('Save shows "Saved" only after the server confirmed it; a failure keeps the window open with the edits', () => {
-  const s = dm.slice(dm.indexOf('async function persistConfirmed'), dm.indexOf('function handlePlannerSend') > 0 ? dm.indexOf('function handleOpenPlannerNotes') : undefined)
-  assert.ok(/const ok = await flushDays\(\)/.test(s))
-  assert.ok(/async function handleMainSave\(\) \{\s*if \(!\(await persistConfirmed\(\)\)\) return\s*setMainSaving\(true\)/.test(s), 'Saved only after confirmation')
-  assert.ok(/async function handleSaveAndClose\(\) \{\s*if \(!\(await persistConfirmed\(\)\)\) return\s*setMainSaving\(true\)/.test(s), 'Save & Close does not close on failure')
-  assert.ok(/saveBusyRef\.current\) return false/.test(s), 'double-click cannot start a second concurrent save')
+  const s = dm.slice(dm.indexOf('const persistRef = useRef'), dm.indexOf('function handleOpenPlannerNotes'))
+  assert.ok(/await Promise\.race\(\[flushDays\(\), slow\]\)/.test(s), 'still waits for the server to confirm (bounded)')
+  assert.ok(/async function handleMainSave\(\) \{\s*if \(!\(await persistConfirmed\(\)\) \|\| !mountedRef\.current\) return\s*setMainSaving\(true\)/.test(s), 'Saved only after confirmation')
+  assert.ok(/async function handleSaveAndClose\(\) \{\s*if \(!\(await persistConfirmed\(\)\) \|\| !mountedRef\.current\) return\s*setMainSaving\(true\)/.test(s), 'Save & Close does not close on failure')
+  assert.ok(/if \(persistRef\.current\) return persistRef\.current/.test(s), 'a second click cannot start a second concurrent save: it joins the one in flight (v1.338; it used to be silently ignored)')
   assert.ok(/disabled=\{mainSaving \|\| saveBusy\}/.test(dm) && /'Saving…'/.test(dm))
 })
 
-test('closing: idempotent, never leaves a click-trapping invisible layer, and self-heals if the parent did not unmount it', () => {
-  assert.ok(/if \(closingRef\.current\) return/.test(dm))
-  assert.ok(/pointerEvents: isClosing \? 'none' : undefined/.test(dm))
-  assert.ok(/closingRef\.current = false; setIsClosing\(false\)/.test(dm))
+test('closing: idempotent, never leaves a lingering layer, and self-heals if the parent did not unmount it', () => {
+  assert.ok(/if \(closingRef\.current \|\| !mountedRef\.current\) return/.test(dm))
+  // v1.338: the fading window absorbs taps (they used to fall through onto the calendar); it still cannot linger — see the self-heal
+  assert.ok(!/pointerEvents: isClosing/.test(dm))
+  assert.ok(/later\(\(\) => \{ closingRef\.current = false; setIsClosing\(false\) \}, 1500\)/.test(dm))
 })
 
 test('a queued "after close" navigation captured for another day is dropped when the user changes day', () => {

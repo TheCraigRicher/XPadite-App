@@ -165,7 +165,7 @@ test('Mind Mapping: menu item directly below Planner/Journal, same icon/typograp
 test('stale-write protection is wired: CAS writer, bases from hydration/realtime/RPC, parked conflicts, no silent overwrite', () => {
   const a = strip(src('AppContext.tsx')), q = strip(src('daySync.ts'))
   const w = a.slice(a.indexOf('async function writeDay'), a.indexOf('const resolveDayConflict'))
-  assert.ok(/await saveDayCas\(sb, key, mine, base\?\.rev \?\? null\)/.test(w) && /mergeDay\(base\?\.doc \?\? null, mine, res\.doc\)/.test(w), 'write names the revision it is based on; a refusal triggers the three-way merge')
+  assert.ok(/await saveDayCas\(sb, key, mine, base\?\.rev \?\? null, signal\)/.test(w) && /mergeDay\(base\?\.doc \?\? null, mine, res\.doc\)/.test(w), 'write names the revision it is based on; a refusal triggers the three-way merge')
   assert.ok(/throw new DaySyncParked\(\)/.test(w) && /attempt < 4/.test(w) && /day-sync-contended/.test(w), 'a real conflict parks the day; contention is bounded')
   assert.ok(/for \(const \[key, doc\] of Object\.entries\(sbCalData\)\) if \(!daySync\.hasUnsynced\(key\)\)/.test(a), 'hydration never rebases a day that holds unsent edits')
   assert.ok(/row\.rev >= b0\.rev/.test(a), 'realtime only moves the base forward, and only for clean days')

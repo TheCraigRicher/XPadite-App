@@ -32,8 +32,14 @@
  */
 export class DaySyncParked extends Error { constructor() { super('day-sync-parked') } }
 
+/** Thrown into the queue when one write attempt got no answer within `attemptTimeoutMs`: counted as an ordinary failed attempt (data kept, retried with back-off). */
+export class DaySyncTimeout extends Error { constructor() { super('day-sync-timeout') } }
+
 export interface DaySyncOptions<T> {
-  write: (key: string, data: T) => Promise<void>
+  /** `signal` is aborted when the attempt is given up on, so the request itself is cancelled (it can not land late and overwrite newer data). */
+  write: (key: string, data: T, signal?: AbortSignal) => Promise<void>
+  /** A write that gets no answer for this long is abandoned and retried like any failure. Without it a request that never answers blocks that day (and anything ordered after it) forever. */
+  attemptTimeoutMs?: number
   debounceMs?: number
   retryDelaysMs?: number[]
   /** First failure of an outage (not every retry). */
@@ -59,10 +65,10 @@ export class DaySyncQueue<T = unknown> {
   private confirmed = new Map<string, number>()
   private counter = 0
   private outage = false
-  private opts: Required<Pick<DaySyncOptions<T>, 'write' | 'debounceMs' | 'retryDelaysMs'>> & DaySyncOptions<T>
+  private opts: Required<Pick<DaySyncOptions<T>, 'write' | 'debounceMs' | 'retryDelaysMs' | 'attemptTimeoutMs'>> & DaySyncOptions<T>
 
   constructor(opts: DaySyncOptions<T>) {
-    this.opts = { debounceMs: 1000, retryDelaysMs: [2000, 5000, 15000, 30000], ...opts }
+    this.opts = { debounceMs: 1000, retryDelaysMs: [2000, 5000, 15000, 30000], attemptTimeoutMs: 30000, ...opts }
   }
 
   hasUnsynced(key: string): boolean { return this.entries.has(key) }
@@ -141,8 +147,15 @@ export class DaySyncQueue<T = unknown> {
       if (e.timer) { clearTimeout(e.timer); e.timer = null }
       const v = e.version, data = e.data
       e.flight = (async () => {
+        // One attempt is bounded: a request that never answers is aborted and counted as a failed attempt, so `flight` always settles and
+        // the day's later edits (and anything ordered after it) are never blocked behind it. The data is untouched — it is retried below.
+        const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null
+        let timer: ReturnType<typeof setTimeout> | undefined
         try {
-          await this.opts.write(key, data)
+          const giveUp = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => { ctl?.abort(); reject(new DaySyncTimeout()) }, this.opts.attemptTimeoutMs)
+          })
+          await Promise.race([this.opts.write(key, data, ctl?.signal), giveUp])
           this.confirmed.set(key, Math.max(this.confirmed.get(key) ?? 0, v))
           e.failures = 0
           return true
@@ -151,6 +164,8 @@ export class DaySyncQueue<T = unknown> {
           e.failures++
           if (!this.outage) { this.outage = true; this.opts.onError?.(key, err) }
           return false
+        } finally {
+          if (timer) clearTimeout(timer)
         }
       })()
       const ok = await e.flight

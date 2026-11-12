@@ -42,7 +42,7 @@ test('main App: EVERY Dashboard action (main calendar, month zoom, Expandable Mo
   const code = strip(app)
   assert.ok(!/DayDashboardModal/.test(code), 'the old dashboard is no longer rendered anywhere in the App shell')
   assert.equal((code.match(/<DayFullPageModal/g) || []).length, 1, 'a single dashboard mount')
-  assert.ok(/\{dashboardDay && \(\s*<DayFullPageModal\s+key=\{dashboardDay\.key\}\s+dateKey=\{dashboardDay\.key\}/.test(code), 'opens on the selected day')
+  assert.ok(/\{dashboardDay && \(\s*<DayFullPageModal\s+key=\{`dash-\$\{dashboardDay\.key\}`\}\s+dateKey=\{dashboardDay\.key\}/.test(code), 'opens on the selected day')
   // the day window's Dashboard button hands over the day that was opened, from any calendar
   assert.ok(/onDashboard=\{\(\) => \{[\s\S]*?setDashboardDay\(modalDay\)/.test(code))
   // main calendar double-click still opens the Task Manager day window first (intermediate window preserved)

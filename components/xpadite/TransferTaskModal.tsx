@@ -18,6 +18,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useApp } from './AppContext'
+import { useEscapeLayer } from './escapeLayers'
 import { dateKey as buildDateKey, isToday, MONTHS, DAY_HEADERS } from './utils'
 import type { Task } from './types'
 
@@ -61,6 +62,7 @@ export function TransferTaskModal({ tasks, dateKey, onClose, onTransferred }: Tr
   const [mode, setMode] = useState<TransferMode>(anyDone ? 'copy' : 'move')
   const [showCompletedDialog, setShowCompletedDialog] = useState(false)
 
+  useEscapeLayer(true)   // handles Escape itself (below); nothing underneath may react to it
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'Escape') return

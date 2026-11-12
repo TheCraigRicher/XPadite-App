@@ -16,6 +16,7 @@ import {
 import type { JournalBlock, JournalDoc } from './types'
 import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
 import type { TaskAttachment } from './types'
+import { useEscapeLayer } from './escapeLayers'
 
 const EmojiPickerLib = dynamic(() => import('emoji-picker-react'), { ssr: false })
 
@@ -57,6 +58,7 @@ export function JournalEditorEmbed({
   attachments = [], onAttachmentsChange,
 }: JournalEditorEmbedProps) {
   const [showEmoji, setShowEmoji]   = useState(false)
+  const [editorFocused, setEditorFocused] = useState(false)
   const [cameraOpen, setCameraOpen] = useState(false)
   const [uploading, setUploading]   = useState(false)
   const [lightbox, setLightbox]     = useState<string | null>(null)
@@ -90,6 +92,8 @@ export function JournalEditorEmbed({
     ],
     content: parseJournalContent(firstTextBlock?.content),
     editorProps: { attributes: { class: 'xp-je-prose' } },
+    onFocus: () => setEditorFocused(true),
+    onBlur: () => setEditorFocused(false),
     onUpdate: ({ editor: e }) => {
       if (suppressUpdate.current) return
       const content = serializeJournalContent(e)
@@ -102,6 +106,12 @@ export function JournalEditorEmbed({
       onChange(JSON.stringify(updatedDoc))
     },
   })
+
+  // Escape belongs to what the user is actually doing here, not to the Task Manager underneath: it closes the emoji picker; and while the
+  // text field has the caret it ends that interaction (blurs the field) — like the task title editor — so the NEXT Escape closes the window.
+  // During IME composition Escape cancels the composition: it is left to the browser, and still does not reach the window underneath.
+  useEscapeLayer(showEmoji, () => setShowEmoji(false))
+  useEscapeLayer(editorFocused, e => { if (!e.isComposing) editor?.commands.blur() })
 
   // Reload content when date changes
   useEffect(() => {

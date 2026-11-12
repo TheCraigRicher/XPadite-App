@@ -118,8 +118,9 @@ export type DaySaveResult = { ok: true; rev: number } | { ok: false; rev: number
  * (null = "no row yet"); otherwise returns the server's current revision and document and writes NOTHING.
  * Throws if the function does not exist (migration 024 not applied) — the caller decides how to degrade.
  */
-export async function saveDayCas(supabase: Supabase, key: string, doc: DayData, expectedRev: number | null): Promise<DaySaveResult> {
-  const { data, error } = await supabase.rpc('calendar_day_save', { p_date_key: key, p_doc: doc, p_expected_rev: expectedRev })
+export async function saveDayCas(supabase: Supabase, key: string, doc: DayData, expectedRev: number | null, signal?: AbortSignal): Promise<DaySaveResult> {
+  const call = supabase.rpc('calendar_day_save', { p_date_key: key, p_doc: doc, p_expected_rev: expectedRev })
+  const { data, error } = await (signal ? call.abortSignal(signal) : call)   // `signal`: the queue gives up on a request that never answers and cancels it
   if (error) throw Object.assign(new Error(error.message || 'save failed'), { code: error.code })
   const r = data as { ok: boolean; rev: number; doc?: DayData | null }
   return r.ok ? { ok: true, rev: r.rev } : { ok: false, rev: r.rev, doc: (r.doc as DayData | null) ?? null }
@@ -130,13 +131,15 @@ export async function upsertDayData(
   userId: string,
   dateKey: string,
   dayData: DayData,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const { error } = await supabase
+  const call = supabase
     .from('calendar_days')
     .upsert(
       { user_id: userId, date_key: dateKey, day_data: dayData },
       { onConflict: 'user_id,date_key' },
     )
+  const { error } = await (signal ? call.abortSignal(signal) : call)
   if (error) throw error
 }
 

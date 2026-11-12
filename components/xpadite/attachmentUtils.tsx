@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TaskAttachment } from './types'
+import { useEscapeLayer } from './escapeLayers'
 
 // ── File helpers ──────────────────────────────────────────────────────────────
 
@@ -250,6 +251,7 @@ export function ImageLightbox({
   alt: string
   onClose: () => void
 }) {
+  useEscapeLayer(true)   // handles Escape itself (below); nothing underneath may react to it
   useEffect(() => {
     const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', fn)
@@ -376,6 +378,7 @@ export function CameraModal({
     return () => { stopStream() }
   }, [startCamera])
 
+  useEscapeLayer(true)   // handles Escape itself (below); nothing underneath may react to it
   // Stable Escape key listener — never re-registers on capture
   useEffect(() => {
     const fn = (e: KeyboardEvent) => { if (e.key === 'Escape') handleCloseRef.current() }

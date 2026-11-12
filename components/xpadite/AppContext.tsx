@@ -194,6 +194,10 @@ interface AppContextValue {
   // A day edited on two devices in conflicting ways: the user is asked (see DayConflictDialog); resolved here.
   dayConflicts: { key: string; mine: DayData; theirs: DayData | null; theirsRev: number; conflicts: MergeConflict[] }[]
   resolveDayConflict: (key: string, choice: 'mine' | 'theirs') => void
+  /** Tells a window when the set of days still waiting to be saved changed (e.g. a retried save was confirmed). Returns the unsubscribe. */
+  subscribeDaySync: (listener: () => void) => () => void
+  /** True while the latest edit of this day is not yet confirmed by the server (pending, in flight or failed). */
+  isDayUnsynced: (key: string) => boolean
   // closeOnExit: the canvas was opened straight from the main menu (the Planner was not already showing), so leaving it returns to the main app
   mindMapRequest: { dateKey: string; nonce: number; closeOnExit: boolean } | null
   requestMindMap: (dateKey: string, closeOnExit?: boolean) => void
@@ -269,7 +273,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const serverBaseRef = useRef(new Map<string, { rev: number | null; doc: DayData }>())
   const dayConflictsRef = useRef<DayConflict[]>([])
   const casAvailableRef = useRef(true)
-  const writeDayRef = useRef<(key: string, data: DayData) => Promise<void>>(async () => { throw new Error('day-writer-not-ready') })
+  const writeDayRef = useRef<(key: string, data: DayData, signal?: AbortSignal) => Promise<void>>(async () => { throw new Error('day-writer-not-ready') })
   useEffect(() => {
     calDataRef.current = calData
     scheduleEventsRef.current = scheduleEvents
@@ -298,16 +302,19 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   // Durable day-sync queue (see daySync.ts): a day stays "unsynced" from the first edit until the
   // server confirms it. Failed writes keep their data and retry; a move's origin write waits for the
   // destination; hydration / realtime never overwrite an unsynced day.
+  const daySyncListenersRef = useRef(new Set<() => void>())
   const daySyncRef = useRef<DaySyncQueue<DayData> | null>(null)
   if (daySyncRef.current === null) {
     daySyncRef.current = new DaySyncQueue<DayData>({
-      write: (key, data) => writeDayRef.current(key, data),
+      write: (key, data, signal) => writeDayRef.current(key, data, signal),
       onError: (key, err) => {
         console.error('[CalData] Supabase sync error for', key, err)
         setToast('⚠ Couldn’t save to the cloud — your changes are kept on this device and will retry automatically')
       },
       onRecovered: () => setToast('Changes synced ✓'),
       onUnsyncedChange: keys => {
+        // listeners are told in a microtask: this runs inside state updaters / the queue, where a listener's own state update must not run
+        queueMicrotask(() => daySyncListenersRef.current.forEach(fn => { try { fn() } catch {} }))
         try { localStorage.setItem(UNSYNCED_KEY, JSON.stringify({ uid: userIdRef.current, keys })) } catch {}
         // remember the version each unsynced day was based on, so a refresh mid-edit can still merge instead of guessing
         try {
@@ -319,6 +326,8 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     })
   }
   const daySync = daySyncRef.current
+  const subscribeDaySync = useCallback((fn: () => void) => { daySyncListenersRef.current.add(fn); return () => { daySyncListenersRef.current.delete(fn) } }, [])
+  const isDayUnsynced = useCallback((key: string) => daySync.hasUnsynced(key), [daySync])
 
   // ── Stale-write protection (migration 024) ─────────────────────────────────────────────────────────────────────────
   // A day is written only if the server still holds the revision this device based its edits on (calendar_day_save, compare-and-swap). If the day
@@ -339,19 +348,19 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     }
   }
 
-  async function writeDay(key: string, data: DayData): Promise<void> {
+  async function writeDay(key: string, data: DayData, signal?: AbortSignal): Promise<void> {
     const uid = userIdRef.current
     if (!uid) throw new Error('no-user')
     if (dayConflictsRef.current.some(c => c.key === key)) throw new DaySyncParked()     // waiting for the user: no network, no retry storm
     const sb = createClient()
-    if (!casAvailableRef.current) { await upsertDayData(sb, uid, key, data); return }  // database without migration 024: the previous behaviour
+    if (!casAvailableRef.current) { await upsertDayData(sb, uid, key, data, signal); return }  // database without migration 024: the previous behaviour
     let mine = data
     for (let attempt = 0; attempt < 4; attempt++) {
       const base = serverBaseRef.current.get(key)
       let res: Awaited<ReturnType<typeof saveDayCas>>
-      try { res = await saveDayCas(sb, key, mine, base?.rev ?? null) }
+      try { res = await saveDayCas(sb, key, mine, base?.rev ?? null, signal) }
       catch (err) {
-        if (isMissingFn(err)) { casAvailableRef.current = false; await upsertDayData(sb, uid, key, mine); return }
+        if (isMissingFn(err)) { casAvailableRef.current = false; await upsertDayData(sb, uid, key, mine, signal); return }
         throw err
       }
       if (res.ok) { finishWrite(key, data, mine, res.rev); return }
@@ -1671,7 +1680,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       reminders, userEmail,
       upsertReminderCtx, removeReminderCtx, fireReminderCtx, setReminderNotificationsEnabled,
       scheduleEvents, scheduleStatus, deadlineDays, saveScheduleEvent, deleteScheduleEvent,
-      scheduleTaskSync, setScheduleTaskSyncPref, dayConflicts, resolveDayConflict,
+      scheduleTaskSync, setScheduleTaskSyncPref, dayConflicts, resolveDayConflict, subscribeDaySync, isDayUnsynced,
       detachDeadlineTask, restoreDeadlineTask, scheduleSyncIssue, retryScheduleSync, scheduleTimeFormat, setScheduleTimeFormat,
       scheduleFocusRequest, requestScheduleEvent, clearScheduleFocusRequest,
       mindMapRequest, requestMindMap, clearMindMapRequest,

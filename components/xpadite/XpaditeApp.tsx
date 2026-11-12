@@ -1243,7 +1243,7 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
 
       {modalDay && (
         <DayModal
-          key={modalDay.key}
+          key={`day-${modalDay.key}`}
           dateKey={modalDay.key}
           month={modalDay.month}
           day={modalDay.day}
@@ -1286,6 +1286,7 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
             setModalDay({ key: dateKey(t.getFullYear(), t.getMonth(), t.getDate()), month: t.getMonth(), day: t.getDate(), skipAnim: true, fromAnalyticsMonth: modalDay.fromAnalyticsMonth })
           }}
           closeIntent={dayModalCloseIntent}
+          suspended={!!dashboardDay}
         />
       )}
 
@@ -1294,7 +1295,7 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
           Monthly, Analytics reopens on that month. */}
       {dashboardDay && (
         <DayFullPageModal
-          key={dashboardDay.key}
+          key={`dash-${dashboardDay.key}`}
           dateKey={dashboardDay.key}
           onClose={() => {
             const closing = dashboardDay

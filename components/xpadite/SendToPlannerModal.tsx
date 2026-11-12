@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useApp } from './AppContext'
+import { useEscapeLayer } from './escapeLayers'
 import { dateKey as buildDateKey, isToday, MONTHS, DAY_HEADERS } from './utils'
 
 interface SendToPlannerModalProps {
@@ -28,6 +29,7 @@ export function SendToPlannerModal({ taskText, sourceDate, onSend, onClose }: Se
   const [selectedDate, setSelectedDate] = useState<Date>(sourceAsDate)  // pre-select TM date
   const [dupWarning, setDupWarning] = useState(false)
 
+  useEscapeLayer(true)   // handles Escape itself (below); nothing underneath may react to it
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)

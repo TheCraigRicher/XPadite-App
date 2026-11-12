@@ -59,35 +59,52 @@ export function freezeBodyOnIOS(): (() => void) | null {
  * already works there — EXCEPT on iOS, which gets the full freeze (see
  * freezeBodyOnIOS). Android and desktop behave exactly as before.
  */
+// Reference-counted: only the FIRST open modal applies the lock and only the LAST one to close removes it. Modals that overlap (a window
+// plus a screen or dialog opened over it) used to each remember "the body as I found it" and put that back on close — so when they
+// unmounted in the wrong order (or in the same render) the one that closed last restored the OTHER modal's locked snapshot and left the
+// page frozen (overflow:hidden / position:fixed) with nothing open.
+let activeLocks = 0
+let releaseShared: (() => void) | null = null
+
+function applyLock(): () => void {
+  if (window.innerWidth < 640) {
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const releaseIOS = freezeBodyOnIOS()
+    return () => {
+      if (releaseIOS) releaseIOS()
+      document.body.style.overflow = prevOverflow
+    }
+  }
+
+  const scrollY = window.scrollY
+  const prevOverflow = document.body.style.overflow
+  const prevPosition = document.body.style.position
+  const prevTop = document.body.style.top
+  const prevWidth = document.body.style.width
+
+  document.body.style.overflow = 'hidden'
+  document.body.style.position = 'fixed'
+  document.body.style.top = `-${scrollY}px`
+  document.body.style.width = '100%'
+
+  return () => {
+    document.body.style.overflow = prevOverflow
+    document.body.style.position = prevPosition
+    document.body.style.top = prevTop
+    document.body.style.width = prevWidth
+    window.scrollTo(0, scrollY)
+  }
+}
+
 export function useLockBodyScroll(): void {
   useEffect(() => {
-    if (window.innerWidth < 640) {
-      const prevOverflow = document.body.style.overflow
-      document.body.style.overflow = 'hidden'
-      const releaseIOS = freezeBodyOnIOS()
-      return () => {
-        if (releaseIOS) releaseIOS()
-        document.body.style.overflow = prevOverflow
-      }
-    }
-
-    const scrollY = window.scrollY
-    const prevOverflow = document.body.style.overflow
-    const prevPosition = document.body.style.position
-    const prevTop = document.body.style.top
-    const prevWidth = document.body.style.width
-
-    document.body.style.overflow = 'hidden'
-    document.body.style.position = 'fixed'
-    document.body.style.top = `-${scrollY}px`
-    document.body.style.width = '100%'
-
+    if (activeLocks++ === 0) releaseShared = applyLock()
+    let released = false
     return () => {
-      document.body.style.overflow = prevOverflow
-      document.body.style.position = prevPosition
-      document.body.style.top = prevTop
-      document.body.style.width = prevWidth
-      window.scrollTo(0, scrollY)
+      if (released) return
+      released = true
+      if (--activeLocks === 0) { releaseShared?.(); releaseShared = null }
     }
   }, [])
 }

@@ -15,6 +15,7 @@ import { TransferTaskModal } from './TransferTaskModal'
 import { SendToPlannerModal } from './SendToPlannerModal'
 import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentItem, ImageLightbox, CameraModal } from './attachmentUtils'
 import { useLockBodyScroll } from './useLockBodyScroll'
+import { useEscapeLayer, hasEscapeLayer } from './escapeLayers'
 import dynamic from 'next/dynamic'
 import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
@@ -25,6 +26,9 @@ const JournalEditorEmbed = dynamic(
 )
 
 const EmojiPickerLib = dynamic(() => import('emoji-picker-react'), { ssr: false })
+
+// How long Save waits for the server to confirm before telling the user it is slow (the edits stay queued and keep retrying).
+const SAVE_WAIT_MS = 12000
 
 // ─── Task helpers ─────────────────────────────────────────────────────────────
 
@@ -158,6 +162,7 @@ function CompactDropdown({ value, options, onChange, isDark, width, ariaLabel, i
 
   // Reset keyboard focus when closed
   useEffect(() => { if (!isOpen) setFocusedIdx(-1) }, [isOpen])
+  useEscapeLayer(isOpen, () => { onOpenChange(false); setFocusedIdx(-1) })
 
   function handleTriggerClick(e: React.MouseEvent | React.TouchEvent) {
     e.stopPropagation()
@@ -521,6 +526,7 @@ function AdjustTimeModal({ task, dateKey, onClose, onSave }: AdjustTimeProps) {
   // or a successful Save closes it. Escape is also swallowed before it reaches the Day modal's own Escape handler
   // (a window listener that would otherwise close the whole Day modal, and this one with it).
   const dialogRef = useRef<HTMLDivElement>(null)
+  useEscapeLayer(true)   // a layer that deliberately ignores Escape: nothing underneath may react to it either
   useEffect(() => {
     function swallowEscape(e: KeyboardEvent) {
       if (e.key === 'Escape' && !dialogRef.current?.contains(e.target as Node)) e.stopPropagation()
@@ -663,6 +669,7 @@ const PRIORITY_TINT = { L: 'rgba(239,68,68,0.09)', D: 'rgba(239,68,68,0.14)' }
 function ColorPickerPopover({ currentColor, isDark, onSelect, onClose }: {
   currentColor: string; isDark: boolean; onSelect: (color: string) => void; onClose: () => void
 }) {
+  useEscapeLayer(true, onClose)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     function onOut(e: PointerEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
@@ -779,6 +786,7 @@ interface TaskMenuProps {
 }
 
 function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onIncrementSession, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onPlannerNotes, onChooseColor, onTogglePriority, onTransfer, pasteEnabled, transferDisabled, isChild, isPriority, onClose, menuAnchor, isDark }: TaskMenuProps) {
+  useEscapeLayer(true, onClose)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     function onOut(e: PointerEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose() }
@@ -1079,6 +1087,9 @@ function TaskRow({
   const [showTooltip, setShowTooltip] = useState(false)
   const [tooltipPos,  setTooltipPos]  = useState<{ top: number; left: number; width: number } | null>(null)
   const [showPopover, setShowPopover] = useState(false)
+  useEscapeLayer(isEditing)                                         // the inline title editor ends itself on Escape (its own onKeyDown)
+  useEscapeLayer(emojiOpen, () => setEmojiOpen(false))
+  useEscapeLayer(showPopover, () => setShowPopover(false))
 
   useEffect(() => () => { if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current) }, [])
 
@@ -2023,14 +2034,17 @@ function TodayStatusDropdown({ value, onChange, isDark }: { value: StatusValue |
 
   // Option order: index 0 = None, indices 1–4 = STATUS_OPTIONS
   const allOptValues: (StatusValue | null)[] = [null, ...STATUS_OPTIONS.map(o => o.value)]
+  useEscapeLayer(open, () => { setOpen(false); setFocusedIdx(-1) })
 
   useEffect(() => {
     if (!open) return
     function onOutside(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) { setOpen(false); setFocusedIdx(-1) }
     }
-    setTimeout(() => document.addEventListener('mousedown', onOutside), 10)
-    return () => document.removeEventListener('mousedown', onOutside)
+    // the listener is attached a tick late (so the opening click does not close it); cancel that if the dropdown closes or unmounts first,
+    // otherwise it would be attached AFTER cleanup ran and stay on the document forever
+    const t = setTimeout(() => document.addEventListener('mousedown', onOutside), 10)
+    return () => { clearTimeout(t); document.removeEventListener('mousedown', onOutside) }
   }, [open])
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -2134,14 +2148,17 @@ function ActivityDropdown({ value, onChange, activities, isDark, disabled }: Act
   const selected  = activities.find(a => a.id === value)
   // Option order: index 0 = "Category" (no selection), indices 1+ = activities
   const allOpts   = [{ id: '', name: 'Category', color: '' } as { id: string; name: string; color: string }, ...activities]
+  useEscapeLayer(open, () => { setOpen(false); setFocusedIdx(-1) })
 
   useEffect(() => {
     if (!open) return
     function onOutside(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) { setOpen(false); setFocusedIdx(-1) }
     }
-    setTimeout(() => document.addEventListener('mousedown', onOutside), 10)
-    return () => document.removeEventListener('mousedown', onOutside)
+    // the listener is attached a tick late (so the opening click does not close it); cancel that if the dropdown closes or unmounts first,
+    // otherwise it would be attached AFTER cleanup ran and stay on the document forever
+    const t = setTimeout(() => document.addEventListener('mousedown', onOutside), 10)
+    return () => { clearTimeout(t); document.removeEventListener('mousedown', onOutside) }
   }, [open])
 
   function handleOpen() {
@@ -2321,16 +2338,38 @@ interface DayModalProps {
   closeIntent?: 'save' | 'discard' | null
   skipEntryAnimation?: boolean
   onSendToPlanner?: (destDateKey: string) => void
+  /** True while another screen (the Daily Dashboard) is layered above this window: Escape then belongs to that screen, not to this one. */
+  suspended?: boolean
 }
 
-export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyChange, onNavigateDay, onGoToToday, closeIntent, skipEntryAnimation, onSendToPlanner }: DayModalProps) {
+export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyChange, onNavigateDay, onGoToToday, closeIntent, skipEntryAnimation, onSendToPlanner, suspended }: DayModalProps) {
   const {
     calData, updateDay, flushDays, activeTaskTimer, setActiveTaskTimer,
     activities, activeSession, setActiveSession, selectedActId,
-    reminders, isDark, setToast, sessions, effectiveTimezone, effectiveLocale, detachDeadlineTask,
+    reminders, isDark, setToast, sessions, effectiveTimezone, effectiveLocale, detachDeadlineTask, subscribeDaySync, isDayUnsynced,
   } = useApp()
 
   useLockBodyScroll()
+
+  // Lifecycle guard. Everything asynchronous in this window (the close animation, "Saved" feedback, a save waiting on the server)
+  // resumes later, possibly after the window was dismissed or replaced by another day's instance. `later` timers are cancelled on
+  // unmount and re-check `mountedRef` when they fire, so a gone window can never close, re-open or update anything — in particular it
+  // can never run its stale `onClose` against the NEXT window.
+  const mountedRef = useRef(true)
+  const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set())
+  const later = (fn: () => void, ms: number) => {
+    const id = setTimeout(() => { timersRef.current.delete(id); if (mountedRef.current) fn() }, ms)
+    timersRef.current.add(id)
+  }
+  useEffect(() => {
+    mountedRef.current = true
+    const timers = timersRef.current
+    return () => { mountedRef.current = false; timers.forEach(clearTimeout); timers.clear() }
+  }, [])
+  // Latest callbacks / flags for handlers that outlive the render that created them.
+  const onCloseRef = useRef(onClose); onCloseRef.current = onClose
+  const onDirtyChangeRef = useRef(onDirtyChange); onDirtyChangeRef.current = onDirtyChange
+  const suspendedRef = useRef(!!suspended); suspendedRef.current = !!suspended
 
   const dayData = calData[dateKey] ?? { ...EMPTY_DAY }
   // Mirror ref so handleMainSave's delayed callback can read the truly
@@ -2411,6 +2450,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   const prevNotesOpenRef    = useRef(false)
   const openSnapshotRef     = useRef<typeof dayData | null>(null)
   const onConfettiDone = useCallback(() => setShowConfetti(false), [])
+  useEscapeLayer(addingTask)                                        // the "+ Add Task" input cancels itself on Escape (its own onKeyDown)
 
   // ── Reorder Mode — real-time sortable drag (mouse + touch), replacing the
   // old handle-only HTML5 drag/drop (which never fires on most mobile
@@ -2653,6 +2693,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     onDirtyChange?.(hasDirtyChanges)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasDirtyChanges])
+  // ...and once more when this window goes away: the parent's guard must never keep a stale "unsaved" flag from a window that is gone.
+  useEffect(() => () => { onDirtyChangeRef.current?.(false) }, [])
 
   // External close intent from parent (nav guard: 'save' or 'discard')
   useEffect(() => {
@@ -2686,14 +2728,18 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        if (hasDirtyChanges) { setShowCloseDialog(true) } else { doClose() }
-      }
+      if (e.key !== 'Escape' || suspendedRef.current) return
+      // Only the top-most layer reacts. Decided in the CAPTURE phase (see escapeLayers.ts), i.e. against the state at the moment the
+      // key was pressed — a dropdown / dialog / editor opened above this window owns this Escape, whatever order the listeners run in.
+      if (hasEscapeLayer()) return
+      if (showCloseDialog) { setShowCloseDialog(false); return }    // "Keep Editing"
+      if (pendingDeleteId) { setPendingDeleteId(null); return }     // "Keep Task"
+      if (hasDirtyChanges) { setShowCloseDialog(true) } else { doClose() }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasDirtyChanges, onClose])
+  }, [hasDirtyChanges, onClose, showCloseDialog, pendingDeleteId])
 
   // Detect journal opening: play border animation
   useEffect(() => {
@@ -3004,13 +3050,13 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
 
   const closingRef = useRef(false)
   function doClose() {
-    if (closingRef.current) return                  // idempotent: Cancel + Escape + close-intent can race
+    if (closingRef.current || !mountedRef.current) return   // idempotent: Cancel + Escape + close-intent can race; a gone window never closes anything
     closingRef.current = true
     setIsClosing(true)
-    setTimeout(onClose, 210)
+    later(() => onCloseRef.current(), 210)
     // Self-heal: if the parent has NOT unmounted this window shortly after onClose (e.g. a queued navigation
     // re-opened it), come back fully interactive instead of staying as an invisible, click-blocking layer.
-    setTimeout(() => { closingRef.current = false; setIsClosing(false) }, 1500)
+    later(() => { closingRef.current = false; setIsClosing(false) }, 1500)
   }
 
   function attemptClose() {
@@ -3038,40 +3084,69 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   // Persist for real: queue the pending edits, then wait for the server to CONFIRM every unsynced day
   // (this day and, after a move, its destination). Resolves false — and tells the user — if it did not land;
   // nothing is closed, re-baselined or reported as saved in that case, and the edits stay in the sync queue.
-  async function persistConfirmed(): Promise<boolean> {
-    if (saveBusyRef.current) return false           // a second click while one Save is in flight
+  // A second Save / "Save and Close" while a save is already in flight JOINS that save and gets its outcome — it is never silently
+  // ignored (which used to leave "Save and Close" doing nothing). The wait for the server is bounded: if it has not answered in
+  // SAVE_WAIT_MS the user is told, the window becomes usable again, and the edits stay in the durable sync queue, which keeps retrying.
+  const persistRef = useRef<Promise<boolean> | null>(null)
+  // What the user asked to Save when the save did NOT come back confirmed (failed / slow). The edits sit in the sync queue and are retried;
+  // once the server has confirmed them they ARE saved, so the unsaved-changes baseline moves to exactly that version — Cancel then no
+  // longer warns about work that is safely stored. Anything typed AFTER that Save is not in the snapshot, so it still counts as unsaved.
+  const pendingSaveRef = useRef<DayData | null>(null)
+  function adoptConfirmedSave() {
+    const asked = pendingSaveRef.current
+    if (!asked || !mountedRef.current || isDayUnsynced(dateKey)) return      // still queued / in flight / failed: not safely stored yet
+    pendingSaveRef.current = null
+    openSnapshotRef.current = asked
+    setBaselineTick(n => n + 1)
+  }
+  const adoptRef = useRef(adoptConfirmedSave); adoptRef.current = adoptConfirmedSave
+  useEffect(() => subscribeDaySync(() => adoptRef.current()), [subscribeDaySync])
+  function persistConfirmed(): Promise<boolean> {
+    if (persistRef.current) return persistRef.current
     saveBusyRef.current = true; setSaveBusy(true)
-    try {
-      flushDirtyNotes()
-      setNewTaskText('')
-      setAddingTask(false)
-      await new Promise(r => setTimeout(r, 0))      // let the queued updateDay calls commit before flushing
-      const ok = await flushDays()
-      if (!ok) setToast('⚠ Couldn’t save to the cloud. Your changes are kept on this device and will retry — nothing was lost.')
-      return ok
-    } finally {
-      saveBusyRef.current = false; setSaveBusy(false)
-    }
+    const run = (async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        flushDirtyNotes()
+        setNewTaskText('')
+        setAddingTask(false)
+        await new Promise(r => setTimeout(r, 0))      // let the queued updateDay calls commit before flushing
+        const asked: DayData = JSON.parse(JSON.stringify(dayDataRef.current))   // exactly what this Save is for
+        const slow = new Promise<'slow'>(r => { timer = setTimeout(() => r('slow'), SAVE_WAIT_MS) })
+        const res = await Promise.race([flushDays(), slow])
+        if (res === true) pendingSaveRef.current = null
+        else { pendingSaveRef.current = asked; adoptRef.current() }    // not confirmed (yet): adopt it as saved the moment the queue confirms it
+        if (res === 'slow') { setToast('⚠ Still saving — the server is slow to answer. Your changes are kept on this device and will sync automatically.'); return false }
+        if (!res) setToast('⚠ Couldn’t save to the cloud. Your changes are kept on this device and will retry — nothing was lost.')
+        return res
+      } finally {
+        if (timer) clearTimeout(timer)
+        persistRef.current = null; saveBusyRef.current = false
+        if (mountedRef.current) setSaveBusy(false)
+      }
+    })()
+    persistRef.current = run
+    return run
   }
 
   async function handleMainSave() {
-    if (!(await persistConfirmed())) return
+    if (!(await persistConfirmed()) || !mountedRef.current) return
     setMainSaving(true)
     // Save keeps Task Manager open — re-baseline the dirty-change snapshot
     // to the just-saved state (via the mirror ref, so further edits made
     // after this Save are still correctly detected as unsaved) instead of
     // closing.
-    setTimeout(() => {
+    later(() => {
       openSnapshotRef.current = JSON.parse(JSON.stringify(dayDataRef.current))
       setMainSaving(false)
     }, 620)
   }
 
   async function handleSaveAndClose() {
-    if (!(await persistConfirmed())) return
+    if (!(await persistConfirmed()) || !mountedRef.current) return
     setMainSaving(true)
     // Same re-baseline as handleMainSave, then close once the state is clean.
-    setTimeout(() => {
+    later(() => {
       openSnapshotRef.current = JSON.parse(JSON.stringify(dayDataRef.current))
       setMainSaving(false)
       doClose()
@@ -3198,8 +3273,9 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
         WebkitBackdropFilter: isDark ? `blur(${visible ? 9 : 0}px)` : undefined,
         transition: 'background 220ms ease-out, backdrop-filter 220ms ease-out',
         willChange: isDark ? 'backdrop-filter' : undefined,
-        // While fading out the window is no longer interactive and must never trap clicks if it lingers.
-        pointerEvents: isClosing ? 'none' : undefined,
+        // While fading out (210ms) the window keeps absorbing taps: with pointer events off, a second tap on Cancel fell THROUGH onto the
+        // calendar underneath and — as two quick taps on a date — opened the Task Manager for an unrelated day. It cannot linger: doClose()
+        // hands control back after 1.5s if the parent has not unmounted it, and the unmount-safe timers/keys keep it from being orphaned.
       }}
     >
       {/* Purple ambient glow — dark mode only */}

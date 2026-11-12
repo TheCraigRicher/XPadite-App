@@ -513,7 +513,12 @@ body {
 .xp-toast-wrapper {
   bottom: 24px;
   z-index: 200;
+  /* A toast must never swallow taps meant for the screen beneath it: on tablet/desktop it sits bottom-right, directly over a Task
+     Manager's Cancel / Save, and used to make them unresponsive for as long as it was showing (e.g. after a failed save). Only its
+     own dismiss (✕) button takes input. */
+  pointer-events: none;
 }
+.xp-toast-wrapper button { pointer-events: auto; }
 @media (max-width: 639px) {
   .xp-toast-wrapper {
     /* Nav renders ~76-77px tall (56px buttons + 10px top/bottom padding) plus

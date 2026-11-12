@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useApp } from './AppContext'
+import { useEscapeLayer } from './escapeLayers'
 import { computeNextRunAt } from '@/lib/reminders'
 import type { Reminder, RepeatFrequency } from './types'
 
@@ -37,6 +38,7 @@ export function ReminderModal({
   onSaved,
 }: ReminderModalProps) {
   const { upsertReminderCtx, removeReminderCtx, userEmail, isDark } = useApp()
+  useEscapeLayer(true, onClose)   // Escape closes this dialog and nothing underneath it
 
   const existing = existingReminder
 

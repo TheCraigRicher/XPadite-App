@@ -504,10 +504,10 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
            the Analytics modal host's own auto-height card), internal scroll
            on mobile — identical split MonthFullPage's embedded mode uses. ── */}
       <div className="flex-1 overflow-y-auto sm:flex-none sm:overflow-visible xp-tab-body" style={{ minHeight: 0, WebkitOverflowScrolling: 'touch' }}>
-        <div className="p-3 sm:p-4 lg:p-5 space-y-3 lg:space-y-4" style={{ background: isDark ? 'rgba(9,4,22,0.99)' : 'var(--xp-bg3)' }}>
+        <div className="p-3 sm:p-4 lg:p-5 space-y-3 lg:space-y-4 xp-td-dash" style={{ background: isDark ? 'rgba(9,4,22,0.99)' : 'var(--xp-bg3)' }}>
 
           {/* ROW 1 — KPI area | (Performance Analytics + Performance Badge) */}
-          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.52fr)_minmax(0,2.06fr)] items-stretch gap-3 lg:gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.52fr)_minmax(0,2.06fr)] items-stretch gap-3 lg:gap-4 xp-td-r1">
 
             <div className="flex flex-col gap-2">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 content-start">
@@ -611,7 +611,7 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.36fr)_minmax(0,0.70fr)] items-stretch gap-3 lg:gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.36fr)_minmax(0,0.70fr)] items-stretch gap-3 lg:gap-4 xp-td-gg">
               <div className="rounded-2xl overflow-hidden flex flex-col justify-center" style={{ background: isDark ? 'linear-gradient(145deg,rgba(16,7,44,0.99) 0%,rgba(7,3,18,0.99) 100%)' : 'var(--xp-card)', border: isDark ? '0.5px solid rgba(124,58,237,0.35)' : '0.5px solid var(--xp-bdr2)', boxShadow: isDark ? '0 4px 36px rgba(80,0,220,0.22),0 2px 16px rgba(0,0,0,0.55)' : '0 2px 12px rgba(0,0,0,0.08)', minHeight: 280 }}>
                 <GaugeMeter score={yearScore} />
               </div>
@@ -629,7 +629,7 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
           </div>
 
           {/* ROW 2 — Yearly Progress (12 months) | Activity Breakdown */}
-          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)] items-stretch gap-3 lg:gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)] items-stretch gap-3 lg:gap-4 xp-td-r2">
 
             <div className="rounded-2xl p-4 sm:p-5 flex flex-col" style={card1}>
               <div className="flex items-start justify-between flex-shrink-0 mb-2">
@@ -699,7 +699,7 @@ export function YearFullPage({ onClose }: YearFullPageProps) {
               grouped by month (collapsible) and internally scrollable, so
               none of the three cards grows taller just because a full year
               holds more data than a single month would. */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4 xp-td-r3">
 
             <div className="rounded-2xl p-3.5 flex flex-col" style={{ ...card1, height: 280 }}>
               <p className="text-[11px] font-semibold tracking-wide mb-2.5 flex-shrink-0" style={{ color: isDark ? 'rgba(255,255,255,0.88)' : 'var(--xp-txt)' }}>Total Activities</p>

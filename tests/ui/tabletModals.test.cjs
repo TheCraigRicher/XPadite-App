@@ -12,7 +12,7 @@ test('tablet = touch-first (pointer: coarse), 640-1400px wide, >=560px tall: pho
   const i = css.indexOf('@media (pointer: coarse) and (min-width: 640px) and (max-width: 1400px) and (min-height: 560px) {')
   assert.ok(i > 0, 'the tablet media query exists')
   const block = css.slice(i)
-  assert.equal((css.match(/pointer: coarse\) and \(min-width: 640px\)/g) ?? []).length, 1, 'one tablet definition, not several competing ones')
+  assert.equal((css.match(/pointer: coarse\) and \(min-width: 640px\) and \(max-width: 1400px\)/g) ?? []).length, 1, 'one tablet definition, not several competing ones')
   for (const sel of ['.xp-tab-overlay', '.xp-tab-shell', '.xp-tab-hide-activity-btns']) assert.ok(block.includes(sel), sel)
   assert.match(block, /height: 100dvh !important/); assert.match(block, /env\(safe-area-inset-top/); assert.match(block, /border-radius: 0 !important/)
   assert.match(block, /overscroll-behavior: contain/)
@@ -63,4 +63,21 @@ test('v1.336 — analytics dashboards: their body is the single tablet scroller 
   const rule = css.slice(i).match(/\.xp-tab-shell \.xp-tab-body \{[^}]*\}/)
   assert.ok(rule, 'rule is inside the tablet media query'); assert.match(rule[0], /overflow-y: auto !important/); assert.match(rule[0], /min-height: 0 !important/)
   assert.ok(!css.slice(0, i).includes('xp-tab-body'), 'nothing outside the tablet query')
+})
+
+test('v1.337 — dashboard card pairing is tablet-portrait only: 5 markers per dashboard, every rule inside one narrower-than-lg tablet query', () => {
+  for (const f of ['DayFullPage.tsx', 'WeekFullPage.tsx', 'YearFullPage.tsx', 'MonthFullPage.tsx']) {
+    const s = read(C + f)
+    for (const m of ['xp-td-dash', 'xp-td-r1', 'xp-td-gg', 'xp-td-r2', 'xp-td-r3']) assert.equal((s.match(new RegExp(m + '"', 'g')) ?? []).length, 1, f + ' ' + m)
+    // the original responsive classes are all still there (phone / desktop paths untouched)
+    assert.ok(s.includes('grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4 xp-td-r3"'), f + ' row 3 keeps lg:grid-cols-3')
+    assert.ok(s.includes('lg:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)] items-stretch gap-3 lg:gap-4 xp-td-r2"'), f + ' row 2 keeps its lg columns')
+  }
+  const css = read('app/globals.css'); const q = '@media (pointer: coarse) and (min-width: 640px) and (max-width: 1023px) and (min-height: 560px) {'
+  const i = css.indexOf(q); assert.ok(i > 0, 'portrait tablet query exists')
+  assert.equal(css.split('xp-td-dash').length - 1, css.slice(i).split('xp-td-dash').length - 1, 'every xp-td rule is inside it')
+  const block = css.slice(i, css.indexOf('\n}\n', i))
+  assert.match(block, /\.xp-td-dash \{ display: grid; grid-template-columns: repeat\(2/)
+  assert.match(block, /\.xp-td-r3 > :nth-child\(1\) \{ order: 4/); assert.match(block, /\.xp-td-r3 > :nth-child\(3\) \{ order: 8/)
+  assert.equal((css.match(/max-width: 1023px\) and \(min-height: 560px\)/g) ?? []).length, 1)
 })

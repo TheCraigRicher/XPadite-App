@@ -671,3 +671,24 @@ html, body {
   /* the old +/-/edit strip under the main header is redundant on tablets (Activity Manager covers it) */
   .xp-tab-hide-activity-btns { display: none !important; }
 }
+
+/* Analytics dashboards on TABLETS narrower than the lg tier (portrait; >=1024px landscape already lays these cards out in rows) — v1.337.
+   The four dashboards (Day / Week / Month / Year) share one structure, which left single cards stranded on a half-empty row. Here the
+   row wrappers dissolve (display: contents) into one 2-column grid so cards can be paired:
+     KPI cards (full) / gauge (full) / [Elite badge | Total Activities] / Progress chart (full) / Activity Breakdown (full) / [Total Sessions | Pending Tasks]
+   Only order and span change - every card keeps its own markup, data and sizing. Phones (<640px) and desktops never match. */
+@media (pointer: coarse) and (min-width: 640px) and (max-width: 1023px) and (min-height: 560px) {
+  .xp-tab-shell .xp-td-dash { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; align-items: stretch; }
+  .xp-tab-shell .xp-td-r1, .xp-tab-shell .xp-td-gg, .xp-tab-shell .xp-td-r2, .xp-tab-shell .xp-td-r3 { display: contents; }
+  .xp-tab-shell .xp-td-dash > * { margin-top: 0 !important; }
+  .xp-tab-shell .xp-td-r1 > :nth-child(1) { grid-column: 1 / -1; order: 1; }
+  .xp-tab-shell .xp-td-gg > :nth-child(1) { grid-column: 1 / -1; order: 2; }
+  .xp-tab-shell .xp-td-gg > :nth-child(2) { order: 3; }
+  /* Total Activities has a fixed row height; beside the badge it must match the badge's height instead. contain:size gives it no content-driven
+     height, so the row is as tall as the badge (never shorter than the original 240px) and a long list still scrolls inside the card. */
+  .xp-tab-shell .xp-td-r3 > :nth-child(1) { order: 4; height: auto !important; min-height: 240px; contain: size; }
+  .xp-tab-shell .xp-td-r2 > :nth-child(1) { grid-column: 1 / -1; order: 5; }
+  .xp-tab-shell .xp-td-r2 > :nth-child(2) { grid-column: 1 / -1; order: 6; }
+  .xp-tab-shell .xp-td-r3 > :nth-child(2) { order: 7; }
+  .xp-tab-shell .xp-td-r3 > :nth-child(3) { order: 8; }
+}

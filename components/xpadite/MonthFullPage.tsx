@@ -1673,7 +1673,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
 
               {/* ── DASHBOARD VIEW ─────────────────────────────────────────────── */}
               {view === 'dashboard' && (
-                <div className="p-3 sm:p-4 lg:p-5 space-y-3 lg:space-y-4" style={{ background: isDark ? 'rgba(9,4,22,0.99)' : 'var(--xp-bg3)' }}>
+                <div className="p-3 sm:p-4 lg:p-5 space-y-3 lg:space-y-4 xp-td-dash" style={{ background: isDark ? 'rgba(9,4,22,0.99)' : 'var(--xp-bg3)' }}>
                   {/* ROW 1 — KPI area | (Performance Analytics + Performance Badge).
                       The KPI area now has 4 rows (6 cards + 2 separated cards) and is
                       naturally taller than gauge+badge need to be. items-stretch at this
@@ -1683,7 +1683,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                       and gauge+badge are grouped into their own nested grid (below) that
                       keeps items-stretch between just those two, so they still match
                       each other's bottom edge without being tied to the KPI column. */}
-                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.52fr)_minmax(0,2.06fr)] items-stretch gap-3 lg:gap-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.52fr)_minmax(0,2.06fr)] items-stretch gap-3 lg:gap-4 xp-td-r1">
 
                     {/* LEFT: the 6 primary Monthly KPI cards (Today's Dashboard's exact
                         dimensions/spacing/3×2 placement) plus one compact combined card
@@ -1807,7 +1807,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                         stretch to match each other; the outer row's own items-stretch
                         (restored above) then matches this whole wrapper's height to the
                         KPI column's, so all three bottoms land on the same line. */}
-                    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.36fr)_minmax(0,0.70fr)] items-stretch gap-3 lg:gap-4">
+                    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.36fr)_minmax(0,0.70fr)] items-stretch gap-3 lg:gap-4 xp-td-gg">
                       {/* Performance Analytics Gauge — stretched (via the outer grid's
                           items-stretch, restored above) so its bottom aligns with the
                           KPI area's bottom; justify-center keeps the SVG (which is
@@ -1835,7 +1835,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                   </div>
 
                   {/* ROW 2 — Monthly Progress (cumulative) | Activity Breakdown */}
-                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)] items-stretch gap-3 lg:gap-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.9fr)_minmax(0,1fr)] items-stretch gap-3 lg:gap-4 xp-td-r2">
 
                     {/* Monthly Progress — weekly bar + trend-line chart (replaces the old
                         day-by-day cumulative line and the separate Weekly Focus
@@ -1943,7 +1943,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                   </div>
 
                   {/* ROW 3 — Total Activities | Total Sessions | Pending Tasks */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 lg:gap-4 xp-td-r3">
 
                     {/* Total Activities — reuses Today's Dashboard's Task Breakdown
                         gradient-pill visual treatment (TASK_GRAD_STRINGS, imported

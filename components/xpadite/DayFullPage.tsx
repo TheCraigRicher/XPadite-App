@@ -375,7 +375,7 @@ export function DayFullPage({ onClose, initialDateKey, onAiInsights }: DayFullPa
            the Analytics modal host's own auto-height card), internal scroll
            on mobile — identical split Monthly/Weekly/Yearly's embedded mode
            uses. ── */}
-      <div className="flex-1 overflow-y-auto sm:flex-none sm:overflow-visible" style={{ minHeight: 0, WebkitOverflowScrolling: 'touch' }}>
+      <div className="flex-1 overflow-y-auto sm:flex-none sm:overflow-visible xp-tab-body" style={{ minHeight: 0, WebkitOverflowScrolling: 'touch' }}>
         <div className="p-3 sm:p-4 lg:p-5 space-y-3 lg:space-y-4" style={{ background: isDark ? 'rgba(9,4,22,0.99)' : 'var(--xp-bg3)' }}>
 
           {/* ROW 1 — KPI area | (Performance Analytics + Performance Badge) */}

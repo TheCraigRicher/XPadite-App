@@ -55,3 +55,12 @@ test('v1.335: the Expandable Month modal opts in; Mind Mapping from the main men
   assert.match(ed, /const toMain = exitToMainRef\.current; exitToMainRef\.current = false\s*\n\s*setDrawState\(null\); setMmcFit\(false\)\s*\n\s*if \(toMain\) guardedNavigate\(onClose\)/)
   assert.ok(!/exitToMainRef\.current = true/.test(ed), 'the Planner button path never sets it, so it keeps returning to the editor')
 })
+
+test('v1.336 — analytics dashboards: their body is the single tablet scroller (marker + CSS), for Day, Week, embedded Month and Year', () => {
+  for (const f of ['DayFullPage.tsx', 'WeekFullPage.tsx', 'YearFullPage.tsx']) assert.match(read(C + f), /sm:flex-none sm:overflow-visible xp-tab-body"/, f)
+  assert.match(read(C + 'MonthFullPage.tsx'), /embedded \? 'flex-1 overflow-y-auto sm:flex-none sm:overflow-visible xp-tab-body' : undefined/)
+  const css = read('app/globals.css'); const i = css.indexOf('@media (pointer: coarse) and (min-width: 640px)')
+  const rule = css.slice(i).match(/\.xp-tab-shell \.xp-tab-body \{[^}]*\}/)
+  assert.ok(rule, 'rule is inside the tablet media query'); assert.match(rule[0], /overflow-y: auto !important/); assert.match(rule[0], /min-height: 0 !important/)
+  assert.ok(!css.slice(0, i).includes('xp-tab-body'), 'nothing outside the tablet query')
+})

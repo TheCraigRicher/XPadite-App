@@ -1632,7 +1632,7 @@ export function MonthFullPage({ month, onClose, onDayDoubleClick, initialView, e
                  dead space — mobile still scrolls internally within the host's
                  bounded viewport, same as DayDashboardModal's own split. ── */}
             <div
-              className={embedded ? 'flex-1 overflow-y-auto sm:flex-none sm:overflow-visible' : undefined}
+              className={embedded ? 'flex-1 overflow-y-auto sm:flex-none sm:overflow-visible xp-tab-body' : undefined}
               style={embedded
                 ? { minHeight: 0, WebkitOverflowScrolling: 'touch' } as React.CSSProperties
                 : { flex: 1, overflowY: 'auto', minHeight: 0, overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}

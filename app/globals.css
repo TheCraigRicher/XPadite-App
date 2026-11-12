@@ -658,6 +658,16 @@ html, body {
   }
   /* same page background as the phone layout, so a card taller than its calendar shows no white band underneath */
   .xp-tab-shell.xp-mfp-box { background: var(--xp-bg) !important; }
+  /* Analytics dashboards (Day/Week/Month-embedded/Year): on >=640px their body is content-height (sm:flex-none sm:overflow-visible) and relies on
+     the overlay to scroll; the tablet card is now a fixed-height shell, so the body itself becomes the ONE scroller (no nested regions). */
+  .xp-tab-shell .xp-tab-body {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
   /* the old +/-/edit strip under the main header is redundant on tablets (Activity Manager covers it) */
   .xp-tab-hide-activity-btns { display: none !important; }
 }

@@ -6,16 +6,17 @@ import { stepDisplayed, type StartupStatus } from './startupReadiness'
 // ── XPadite startup loader ───────────────────────────────────────────────────────────────────────────────────────────────────────
 // Layer 1 — outer ring: fills CLOCKWISE with the REAL initialisation progress (see startupReadiness.ts). The displayed value eases toward the real
 //           one but never passes it, so it can not claim data has loaded that has not.
-// Layer 2 — 36 fixed spikes: a bright wave travels COUNTER-CLOCKWISE around them, each spike lighting as the wave reaches it and fading behind it.
+// Layer 2 — 36 fixed spikes: a bright wave travels CLOCKWISE (faster than the ring) around them, each spike lighting as the wave reaches it and fading behind it.
 //           This is a CSS-only animation (compositor opacity), independent of the network: it keeps cycling if loading pauses. One lap = LAP_S.
-//           The spikes never rotate as a graphic — only their brightness moves.
+//           The spikes never rotate as a graphic — only their brightness moves. They wear the ring's own gradient.
 // Centre  — "48% / Loading…" while loading, "100% / Loaded" at the end, never the logo.
 // Finish  — spikes fade, the original XPadite X (traced from the supplied logo, recoloured) + wordmark appear, zoom toward the viewer and fade,
 //           and the overlay dissolves into the app.
-// While this is mounted the app underneath is `inert` and covered, so nothing can be tapped, typed or saved.
+// The overlay is see-through (the app shows behind it) but it still covers the whole screen and the app underneath is `inert`: nothing can be
+// tapped, typed or saved until the data is ready.
 
 const N = 36                       // spikes
-const LAP_S = 1.15                 // one counter-clockwise lap of the spike wave (a typical 2–4 s load = 2–3 laps)
+const LAP_S = 1.15                 // one clockwise lap of the spike wave (a typical 2–4 s load = 2–3 laps)
 const R_RING = 181.5, RING_W = 17  // outer ring (centre-line radius, thickness) in the 400×400 box
 const CIRC = 2 * Math.PI * R_RING
 const CX = 200, CY = 200
@@ -25,10 +26,10 @@ const R_IN = 133, R_OUT = 167      // spike radii
 const polar = (r: number, deg: number) => { const a = (deg - 90) * Math.PI / 180; return [CX + r * Math.cos(a), CY + r * Math.sin(a)] as const }
 const SPIKES = Array.from({ length: N }, (_, i) => {
   const th = (360 / N) * i
-  const p = [polar(R_IN, th - 0.9), polar(R_OUT, th - 2.3), polar(R_OUT, th + 2.3), polar(R_IN, th + 0.9)]
+  const p = [polar(R_IN, th - 0.58), polar(R_OUT, th - 1.5), polar(R_OUT, th + 1.5), polar(R_IN, th + 0.58)]      // ~35% thinner than v1.339
   const d = 'M' + p.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join('L') + 'Z'
-  // the wave moves counter-clockwise: spike 0 is hit first, then the one before it (i = N-1), and so on. Negative delay = already part-way through the lap.
-  const hit = ((N - i) % N) / N * LAP_S
+  // the wave moves clockwise: spike 0 is hit first, then spike 1, 2, ... Negative delay = already part-way through the lap.
+  const hit = (i / N) * LAP_S
   return { d, delay: (hit - LAP_S).toFixed(3) }
 })
 
@@ -53,6 +54,9 @@ const toPoints = (p: [number, number][]) => p.map(([x, y]) => `${x.toFixed(1)},$
 const X_RIM = X_SHAPES.map(toPoints)
 const X_FACE = X_SHAPES.map(s => toPoints(inset(s, 13)))
 
+// the wordmark sits under the X: the PNG is 1600x220 (aspect 7.27), shown 232 units wide in the 400-unit box
+const WM_W = 232, WM_H = +(232 * 220 / 1600).toFixed(2), WM_X = 200 - WM_W / 2, WM_Y = 250
+
 type Phase = 'run' | 'loaded' | 'logo' | 'zoom'
 
 interface Props {
@@ -63,9 +67,11 @@ interface Props {
   complete: boolean
   onRetry: () => void
   onDone: () => void
+  /** The app is rendered behind the (see-through) overlay. Before that a solid backdrop is used so nothing white shows. */
+  appVisible: boolean
 }
 
-export function StartupLoader({ status, progress, complete, onRetry, onDone }: Props) {
+export function StartupLoader({ status, progress, complete, onRetry, onDone, appVisible }: Props) {
   const [phase, setPhase] = useState<Phase>('run')
   const [reduced, setReduced] = useState(false)
   const arcRef = useRef<SVGCircleElement>(null)
@@ -128,24 +134,29 @@ export function StartupLoader({ status, progress, complete, onRetry, onDone }: P
 
   const failed = status === 'failed' && phase === 'run'
   const cls = ['xl-root', phase !== 'run' ? 'xl-ph-' + phase : '', phase === 'logo' || phase === 'zoom' ? 'xl-past' : '', failed ? 'xl-paused xl-failed' : ''].join(' ')
-  const label = failed ? 'Couldn’t load' : phase === 'run' ? 'Loading...' : 'Loaded'
+  const loading = !failed && phase === 'run'
+  const label = failed ? 'Couldn’t load' : 'Loaded'
 
   return (
     <div ref={rootRef} className={cls} role="progressbar" aria-label="Loading XPadite" aria-valuemin={0} aria-valuemax={100} aria-valuenow={0} data-xp-startup="">
       <style>{CSS}</style>
+      <div className={'xl-solid' + (appVisible ? ' xl-solid-off' : '')} />
       <div className="xl-bg" />
       <div className="xl-stage">
         <svg viewBox="0 0 400 400" className="xl-svg" aria-hidden="true" focusable="false">
           <defs>
             <linearGradient id="xl-ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#ff4dfc" /><stop offset=".5" stopColor="#b026ff" /><stop offset="1" stopColor="#5b21d6" /></linearGradient>
-            <radialGradient id="xl-spike" cx={CX} cy={CY} r={R_OUT} gradientUnits="userSpaceOnUse"><stop offset={(R_IN - 6) / R_OUT} stopColor="#6d28d9" /><stop offset=".86" stopColor="#c026d3" /><stop offset="1" stopColor="#f0abfc" /></radialGradient>
+            {/* the spikes wear the ring's own colours: the ring is drawn rotated -90deg, so its pink to violet diagonal runs bottom-left to top-right in screen space */}
+            <linearGradient id="xl-spike" x1="18" y1="382" x2="382" y2="18" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#ff4dfc" /><stop offset=".5" stopColor="#b026ff" /><stop offset="1" stopColor="#5b21d6" /></linearGradient>
+            <mask id="xl-wm-mask" maskUnits="userSpaceOnUse" x={WM_X} y={WM_Y} width={WM_W} height={WM_H}><image href="/startup/xpadite-wordmark.png" x={WM_X} y={WM_Y} width={WM_W} height={WM_H} preserveAspectRatio="xMidYMid meet" /></mask>
             <linearGradient id="xl-rim" x1="150" y1="170" x2="750" y2="670" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fbe8ff" /><stop offset=".45" stopColor="#d58bff" /><stop offset="1" stopColor="#8b5cf6" /></linearGradient>
             <linearGradient id="xl-face" x1="150" y1="170" x2="750" y2="670" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#ff4dfc" /><stop offset=".55" stopColor="#a21fe8" /><stop offset="1" stopColor="#4f35d8" /></linearGradient>
-            <linearGradient id="xl-word" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#ff6bff" /><stop offset=".55" stopColor="#b53cff" /><stop offset="1" stopColor="#6d4aff" /></linearGradient>
+            <linearGradient id="xl-word" x1={WM_X} y1="0" x2={WM_X + WM_W} y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#ff6bff" /><stop offset=".55" stopColor="#b53cff" /><stop offset="1" stopColor="#6d4aff" /></linearGradient>
           </defs>
 
           <g className="xl-ringg">
-            <circle cx={CX} cy={CY} r={R_RING} fill="none" stroke="#7c3aed" strokeOpacity=".16" strokeWidth={RING_W} />
+            <circle cx={CX} cy={CY} r={R_RING + 6} fill="#080320" fillOpacity=".74" />
+            <circle cx={CX} cy={CY} r={R_RING} fill="none" stroke="#7c3aed" strokeOpacity=".22" strokeWidth={RING_W} />
             <g transform={`rotate(-90 ${CX} ${CY})`}>
               <circle ref={arcRef} cx={CX} cy={CY} r={R_RING} fill="none" stroke="url(#xl-ring)" strokeOpacity=".22" strokeWidth={RING_W + 10} strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={CIRC} />
               <circle ref={arc2Ref} cx={CX} cy={CY} r={R_RING} fill="none" stroke="url(#xl-ring)" strokeWidth={RING_W} strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={CIRC} />
@@ -154,12 +165,14 @@ export function StartupLoader({ status, progress, complete, onRetry, onDone }: P
           </g>
 
           <g className="xl-spikes">
-            {SPIKES.map((s, i) => <path key={i} d={s.d} fill="url(#xl-spike)" className="xl-sp" style={{ animationDelay: s.delay + 's' }} />)}
+            {SPIKES.map((s, i) => <path key={i} d={s.d} fill="url(#xl-spike)" stroke="url(#xl-spike)" strokeOpacity=".4" strokeWidth="2.4" strokeLinejoin="round" className="xl-sp" style={{ animationDelay: s.delay + 's' }} />)}
           </g>
 
           <g className="xl-txt">
             <text ref={pctRef} x={CX} y="214" textAnchor="middle" className="xl-pct">0%</text>
-            <text x={CX} y="248" textAnchor="middle" className="xl-sub">{label}</text>
+            <text x={CX} y="248" textAnchor="middle" className="xl-sub">
+              {loading ? (<>Loading<tspan className="xl-d1">.</tspan><tspan className="xl-d2">.</tspan><tspan className="xl-d3">.</tspan></>) : label}
+            </text>
           </g>
 
           <g className="xl-mark">
@@ -167,7 +180,8 @@ export function StartupLoader({ status, progress, complete, onRetry, onDone }: P
               {X_RIM.map((p, i) => <polygon key={'r' + i} points={p} fill="url(#xl-rim)" strokeLinejoin="round" stroke="url(#xl-rim)" strokeWidth="3" />)}
               {X_FACE.map((p, i) => <polygon key={'f' + i} points={p} fill="url(#xl-face)" />)}
             </g>
-            <text x={CX} y="266" textAnchor="middle" className="xl-word" fill="url(#xl-word)">XPADITE</text>
+            {/* the supplied wordmark PNG is used as a mask: its exact letter shapes, filled with the XPadite gradient (glow in CSS) */}
+            <rect className="xl-word" x={WM_X} y={WM_Y} width={WM_W} height={WM_H} fill="url(#xl-word)" mask="url(#xl-wm-mask)" />
           </g>
         </svg>
 
@@ -185,15 +199,24 @@ export function StartupLoader({ status, progress, complete, onRetry, onDone }: P
 
 const CSS = `
 .xl-root{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;touch-action:none;overscroll-behavior:contain;-webkit-user-select:none;user-select:none;color:#f3e8ff}
-.xl-bg{position:absolute;inset:0;background:radial-gradient(circle at 50% 45%,#1b0a3d 0%,#0b0622 55%,#04020f 100%)}
+.xl-solid{position:absolute;inset:0;background:radial-gradient(circle at 50% 45%,#1b0a3d 0%,#0b0622 55%,#04020f 100%);transition:opacity .5s ease}
+.xl-solid-off{opacity:0}
+/* see-through: the app stays recognisable behind the loader (no blur); a soft vignette keeps the loader prominent. The layer still covers the screen and takes every touch. */
+.xl-bg{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,rgba(10,5,32,.34) 0%,rgba(10,5,32,.16) 45%,rgba(10,5,32,.05) 100%)}
 .xl-stage{position:relative;width:min(78vmin,420px);display:flex;flex-direction:column;align-items:center}
+/* phones (portrait or landscape): 15% smaller than the desktop/tablet size */
+@media (max-width:600px),(max-height:500px){.xl-stage{width:min(66.3vmin,357px)}}
 .xl-svg{width:100%;height:auto;display:block;overflow:visible}
 .xl-sp{opacity:.14;animation:xl-trail ${LAP_S}s linear infinite;will-change:opacity}
 @keyframes xl-trail{0%{opacity:1}5%{opacity:.9}66%{opacity:.14}92%{opacity:.14}100%{opacity:1}}
 .xl-paused .xl-sp{animation-play-state:paused}
 .xl-spikes{transition:opacity .45s ease}
-.xl-mark .xl-word{font:italic 800 40px/1 "Segoe UI","Helvetica Neue",Arial,sans-serif;letter-spacing:6px;transform:skewX(-8deg);transform-box:fill-box;transform-origin:center}
+.xl-mark .xl-word{filter:drop-shadow(0 0 4px rgba(214,96,255,.8)) drop-shadow(0 0 12px rgba(130,70,255,.5))}
 .xl-pct{font:300 64px/1 "Segoe UI","Helvetica Neue",Arial,sans-serif;fill:#f5e6ff;paint-order:stroke;stroke:#b026ff;stroke-opacity:.35;stroke-width:6px;stroke-linejoin:round}
+.xl-d2,.xl-d3{animation:xl-dot 1.2s step-end infinite}
+.xl-d3{animation-name:xl-dot3}
+@keyframes xl-dot{0%{opacity:0}33.33%{opacity:1}100%{opacity:1}}
+@keyframes xl-dot3{0%{opacity:0}66.66%{opacity:1}100%{opacity:1}}
 .xl-sub{font:400 23px/1 "Segoe UI","Helvetica Neue",Arial,sans-serif;fill:#e9c9ff;letter-spacing:1.6px}
 .xl-head{filter:drop-shadow(0 0 6px #f0abfc)}
 .xl-txt{transition:opacity .3s ease}
@@ -221,6 +244,7 @@ const CSS = `
 .xl-btn:focus-visible{outline:3px solid #f0abfc;outline-offset:3px}
 @media (prefers-reduced-motion:reduce){
   .xl-sp{animation:none;opacity:.5}
+  .xl-d2,.xl-d3{animation:none;opacity:1}
   .xl-ph-zoom .xl-mark{animation:xl-fade .3s ease forwards}
   .xl-past .xl-mark{animation:none;opacity:1}
   .xl-ph-zoom .xl-bg{transition-duration:.3s;transition-delay:0s}

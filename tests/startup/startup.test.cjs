@@ -114,7 +114,8 @@ test('every other server writer is silent until ready (sessions, activities, pre
 
 test('the app is inert and covered until the loader is done; layout is unchanged (display: contents)', () => {
   assert.match(ctx, /<div style=\{\{ display: 'contents' \}\} inert=\{!overlayDone \|\| !dataReady\}>\{children\}<\/div>/)
-  assert.match(ctx, /if \(!hydrated\) return loader/, 'the loader is the very first thing painted')
+  assert.match(ctx, /\{hydrated && <AppContext\.Provider value=/, 'the app only renders once hydrated; the loader (one stable position in the tree) is painted from the very first frame')
+  assert.match(ctx, /appVisible=\{hydrated\}/)
 })
 
 test('backgrounding can never release the overlay (or unblock the app) before the data is ready', () => {
@@ -136,16 +137,16 @@ test('the verified marker is written only after a COMPLETE successful read, for 
 // ── loader pins ────────────────────────────────────────────────────────────────────────────────────────────────────────
 const ld = read('components/xpadite/StartupLoader.tsx')
 
-test('loader: 36 evenly spaced spikes lit by a COUNTER-CLOCKWISE wave (sequential illumination, not a rotating graphic)', () => {
+test('loader: 36 evenly spaced spikes lit by a CLOCKWISE wave (sequential illumination, not a rotating graphic)', () => {
   assert.match(ld, /const N = 36/)
   assert.match(ld, /const th = \(360 \/ N\) \* i/)
-  assert.match(ld, /const hit = \(\(N - i\) % N\) \/ N \* LAP_S/, 'spike i-1 is hit AFTER spike i: angles fall = counter-clockwise')
+  assert.match(ld, /const hit = \(i \/ N\) \* LAP_S/, 'spike i+1 is hit AFTER spike i: angles rise = clockwise')
   assert.match(ld, /animationDelay: s\.delay/)
   assert.ok(!/\.xl-spikes\s*\{[^}]*(rotate|animation)/.test(ld), 'the spike group itself never rotates')
   assert.match(ld, /@keyframes xl-trail\{0%\{opacity:1\}[\s\S]*?66%\{opacity:\.14\}/, 'bright head, long fade trail')
 })
 
-test('loader: one counter-clockwise lap is 0.8–1.6 s, so a 2.5–4 s load shows about 2–3 laps; the spike CSS animation is independent of loading state', () => {
+test('loader: one clockwise lap is 0.8–1.6 s, so a 2.5–4 s load shows about 2–3 laps; the spike CSS animation is independent of loading state', () => {
   const lap = +/const LAP_S = ([0-9.]+)/.exec(ld)[1]
   assert.ok(lap >= 0.8 && lap <= 1.6, String(lap))
   assert.match(ld, /\.xl-sp\{opacity:\.14;animation:xl-trail \$\{LAP_S\}s linear infinite/)
@@ -177,4 +178,46 @@ test('loader: reduced motion simplifies the animation; a hidden tab never holds 
   assert.match(ld, /prefers-reduced-motion:reduce\)\{\s*\.xl-sp\{animation:none/)
   assert.match(ld, /if \(hidden\(\)\) \{ finish\(\); return \}/)
   assert.match(ld, /visibilitychange/)
+})
+
+// ── v1.340 refinements ────────────────────────────────────────────────────────────────────────────────────────────────────
+test('v1.340: the overlay is see-through (app visible, no blur) but still covers and blocks the whole screen', () => {
+  const bg = /\.xl-bg\{[^}]*\}/.exec(ld)[0]
+  const alphas = [...bg.matchAll(/rgba\(\d+,\d+,\d+,([0-9.]+)\)/g)].map(m => +m[1])
+  assert.ok(alphas.length >= 2 && Math.max(...alphas) <= 0.4, 'translucent: ' + bg)
+  assert.ok(!/blur\(|backdrop-filter/.test(ld), 'no blur')
+  assert.match(ld, /\.xl-root\{position:fixed;inset:0;/, 'still a full-screen layer that takes every touch')
+  assert.match(ld, /\.xl-solid-off\{opacity:0\}/, 'the solid backdrop is only for the instant before the app is rendered')
+  assert.match(ctx, /inert=\{!overlayDone \|\| !dataReady\}/, 'inert protection unchanged')
+})
+
+test('v1.340: spikes are ~35% thinner and wear the ring gradient', () => {
+  assert.match(ld, /th - 0\.58\), polar\(R_OUT, th - 1\.5\)/)
+  const ring = /id="xl-ring"[^>]*>(.*?)<\/linearGradient>/.exec(ld)[1], spk = /id="xl-spike"[^>]*>(.*?)<\/linearGradient>/.exec(ld)[1]
+  assert.equal(ring, spk, 'identical colour stops')
+  assert.match(ld, /fill="url\(#xl-spike\)"/)
+})
+
+test('v1.340: phones get a loader 15% smaller; tablets/desktop unchanged', () => {
+  assert.match(ld, /\.xl-stage\{position:relative;width:min\(78vmin,420px\)/)
+  assert.match(ld, /@media \(max-width:600px\),\(max-height:500px\)\{\.xl-stage\{width:min\(66\.3vmin,357px\)\}\}/)
+  assert.ok(Math.abs(66.3 / 78 - 0.85) < 0.002 && Math.abs(357 / 420 - 0.85) < 0.002)
+  assert.ok(ld.indexOf('@media (max-width:600px),(max-height:500px)') > ld.indexOf('.xl-stage{position:relative'), 'the phone rule comes after the base rule so it wins')
+})
+
+test('v1.340: Loading. / Loading.. / Loading... cycles every 400 ms per stage, in a stable-width label', () => {
+  assert.match(ld, /Loading<tspan className="xl-d1">\.<\/tspan><tspan className="xl-d2">\.<\/tspan><tspan className="xl-d3">\.<\/tspan>/)
+  assert.match(ld, /\.xl-d2,\.xl-d3\{animation:xl-dot 1\.2s step-end infinite\}/, '3 stages x 400 ms')
+  assert.match(ld, /@keyframes xl-dot\{0%\{opacity:0\}33\.33%\{opacity:1\}/)
+  assert.match(ld, /@keyframes xl-dot3\{0%\{opacity:0\}66\.66%\{opacity:1\}/)
+  assert.ok(!/\.xl-d[123]\{[^}]*display:none/.test(ld), 'dots are faded, never removed, so the width never changes')
+})
+
+test('v1.340: the wordmark is the supplied PNG used as a mask (no font, no redrawn letters)', () => {
+  const png = fs.readFileSync(path.join(ROOT, 'public/startup/xpadite-wordmark.png'))
+  assert.equal(png.readUInt32BE(16), 1600); assert.equal(png.readUInt32BE(20), 220); assert.equal(png[25], 6, 'RGBA: transparent background')
+  assert.match(ld, /<mask id="xl-wm-mask"[^>]*><image href="\/startup\/xpadite-wordmark\.png"/)
+  assert.match(ld, /mask="url\(#xl-wm-mask\)"/)
+  assert.ok(!/<text[^>]*xl-word/.test(ld) && !/font:italic 800/.test(ld), 'no system-font approximation left')
+  assert.match(ld, /\.xl-mark \.xl-word\{filter:drop-shadow/, 'glow')
 })

@@ -1749,14 +1749,14 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   }, [startup.status, retryStartup])
 
   const loader = overlayDone ? null : (
-    <StartupLoader status={startup.status} progress={progress} complete={loaderGate} onRetry={retryStartup} onDone={() => { if (!dataReadyRef.current) return      /* the overlay can only be released once the data really is ready, whatever the loader asks */
+    <StartupLoader status={startup.status} progress={progress} complete={loaderGate} appVisible={hydrated} onRetry={retryStartup} onDone={() => { if (!dataReadyRef.current) return      /* the overlay can only be released once the data really is ready, whatever the loader asks */
       setOverlayDone(true); if (startup.status === 'offline') setToast('Offline — showing your saved data. Changes sync when you are back online.') }} />
   )
-  if (!hydrated) return loader
 
   return (
     <>
-    <AppContext.Provider value={{
+    {/* the loader keeps one position in the tree, so it is never remounted when the app appears behind it */}
+    {hydrated && <AppContext.Provider value={{
       calData, updateDay, flushDays,
       sessions, addSession,
       activities, addActivity, removeActivity, updateActivity,
@@ -1788,7 +1788,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       {/* `inert` while the startup overlay is up: nothing underneath can be focused, tapped or typed into. display:contents keeps the layout unchanged. */}
       <div style={{ display: 'contents' }} inert={!overlayDone || !dataReady}>{children}</div>
       {dayConflicts[0] && <DayConflictDialog conflict={dayConflicts[0]} others={dayConflicts.length - 1} onChoose={choice => resolveDayConflict(dayConflicts[0].key, choice)} />}
-    </AppContext.Provider>
+    </AppContext.Provider>}
     {loader}
     </>
   )

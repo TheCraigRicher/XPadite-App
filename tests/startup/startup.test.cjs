@@ -137,95 +137,61 @@ test('the verified marker is written only after a COMPLETE successful read, for 
 // ── loader pins ────────────────────────────────────────────────────────────────────────────────────────────────────────
 const ld = read('components/xpadite/StartupLoader.tsx')
 
-test('loader: 36 evenly spaced spikes lit by a CLOCKWISE wave (sequential illumination, not a rotating graphic)', () => {
-  assert.match(ld, /const N = 36/)
-  assert.match(ld, /const th = \(360 \/ N\) \* i/)
-  assert.match(ld, /const hit = \(i \/ N\) \* LAP_S/, 'spike i+1 is hit AFTER spike i: angles rise = clockwise')
-  assert.match(ld, /animationDelay: s\.delay/)
-  assert.ok(!/\.xl-spikes\s*\{[^}]*(rotate|animation)/.test(ld), 'the spike group itself never rotates')
-  assert.match(ld, /@keyframes xl-trail\{0%\{opacity:1\}[\s\S]*?66%\{opacity:\.14\}/, 'bright head, long fade trail')
-})
-
-test('loader: one clockwise lap is 0.8–1.6 s, so a 2.5–4 s load shows about 2–3 laps; the spike CSS animation is independent of loading state', () => {
-  const lap = +/const LAP_S = ([0-9.]+)/.exec(ld)[1]
-  assert.ok(lap >= 0.8 && lap <= 1.6, String(lap))
-  assert.match(ld, /\.xl-sp\{opacity:\.14;animation:xl-trail \$\{LAP_S\}s linear infinite/)
-})
-
-test('loader: the ring starts at 12 o\'clock and fills clockwise from the real progress', () => {
-  assert.match(ld, /rotate\(-90 \$\{CX\} \$\{CY\}\)/)
-  assert.match(ld, /strokeDashoffset = off|CIRC \* \(1 - f\)/)
-  assert.match(ld, /polar\(R_RING, f \* 360\)/, 'the bright head sits at the clockwise angle of the progress')
-})
-
-test('loader: reduced motion simplifies the animation; a hidden tab never holds the app behind the overlay', () => {
-  assert.match(ld, /prefers-reduced-motion:reduce\)\{\s*\.xl-sp\{animation:none/)
-  assert.match(ld, /if \(hidden\(\)\) \{ finish\(\); return \}/)
-  assert.match(ld, /visibilitychange/)
-})
-
-// ── v1.340 refinements ────────────────────────────────────────────────────────────────────────────────────────────────────
-test('v1.340: spikes are ~35% thinner and wear the ring gradient', () => {
-  assert.match(ld, /th - 0\.58\), polar\(R_OUT, th - 1\.5\)/)
-  const ring = /id="xl-ring"[^>]*>(.*?)<\/linearGradient>/.exec(ld)[1], spk = /id="xl-spike"[^>]*>(.*?)<\/linearGradient>/.exec(ld)[1]
-  assert.equal(ring, spk, 'identical colour stops')
-  assert.match(ld, /fill="url\(#xl-spike\)"/)
-})
-
-test('v1.340: Loading. / Loading.. / Loading... cycles every 400 ms per stage, in a stable-width label', () => {
-  assert.match(ld, /Loading<tspan className="xl-d1">\.<\/tspan><tspan className="xl-d2">\.<\/tspan><tspan className="xl-d3">\.<\/tspan>/)
-  assert.match(ld, /\.xl-d2,\.xl-d3\{animation:xl-dot 1\.2s step-end infinite\}/, '3 stages x 400 ms')
-  assert.match(ld, /@keyframes xl-dot\{0%\{opacity:0\}33\.33%\{opacity:1\}/)
-  assert.match(ld, /@keyframes xl-dot3\{0%\{opacity:0\}66\.66%\{opacity:1\}/)
-  assert.ok(!/\.xl-d[123]\{[^}]*display:none/.test(ld), 'dots are faded, never removed, so the width never changes')
-})
-
-// ── v1.341 polish ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-// ── v1.342: simplified loader ─────────────────────────────────────────────────────────────────────────────────────────────
-test('v1.342: 100% / Loaded only once complete; a failed load shows Retry', () => {
+test('loader: 100% Loaded only once complete; a failed load shows Retry', () => {
   assert.match(ld, /isComplete && f >= 0\.995 \? 100 : Math\.min\(99, Math\.round\(f \* 100\)\)/)
   assert.match(ld, /status === 'failed' && phase === 'run'/)
   assert.match(ld, /onClick=\{onRetry\}/)
 })
 
-test('v1.342: no logo, no wordmark, no reveal or zoom anywhere in the loader', () => {
-  assert.ok(!/X_SHAPES|<polygon|xl-mark|xl-wm-mask|xpadite-wordmark|xl-zoom|xl-ph-logo|xl-past|xl-rim|xl-face/.test(ld))
-  assert.match(ld, /type Phase = 'run' \| 'loaded' \| 'fade'/)
-  assert.ok(!fs.existsSync(path.join(ROOT, 'public/startup/xpadite-wordmark.png')), 'the unused wordmark asset is gone')
+test('loader: a hidden tab never holds the app behind the overlay', () => {
+  assert.match(ld, /if \(hidden\(\)\) \{ finish\(\); return \}/)
+  assert.match(ld, /visibilitychange/)
 })
 
-test('v1.342: no background of any kind over the app — no disc, no vignette, no tint layer', () => {
-  assert.ok(!/xl-bg|xl-vig|#080320|<radialGradient id="xl-vig"|fillOpacity="\.74"/.test(ld))
-  assert.ok(!/blur\(|backdrop-filter/.test(ld))
-  assert.match(ld, /\.xl-solid\{[^}]*\}/, 'only the pre-render backdrop remains, and it fades out the moment the app is on screen')
+// ── v1.343: horizontal progress bar ───────────────────────────────────────────────────────────────────────────────────────
+test('v1.343: the bar fills left to right from the real (eased, never ahead) progress', () => {
+  assert.match(ld, /fill\.style\.width = \(f \* 100\)\.toFixed\(2\) \+ '%'/)
+  assert.match(ld, /stepDisplayed\(shown\.current, isComplete \? 1 : progressRef\.current, dt\)/)
+  assert.match(ld, /\.xl-fill\{position:absolute;left:0;top:0;bottom:0;/)
+})
+
+test('v1.343: capsule with border, diagonal stripes that move right only inside the filled part, paused on failure', () => {
+  assert.match(ld, /\.xl-bar\{[^}]*border-radius:999px[^}]*overflow:hidden/)
+  assert.match(ld, /\.xl-bar\{[^}]*border:2px solid #c026d3/)
+  assert.match(ld, /\.xl-fill\{[^}]*overflow:hidden[^}]*#9333ea/)
+  assert.match(ld, /\.xl-fill::after\{[^}]*repeating-linear-gradient\(115deg/)
+  assert.match(ld, /@keyframes xl-stripes\{from\{transform:translateX\(0\)\}to\{transform:translateX\(28px\)\}\}/, 'moves right')
+  assert.match(ld, /\.xl-paused \.xl-fill::after\{animation-play-state:paused\}/)
+  assert.match(ld, /\.xl-bar\{[^}]*rgba\(40,14,78,\.72\)/, 'dark purple, subtly translucent track')
+})
+
+test('v1.343: phones 220–260px, larger on tablet/desktop, bar centred with the text hanging below it', () => {
+  assert.match(ld, /\.xl-stage\{position:relative;width:min\(62vw,240px\)/)
+  assert.match(ld, /@media \(min-width:601px\) and \(min-height:501px\)\{\.xl-stage\{width:360px\}\}/)
+  assert.match(ld, /\.xl-txt\{position:absolute;left:0;right:0;top:100%/)
+})
+
+test('v1.343: "NN% Loading." / ".." / "..." in #C026D3, "100% Loaded" at the end', () => {
+  assert.match(ld, /Loading<span className="xl-d1">\.<\/span><span className="xl-d2">\.<\/span><span className="xl-d3">\.<\/span>/)
+  assert.match(ld, /\.xl-d2,\.xl-d3\{animation:xl-dot 1\.2s step-end infinite\}/)
+  assert.match(ld, /@keyframes xl-dot\{0%\{opacity:0\}33\.33%\{opacity:1\}/)
+  assert.match(ld, /@keyframes xl-dot3\{0%\{opacity:0\}66\.66%\{opacity:1\}/)
+  assert.match(ld, /const label = failed \? 'Couldn’t load' : 'Loaded'/)
+  assert.match(ld, /\.xl-txt\{[^}]*color:#C026D3/)
+})
+
+test('v1.343: no ring, spikes, logo, wordmark, zoom, disc, vignette or blur; the app shows through', () => {
+  assert.ok(!/<svg|<circle|<polygon|SPIKES|xl-sp\b|xl-mark|xl-zoom|xl-ph-logo|xl-bg|xl-vig|xl-rim|xpadite-wordmark|blur\(|backdrop-filter/.test(ld))
+  assert.match(ld, /type Phase = 'run' \| 'loaded' \| 'fade'/)
   assert.match(ld, /\.xl-solid-off\{opacity:0\}/)
-  assert.match(ld, /\.xl-root\{position:fixed;inset:0;/, 'the layer itself still covers the whole screen and takes every touch')
+  assert.match(ld, /\.xl-root\{position:fixed;inset:0;/)
   assert.match(ctx, /inert=\{!overlayDone \|\| !dataReady\}/)
 })
 
-test('v1.342: phones get the loader at 47.9vmin / 258px (v1.341 x 0.85); tablets and desktop unchanged', () => {
-  assert.match(ld, /\.xl-stage\{position:relative;width:min\(78vmin,420px\)/)
-  assert.match(ld, /@media \(max-width:600px\),\(max-height:500px\)\{\.xl-stage\{width:min\(47\.9vmin,258px\)\}\}/)
-  assert.ok(Math.abs(47.9 / 56.36 - 0.85) < 0.002 && Math.abs(258 / 303.5 - 0.85) < 0.002, '15% below v1.341')
-  assert.ok(ld.indexOf('@media (max-width:600px),(max-height:500px)') > ld.indexOf('.xl-stage{position:relative'))
-})
-
-test('v1.342: finish is immediate — 100% / Loaded for 450 ms, a 300 ms fade, then the app is released', () => {
+test('v1.343: 100% Loaded for 450 ms, 300 ms fade, then the app is released (only when data is ready); reduced motion respected', () => {
   assert.match(ld, /phase === 'loaded' \? setTimeout\(\(\) => setPhase\('fade'\), 450\)/)
   assert.match(ld, /: setTimeout\(finish, 300\)/)
   assert.match(ld, /\.xl-ph-fade \.xl-stage\{opacity:0\}/)
-  assert.match(ctx, /onDone=\{\(\) => \{ if \(!dataReadyRef\.current\) return/, 'release still requires ready data')
-})
-
-test('v1.342: the v1.340 look is back — thin clockwise gradient spikes, no energy pulses, dots animation', () => {
-  assert.match(ld, /th - 0\.58\), polar\(R_OUT, th - 1\.5\)/)
-  assert.match(ld, /const hit = \(i \/ N\) \* LAP_S/)
-  assert.ok(!/xl-en|xl-prog|EN_P|arc3Ref|xl-finishing/.test(ld), 'v1.341 energy and spike-dimming effects removed')
-  assert.match(ld, /\.xl-d2,\.xl-d3\{animation:xl-dot 1\.2s step-end infinite\}/)
-})
-
-test('v1.342: the percentage and Loading / Loaded text are #C026D3 so they stay readable over the see-through calendar', () => {
-  assert.match(ld, /\.xl-pct\{[^}]*fill:#C026D3/)
-  assert.match(ld, /\.xl-sub\{[^}]*fill:#C026D3/)
+  assert.match(ctx, /onDone=\{\(\) => \{ if \(!dataReadyRef\.current\) return/)
+  assert.match(ld, /prefers-reduced-motion:reduce\)\{\s*\.xl-fill::after\{animation:none\}/)
 })

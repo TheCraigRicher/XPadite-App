@@ -32,13 +32,14 @@ function rowToReminder(row: Record<string, any>): Reminder {
 
 // ─── CRUD ────────────────────────────────────────────────────────────────────
 
-export async function fetchReminders(): Promise<Reminder[]> {
+export async function fetchReminders(strict = false): Promise<Reminder[]> {
   const supabase = createClient()
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('reminders')
     .select('*')
     .eq('is_active', true)
     .order('created_at', { ascending: false })
+  if (error && strict) throw error      // startup: "could not load" must not look like "no reminders"
   return (data ?? []).map(rowToReminder)
 }
 

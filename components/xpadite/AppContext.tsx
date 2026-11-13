@@ -39,6 +39,8 @@ import { fetchJournalFoldersStrict } from '@/lib/supabase/journal-docs'
 import { mergeDay } from './dayMerge'
 import type { MergeConflict } from './dayMerge'
 import { DayConflictDialog } from './DayConflictDialog'
+import { StartupLoader } from './StartupLoader'
+import { freshStages, stageProgress, allStagesSettled, decideStatus, isDataReady, looksLikeNetworkError, parseVerified, VERIFIED_KEY, REQUIRED_STAGES, type StageId, type StageState, type StageMap, type StartupStatus } from './startupReadiness'
 import { fetchScheduleEvents, applyScheduleChange, setScheduleTaskLink, fetchScheduleExtras, saveScheduleExtras, fetchScheduleSyncPref, setScheduleSyncPref, ScheduleConflictError, ScheduleSetupError } from '@/lib/supabase/schedule-data'
 import type { StoredScheduleEvent } from '@/lib/supabase/schedule-data'
 import { planDeadlineSync, deadlineDayMap, reconcileDeadlines, batchItems, opKeys, applyOpsLocal, isBackfillEligible } from './deadlineLink'
@@ -194,6 +196,9 @@ interface AppContextValue {
   // A day edited on two devices in conflicting ways: the user is asked (see DayConflictDialog); resolved here.
   dayConflicts: { key: string; mine: DayData; theirs: DayData | null; theirsRev: number; conflicts: MergeConflict[] }[]
   resolveDayConflict: (key: string, choice: 'mine' | 'theirs') => void
+  /** Startup readiness: true once the account's data has really been read (or this device holds a verified copy and is offline). Edits and server writes wait for it. */
+  dataReady: boolean
+  startup: { status: StartupStatus; progress: number; offline: boolean }
   /** Tells a window when the set of days still waiting to be saved changed (e.g. a retried save was confirmed). Returns the unsubscribe. */
   subscribeDaySync: (listener: () => void) => () => void
   /** True while the latest edit of this day is not yet confirmed by the server (pending, in flight or failed). */
@@ -241,6 +246,16 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const deadlineDays = useMemo(() => deadlineDayMap(scheduleEvents) as Record<string, StoredScheduleEvent[]>, [scheduleEvents])
   const [savedLocations, setSavedLocationsState] = useState<string[]>([])
   const [calHydrated, setCalHydrated] = useState(false)
+  // ── Startup readiness (see startupReadiness.ts): "not loaded" is never treated as "empty" ──
+  const [startup, setStartup] = useState<{ status: StartupStatus; stages: StageMap; attempt: number }>(() => ({ status: 'loading', stages: freshStages(), attempt: 0 }))
+  const [overlayDone, setOverlayDone] = useState(false)
+  const [graceDone, setGraceDone] = useState(false)
+  const stagesRef = useRef<StageMap>(startup.stages)
+  const attemptRef = useRef(0)
+  const dataReadyRef = useRef(false)
+  const readyWaitersRef = useRef(new Set<() => void>())
+  const heldEditsRef = useRef<{ key: string; updater: (prev: DayData) => DayData; opts?: { after?: string[] } }[]>([])
+  const applyDayEditRef = useRef<(key: string, updater: (prev: DayData) => DayData, opts?: { after?: string[] }) => void>(() => {})
   const [scheduleTaskSync, setScheduleTaskSyncState] = useState(false)
   type DayConflict = { key: string; mine: DayData; theirs: DayData | null; theirsRev: number; conflicts: MergeConflict[] }
   const [dayConflicts, setDayConflicts] = useState<DayConflict[]>([])
@@ -329,6 +344,41 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const subscribeDaySync = useCallback((fn: () => void) => { daySyncListenersRef.current.add(fn); return () => { daySyncListenersRef.current.delete(fn) } }, [])
   const isDayUnsynced = useCallback((key: string) => daySync.hasUnsynced(key), [daySync])
 
+  // ── Startup readiness plumbing ─────────────────────────────────────────────────────────────────────────────────────────
+  const markStage = useCallback((id: StageId, state: StageState) => {
+    if (stagesRef.current[id] === state) return
+    stagesRef.current = { ...stagesRef.current, [id]: state }
+    setStartup(s => ({ ...s, stages: stagesRef.current }))
+  }, [])
+  /** Resolves when the account's data is ready (or the signal aborts). Used by the day writer so nothing is saved from an unloaded state. */
+  const waitReady = useCallback((signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+    if (dataReadyRef.current) { resolve(); return }
+    const go = () => { signal?.removeEventListener('abort', onAbort); resolve() }
+    const onAbort = () => { readyWaitersRef.current.delete(go); reject(new Error('startup-wait-aborted')) }
+    readyWaitersRef.current.add(go)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  }), [])
+  /** Decide the startup status from the stages (and the failure, if any). Success → ready; failure → offline (verified local copy) or failed (blocked until Retry). */
+  const settleStartup = useCallback((err?: unknown) => {
+    const verified = parseVerified((() => { try { return localStorage.getItem(VERIFIED_KEY) } catch { return null } })())
+    const status = decideStatus({ stages: stagesRef.current, verifiedForUser: !!verified && verified.uid === userIdRef.current, networkDown: looksLikeNetworkError(err) })
+    if (status === 'loading') return
+    if (status === 'ready') { try { localStorage.setItem(VERIFIED_KEY, JSON.stringify({ uid: userIdRef.current, at: Date.now() })) } catch {} }
+    if (isDataReady(status)) {
+      dataReadyRef.current = true
+      readyWaitersRef.current.forEach(fn => fn()); readyWaitersRef.current.clear()
+      const held = heldEditsRef.current; heldEditsRef.current = []
+      for (const h of held) applyDayEditRef.current(h.key, h.updater, h.opts)     // edits made before the data was ready run on top of the loaded data
+    }
+    setStartup(s => ({ ...s, status }))
+  }, [])
+  const retryStartup = useCallback(() => {
+    attemptRef.current += 1
+    const next = { ...stagesRef.current }; for (const s of [...REQUIRED_STAGES, 'folders'] as StageId[]) next[s] = 'pending'
+    stagesRef.current = next
+    setStartup(s => ({ ...s, status: 'loading', stages: next, attempt: attemptRef.current }))
+  }, [])
+
   // ── Stale-write protection (migration 024) ─────────────────────────────────────────────────────────────────────────
   // A day is written only if the server still holds the revision this device based its edits on (calendar_day_save, compare-and-swap). If the day
   // has moved on, the server hands back its current copy and the two are merged THREE ways (dayMerge.ts): changes to different tasks/fields all
@@ -349,6 +399,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   }
 
   async function writeDay(key: string, data: DayData, signal?: AbortSignal): Promise<void> {
+    await waitReady(signal)       // never save before the account's data has been read: an unloaded screen is not an empty account
     const uid = userIdRef.current
     if (!uid) throw new Error('no-user')
     if (dayConflictsRef.current.some(c => c.key === key)) throw new DaySyncParked()     // waiting for the user: no network, no retry storm
@@ -483,17 +534,26 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       const att = localStorage.getItem('xp9-active-task-timer')
       if (att) setActiveTaskTimerRaw(JSON.parse(att) as ActiveTaskTimer)
     } catch {}
+    markStage('local', 'done')
     setHydrated(true)
-  }, [])
+  }, [markStage])
 
   // ─── Resolve Supabase user ID after hydration ────────────────────────────────
 
   useEffect(() => {
     if (!hydrated) return
-    createClient().auth.getUser().then(({ data }) => {
-      if (data.user) setUserId(data.user.id)
-    }).catch(() => {})
-  }, [hydrated])
+    let cancelled = false
+    ;(async () => {
+      const auth = createClient().auth
+      let uid = ''
+      try { uid = (await auth.getUser()).data.user?.id ?? '' } catch {}
+      if (!uid) { try { uid = (await auth.getSession()).data.session?.user.id ?? '' } catch {} }      // offline: the stored session still names the account
+      if (cancelled) return
+      if (uid) { setUserId(uid); markStage('auth', 'done') }
+      else { markStage('auth', 'failed'); settleStartup(new Error('auth-unavailable')) }
+    })()
+    return () => { cancelled = true }
+  }, [hydrated, startup.attempt, markStage, settleStartup])
 
   // ─── Initial Supabase data fetch ─────────────────────────────────────────────
   // Runs once per session when the user ID becomes available.
@@ -503,6 +563,9 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   useEffect(() => {
     if (!userId) return
     const supabase = createClient()
+    const attempt = attemptRef.current
+    // Each read reports its own completion (that is what the loader's percentage is made of); a read that FAILS is a failure — never "empty".
+    const track = <T,>(id: StageId, p: Promise<T>): Promise<T> => p.then(v => { markStage(id, 'done'); return v }, e => { markStage(id, 'failed'); throw e })
 
     // Resume days whose last edit never reached the server (failed write, or a refresh mid-write): re-send the
     // LOCAL copy and keep hydration from replacing it with the older server row.
@@ -521,14 +584,15 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     } catch {}
 
     Promise.all([
-      fetchCalendarDaysWithRev(supabase, userId),
-      fetchWorkSessions(supabase, userId),
-      fetchUserActivities(supabase, userId),
-      fetchUserPreferences(supabase, userId),
-      supabaseFetchReminders(),
-      fetchJournalLabels(supabase, userId),
-      fetchJournalFoldersStrict(supabase, userId),
+      track('calendar', fetchCalendarDaysWithRev(supabase, userId, true)),
+      track('sessions', fetchWorkSessions(supabase, userId, true)),
+      track('activities', fetchUserActivities(supabase, userId, true)),
+      track('preferences', fetchUserPreferences(supabase, userId, true)),
+      track('reminders', supabaseFetchReminders(true)),
+      track('labels', fetchJournalLabels(supabase, userId, true)),
+      fetchJournalFoldersStrict(supabase, userId).then(v => { markStage('folders', 'done'); return v }, () => { markStage('folders', 'done'); return null }),   // optional: null = could not load, this device's copy is kept
     ]).then(([sbCalRes, sbSessions, sbActivities, sbPrefs, sbReminders, sbJournalLabels, sbJournalFolders]) => {
+      if (attempt !== attemptRef.current) return      // a newer attempt (Retry) owns the result
       const sbCalData = sbCalRes.data
 
       // Calendar days: merge if Supabase has rows; Supabase data wins per date key.
@@ -685,10 +749,12 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
         }
       }
 
+      settleStartup()     // everything that guards the user's data was read: editing and saving are now allowed
     }).catch(err => {
       console.error('[XPadite] Supabase initial fetch error:', err)
+      if (attempt === attemptRef.current) settleStartup(err)      // nothing was applied: this device's copy stays untouched; offline (verified) or blocked until Retry
     })
-  }, [userId])
+  }, [userId, startup.attempt, markStage, settleStartup])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Active-session reconciliation (focus/visibility + reconnect fallback) ───
   // Realtime is the primary sync mechanism, but it can miss events across a
@@ -981,7 +1047,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
 
   // ─── Core data mutations ─────────────────────────────────────────────────────
 
-  const updateDay = useCallback((key: string, updater: (prev: DayData) => DayData, opts?: { after?: string[] }) => {
+  const applyDayEdit = useCallback((key: string, updater: (prev: DayData) => DayData, opts?: { after?: string[] }) => {
     setCalData(prev => {
       const raw = prev[key] ?? { ...EMPTY_DAY }
       // Normalize legacy DayData that may lack a tasks array
@@ -996,8 +1062,16 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       return next
     })
   }, [daySync])
+  useEffect(() => { applyDayEditRef.current = applyDayEdit }, [applyDayEdit])
+  // Before the account's data is ready an edit would be built on a screen that may be missing everything: it is HELD (nothing is lost, nothing is
+  // saved) and replayed on top of the loaded data the moment it is ready. The loader blocks the UI, so this is the safety net behind it.
+  const updateDay = useCallback((key: string, updater: (prev: DayData) => DayData, opts?: { after?: string[] }) => {
+    if (!dataReadyRef.current) { if (heldEditsRef.current.length < 500) heldEditsRef.current.push({ key, updater, opts }); return }
+    applyDayEdit(key, updater, opts)
+  }, [applyDayEdit])
 
   const flushDays = useCallback(async (keys?: string[]): Promise<boolean> => {
+    if (!dataReadyRef.current) return false        // not loaded yet: nothing has been confirmed saved
     if (!userIdRef.current) return true
     if (!keys) return daySync.flushAll()
     const results = await Promise.all(keys.map(k => daySync.flush(k)))
@@ -1234,7 +1308,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       try { localStorage.setItem('xp9s', JSON.stringify(next)) } catch {}
       return next
     })
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       upsertWorkSession(createClient(), uid, s).catch(err =>
         console.error('[Sessions] Supabase sync error:', err)
@@ -1246,7 +1320,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const next = [...activitiesRef.current, a]
     try { localStorage.setItem('xp9a', JSON.stringify(next)) } catch {}
     setActivitiesState(next)
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       upsertAllActivities(createClient(), uid, next).catch(err =>
         console.error('[Activities] Supabase sync error:', err)
@@ -1258,7 +1332,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const next = activitiesRef.current.map(a => a.id === id ? { ...a, ...patch } : a)
     try { localStorage.setItem('xp9a', JSON.stringify(next)) } catch {}
     setActivitiesState(next)
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       upsertAllActivities(createClient(), uid, next).catch(err =>
         console.error('[Activities] Supabase sync error:', err)
@@ -1269,7 +1343,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const setProgressColor = useCallback((c: string) => {
     setProgressColorRaw(c)
     try { localStorage.setItem('xp-progress-color', c) } catch {}
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       upsertUserPreferences(createClient(), uid, { progressColor: c }).catch(err =>
         console.error('[Prefs] Progress color sync error:', err)
@@ -1280,7 +1354,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
   const setIsDark = useCallback((v: boolean) => {
     setIsDarkRaw(v)
     try { localStorage.setItem('xp-theme', String(v)) } catch {}
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       upsertUserPreferences(createClient(), uid, { isDark: v }).catch(err =>
         console.error('[Prefs] Theme sync error:', err)
@@ -1317,7 +1391,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       if (v) localStorage.setItem('xp-language', v)
       else localStorage.removeItem('xp-language')
     } catch {}
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       upsertUserPreferences(createClient(), uid, { language: v }).catch(err =>
         console.error('[Prefs] Language sync error:', describePrefsError(err))
@@ -1331,7 +1405,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       if (v) localStorage.setItem('xp-timezone', v)
       else localStorage.removeItem('xp-timezone')
     } catch {}
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       upsertUserPreferences(createClient(), uid, { timezone: v }).catch(err =>
         console.error('[Prefs] Timezone sync error:', describePrefsError(err))
@@ -1355,7 +1429,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const next = [...current, normalized]
     setCustomColorsRaw(next)
     try { localStorage.setItem('xp-custom-colors', JSON.stringify(next)) } catch {}
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       upsertUserPreferences(createClient(), uid, { customColors: next }).catch(err =>
         console.error('[Prefs] Custom color sync error:', err)
@@ -1370,7 +1444,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const next = customColorsRef.current.filter(c => normalizeHexColor(c) !== normalized)
     setCustomColorsRaw(next)
     try { localStorage.setItem('xp-custom-colors', JSON.stringify(next)) } catch {}
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       upsertUserPreferences(createClient(), uid, { customColors: next }).catch(err =>
         console.error('[Prefs] Custom color remove sync error:', err)
@@ -1385,7 +1459,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     setActiveSessionRaw(s)
     if (s) {
       try { localStorage.setItem('xp9-active-session', JSON.stringify(s)) } catch {}
-      const uid = userIdRef.current
+      const uid = dataReadyRef.current ? userIdRef.current : ''
       if (uid) {
         upsertWorkSession(createClient(), uid, { ...s, endTs: null }).catch(err =>
           console.error('[ActiveSession] Supabase upsert error:', err)
@@ -1431,7 +1505,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
         try { localStorage.setItem('xp9s', JSON.stringify(next)) } catch {}
         return next
       })
-      const uid = userIdRef.current
+      const uid = dataReadyRef.current ? userIdRef.current : ''
       if (uid) {
         upsertWorkSession(createClient(), uid, finalized).catch(err =>
           console.error('[ActiveSession] Supabase upsert error:', err)
@@ -1447,7 +1521,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     try { localStorage.setItem('xp9a', JSON.stringify(next)) } catch {}
     setActivitiesState(next)
     setSelectedActId(prev => prev === id ? (next[0]?.id ?? DEFAULT_ACTIVITIES[0].id) : prev)
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       deleteUserActivity(createClient(), uid, id).catch(err =>
         console.error('[Activities] Supabase delete error:', err)
@@ -1465,7 +1539,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const next = [...journalLabelsRef.current, l]
     try { localStorage.setItem('xp9jl', JSON.stringify(next)) } catch {}
     setJournalLabelsState(next)
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       upsertAllJournalLabels(createClient(), uid, next).catch(err =>
         console.error('[JournalLabels] Supabase sync error:', err)
@@ -1477,7 +1551,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const next = journalLabelsRef.current.filter(l => l.id !== id)
     try { localStorage.setItem('xp9jl', JSON.stringify(next)) } catch {}
     setJournalLabelsState(next)
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       deleteJournalLabel(createClient(), uid, id).catch(err =>
         console.error('[JournalLabels] Supabase delete error:', err)
@@ -1489,7 +1563,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const next = [...journalFoldersRef.current, f]
     try { localStorage.setItem('xp9jf', JSON.stringify(next)) } catch {}
     setJournalFoldersState(next)
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       upsertAllJournalFolders(createClient(), uid, next).catch(err =>
         console.error('[JournalFolders] Supabase sync error:', err)
@@ -1501,7 +1575,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const next = journalFoldersRef.current.map(x => (x.id === f.id ? { ...x, ...f } : x))
     try { localStorage.setItem('xp9jf', JSON.stringify(next)) } catch {}
     setJournalFoldersState(next)
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       upsertAllJournalFolders(createClient(), uid, next).catch(err =>
         console.error('[JournalFolders] Supabase sync error:', err)
@@ -1513,7 +1587,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const next = journalFoldersRef.current.filter(f => f.id !== id)
     try { localStorage.setItem('xp9jf', JSON.stringify(next)) } catch {}
     setJournalFoldersState(next)
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (!uid) return Promise.resolve(true)
     return deleteJournalFolder(createClient(), uid, id).then(() => true, err => {
       console.error('[JournalFolders] Supabase delete error:', err)
@@ -1544,7 +1618,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     // Background Supabase sync — fetch user fresh so we never rely on stale cached userId
     ;(async () => {
       try {
-        let uid = userIdRef.current
+        let uid = dataReadyRef.current ? userIdRef.current : ''
         if (!uid) {
           const { data, error: authError } = await createClient().auth.getUser()
           if (authError) {
@@ -1580,7 +1654,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const next = remindersRef.current.filter(r => r.id !== id)
     persistReminders(next)
     setReminders(next)
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) supabaseDeleteReminder(id).catch(() => {})
   }, [])
 
@@ -1614,7 +1688,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     //                              then sets is_active=false. Patching here races the cron.
     //   2. Once + no email       → Deactivate in Supabase now; no backend will process this row.
     //   3. Repeating (any)       → Advance nextRunAt only; is_active stays true.
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       if (isOnce && reminder.emailEnabled) {
         console.log(
@@ -1647,7 +1721,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     persistReminders(next)
     setReminders(next)
 
-    const uid = userIdRef.current
+    const uid = dataReadyRef.current ? userIdRef.current : ''
     if (uid) {
       supabasePatchReminder(id, { notificationsEnabled: enabled }).catch(err => {
         console.error('[Reminders] setReminderNotificationsEnabled patch error:', err)
@@ -1655,9 +1729,33 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     }
   }, [])
 
-  if (!hydrated) return null
+  const progress = stageProgress(startup.stages)
+  const dataReady = isDataReady(startup.status)
+  // the loader completes only once the data is ready AND the optional reads (notes, schedule, folders) have settled — or a short grace has passed
+  const loaderGate = dataReady && (allStagesSettled(startup.stages) || graceDone)
+  useEffect(() => {
+    if (!dataReady || allStagesSettled(startup.stages)) return
+    const id = setTimeout(() => setGraceDone(true), 4000)
+    return () => clearTimeout(id)
+  }, [dataReady, startup.stages])
+  useEffect(() => { if (journalDocs.status === 'ready' || journalDocs.status === 'offline' || journalDocs.status === 'unavailable') markStage('notes', 'done') }, [journalDocs.status, markStage])
+  useEffect(() => { if (scheduleStatus !== 'loading') markStage('schedule', 'done') }, [scheduleStatus, markStage])
+  // back online while the first read had failed: try again by itself
+  useEffect(() => {
+    if (startup.status !== 'failed') return
+    const on = () => retryStartup()
+    window.addEventListener('online', on)
+    return () => window.removeEventListener('online', on)
+  }, [startup.status, retryStartup])
+
+  const loader = overlayDone ? null : (
+    <StartupLoader status={startup.status} progress={progress} complete={loaderGate} onRetry={retryStartup} onDone={() => { if (!dataReadyRef.current) return      /* the overlay can only be released once the data really is ready, whatever the loader asks */
+      setOverlayDone(true); if (startup.status === 'offline') setToast('Offline — showing your saved data. Changes sync when you are back online.') }} />
+  )
+  if (!hydrated) return loader
 
   return (
+    <>
     <AppContext.Provider value={{
       calData, updateDay, flushDays,
       sessions, addSession,
@@ -1681,13 +1779,17 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       upsertReminderCtx, removeReminderCtx, fireReminderCtx, setReminderNotificationsEnabled,
       scheduleEvents, scheduleStatus, deadlineDays, saveScheduleEvent, deleteScheduleEvent,
       scheduleTaskSync, setScheduleTaskSyncPref, dayConflicts, resolveDayConflict, subscribeDaySync, isDayUnsynced,
+      dataReady, startup: { status: startup.status, progress, offline: startup.status === 'offline' },
       detachDeadlineTask, restoreDeadlineTask, scheduleSyncIssue, retryScheduleSync, scheduleTimeFormat, setScheduleTimeFormat,
       scheduleFocusRequest, requestScheduleEvent, clearScheduleFocusRequest,
       mindMapRequest, requestMindMap, clearMindMapRequest,
       savedLocations, setSavedLocations, scheduleCategories, setScheduleCategories,
     }}>
-      {children}
+      {/* `inert` while the startup overlay is up: nothing underneath can be focused, tapped or typed into. display:contents keeps the layout unchanged. */}
+      <div style={{ display: 'contents' }} inert={!overlayDone || !dataReady}>{children}</div>
       {dayConflicts[0] && <DayConflictDialog conflict={dayConflicts[0]} others={dayConflicts.length - 1} onChoose={choice => resolveDayConflict(dayConflicts[0].key, choice)} />}
     </AppContext.Provider>
+    {loader}
+    </>
   )
 }

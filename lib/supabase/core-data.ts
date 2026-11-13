@@ -16,15 +16,18 @@ export interface UserPreferences {
   timezone: string | null
 }
 
+// `strict` (startup): a failed read THROWS instead of looking like "nothing there", so the app can tell "could not load" from "genuinely empty".
 export async function fetchUserPreferences(
   supabase: Supabase,
   userId: string,
+  strict = false,
 ): Promise<UserPreferences | null> {
-  const { data, error } = await supabase
+  const q = supabase
     .from('user_preferences')
     .select('is_dark, progress_color, custom_colors, language, timezone')
     .eq('user_id', userId)
-    .single()
+  const { data, error } = strict ? await q.maybeSingle() : await q.single()
+  if (strict && error) throw error
   if (error || !data) return null
   return {
     isDark: data.is_dark as boolean,
@@ -96,6 +99,7 @@ export async function fetchCalendarDay(
 export async function fetchCalendarDaysWithRev(
   supabase: Supabase,
   userId: string,
+  strict = false,
 ): Promise<{ data: CalendarData; revs: Record<string, number | null> }> {
   type Row = { date_key: string; day_data: unknown; rev?: number | null }
   let rows: Row[] = []
@@ -103,6 +107,7 @@ export async function fetchCalendarDaysWithRev(
   if (!withRev.error) rows = (withRev.data ?? []) as Row[]
   else {
     const plain = await supabase.from('calendar_days').select('date_key, day_data').eq('user_id', userId)
+    if (plain.error && strict) throw plain.error
     if (plain.error || !plain.data) return { data: {}, revs: {} }
     rows = plain.data as Row[]
   }
@@ -148,12 +153,14 @@ export async function upsertDayData(
 export async function fetchWorkSessions(
   supabase: Supabase,
   userId: string,
+  strict = false,
 ): Promise<WorkSession[]> {
   const { data, error } = await supabase
     .from('work_sessions')
     .select('session_id, act_id, act_name, act_color, start_ts, end_ts, date_key')
     .eq('user_id', userId)
     .order('start_ts', { ascending: true })
+  if (error && strict) throw error
   if (error || !data || data.length === 0) return []
   return data.map(row => ({
     id: row.session_id as string,
@@ -219,12 +226,14 @@ export async function fetchOpenWorkSessions(
 export async function fetchUserActivities(
   supabase: Supabase,
   userId: string,
+  strict = false,
 ): Promise<Activity[]> {
   const { data, error } = await supabase
     .from('user_activities')
     .select('activity_id, name, color, emoji, counts_toward_productivity, sort_order')
     .eq('user_id', userId)
     .order('sort_order', { ascending: true })
+  if (error && strict) throw error
   if (error || !data || data.length === 0) return []
   return data.map(row => ({
     id: row.activity_id as string,
@@ -274,12 +283,14 @@ export async function deleteUserActivity(
 export async function fetchJournalLabels(
   supabase: Supabase,
   userId: string,
+  strict = false,
 ): Promise<JournalLabel[]> {
   const { data, error } = await supabase
     .from('journal_labels')
     .select('label_id, name, color')
     .eq('user_id', userId)
     .order('created_at', { ascending: true })
+  if (error && strict) throw error
   if (error || !data || data.length === 0) return []
   return data.map(row => ({
     id: row.label_id as string,

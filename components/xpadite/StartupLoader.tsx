@@ -15,11 +15,13 @@ import { stepDisplayed, type StartupStatus } from './startupReadiness'
 // The overlay is see-through (the app shows behind it) but it still covers the whole screen and the app underneath is `inert`: nothing can be
 // tapped, typed or saved until the data is ready.
 
+const BRAND = '#9333EA'            // the X and the wordmark: one solid brand purple
 const N = 36                       // spikes
 const LAP_S = 1.15                 // one clockwise lap of the spike wave (a typical 2–4 s load = 2–3 laps)
 const R_RING = 181.5, RING_W = 17  // outer ring (centre-line radius, thickness) in the 400×400 box
 const CIRC = 2 * Math.PI * R_RING
 const CX = 200, CY = 200
+const EN_P = CIRC / 8, EN_D = 30     // energy pulses: 8 evenly spaced around the ring (the pattern repeats exactly, so the loop is seamless)
 const R_IN = 133, R_OUT = 167      // spike radii
 
 // Spike wedges: narrow at the inner end, wider outward (matches the concept image). Angle 0 = 12 o'clock, increasing clockwise.
@@ -39,20 +41,8 @@ const X_SHAPES: [number, number][][] = [
   [[144, 377], [354, 438], [294, 497]],                  // the upper-left wedge
   [[401, 568], [457, 488], [751, 657], [520, 658]],      // the lower-right wedge
 ]
-/** Shrinks a convex polygon by `d` on every side (the bevelled face inside the bright rim). */
-function inset(pts: [number, number][], d: number): [number, number][] {
-  const n = pts.length
-  let area = 0; for (let i = 0; i < n; i++) { const [x1, y1] = pts[i], [x2, y2] = pts[(i + 1) % n]; area += x1 * y2 - x2 * y1 }
-  const s = area > 0 ? 1 : -1
-  const lines = pts.map((p, i) => { const q = pts[(i + 1) % n]; const dx = q[0] - p[0], dy = q[1] - p[1], L = Math.hypot(dx, dy) || 1
-    const nx = -dy / L * s, ny = dx / L * s; return { px: p[0] + nx * d, py: p[1] + ny * d, dx, dy } })
-  return pts.map((_, i) => { const a = lines[(i + n - 1) % n], b = lines[i]
-    const den = a.dx * b.dy - a.dy * b.dx; if (Math.abs(den) < 1e-9) return [b.px, b.py] as [number, number]
-    const t = ((b.px - a.px) * b.dy - (b.py - a.py) * b.dx) / den; return [a.px + a.dx * t, a.py + a.dy * t] as [number, number] })
-}
 const toPoints = (p: [number, number][]) => p.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
-const X_RIM = X_SHAPES.map(toPoints)
-const X_FACE = X_SHAPES.map(s => toPoints(inset(s, 13)))
+const X_PATHS = X_SHAPES.map(toPoints)      // the exact traced silhouette of each part, filled with one solid colour
 
 // the wordmark sits under the X: the PNG is 1600x220 (aspect 7.27), shown 232 units wide in the 400-unit box
 const WM_W = 232, WM_H = +(232 * 220 / 1600).toFixed(2), WM_X = 200 - WM_W / 2, WM_Y = 250
@@ -76,6 +66,7 @@ export function StartupLoader({ status, progress, complete, onRetry, onDone, app
   const [reduced, setReduced] = useState(false)
   const arcRef = useRef<SVGCircleElement>(null)
   const arc2Ref = useRef<SVGCircleElement>(null)
+  const arc3Ref = useRef<SVGCircleElement>(null)
   const headRef = useRef<SVGCircleElement>(null)
   const pctRef = useRef<SVGTextElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -97,10 +88,11 @@ export function StartupLoader({ status, progress, complete, onRetry, onDone, app
     if (phase !== 'run') return
     let raf = 0, last = performance.now()
     const paint = (f: number, isComplete: boolean) => {
-      const arc = arcRef.current, arc2 = arc2Ref.current, head = headRef.current, txt = pctRef.current
+      const arc = arcRef.current, arc2 = arc2Ref.current, arc3 = arc3Ref.current, head = headRef.current, txt = pctRef.current
       const off = String(CIRC * (1 - f))
       if (arc) arc.style.strokeDashoffset = off
       if (arc2) arc2.style.strokeDashoffset = off
+      if (arc3) arc3.style.strokeDashoffset = off
       if (head) { const [x, y] = polar(R_RING, f * 360); head.setAttribute('cx', x.toFixed(2)); head.setAttribute('cy', y.toFixed(2)); head.style.opacity = f > 0.004 && f < 0.999 ? '1' : '0' }
       const pct = isComplete && f >= 0.995 ? 100 : Math.min(99, Math.round(f * 100))     // 100% is shown only once everything really is ready
       if (txt && pct !== lastPct.current) { lastPct.current = pct; txt.textContent = pct + '%'; rootRef.current?.setAttribute('aria-valuenow', String(pct)) }
@@ -133,7 +125,7 @@ export function StartupLoader({ status, progress, complete, onRetry, onDone, app
   }, [phase, reduced])
 
   const failed = status === 'failed' && phase === 'run'
-  const cls = ['xl-root', phase !== 'run' ? 'xl-ph-' + phase : '', phase === 'logo' || phase === 'zoom' ? 'xl-past' : '', failed ? 'xl-paused xl-failed' : ''].join(' ')
+  const cls = ['xl-root', phase !== 'run' ? 'xl-ph-' + phase : '', phase === 'logo' || phase === 'zoom' ? 'xl-past' : '', failed ? 'xl-paused xl-failed' : '', complete && phase === 'run' ? 'xl-finishing' : ''].join(' ')
   const loading = !failed && phase === 'run'
   const label = failed ? 'Couldn’t load' : 'Loaded'
 
@@ -148,18 +140,26 @@ export function StartupLoader({ status, progress, complete, onRetry, onDone, app
             <linearGradient id="xl-ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#ff4dfc" /><stop offset=".5" stopColor="#b026ff" /><stop offset="1" stopColor="#5b21d6" /></linearGradient>
             {/* the spikes wear the ring's own colours: the ring is drawn rotated -90deg, so its pink to violet diagonal runs bottom-left to top-right in screen space */}
             <linearGradient id="xl-spike" x1="18" y1="382" x2="382" y2="18" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#ff4dfc" /><stop offset=".5" stopColor="#b026ff" /><stop offset="1" stopColor="#5b21d6" /></linearGradient>
+            {/* soft purple-black vignette: darkest in the middle, no edge, fully transparent at the rim */}
+            <radialGradient id="xl-vig" cx={CX} cy={CY} r="236" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#0d0620" stopOpacity=".62" /><stop offset=".42" stopColor="#0d0620" stopOpacity=".5" /><stop offset=".72" stopColor="#120828" stopOpacity=".2" /><stop offset="1" stopColor="#120828" stopOpacity="0" /></radialGradient>
+            {/* the energy only shows where the ring is already filled: the mask is the progress arc itself (same geometry, same dash offset) */}
+            <mask id="xl-prog" maskUnits="userSpaceOnUse" x="0" y="0" width="400" height="400"><circle ref={arc3Ref} cx={CX} cy={CY} r={R_RING} fill="none" stroke="#fff" strokeWidth={RING_W} strokeLinecap="butt" strokeDasharray={CIRC} strokeDashoffset={CIRC} /></mask>
             <mask id="xl-wm-mask" maskUnits="userSpaceOnUse" x={WM_X} y={WM_Y} width={WM_W} height={WM_H}><image href="/startup/xpadite-wordmark.png" x={WM_X} y={WM_Y} width={WM_W} height={WM_H} preserveAspectRatio="xMidYMid meet" /></mask>
-            <linearGradient id="xl-rim" x1="150" y1="170" x2="750" y2="670" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#fbe8ff" /><stop offset=".45" stopColor="#d58bff" /><stop offset="1" stopColor="#8b5cf6" /></linearGradient>
-            <linearGradient id="xl-face" x1="150" y1="170" x2="750" y2="670" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#ff4dfc" /><stop offset=".55" stopColor="#a21fe8" /><stop offset="1" stopColor="#4f35d8" /></linearGradient>
-            <linearGradient id="xl-word" x1={WM_X} y1="0" x2={WM_X + WM_W} y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stopColor="#ff6bff" /><stop offset=".55" stopColor="#b53cff" /><stop offset="1" stopColor="#6d4aff" /></linearGradient>
           </defs>
 
           <g className="xl-ringg">
-            <circle cx={CX} cy={CY} r={R_RING + 6} fill="#080320" fillOpacity=".74" />
+            <circle cx={CX} cy={CY} r="236" fill="url(#xl-vig)" />
+            {/* during the logo reveal only, the middle settles a little darker so the solid-purple mark stays legible over the calendar */}
+            <circle className="xl-vig2" cx={CX} cy={CY} r="236" fill="url(#xl-vig)" />
             <circle cx={CX} cy={CY} r={R_RING} fill="none" stroke="#7c3aed" strokeOpacity=".22" strokeWidth={RING_W} />
             <g transform={`rotate(-90 ${CX} ${CY})`}>
               <circle ref={arcRef} cx={CX} cy={CY} r={R_RING} fill="none" stroke="url(#xl-ring)" strokeOpacity=".22" strokeWidth={RING_W + 10} strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={CIRC} />
               <circle ref={arc2Ref} cx={CX} cy={CY} r={R_RING} fill="none" stroke="url(#xl-ring)" strokeWidth={RING_W} strokeLinecap="round" strokeDasharray={CIRC} strokeDashoffset={CIRC} />
+              {/* forward-moving energy (the Journal border-draw technique: a dashed glowing stroke whose dash offset is animated): luminous pulses flow clockwise along the filled part of the ring */}
+              <g mask="url(#xl-prog)" className="xl-en">
+                <circle className="xl-en1" cx={CX} cy={CY} r={R_RING} fill="none" stroke="#ffe3ff" strokeOpacity=".24" strokeWidth={RING_W - 2} strokeLinecap="round" strokeDasharray={`${EN_D} ${EN_P - EN_D}`} />
+                <circle className="xl-en1" cx={CX} cy={CY} r={R_RING} fill="none" stroke="#fff" strokeOpacity=".6" strokeWidth="5" strokeLinecap="round" strokeDasharray={`${EN_D * 0.55} ${EN_P - EN_D * 0.55}`} />
+              </g>
             </g>
             <circle ref={headRef} cx={CX} cy={CY - R_RING} r="8.5" fill="#fff" fillOpacity=".95" style={{ opacity: 0 }} className="xl-head" />
           </g>
@@ -177,11 +177,10 @@ export function StartupLoader({ status, progress, complete, onRetry, onDone, app
 
           <g className="xl-mark">
             <g transform="translate(200 152) scale(.27) translate(-446 -421)">
-              {X_RIM.map((p, i) => <polygon key={'r' + i} points={p} fill="url(#xl-rim)" strokeLinejoin="round" stroke="url(#xl-rim)" strokeWidth="3" />)}
-              {X_FACE.map((p, i) => <polygon key={'f' + i} points={p} fill="url(#xl-face)" />)}
+              {X_PATHS.map((p, i) => <polygon key={i} points={p} fill={BRAND} />)}
             </g>
-            {/* the supplied wordmark PNG is used as a mask: its exact letter shapes, filled with the XPadite gradient (glow in CSS) */}
-            <rect className="xl-word" x={WM_X} y={WM_Y} width={WM_W} height={WM_H} fill="url(#xl-word)" mask="url(#xl-wm-mask)" />
+            {/* the supplied wordmark PNG is used as a mask: its exact letter shapes, filled with the same solid brand purple as the X */}
+            <rect className="xl-word" x={WM_X} y={WM_Y} width={WM_W} height={WM_H} fill={BRAND} mask="url(#xl-wm-mask)" />
           </g>
         </svg>
 
@@ -202,16 +201,25 @@ const CSS = `
 .xl-solid{position:absolute;inset:0;background:radial-gradient(circle at 50% 45%,#1b0a3d 0%,#0b0622 55%,#04020f 100%);transition:opacity .5s ease}
 .xl-solid-off{opacity:0}
 /* see-through: the app stays recognisable behind the loader (no blur); a soft vignette keeps the loader prominent. The layer still covers the screen and takes every touch. */
-.xl-bg{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,rgba(10,5,32,.34) 0%,rgba(10,5,32,.16) 45%,rgba(10,5,32,.05) 100%)}
+.xl-bg{position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,rgba(13,6,32,.2) 0%,rgba(13,6,32,.1) 45%,rgba(13,6,32,0) 100%)}
 .xl-stage{position:relative;width:min(78vmin,420px);display:flex;flex-direction:column;align-items:center}
-/* phones (portrait or landscape): 15% smaller than the desktop/tablet size */
-@media (max-width:600px),(max-height:500px){.xl-stage{width:min(66.3vmin,357px)}}
+/* phones (portrait or landscape): 72.25% of the tablet/desktop size (v1.340 -15%, v1.341 a further -15%) */
+@media (max-width:600px),(max-height:500px){.xl-stage{width:min(56.36vmin,303.5px)}}
 .xl-svg{width:100%;height:auto;display:block;overflow:visible}
 .xl-sp{opacity:.14;animation:xl-trail ${LAP_S}s linear infinite;will-change:opacity}
 @keyframes xl-trail{0%{opacity:1}5%{opacity:.9}66%{opacity:.14}92%{opacity:.14}100%{opacity:1}}
 .xl-paused .xl-sp{animation-play-state:paused}
-.xl-spikes{transition:opacity .45s ease}
-.xl-mark .xl-word{filter:drop-shadow(0 0 4px rgba(214,96,255,.8)) drop-shadow(0 0 12px rgba(130,70,255,.5))}
+.xl-spikes{transition:opacity .6s ease}
+/* the spikes calm down as the load completes, so nothing competes with the logo: dimmer while the ring catches up to 100%, dimmer still on 100% / Loaded, gone for the reveal */
+.xl-finishing .xl-spikes{opacity:.5}
+.xl-ph-loaded .xl-spikes{opacity:.2}
+.xl-en1{animation:xl-en 1.5s linear infinite}
+@keyframes xl-en{from{stroke-dashoffset:0}to{stroke-dashoffset:-${EN_P}}}
+.xl-en{transition:opacity .4s ease}
+.xl-vig2{opacity:0;transition:opacity .5s ease}
+.xl-past .xl-vig2{opacity:1}
+.xl-past .xl-en,.xl-ph-loaded .xl-en{opacity:0}
+.xl-paused .xl-en1{animation-play-state:paused}
 .xl-pct{font:300 64px/1 "Segoe UI","Helvetica Neue",Arial,sans-serif;fill:#f5e6ff;paint-order:stroke;stroke:#b026ff;stroke-opacity:.35;stroke-width:6px;stroke-linejoin:round}
 .xl-d2,.xl-d3{animation:xl-dot 1.2s step-end infinite}
 .xl-d3{animation-name:xl-dot3}
@@ -220,7 +228,7 @@ const CSS = `
 .xl-sub{font:400 23px/1 "Segoe UI","Helvetica Neue",Arial,sans-serif;fill:#e9c9ff;letter-spacing:1.6px}
 .xl-head{filter:drop-shadow(0 0 6px #f0abfc)}
 .xl-txt{transition:opacity .3s ease}
-.xl-mark{opacity:0;transform-origin:200px 200px}
+.xl-mark{filter:drop-shadow(0 0 7px rgba(147,51,234,.5));opacity:0;transform-origin:200px 200px}
 .xl-ringg{transition:opacity .6s ease}
 .xl-past .xl-spikes,.xl-past .xl-txt{opacity:0}
 .xl-past .xl-mark{animation:xl-in .5s ease-out forwards}
@@ -228,7 +236,8 @@ const CSS = `
 .xl-ph-zoom .xl-ringg{opacity:0}
 .xl-ph-zoom .xl-bg{opacity:0;transition:opacity .85s ease-in .15s}
 @keyframes xl-in{from{opacity:0;transform:scale(.55)}to{opacity:1;transform:scale(1)}}
-@keyframes xl-zoom{from{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(6)}}
+/* gentler finish than v1.340 (scale 6 -> 4.3): the fade starts at once and is complete at 82% of the zoom, long before the mark gets large */
+@keyframes xl-zoom{0%{opacity:1;transform:scale(1)}30%{opacity:.82}82%{opacity:0}100%{opacity:0;transform:scale(4.3)}}
 @keyframes xl-fade{from{opacity:1}to{opacity:0}}
 .xl-failed{overflow-y:auto}
 .xl-failed .xl-stage{width:min(62vmin,380px);margin:auto}
@@ -244,6 +253,7 @@ const CSS = `
 .xl-btn:focus-visible{outline:3px solid #f0abfc;outline-offset:3px}
 @media (prefers-reduced-motion:reduce){
   .xl-sp{animation:none;opacity:.5}
+  .xl-en{display:none}
   .xl-d2,.xl-d3{animation:none;opacity:1}
   .xl-ph-zoom .xl-mark{animation:xl-fade .3s ease forwards}
   .xl-past .xl-mark{animation:none;opacity:1}

@@ -160,7 +160,7 @@ test('loader: the ring starts at 12 o\'clock and fills clockwise from the real p
 
 test('loader: 100% / Loaded only once complete; no logo or wordmark while loading; a failed load shows Retry', () => {
   assert.match(ld, /isComplete && f >= 0\.995 \? 100 : Math\.min\(99, Math\.round\(f \* 100\)\)/)
-  assert.match(ld, /\.xl-mark\{opacity:0/, 'logo + wordmark are invisible until the reveal')
+  assert.match(ld, /\.xl-mark\{[^}]*opacity:0/, 'logo + wordmark are invisible until the reveal')
   assert.match(ld, /\.xl-past \.xl-mark\{animation:xl-in/)
   assert.match(ld, /status === 'failed' && phase === 'run'/)
   assert.match(ld, /onClick=\{onRetry\}/)
@@ -200,8 +200,8 @@ test('v1.340: spikes are ~35% thinner and wear the ring gradient', () => {
 
 test('v1.340: phones get a loader 15% smaller; tablets/desktop unchanged', () => {
   assert.match(ld, /\.xl-stage\{position:relative;width:min\(78vmin,420px\)/)
-  assert.match(ld, /@media \(max-width:600px\),\(max-height:500px\)\{\.xl-stage\{width:min\(66\.3vmin,357px\)\}\}/)
-  assert.ok(Math.abs(66.3 / 78 - 0.85) < 0.002 && Math.abs(357 / 420 - 0.85) < 0.002)
+  assert.match(ld, /@media \(max-width:600px\),\(max-height:500px\)\{\.xl-stage\{width:min\(56\.36vmin,303\.5px\)\}\}/)
+  assert.ok(Math.abs(56.36 / 78 - 0.7225) < 0.002 && Math.abs(303.5 / 420 - 0.7225) < 0.002, 'v1.340 -15%, v1.341 a further -15% = 72.25% of the original')
   assert.ok(ld.indexOf('@media (max-width:600px),(max-height:500px)') > ld.indexOf('.xl-stage{position:relative'), 'the phone rule comes after the base rule so it wins')
 })
 
@@ -219,5 +219,51 @@ test('v1.340: the wordmark is the supplied PNG used as a mask (no font, no redra
   assert.match(ld, /<mask id="xl-wm-mask"[^>]*><image href="\/startup\/xpadite-wordmark\.png"/)
   assert.match(ld, /mask="url\(#xl-wm-mask\)"/)
   assert.ok(!/<text[^>]*xl-word/.test(ld) && !/font:italic 800/.test(ld), 'no system-font approximation left')
-  assert.match(ld, /\.xl-mark \.xl-word\{filter:drop-shadow/, 'glow')
+  assert.match(ld, /\.xl-mark\{filter:drop-shadow\(0 0 7px rgba\(147,51,234,\.5\)\)/, 'a soft purple glow, no outline')
+})
+
+// ── v1.341 polish ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+test('v1.341: X and wordmark are one solid #9333EA — no gradient, no bevel face, no silver rim, no outline', () => {
+  assert.match(ld, /const BRAND = '#9333EA'/)
+  assert.match(ld, /<polygon key=\{i\} points=\{p\} fill=\{BRAND\} \/>/)
+  assert.match(ld, /fill=\{BRAND\} mask="url\(#xl-wm-mask\)"/)
+  const mark = ld.split('<g className="xl-mark">')[1].split('</svg>')[0]
+  assert.ok(!/stroke=|url\(#xl-(rim|face|word)\)|linearGradient/.test(mark), 'nothing but the solid fill')
+  assert.ok(!/xl-rim|xl-face|xl-word"\s*x1|function inset/.test(ld), 'bevel + gradients removed')
+  // the geometry is the SAME three traced silhouettes as v1.339/v1.340
+  const m = /const X_SHAPES[^=]*= \[([\s\S]*?)\r?\n\]/.exec(ld)[1]
+  assert.ok(m.includes('[[141, 672], [656, 169], [311, 673]]') && m.includes('[[144, 377], [354, 438], [294, 497]]') && m.includes('[[401, 568], [457, 488], [751, 657], [520, 658]]'))
+})
+
+test('v1.341: the backdrop is a soft radial vignette (darkest centre, transparent rim), not a disc', () => {
+  const vig = /<radialGradient id="xl-vig"[^>]*>(.*?)<\/radialGradient>/.exec(ld)[1]
+  const ops = [...vig.matchAll(/stopOpacity="([0-9.]+)"/g)].map(m => +m[1])
+  assert.deepEqual(ops, [0.62, 0.5, 0.2, 0], 'centre darkest, fading to nothing')
+  assert.ok(ops[0] <= 0.65, 'the calendar still shows through the middle')
+  assert.match(ld, /<circle cx=\{CX\} cy=\{CY\} r="236" fill="url\(#xl-vig\)" \/>/)
+  assert.ok(!/#080320/.test(ld), 'the old solid disc is gone')
+})
+
+test('v1.341: forward-moving energy lives inside the FILLED part of the ring only (masked by the progress arc), clockwise, CSS-driven', () => {
+  assert.match(ld, /<mask id="xl-prog"[^>]*><circle ref=\{arc3Ref\}/, 'the mask is the progress arc')
+  assert.match(ld, /if \(arc3\) arc3\.style\.strokeDashoffset = off/, 'same dash offset as the visible arc')
+  assert.match(ld, /<g mask="url\(#xl-prog\)" className="xl-en">/)
+  assert.match(ld, /@keyframes xl-en\{from\{stroke-dashoffset:0\}to\{stroke-dashoffset:-\$\{EN_P\}\}\}/, 'dash offset falls = pulses travel forward (clockwise)')
+  assert.match(ld, /const EN_P = CIRC \/ 8/, 'the pattern tiles the circumference exactly: seamless loop')
+  assert.match(ld, /\.xl-paused \.xl-en1\{animation-play-state:paused\}/)
+  assert.match(ld, /prefers-reduced-motion:reduce\)\{[\s\S]*\.xl-en\{display:none\}/)
+})
+
+test('v1.341: the spikes dim while the load completes, before the logo appears', () => {
+  assert.match(ld, /complete && phase === 'run' \? 'xl-finishing' : ''/)
+  assert.match(ld, /\.xl-finishing \.xl-spikes\{opacity:\.5\}/)
+  assert.match(ld, /\.xl-ph-loaded \.xl-spikes\{opacity:\.2\}/)
+  assert.match(ld, /\.xl-past \.xl-spikes,\.xl-past \.xl-txt\{opacity:0\}/)
+})
+
+test('v1.341: gentler zoom — scale 4.3 (was 6, -28%) and fully faded by 82% of the animation', () => {
+  const s = ld.slice(ld.indexOf('@keyframes xl-zoom'))
+  assert.match(s, /^@keyframes xl-zoom\{0%\{opacity:1;transform:scale\(1\)\}30%\{opacity:\.82\}82%\{opacity:0\}100%\{opacity:0;transform:scale\(4\.3\)\}\}/)
+  assert.ok(Math.abs(4.3 / 6 - 0.72) < 0.01, '28% less zoom')
+  assert.match(ld, /\.xl-ph-zoom \.xl-mark\{animation:xl-zoom \.95s/, 'same duration: startup is not prolonged')
 })

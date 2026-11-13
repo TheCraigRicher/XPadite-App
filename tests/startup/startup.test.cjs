@@ -149,20 +149,21 @@ test('loader: a hidden tab never holds the app behind the overlay', () => {
 })
 
 // ── v1.343: horizontal progress bar ───────────────────────────────────────────────────────────────────────────────────────
-test('v1.343: the bar fills left to right from the real (eased, never ahead) progress', () => {
-  assert.match(ld, /fill\.style\.width = \(f \* 100\)\.toFixed\(2\) \+ '%'/)
-  assert.match(ld, /stepDisplayed\(shown\.current, isComplete \? 1 : progressRef\.current, dt\)/)
-  assert.match(ld, /\.xl-fill\{position:absolute;left:0;top:0;bottom:0;/)
+test('v1.343/344: the segments light left to right from the real (eased, never ahead) progress', () => {
+  assert.match(ld, /const o = Math\.max\(0, Math\.min\(1, f \* SEG - i\)\)/, 'segment i lights only as the real progress passes it')
+  assert.match(ld, /stepDisplayed\(shown\.current, isComplete \? 1 : progressRef\.current, isComplete \? dt \* 5 : dt\)/, 'target is the real progress (1 only once complete)')
+  assert.match(ld, /f > 0\.002 && f < 0\.9995 \? now : -1/)
 })
 
-test('v1.343: capsule with border, diagonal stripes that move right only inside the filled part, paused on failure', () => {
-  assert.match(ld, /\.xl-bar\{[^}]*border-radius:999px[^}]*overflow:hidden/)
-  assert.match(ld, /\.xl-bar\{[^}]*border:2px solid #c026d3/)
-  assert.match(ld, /\.xl-fill\{[^}]*overflow:hidden[^}]*#9333ea/)
-  assert.match(ld, /\.xl-fill::after\{[^}]*repeating-linear-gradient\(115deg/)
-  assert.match(ld, /@keyframes xl-stripes\{from\{transform:translateX\(0\)\}to\{transform:translateX\(28px\)\}\}/, 'moves right')
-  assert.match(ld, /\.xl-paused \.xl-fill::after\{animation-play-state:paused\}/)
-  assert.match(ld, /\.xl-bar\{[^}]*rgba\(40,14,78,\.72\)/, 'dark purple, subtly translucent track')
+test('v1.344: separate slanted segments with dark gaps (no candy stripes), XPadite gradient, #160B30 track, breathing leading segment', () => {
+  assert.match(ld, /\.xl-bar\{[^}]*border:2px solid #c026d3[^}]*border-radius:999px[^}]*background:#160B30[^}]*overflow:hidden/)
+  assert.match(ld, /\.xl-segs\{[^}]*display:flex;gap:4px/, 'gaps show the navy track')
+  assert.match(ld, /\.xl-seg\{[^}]*transform:skewX\(-24deg\)/)
+  assert.match(ld, /const SEG = 16/)
+  assert.match(ld, /C0 = \[0x93, 0x33, 0xea\], C1 = \[0xd9, 0x46, 0xef\]/, '#9333EA -> #D946EF')
+  assert.ok(!/xl-fill|xl-stripes|repeating-linear-gradient/.test(ld), 'no scrolling stripe texture')
+  assert.match(ld, /@keyframes xl-lead\{0%,100%\{filter:brightness\(1\)\}50%\{filter:brightness\(1\.35\)/)
+  assert.match(ld, /\.xl-paused \.xl-lead\{animation-play-state:paused\}/)
 })
 
 test('v1.343: phones 220–260px, larger on tablet/desktop, bar centred with the text hanging below it', () => {
@@ -188,10 +189,11 @@ test('v1.343: no ring, spikes, logo, wordmark, zoom, disc, vignette or blur; the
   assert.match(ctx, /inert=\{!overlayDone \|\| !dataReady\}/)
 })
 
-test('v1.343: 100% Loaded for 450 ms, 300 ms fade, then the app is released (only when data is ready); reduced motion respected', () => {
-  assert.match(ld, /phase === 'loaded' \? setTimeout\(\(\) => setPhase\('fade'\), 450\)/)
-  assert.match(ld, /: setTimeout\(finish, 300\)/)
+test('v1.344: 100% Loaded for 120 ms, 110 ms fade (~230 ms), app released only when data is ready; reduced motion respected', () => {
+  assert.match(ld, /phase === 'loaded' \? setTimeout\(\(\) => setPhase\('fade'\), 120\)/)
+  assert.match(ld, /: setTimeout\(finish, 110\)/)
   assert.match(ld, /\.xl-ph-fade \.xl-stage\{opacity:0\}/)
+  assert.match(ld, /\.xl-solid\{[^}]*transition:opacity \.2s ease/, 'backdrop clears quickly once the app is on screen')
   assert.match(ctx, /onDone=\{\(\) => \{ if \(!dataReadyRef\.current\) return/)
-  assert.match(ld, /prefers-reduced-motion:reduce\)\{\s*\.xl-fill::after\{animation:none\}/)
+  assert.match(ld, /prefers-reduced-motion:reduce\)\{\s*\.xl-lead\{animation:none\}/)
 })

@@ -271,11 +271,12 @@ test('completion is stamped by every checkbox toggle and kept through event save
   assert.match(read('components/xpadite/AppContext.tsx'), /completedAt: prev\?\.completedAt \}/)
 })
 
+const noApply = s => { const i = s.indexOf('create or replace function public.schedule_apply'); return i < 0 ? s : s.slice(0, i) + s.slice(s.indexOf('$$;', i) + 3) }   // the re-created schedule_apply is the 024 function (it legitimately deletes events/tasks); it is checked line-for-line against 024 below
 test('migration 026 is additive: one nullable column + one function; nothing dropped, rewritten or back-filled', () => {
   const sql = read('supabase/migrations/026_deadline_completion.sql')
   assert.match(sql, /add column if not exists completed_at bigint;/)
   assert.match(sql, /create or replace function public\.schedule_set_completed\(p_event_id text, p_completed_at bigint\)/)
-  assert.ok(!/\bdrop\b|\bdelete\b|\btruncate\b|alter column|update schedule_events\s+set completed_at = \d/i.test(sql.replace(/--[^\n]*/g, '')), 'no destructive statement')
+  assert.ok(!/\bdrop\b|\bdelete\b|\btruncate\b|alter column|update schedule_events\s+set completed_at = \d/i.test(noApply(sql).replace(/--[^\n]*/g, '')), 'no destructive statement')
   assert.match(sql, /where user_id = uid and event_id = p_event_id/, 'own rows only')
   assert.match(sql, /grant execute on function public\.schedule_set_completed\(text, bigint\) to authenticated;/)
   assert.match(sql, /revoke all on function public\.schedule_set_completed\(text, bigint\) from public, anon;/)

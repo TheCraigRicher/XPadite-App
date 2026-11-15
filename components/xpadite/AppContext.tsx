@@ -45,7 +45,7 @@ import { StartupLoader } from './StartupLoader'
 import { freshStages, stageProgress, allStagesSettled, decideStatus, isDataReady, looksLikeNetworkError, parseVerified, VERIFIED_KEY, REQUIRED_STAGES, type StageId, type StageState, type StageMap, type StartupStatus } from './startupReadiness'
 import { fetchScheduleEvents, applyScheduleChange, setScheduleTaskLink, setScheduleCompleted, detachScheduleTask, fetchScheduleExtras, saveScheduleExtras, fetchScheduleSyncPref, setScheduleSyncPref, ScheduleConflictError, ScheduleSetupError } from '@/lib/supabase/schedule-data'
 import type { StoredScheduleEvent } from '@/lib/supabase/schedule-data'
-import { planDeadlineSync, linkedTaskId, deadlineDayMap, reconcileDeadlines, batchItems, opKeys, applyOpsLocal, isBackfillEligible } from './deadlineLink'
+import { planDeadlineSync, linkedTaskId, dateKeyOf, deadlineDayMap, reconcileDeadlines, batchItems, opKeys, applyOpsLocal, isBackfillEligible } from './deadlineLink'
 import type { TaskOp } from './deadlineLink'
 import type { TimeFormat } from './scheduleLogic'
 import type { ScheduleCategory, ScheduleEvent } from './scheduleLogic'
@@ -1199,7 +1199,10 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     // the per-event opt-out ('detached') survives every edit, including toggling the deadline flag; only the explicit "Add back" clears it
     // a synced-event task is created only for a NEW event (or an explicit "Add back"): re-saving an older event never links it behind the user's back
     const plan = planDeadlineSync(calDataRef.current, ev.id, ev, prev?.taskDateKey ?? null, activitiesRef.current[0]?.id ?? '', undefined, link, scheduleTaskSyncRef.current, !prev || !!opts?.addTask, !!prev && prev.endAt === ev.endAt)   // v1.345: anchored unless the user changed the deadline's end ("Add back" included: the task returns to the recorded date)
-    const stored: StoredScheduleEvent = { ...ev, taskDateKey: plan.taskDateKey, rev: prev?.rev, taskLink: link, completedAt: prev?.completedAt }   // completion is not part of the edit form: keep what was recorded
+    // v1.345: a DETACHED deadline has no task, but its assigned date is still recorded: kept while the end is unchanged (whatever the timezone), recomputed in the
+    // account timezone only when the user changes the end. (Needs the 026 schedule_apply; an older database simply stores null, as before.)
+    const detachedKey = link === 'detached' && ev.isDeadline ? (prev && prev.endAt === ev.endAt ? (prev.taskDateKey ?? null) : dateKeyOf(ev.endAt)) : null
+    const stored: StoredScheduleEvent = { ...ev, taskDateKey: link === 'detached' ? detachedKey : plan.taskDateKey, rev: prev?.rev, taskLink: link, completedAt: prev?.completedAt }   // completion is not part of the edit form: keep what was recorded
     try {
       await flushFor(plan.ops)
       const res = await applyScheduleChange(createClient(), { userId: uid, event: stored, expectedRev: prev?.rev ?? null, ops: plan.ops })

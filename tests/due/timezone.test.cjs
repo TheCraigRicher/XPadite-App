@@ -223,9 +223,31 @@ test('REGRESSION detach: the detach keeps task_date_key through the 026 function
   assert.match(fn, /taskLink: 'detached', taskDateKey: kept/, 'local state keeps the date too')
   assert.match(read('lib/supabase/schedule-data.ts'), /rpc\('schedule_detach_task', \{ p_event_id: eventId \}\)/)
   const sql = read('supabase/migrations/026_deadline_completion.sql')
-  const f = sql.slice(sql.indexOf('create or replace function public.schedule_detach_task'))
+  const f0 = sql.slice(sql.indexOf('create or replace function public.schedule_detach_task')); const f = f0.slice(0, f0.indexOf('$$;') + 3)   // schedule_detach_task only
   assert.match(f, /set task_link = 'detached',\s+rev = rev \+ 1\s+where user_id = uid and event_id = p_event_id/)
   assert.ok(!/task_date_key/.test(f.replace(/--[^\n]*/g, '')), 'it never touches task_date_key')
-  assert.match(f, /security invoker/); assert.match(f, /revoke all on function public\.schedule_detach_task\(text\) from public, anon;/); assert.match(f, /grant execute on function public\.schedule_detach_task\(text\) to authenticated;/)
-  assert.ok(!/\b(drop|delete|truncate)\b/i.test(sql.replace(/--[^\n]*/g, '')), '026 stays additive')
+  assert.match(f, /security invoker/); assert.match(sql, /revoke all on function public\.schedule_detach_task\(text\) from public, anon;/); assert.match(sql, /grant execute on function public\.schedule_detach_task\(text\) to authenticated;/)
+  assert.ok(!/\b(drop|delete|truncate)\b/i.test(f.replace(/--[^\n]*/g, '')), 'schedule_detach_task stays additive')
+})
+
+// ── regression: editing a DETACHED legacy deadline ─────────────────────────────────────────────────────────────────────────────────
+test('REGRESSION edit-detached (SQL): 026 re-creates schedule_apply identical to 024 except ONE line — the assigned date is no longer forced to NULL for detached events', () => {
+  const fnOf = t => { const i = t.indexOf('create or replace function public.schedule_apply'); return t.slice(i, t.indexOf('$$;', i) + 3).split('\n') }
+  const a = fnOf(read('supabase/migrations/024_schedule_task_sync.sql')), b = fnOf(read('supabase/migrations/026_deadline_completion.sql'))
+  assert.equal(a.length, b.length, 'same function, line for line')
+  const diff = a.map((l, i) => [l, b[i]]).filter(([x, y]) => x !== y)
+  assert.equal(diff.length, 1)
+  assert.match(diff[0][0], /task_date_key = case when new_link = 'detached' then null else p_event->>'task_date_key' end,/)
+  assert.match(diff[0][1], /^\s+task_date_key = p_event->>'task_date_key',/)
+  const sql = read('supabase/migrations/026_deadline_completion.sql')
+  assert.match(sql, /grant execute on function public\.schedule_apply\(jsonb, text, integer, jsonb\) to authenticated;/)
+  assert.ok(!/\b(drop|truncate)\b|\balter\s+column\b/i.test(sql.replace(/--[^\n]*/g, '')), '026 stays additive (create or replace only; no drop / truncate / column changes)')
+})
+
+test('REGRESSION edit-detached (client): end unchanged -> the stored date is sent back; end changed -> recomputed in the account timezone; non-deadlines send null', () => {
+  const a = read('components/xpadite/AppContext.tsx')
+  const save = a.slice(a.indexOf('const saveInner'), a.indexOf('const saveScheduleEvent'))
+  assert.match(save, /const detachedKey = link === 'detached' && ev\.isDeadline \? \(prev && prev\.endAt === ev\.endAt \? \(prev\.taskDateKey \?\? null\) : dateKeyOf\(ev\.endAt\)\) : null/)
+  assert.match(save, /taskDateKey: link === 'detached' \? detachedKey : plan\.taskDateKey/)
+  assert.match(a, /import \{ planDeadlineSync, linkedTaskId, dateKeyOf,/)
 })

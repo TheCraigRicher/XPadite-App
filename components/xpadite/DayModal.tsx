@@ -21,7 +21,6 @@ import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
 import { COMPLETED_UNKNOWN, completionPatch, dueInfo, formatDueDate, formatDueTime, taskDueInstant } from './dueStatus'
 import { AssignedDateNote, DueChip } from './DeadlineStatus'
-import { TaskDueDateModal } from './TaskDueDateModal'
 import { useDeadlines } from './useDeadlines'
 
 const JournalEditorEmbed = dynamic(
@@ -769,7 +768,6 @@ function TasksDropdown({ onGenerate, onReorder, onMove, onDelete, isDark }: {
 interface TaskMenuProps {
   onEdit: () => void
   onAdjustTime: () => void
-  onDueDate: () => void
   onDuplicate: () => void
   onIncrementSession: () => void
   onDelete: () => void
@@ -790,7 +788,7 @@ interface TaskMenuProps {
   onClose: () => void
 }
 
-function TaskMenu({ onEdit, onAdjustTime, onDueDate, onDuplicate, onIncrementSession, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onPlannerNotes, onChooseColor, onTogglePriority, onTransfer, pasteEnabled, transferDisabled, isChild, isPriority, onClose, menuAnchor, isDark }: TaskMenuProps) {
+function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onIncrementSession, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onPlannerNotes, onChooseColor, onTogglePriority, onTransfer, pasteEnabled, transferDisabled, isChild, isPriority, onClose, menuAnchor, isDark }: TaskMenuProps) {
   useEscapeLayer(true, onClose)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -804,7 +802,6 @@ function TaskMenu({ onEdit, onAdjustTime, onDueDate, onDuplicate, onIncrementSes
     { icon: '✏️', label: 'Edit Task',        action: onEdit        },
     { icon: '🔔', label: 'Set Reminder',     action: onSetReminder },
     { icon: '🕒', label: 'Adjust Time',      action: onAdjustTime  },
-    { icon: '📆', label: 'Due Date',         action: onDueDate     },
     { icon: '📄', label: 'Duplicate Task',   action: onDuplicate, sep: true },
     { icon: '⏭️', label: 'Increment Session', action: onIncrementSession },
     { icon: '📋', label: 'Copy Task',        action: onCopy        },
@@ -1026,7 +1023,6 @@ function TaskRow({
   const dotBtnRef = useRef<HTMLButtonElement>(null)
   const [colorPickerOpen, setColorPickerOpen] = useState(false)
   const [adjustOpen,     setAdjustOpen]     = useState(false)
-  const [dueOpen,        setDueOpen]        = useState(false)
   const [emojiOpen,      setEmojiOpen]      = useState(false)
   const [emojiAnchor,    setEmojiAnchor]    = useState<DOMRect | null>(null)
   // Mobile only — position relative to cardRootRef (see getLocalPopoverPos),
@@ -1624,7 +1620,6 @@ function TaskRow({
                 onEdit={() => { startEdit(); setMenuOpen(false) }}
                 onSetReminder={onSetReminder}
                 onAdjustTime={() => setAdjustOpen(true)}
-                onDueDate={() => setDueOpen(true)}
                 onDuplicate={onDuplicate}
                 onIncrementSession={onIncrementSession}
                 onDelete={onDelete}
@@ -1986,8 +1981,6 @@ function TaskRow({
           onClose={() => setCameraOpen(false)}
         />
       )}
-
-      {dueOpen && <TaskDueDateModal task={task} dateKey={dateKey} onClose={() => setDueOpen(false)} />}
 
       {adjustOpen && (
         // onSave only persists the data — it must NOT close the modal itself.

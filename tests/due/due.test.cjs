@@ -8,7 +8,7 @@ const ts = require('typescript')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const OUT = path.join(ROOT, 'node_modules', '.cache', 'xpadite-due'); fs.mkdirSync(OUT, { recursive: true })
-const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8')
+const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8').split(String.fromCharCode(13, 10)).join(String.fromCharCode(10))   // CRLF checkouts read like LF ones
 const compile = f => fs.writeFileSync(path.join(OUT, f + '.js'), ts.transpileModule(read(`components/xpadite/${f}.ts`), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)
 compile('dueStatus'); compile('deadlineLink'); compile('deadlineIndex')
 compile('zdate'); compile('dueStatus')
@@ -232,7 +232,7 @@ test('all three calendar layouts use the single-marker rule and keep their own g
 })
 
 test('completion wording: only "Mark Complete" and "Completed" exist; reopening asks first; there is no "Mark Incomplete"', () => {
-  const all = ['DeadlineStatus', 'TaskDueDateModal', 'ScheduleParts', 'DayModal'].map(f => read(`components/xpadite/${f}.tsx`)).join('\n')
+  const all = ['DeadlineStatus', 'ScheduleParts', 'DayModal'].map(f => read(`components/xpadite/${f}.tsx`)).join('\n')
   assert.ok(!/Mark Incomplete|Mark Not Complete|Due Date Completed/i.test(all))
   const ctl = read('components/xpadite/DeadlineStatus.tsx')
   assert.match(ctl, /Mark Complete/); assert.match(ctl, /Completed\n/)
@@ -240,15 +240,14 @@ test('completion wording: only "Mark Complete" and "Completed" exist; reopening 
   assert.match(ctl, /onClick=\{\(\) => setAsking\(true\)\}/, 'clicking Completed asks, it does not revert at once')
 })
 
-test('Task Manager: a "Due Date" item in the three-dot menu opens the compact modal; the popup shows status, due time, completion time and early/late', () => {
+test('Task Manager: the three-dot menu has NO "Due Date" item (My Schedule manages due dates); the popup still shows status, due time, completion time and early/late', () => {
   const dm = read('components/xpadite/DayModal.tsx')
-  assert.match(dm, /label: 'Due Date',\s+action: onDueDate/)
-  assert.match(dm, /<TaskDueDateModal task=\{task\} dateKey=\{dateKey\}/)
+  assert.ok(!/label: 'Due Date'/.test(dm) && !/onDueDate|TaskDueDateModal|setDueOpen/.test(dm), 'no menu item, prop, state or modal left behind')
+  assert.ok(!fs.existsSync(path.join(ROOT, 'components/xpadite/TaskDueDateModal.tsx')), 'the menu-only modal is gone')
+  // every other menu item is still there
+  for (const l of ['Edit Task', 'Set Reminder', 'Adjust Time', 'Duplicate Task', 'Increment Session', 'Copy Task', 'Paste Task', 'Move Task', 'Create Sub-Task', 'Send to Planner', 'Choose Task Color', 'Delete Task']) assert.ok(dm.includes(`label: '${l}'`) || dm.includes(`'${l}'`), l)
   assert.match(dm, /data-testid="task-due-completed"/)
   assert.match(dm, /dueInfo\(\{ dueAt, done, completedAt \}, now, tz\)/)
-  const md = read('components/xpadite/TaskDueDateModal.tsx')
-  for (const id of ['due-date-input', 'due-has-time', 'due-time-input', 'due-save', 'due-cancel', 'due-remove', 'due-complete-row']) assert.ok(md.includes(id), id)
-  assert.match(md, /dateOnly: !hasTime/, 'explicit date-only flag')
 })
 
 test('the literal "\\u2192" in the Task Manager popup is fixed (JSX text does not interpret escapes)', () => {

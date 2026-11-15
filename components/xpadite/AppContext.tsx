@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { CalendarData, WorkSession, Activity, ActiveSession, DayData, ActiveTaskTimer, Reminder, JournalLabel, JournalFolder } from './types'
 import { normalizeHexColor, todayKey, detectBrowserTimezone } from './utils'
+import { setScheduleTz } from './zdate'
 import { resolveLocale, type Locale } from './i18n'
 import {
   upsertReminder as supabaseUpsertReminder,
@@ -26,6 +27,7 @@ import {
   deleteUserActivity,
   fetchUserPreferences,
   upsertUserPreferences,
+  claimAccountTimezone,
   fetchJournalLabels,
   upsertAllJournalLabels,
   deleteJournalLabel,
@@ -41,9 +43,9 @@ import type { MergeConflict } from './dayMerge'
 import { DayConflictDialog } from './DayConflictDialog'
 import { StartupLoader } from './StartupLoader'
 import { freshStages, stageProgress, allStagesSettled, decideStatus, isDataReady, looksLikeNetworkError, parseVerified, VERIFIED_KEY, REQUIRED_STAGES, type StageId, type StageState, type StageMap, type StartupStatus } from './startupReadiness'
-import { fetchScheduleEvents, applyScheduleChange, setScheduleTaskLink, fetchScheduleExtras, saveScheduleExtras, fetchScheduleSyncPref, setScheduleSyncPref, ScheduleConflictError, ScheduleSetupError } from '@/lib/supabase/schedule-data'
+import { fetchScheduleEvents, applyScheduleChange, setScheduleTaskLink, setScheduleCompleted, detachScheduleTask, fetchScheduleExtras, saveScheduleExtras, fetchScheduleSyncPref, setScheduleSyncPref, ScheduleConflictError, ScheduleSetupError } from '@/lib/supabase/schedule-data'
 import type { StoredScheduleEvent } from '@/lib/supabase/schedule-data'
-import { planDeadlineSync, deadlineDayMap, reconcileDeadlines, batchItems, opKeys, applyOpsLocal, isBackfillEligible } from './deadlineLink'
+import { planDeadlineSync, linkedTaskId, deadlineDayMap, reconcileDeadlines, batchItems, opKeys, applyOpsLocal, isBackfillEligible } from './deadlineLink'
 import type { TaskOp } from './deadlineLink'
 import type { TimeFormat } from './scheduleLogic'
 import type { ScheduleCategory, ScheduleEvent } from './scheduleLogic'
@@ -177,6 +179,8 @@ interface AppContextValue {
   detachDeadlineTask: (eventId: string) => Promise<void>
   // ...and the explicit way back: re-link and recreate the task.
   restoreDeadlineTask: (eventId: string) => Promise<void>
+  // v1.345: completion of a deadline that has NO linked task (the instant is kept on the event row; null = reopen). Linked deadlines complete through their task.
+  setDeadlineCompleted: (eventId: string, completedAt: number | null) => Promise<void>
   // Set when linked-task repairs keep failing (after a few tries); null when everything agrees. retry resets the attempts.
   scheduleSyncIssue: string | null
   retryScheduleSync: () => Promise<void>
@@ -311,6 +315,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
 
   // null timezone = "Automatic" → fall back to the device-detected zone.
   const effectiveTimezone = timezone ?? detectBrowserTimezone()
+  setScheduleTz(effectiveTimezone)      // v1.345: My Schedule and deadlines read every wall-clock time in the ACCOUNT timezone (see zdate.ts); set before any child renders
   const effectiveTimezoneRef = useRef(effectiveTimezone)
   effectiveTimezoneRef.current = effectiveTimezone
 
@@ -750,6 +755,20 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       }
 
       settleStartup()     // everything that guards the user's data was read: editing and saving are now allowed
+
+      // v1.345 — the account has no timezone yet: this device claims it ONCE (a zone that already exists is never overwritten). Best effort and after startup:
+      // it never delays or blocks the data gate. Uses a zone this device really reports (never a guessed one); a zone chosen earlier on this device wins.
+      if (!sbPrefs?.timezone) {
+        let mine: string | null = null
+        try { mine = localStorage.getItem('xp-timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone || null } catch {}
+        if (mine) {
+          claimAccountTimezone(supabase, userId, mine).then(tz => {
+            if (!tz || attempt !== attemptRef.current) return
+            setTimezoneRaw(tz)
+            try { localStorage.setItem('xp-timezone', tz) } catch {}
+          }).catch(() => {})
+        }
+      }
     }).catch(err => {
       console.error('[XPadite] Supabase initial fetch error:', err)
       if (attempt === attemptRef.current) settleStartup(err)      // nothing was applied: this device's copy stays untouched; offline (verified) or blocked until Retry
@@ -1179,8 +1198,8 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     const link = prev?.taskLink ?? 'linked'
     // the per-event opt-out ('detached') survives every edit, including toggling the deadline flag; only the explicit "Add back" clears it
     // a synced-event task is created only for a NEW event (or an explicit "Add back"): re-saving an older event never links it behind the user's back
-    const plan = planDeadlineSync(calDataRef.current, ev.id, ev, prev?.taskDateKey ?? null, activitiesRef.current[0]?.id ?? '', undefined, link, scheduleTaskSyncRef.current, !prev || !!opts?.addTask)
-    const stored: StoredScheduleEvent = { ...ev, taskDateKey: plan.taskDateKey, rev: prev?.rev, taskLink: link }
+    const plan = planDeadlineSync(calDataRef.current, ev.id, ev, prev?.taskDateKey ?? null, activitiesRef.current[0]?.id ?? '', undefined, link, scheduleTaskSyncRef.current, !prev || !!opts?.addTask, !!prev && prev.endAt === ev.endAt)   // v1.345: anchored unless the user changed the deadline's end ("Add back" included: the task returns to the recorded date)
+    const stored: StoredScheduleEvent = { ...ev, taskDateKey: plan.taskDateKey, rev: prev?.rev, taskLink: link, completedAt: prev?.completedAt }   // completion is not part of the edit form: keep what was recorded
     try {
       await flushFor(plan.ops)
       const res = await applyScheduleChange(createClient(), { userId: uid, event: stored, expectedRev: prev?.rev ?? null, ops: plan.ops })
@@ -1206,10 +1225,28 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
 
   const detachDeadlineTask = useCallback((eventId: string) => exclusive(async () => {
     if (!userIdRef.current) throw fail('signed_out', 'You are signed out.')
+    // v1.345: detaching must NOT change the deadline's assigned calendar date: schedule_detach_task (026) records the choice and KEEPS task_date_key.
+    // Before 026 is applied it falls back to the original function (which clears the date, exactly as before).
+    const anchor = scheduleEventsRef.current.find(e => e.id === eventId)?.taskDateKey ?? null
     try {
-      const rev = await setScheduleTaskLink(createClient(), eventId, 'detached')
-      commitEvents(list => list.map(e => (e.id === eventId ? { ...e, taskLink: 'detached', taskDateKey: null, rev: rev ?? e.rev } : e)))
+      const client = createClient()
+      let rev: number | null, kept = anchor
+      try { rev = await detachScheduleTask(client, eventId) }
+      catch (e) { if (!(e instanceof ScheduleSetupError)) throw e; rev = await setScheduleTaskLink(client, eventId, 'detached'); kept = null }
+      commitEvents(list => list.map(e => (e.id === eventId ? { ...e, taskLink: 'detached', taskDateKey: kept, rev: rev ?? e.rev } : e)))
     } catch (err) { throw scheduleError(err) }
+  }), [exclusive, commitEvents])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setDeadlineCompleted = useCallback((eventId: string, completedAt: number | null) => exclusive(async () => {
+    if (!userIdRef.current) throw fail('signed_out', 'You are signed out.')
+    try {
+      const rev = await setScheduleCompleted(createClient(), eventId, completedAt)
+      commitEvents(list => list.map(e => (e.id === eventId ? { ...e, completedAt, rev: rev ?? e.rev } : e)))
+    } catch (err) {
+      // migration 026 not applied yet: say so, but do NOT mark the whole schedule unavailable (everything else still works)
+      if (err instanceof ScheduleSetupError) throw fail('setup', 'Completing a deadline without a Task Manager task needs a database update (migration 026). Nothing was saved.')
+      throw scheduleError(err)
+    }
   }), [exclusive, commitEvents])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const restoreDeadlineTask = useCallback((eventId: string) => exclusive(async () => {
@@ -1221,7 +1258,14 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       commitEvents(list => list.map(e => (e.id === eventId ? { ...e, taskLink: 'linked', rev: rev ?? e.rev } : e)))
     } catch (err) { throw scheduleError(err) }
     await saveInner({ ...(scheduleEventsRef.current.find(e => e.id === eventId) as StoredScheduleEvent) }, { addTask: true })   // recreates the task through the same atomic path
-  }), [exclusive, commitEvents, saveInner])   // eslint-disable-line react-hooks/exhaustive-deps
+    // The deadline was completed while its task was away (the completion was kept on the event): the restored task comes back COMPLETED with that same
+    // moment — or, when the moment was never recorded, completed with no time. Nothing is invented and no other task or history is touched.
+    if (typeof ev.completedAt === 'number') {
+      const key = scheduleEventsRef.current.find(e => e.id === eventId)?.taskDateKey
+      const tid = linkedTaskId(eventId, 'deadline')
+      if (key) updateDay(key, d => ({ ...d, tasks: d.tasks.map(t => (t.id === tid ? { ...t, done: true, completedAt: ev.completedAt! > 0 ? ev.completedAt : null } : t)) }))
+    }
+  }), [exclusive, commitEvents, saveInner, updateDay])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Reconciliation ───────────────────────────────────────────────────────────────────────────────────────────────
   // Whenever schedule data is loaded or changes, compare events with tasks and repair drift through the SAME server-merged ops
@@ -1748,6 +1792,24 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
     return () => window.removeEventListener('online', on)
   }, [startup.status, retryStartup])
 
+  // v1.345 — another device may have changed the account timezone: pick it up when this app comes back to the foreground (at most once a minute).
+  useEffect(() => {
+    if (!dataReady) return
+    let last = 0
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - last < 60_000) return
+      const uid = userIdRef.current; if (!uid) return
+      last = Date.now()
+      fetchUserPreferences(createClient(), uid).then(p => {
+        if (!p?.timezone || p.timezone === effectiveTimezoneRef.current) return
+        setTimezoneRaw(p.timezone)
+        try { localStorage.setItem('xp-timezone', p.timezone) } catch {}
+      }).catch(() => {})
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [dataReady])
+
   const loader = overlayDone ? null : (
     <StartupLoader status={startup.status} progress={progress} complete={loaderGate} appVisible={hydrated} onRetry={retryStartup} onDone={() => { if (!dataReadyRef.current) return      /* the overlay can only be released once the data really is ready, whatever the loader asks */
       setOverlayDone(true); if (startup.status === 'offline') setToast('Offline — showing your saved data. Changes sync when you are back online.') }} />
@@ -1780,7 +1842,7 @@ export function AppProvider({ children, email = '' }: { children: React.ReactNod
       scheduleEvents, scheduleStatus, deadlineDays, saveScheduleEvent, deleteScheduleEvent,
       scheduleTaskSync, setScheduleTaskSyncPref, dayConflicts, resolveDayConflict, subscribeDaySync, isDayUnsynced,
       dataReady, startup: { status: startup.status, progress, offline: startup.status === 'offline' },
-      detachDeadlineTask, restoreDeadlineTask, scheduleSyncIssue, retryScheduleSync, scheduleTimeFormat, setScheduleTimeFormat,
+      detachDeadlineTask, restoreDeadlineTask, setDeadlineCompleted, scheduleSyncIssue, retryScheduleSync, scheduleTimeFormat, setScheduleTimeFormat,
       scheduleFocusRequest, requestScheduleEvent, clearScheduleFocusRequest,
       mindMapRequest, requestMindMap, clearMindMapRequest,
       savedLocations, setSavedLocations, scheduleCategories, setScheduleCategories,

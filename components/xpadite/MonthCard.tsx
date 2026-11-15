@@ -1,7 +1,9 @@
 "use client";
 
 import { useRef, useCallback, useMemo, useState, useEffect } from "react";
-import { DeadlineCorner, deadlineSquareStyle, deadlineTitle } from './DeadlineMark';
+import { CompletedBadge, deadlineMarkerStyle, deadlineTitle } from './DeadlineMark';
+import { useDeadlines } from './useDeadlines';
+import { markerState } from './deadlineIndex';
 import { trackFeature } from "@/lib/analytics/client";
 import { useApp } from "./AppContext";
 import {
@@ -235,7 +237,8 @@ export function MonthCard({
   onMonthZoom,
   cleanView = false,
 }: MonthCardProps) {
-  const { calData, updateDay, setToast, isDark, progressColor: _rawColor, reminders, calendarClean, effectiveTimezone, deadlineDays } = useApp();
+  const { calData, updateDay, setToast, isDark, progressColor: _rawColor, reminders, calendarClean, effectiveTimezone } = useApp();
+  const deadlines = useDeadlines();
   const progressColor = resolveProgressColor(_rawColor, isDark);
   const reminderDates = useUpcomingReminderDates(reminders, calData);
   // Match the actual card surface so the productive-circle inner ring blends in
@@ -561,12 +564,13 @@ export function MonthCard({
             const todayCell = isToday(APP_YEAR, month, cell.day, effectiveTimezone);
             const isSun = cell.dayOfWeek === 0;
             const reminderCount = reminderDates.get(cell.key) ?? 0;
-            // v1.328 deadline marker: a plain day shows the date inside a soft red rounded square; every other day gets a small corner square
-            const dls = deadlineDays[cell.key];
+            // v1.345 deadline marker: ONE marker per date, drawn in the number's own container (see DeadlineMark.tsx / deadlineIndex.markerState)
+            const dls = deadlines[cell.key];
             // the current month's card keeps its light-blue surface in dark mode too, so pick the marker tones from the real surface
             const darkSurface = isDark && !isCurrentMonth;
-            const plainDl = !!dls && !productive && !todayCell;
-            const cellTitle = (base?: string) => (dls ? `${deadlineTitle(dls)}${base ? ` \u2014 ${base}` : ''}` : base);
+            const mState = markerState(dls, effectiveClean);
+            const plainDl = !!mState && !productive;      // a productivity marker owns its day
+            const cellTitle = (base?: string) => (dls ? `${deadlineTitle(dls)}${base ? ` — ${base}` : ''}` : base);
 
             const prevKey =
               cell.day > 1 ? dateKey(APP_YEAR, month, cell.day - 1) : null;
@@ -632,7 +636,6 @@ export function MonthCard({
                   {connL}
                   {connR}
                   <ReminderRing count={reminderCount} />
-                  {dls && <DeadlineCorner events={dls} isDark={darkSurface} />}
                   <div
                     className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110"
                     style={{ zIndex: 1 }}
@@ -681,7 +684,6 @@ export function MonthCard({
                   {connL}
                   {connR}
                   <ReminderRing count={reminderCount} />
-                  {dls && <DeadlineCorner events={dls} isDark={darkSurface} />}
                   <div
                     className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110"
                     style={{ zIndex: 1 }}
@@ -732,7 +734,6 @@ export function MonthCard({
                   {connL}
                   {connR}
                   <ReminderRing count={reminderCount} />
-                  {dls && <DeadlineCorner events={dls} isDark={darkSurface} pos="br" />}
                   <div
                     className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110"
                     style={{ zIndex: 1 }}
@@ -785,6 +786,8 @@ export function MonthCard({
                 // Ring is defined in CSS via .xp-prod-circle[data-productive] so it
                 // can be overridden by a mobile scoped rule without needing !important.
               };
+            else if (plainDl && mState)
+              circleStyle = deadlineMarkerStyle(mState, darkSurface, todayCell);
             else if (todayCell)
               circleStyle = {
                 color: "var(--xp-acc)",
@@ -793,8 +796,6 @@ export function MonthCard({
                 outlineOffset: "-1px",
                 fontSize: "9px",
               };
-            else if (plainDl)
-              circleStyle = deadlineSquareStyle(darkSurface);
 
             return (
               <div
@@ -806,7 +807,6 @@ export function MonthCard({
                 {connL}
                 {connR}
                 <ReminderRing count={reminderCount} />
-                {dls && !plainDl && <DeadlineCorner events={dls} isDark={darkSurface} />}
                 <div
                   className="xp-prod-circle absolute inset-[26%] sm:inset-[23%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-110"
                   data-productive={productive || undefined}
@@ -823,6 +823,7 @@ export function MonthCard({
                   }}
                 >
                   {cell.day}
+                  {plainDl && mState === 'completed' && <CompletedBadge />}
                 </div>
                 {productive && cell.key === newlyMarkedKey && (
                   <svg

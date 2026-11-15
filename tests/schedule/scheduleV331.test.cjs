@@ -14,6 +14,7 @@ const strip = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '
 const src = f => read(`components/xpadite/${f}`)
 const compile = f => fs.writeFileSync(path.join(OUT, f + '.js'), ts.transpileModule(src(`${f}.ts`), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)
 compile('scheduleLogic'); compile('scheduleMonth')
+compile('zdate'); compile('dueStatus')
 const L = require(path.join(OUT, 'scheduleLogic.js'))
 const M = require(path.join(OUT, 'scheduleMonth.js'))
 
@@ -76,10 +77,10 @@ test('Month cells: isPast is strictly "before today" at local midnight boundarie
   const prev = M.buildMonthGrid([], new Date(2026, 9, 1), today, 0).flat(); assert.ok(prev.every(c => c.isPast || c.key >= '2026-11-09'), 'a past month is (almost) all past')
 })
 
-test('nothing about an event is added or stored: no completion/done field exists, and no migration newer than 025 was added', () => {
+test('v1.345: the ONLY completion field on an event is the optional completedAt (used when there is no linked task); the only newer migration is the additive 026', () => {
   const t = strip(src('scheduleLogic.ts')); const iface = t.slice(t.indexOf('export interface ScheduleEvent'), t.indexOf('}', t.indexOf('export interface ScheduleEvent')))
-  assert.ok(!/completed|isDone|done\b|status/i.test(iface), 'ScheduleEvent has no completion/status field')
-  assert.deepEqual(fs.readdirSync(path.join(ROOT, 'supabase/migrations')).filter(n => /^02[5-9]_|^03/.test(n)), ['025_journal_documents.sql'], 'no new migration: database schema, RLS and billing are untouched')
+  assert.ok(/completedAt\?: number \| null/.test(iface) && !/isDone|status/i.test(iface.replace(/completedAt\?: number \| null/, '')), 'ScheduleEvent has completedAt and no other completion/status field')
+  assert.deepEqual(fs.readdirSync(path.join(ROOT, 'supabase/migrations')).filter(n => /^02[5-9]_|^03/.test(n)), ['025_journal_documents.sql', '026_deadline_completion.sql'], 'one additive migration (026): database schema, RLS and billing are otherwise untouched')
   for (const f of ['scheduleLogic.ts', 'scheduleMonth.ts']) assert.ok(!/supabase|fetch\(|localStorage\.setItem\(.*event/i.test(strip(src(f)).replace(/readViewPref|writeViewPref|VIEW_PREF_KEY|xp-schedule-view/g, '')), f + ' stays pure')
 })
 

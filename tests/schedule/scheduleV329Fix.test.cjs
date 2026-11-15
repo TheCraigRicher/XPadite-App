@@ -14,6 +14,7 @@ const strip = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '
 const src = f => read(`components/xpadite/${f}`)
 const compile = f => fs.writeFileSync(path.join(OUT, f + '.js'), ts.transpileModule(read(`components/xpadite/${f}.ts`), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)
 compile('deadlineLink'); compile('scheduleLogic'); compile('scheduleEngine')
+compile('zdate'); compile('dueStatus')
 const D = require(path.join(OUT, 'deadlineLink.js'))
 const L = require(path.join(OUT, 'scheduleLogic.js'))
 const E = require(path.join(OUT, 'scheduleEngine.js'))
@@ -146,7 +147,7 @@ test('Sync ON: a NEW event gets its task; EXISTING events are NOT back-filled (n
   assert.equal(plan(cal, ev('new1'), { sync: true, create: true }).ops[0].task_id, 'ev-new1', 'a new event is linked')
   // AppContext policy wiring
   const a = strip(src('AppContext.tsx')); const save = a.slice(a.indexOf('const saveInner'), a.indexOf('const saveScheduleEvent'))
-  assert.ok(/scheduleTaskSyncRef\.current, !prev \|\| !!opts\?\.addTask\)/.test(save), 'a task is created on save only for a new event or an explicit "Add back"')
+  assert.ok(/scheduleTaskSyncRef\.current, !prev \|\| !!opts\?\.addTask, /.test(save), 'a task is created on save only for a new event or an explicit "Add back"')
   assert.ok(/addTask: true/.test(a.slice(a.indexOf('const restoreDeadlineTask'), a.indexOf('Reconciliation'))), '"Add back" still recreates the task')
   const rec = a.slice(a.indexOf('const reconcileInner'), a.indexOf('const reconcileSchedule'))
   assert.ok(/async \(force = false, backfill = false\)/.test(rec) && /backfill \? \(e => isBackfillEligible\(/.test(rec) && /: false\)/.test(rec), 'reconcile creates nothing unless a consented back-fill is running')

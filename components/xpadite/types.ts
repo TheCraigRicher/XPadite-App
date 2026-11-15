@@ -25,6 +25,8 @@ export interface Task {
   isPriority?: boolean       // user-marked as urgent/important
   plannerSectionId?: string  // block.id of the linked Planner section for this task on its date
   sourceEventId?: string     // v1.328: set while this task is the linked task of a My Schedule deadline event (task id is 'dl-<eventId>')
+  completedAt?: number | null // v1.345: epoch ms of the REAL completion (set when the checkbox is ticked, cleared when unticked). Never back-filled for older tasks.
+  due?: { date: string; time?: string | null; dateOnly: boolean } // v1.345: this task's own due date (tasks that are not My Schedule deadlines). `time` is wall-clock HH:MM in the selected timezone.
 }
 
 export interface DeadlineInfo {

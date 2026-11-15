@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { DeadlineCorner, deadlineSquareStyle, deadlineTitle } from './DeadlineMark'
+import { CompletedBadge, deadlineMarkerStyle, deadlineTitle } from './DeadlineMark'
+import { useDeadlines } from './useDeadlines'
+import { markerState } from './deadlineIndex'
 import { useApp } from './AppContext'
 import { dateKey, isToday, DAY_HEADERS, MONTHS, APP_YEAR, getMonthStats } from './utils'
 import { ShareCardModal } from './ShareCardModal'
@@ -19,7 +21,8 @@ interface MonthZoomModalProps {
 }
 
 export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomModalProps) {
-  const { calData, updateDay, setToast, isDark, effectiveTimezone, deadlineDays } = useApp()
+  const { calData, updateDay, setToast, isDark, effectiveTimezone, calendarClean } = useApp()
+  const deadlines = useDeadlines()
   const gapColor = isDark ? '#1a1a28' : '#ffffff'
   const [shareOpen, setShareOpen] = useState(false)
 
@@ -207,9 +210,10 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
               const goal = !!dayData?.goal
               const todayCell = isToday(APP_YEAR, month, cell.day, effectiveTimezone)
               const isSun = cell.dayOfWeek === 0
-              // v1.328 deadline marker (see DeadlineMark.tsx)
-              const dls = deadlineDays[cell.key]
-              const plainDl = !!dls && !productive && !todayCell
+              // v1.345 deadline marker (see DeadlineMark.tsx): ONE marker per date; a productivity marker owns its day
+              const dls = deadlines[cell.key]
+              const mState = markerState(dls, calendarClean)
+              const plainDl = !!mState && !productive
               const cellTitle = (base?: string) => (dls ? `${deadlineTitle(dls)}${base ? ` \u2014 ${base}` : ''}` : base)
 
               const prevKey = cell.day > 1 ? dateKey(APP_YEAR, month, cell.day - 1) : null
@@ -231,7 +235,6 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
                 return (
                   <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)} title={cellTitle("Fire Day!")}>
                     {connL}{connR}
-                    {dls && <DeadlineCorner events={dls} isDark={isDark} size="sm" />}
                     <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
                       <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '30px', lineHeight: 1, userSelect: 'none' }}>🔥</span>
                       <span style={{ position: 'absolute', top: '65%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 2, fontSize: '9px', fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 5px rgba(255,255,255,1)', pointerEvents: 'none' }}>
@@ -247,7 +250,6 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
                 return (
                   <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)} title={cellTitle("Milestone!")}>
                     {connL}{connR}
-                    {dls && <DeadlineCorner events={dls} isDark={isDark} size="sm" />}
                     <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
                       <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '30px', lineHeight: 1, userSelect: 'none', zIndex: 1 }}>🏆</span>
                       <span style={{ position: 'absolute', top: '37%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 2, fontSize: '9px', fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 5px rgba(255,255,255,1)', pointerEvents: 'none' }}>
@@ -263,7 +265,6 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
                 return (
                   <div key={cell.key} className="aspect-square relative cursor-pointer select-none group" onClick={() => handleCellClick(cell.key, cell.day, streak)} title={cellTitle("Goal Achieved!")}>
                     {connL}{connR}
-                    {dls && <DeadlineCorner events={dls} isDark={isDark} pos="br" size="sm" />}
                     <div className="absolute inset-0 transition-transform duration-[160ms] group-hover:scale-110" style={{ zIndex: 1 }}>
                       <span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '28px', lineHeight: 1, userSelect: 'none' }}>🎯</span>
                       <span style={{ position: 'absolute', top: '52%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 2, fontSize: '9px', fontWeight: 900, color: '#0a0a0a', textShadow: '0 0 5px rgba(255,255,255,1)', pointerEvents: 'none' }}>
@@ -279,10 +280,10 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
 
               if (productive) {
                 circleStyle = { background: '#16a34a', color: 'white', fontWeight: 700, fontSize: '13px', boxShadow: `0 0 0 2.5px ${gapColor}, 0 0 0 5.5px rgba(22,163,74,0.7)` }
+              } else if (plainDl && mState) {
+                circleStyle = { ...deadlineMarkerStyle(mState, isDark, todayCell), fontSize: '13px' }
               } else if (todayCell) {
                 circleStyle = { color: 'var(--xp-acc)', background: 'rgba(124,58,237,0.08)', outline: '2px solid var(--xp-acc)', outlineOffset: '-1px', fontSize: '13px' }
-              } else if (plainDl) {
-                circleStyle = { ...deadlineSquareStyle(isDark), fontSize: '13px' }
               }
 
               return (
@@ -293,12 +294,12 @@ export function MonthZoomModal({ month, onClose, onDayDoubleClick }: MonthZoomMo
                   title={cellTitle()}
                 >
                   {connL}{connR}
-                  {dls && !plainDl && <DeadlineCorner events={dls} isDark={isDark} size="sm" />}
                   <div
                     className="absolute inset-[8%] rounded-full flex items-center justify-center transition-all duration-150 group-hover:scale-105"
                     style={{ zIndex: 1, ...circleStyle }}
                   >
                     {cell.day}
+                    {plainDl && mState === 'completed' && <CompletedBadge />}
                   </div>
                 </div>
               )

@@ -8,6 +8,7 @@
 import { useMemo } from 'react'
 import { isSameLocalDay, monthWeeks, monthYearLabel, startOfMonth, weekRowIndex } from './scheduleLogic'
 import type { WeekStart } from './scheduleLogic'
+import { ZDate } from './zdate'
 
 export const MINI_ROW_PX = 36
 const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S']   // Sunday-first; rotated when the week starts on Monday
@@ -39,8 +40,8 @@ export function ScheduleMiniCalendar({ viewMonth, onViewMonthChange, selected, o
   const offsetRows = expanded ? 0 : selRow
 
   function step(delta: number) {
-    if (expanded) onViewMonthChange(new Date(month.getFullYear(), month.getMonth() + delta, 1))
-    else onSelect(new Date(selected.getFullYear(), selected.getMonth(), selected.getDate() + delta * 7))   // collapsed arrows move by a week
+    if (expanded) onViewMonthChange(new ZDate(month.getFullYear(), month.getMonth() + delta, 1))
+    else onSelect(new ZDate(selected.getFullYear(), selected.getMonth(), selected.getDate() + delta * 7))   // collapsed arrows move by a week
   }
 
   const arrow = (dir: 'prev' | 'next') => (
@@ -90,7 +91,7 @@ export function ScheduleMiniCalendar({ viewMonth, onViewMonthChange, selected, o
                 return (
                   <button key={d.getTime()} type="button" role="gridcell" tabIndex={hidden ? -1 : 0} aria-selected={isSel} aria-hidden={hidden}
                     aria-label={d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) + (busy ? ', has events' : '')}
-                    onClick={() => onSelect(new Date(d.getFullYear(), d.getMonth(), d.getDate()))}
+                    onClick={() => onSelect(new ZDate(d.getFullYear(), d.getMonth(), d.getDate()))}
                     className="flex items-center justify-center" style={{ height: MINI_ROW_PX }}>
                     <span className="flex items-center justify-center text-[13px]"
                       style={{

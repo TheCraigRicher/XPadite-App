@@ -14,8 +14,8 @@ const js = ts.transpileModule(body.replace('function executeNav(tab: MobileTab)'
 function run(tab, initial = { analyticsOpen: true }) {
   const state = { analyticsOpen: !!initial.analyticsOpen, analyticsRestore: { month: 9 }, mobileTab: 'analytics-not-a-tab', modalDay: null, dashboardDay: { key: 'x' }, fullPageMonth: 3, order: [] }
   const rec = name => v => { state[name] = v; state.order.push(name) }
-  const fn = new Function('setDashboardDay', 'setFullPageMonth', 'setMobileTab', 'setModalDay', 'setAnalyticsOpen', 'setAnalyticsRestore', 'dateKey', js.replace(/^"use strict";?/, ''))(
-    rec('dashboardDay'), rec('fullPageMonth'), rec('mobileTab'), rec('modalDay'), rec('analyticsOpen'), rec('analyticsRestore'), (y, m, d) => `${y}-${m}-${d}`)
+  const fn = new Function('setDashboardDay', 'setFullPageMonth', 'setMobileTab', 'setModalDay', 'setAnalyticsOpen', 'setAnalyticsRestore', 'dateKey', 'ZDate', js.replace(/^"use strict";?/, ''))(
+    rec('dashboardDay'), rec('fullPageMonth'), rec('mobileTab'), rec('modalDay'), rec('analyticsOpen'), rec('analyticsRestore'), (y, m, d) => `${y}-${m}-${d}`, Date)   // ZDate: the "today" of this handler is read in the account timezone (zdate.ts); a plain Date is equivalent here
   fn(tab)
   return state
 }

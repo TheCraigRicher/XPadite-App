@@ -26,6 +26,8 @@ export interface ScheduleEventRow {
   task_date_key: string | null
   rev?: number
   task_link?: string
+  /** v1.345 (migration 026): epoch ms the deadline was completed; absent until that migration is applied. */
+  completed_at?: number | null
 }
 
 /** A persisted event plus where its linked task lives, its revision (optimistic concurrency) and the Task Manager choice. */
@@ -49,10 +51,11 @@ export function rowToEvent(r: ScheduleEventRow): StoredScheduleEvent {
     taskDateKey: r.task_date_key,
     rev: typeof r.rev === 'number' ? r.rev : undefined,
     taskLink: r.task_link === 'detached' ? 'detached' : 'linked',
+    completedAt: typeof r.completed_at === 'number' ? r.completed_at : (typeof r.completed_at === 'string' && r.completed_at !== '' && Number.isFinite(Number(r.completed_at)) ? Number(r.completed_at) : undefined),
   }
 }
 
-export function eventToRow(userId: string, e: StoredScheduleEvent): Omit<ScheduleEventRow, 'rev' | 'task_link'> & { user_id: string } {
+export function eventToRow(userId: string, e: StoredScheduleEvent): Omit<ScheduleEventRow, 'rev' | 'task_link' | 'completed_at'> & { user_id: string } {
   return {
     user_id: userId,
     event_id: e.id,
@@ -73,9 +76,15 @@ export function eventToRow(userId: string, e: StoredScheduleEvent): Omit<Schedul
 const COLS = 'event_id, title, category, start_at, end_at, location, meeting_url, notes, reminder_mins, recurrence, is_deadline, task_date_key, rev, task_link'
 
 export async function fetchScheduleEvents(supabase: Supabase, userId: string): Promise<StoredScheduleEvent[]> {
-  const { data, error } = await supabase.from('schedule_events').select(COLS).eq('user_id', userId).order('start_at', { ascending: true })
-  if (error) throw error
-  return (data ?? []).map(r => rowToEvent(r as ScheduleEventRow))
+  // v1.345: completed_at comes from migration 026. Until it is applied the column does not exist (Postgres 42703): read without it rather than fail the whole schedule.
+  const read = async (cols: string) => {
+    const r = await supabase.from('schedule_events').select(cols).eq('user_id', userId).order('start_at', { ascending: true })
+    return { rows: (r.data ?? []) as unknown as ScheduleEventRow[], error: r.error }
+  }
+  let res = await read(COLS + ', completed_at')
+  if (res.error && (res.error.code === '42703' || /completed_at/i.test(res.error.message ?? ''))) res = await read(COLS)
+  if (res.error) throw res.error
+  return res.rows.map(rowToEvent)
 }
 
 // ── Atomic writes: schedule_apply / schedule_set_task_link (migration 023) ───────────────────────────────────────
@@ -119,6 +128,23 @@ export async function applyScheduleChange(
 /** Records "removed from Task Manager" ('detached') or "restored" ('linked') on the event. Returns the new revision (null = no such event). */
 export async function setScheduleTaskLink(supabase: Supabase, eventId: string, link: TaskLink): Promise<number | null> {
   const { data, error } = await supabase.rpc('schedule_set_task_link', { p_event_id: eventId, p_link: link })
+  if (error) throw classify(error)
+  return (data as number | null) ?? null
+}
+
+/**
+ * "Remove from Task Manager" that KEEPS the deadline's assigned calendar date (migration 026). schedule_set_task_link('detached') clears task_date_key,
+ * which would let a legacy deadline's date be re-derived. Returns the new revision (null = no such event). Needs migration 026.
+ */
+export async function detachScheduleTask(supabase: Supabase, eventId: string): Promise<number | null> {
+  const { data, error } = await supabase.rpc('schedule_detach_task', { p_event_id: eventId })
+  if (error) throw classify(error)
+  return (data as number | null) ?? null
+}
+
+/** Records (or clears, with null) the completion instant of a deadline that has NO linked task. Returns the new revision (null = no such event). Needs migration 026. */
+export async function setScheduleCompleted(supabase: Supabase, eventId: string, completedAt: number | null): Promise<number | null> {
+  const { data, error } = await supabase.rpc('schedule_set_completed', { p_event_id: eventId, p_completed_at: completedAt })
   if (error) throw classify(error)
   return (data as number | null) ?? null
 }

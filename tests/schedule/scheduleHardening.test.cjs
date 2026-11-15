@@ -11,6 +11,7 @@ const OUT = path.join(ROOT, 'node_modules', '.cache', 'xpadite-schedule-v328-har
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8').split('\r\n').join('\n')
 const compile = (f, out) => fs.writeFileSync(path.join(OUT, out + '.js'), ts.transpileModule(read(f), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)
 compile('components/xpadite/scheduleLogic.ts', 'scheduleLogic'); compile('components/xpadite/deadlineLink.ts', 'deadlineLink')
+compile('components/xpadite/zdate.ts', 'zdate'); compile('components/xpadite/dueStatus.ts', 'dueStatus')
 const D = require(path.join(OUT, 'deadlineLink.js')); const L = require(path.join(OUT, 'scheduleLogic.js'))
 const src = f => read(`components/xpadite/${f}`)
 const strip = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
@@ -49,7 +50,8 @@ test('duplicates (two devices, stale overwrite) collapse to one, keeping the cop
   const all = Object.values(fixed).flatMap(d => d.tasks).filter(t => t.id === 'dl-e1')
   assert.equal(all.length, 1, 'one task left')
   assert.deepEqual([all[0].sourceEventId, all[0].done, all[0].journal], ['e1', true, 'work'], 'the linked task is the one carrying the work')
-  assert.equal(fixed['2026-11-24'].tasks.length, 1); assert.equal(fixed['2026-11-25'].tasks.length, 0, 'the empty copy is gone')
+  // v1.345 ANCHORING: the copy holding the work STAYS where it is (no relocation); only the empty duplicate is dropped
+  assert.equal(fixed['2026-11-25'].tasks.length, 1); assert.equal(fixed['2026-11-24'].tasks.length, 0, 'the empty copy is gone')
   // both copies hold work: nothing is destroyed (the extra is kept as an ordinary, unlinked task)
   const both = converge({ '2026-11-24': day([linked('e1', { journal: 'a' })]), '2026-11-25': day([linked('e1', { journal: 'b' })]) }, [E('e1')]).cal
   assert.equal(Object.values(both).flatMap(d => d.tasks).length, 2); assert.equal(Object.values(both).flatMap(d => d.tasks).filter(t => t.sourceEventId).length, 1)
@@ -76,12 +78,14 @@ test('reconcile repairs: missing task, stale title, wrong day; leaves everything
   }
   const events = [E('e1'), E('e2', { title: 'Fresh', endAt: at(2026, 11, 25, 10) }), E('e3', { endAt: at(2026, 11, 29, 10) })]
   const r1 = converge(cal, events)
-  assert.deepEqual(r1.items.map(i => [i.eventId, i.reason]).sort(), [['e1', 'created'], ['e2', 'updated'], ['e3', 'moved']])
+  assert.deepEqual(r1.items.map(i => [i.eventId, i.reason]).sort(), [['e1', 'created'], ['e2', 'updated']])   // v1.345: e3 sits on a different day than its end implies — reconciliation no longer relocates it
   const f = r1.cal
   assert.deepEqual(f['2026-11-24'].tasks.filter(t => !t.id.startsWith('dl-')), [mine, other], 'same-titled / unrelated tasks untouched')
   assert.equal(f['2026-11-24'].productive, true); assert.equal(f['2026-11-24'].notes, 'n')
   assert.deepEqual([f['2026-11-25'].tasks[0].text, f['2026-11-25'].tasks[0].done, f['2026-11-25'].tasks[0].journal], ['Fresh', true, 'w'])
-  assert.equal(f['2026-11-27'].tasks.length, 0); assert.equal(f['2026-11-29'].tasks[0].id, 'dl-e3')
+  assert.equal(f['2026-11-27'].tasks.length, 1); assert.equal(f['2026-11-27'].tasks[0].id, 'dl-e3'); assert.equal(f['2026-11-29'], undefined, 'anchored: nothing moved')
+  // ...but when the USER edits the deadline (not anchored) the task follows it to the new day
+  assert.deepEqual(D.planDeadlineSync(cal, 'e3', events[2], '2026-11-27', 'a').ops.map(o => [o.kind, o.date_key]), [['move', '2026-11-29']])
   assert.deepEqual(D.reconcileDeadlines(f, events, 'a'), [], 'converged: nothing left to do')
 })
 
@@ -136,7 +140,7 @@ test('Task Manager: deadline task title is owned by the event; deleting = remove
 
 test('time format: one shared (session-only) choice drives the popup, Event Details and the schedule; nothing claims persistence', () => {
   const d = src('DayModal.tsx'), a = src('AppContext.tsx'), m = src('MeetingsModal.tsx')
-  assert.ok(/fmt=\{scheduleTimeFormat\}/.test(d) && /clockLabel\(dueAt, fmt\)/.test(d) && !/clockLabel\(dueAt, '12h'\)/.test(d))
+  assert.ok(/hour12=\{scheduleTimeFormat !== '24h'\}/.test(d) && !/clockLabel\(dueAt, '12h'\)/.test(d), 'v1.345: the popup reads the shared time format (12h / 24h) through Intl in the selected timezone')
   assert.ok(/useState<TimeFormat>\('12h'\)/.test(a) && /SESSION-ONLY/.test(a) && !/localStorage[^\n]*timefmt|time_format/i.test(strip(a)))
   assert.ok(/timeFormat: scheduleTimeFormat/.test(m) && /setScheduleTimeFormat\(p\.timeFormat\)/.test(m))
   const ts1 = at(2026, 11, 24, 17, 5)
@@ -181,5 +185,5 @@ test('a retried "add" re-sends the SAME event id (lost-response safe); restore a
 test('the old non-atomic helpers are gone from the data layer; every write is one RPC', () => {
   const s = strip(read('lib/supabase/schedule-data.ts'))
   assert.ok(!/export async function (upsertScheduleEvent|deleteScheduleEventRow)/.test(s))
-  assert.equal((s.match(/\.rpc\(/g) || []).length, 3, 'schedule_apply, schedule_set_task_link, schedule_set_sync')
+  assert.equal((s.match(/\.rpc\(/g) || []).length, 5, 'schedule_apply, schedule_set_task_link, schedule_set_completed + schedule_detach_task (v1.345), schedule_set_sync')
 })

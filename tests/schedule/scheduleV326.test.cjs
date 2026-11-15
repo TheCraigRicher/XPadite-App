@@ -11,6 +11,7 @@ const OUT = path.join(ROOT, 'node_modules', '.cache', 'xpadite-schedule-v326'); 
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8').split('\r\n').join('\n')
 const compile = f => fs.writeFileSync(path.join(OUT, f + '.js'), ts.transpileModule(read(`components/xpadite/${f}.ts`), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)
 compile('scheduleLogic'); compile('scheduleEngine')
+compile('zdate'); compile('dueStatus')
 const L = require(path.join(OUT, 'scheduleLogic.js'))
 const E = require(path.join(OUT, 'scheduleEngine.js'))
 const src = f => read(`components/xpadite/${f}`)

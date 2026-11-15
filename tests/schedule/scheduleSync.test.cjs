@@ -11,6 +11,7 @@ const OUT = path.join(ROOT, 'node_modules', '.cache', 'xpadite-schedule-sync'); 
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8').split('\r\n').join('\n')
 const strip = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 const src = f => read(`components/xpadite/${f}`)
+for (const m of ['zdate', 'dueStatus']) fs.writeFileSync(path.join(OUT, m + '.js'), ts.transpileModule(read(`components/xpadite/${m}.ts`), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)
 fs.writeFileSync(path.join(OUT, 'deadlineLink.js'), ts.transpileModule(read('components/xpadite/deadlineLink.ts'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)
 const D = require(path.join(OUT, 'deadlineLink.js'))
 

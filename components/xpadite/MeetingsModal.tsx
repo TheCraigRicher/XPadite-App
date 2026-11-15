@@ -33,6 +33,7 @@ import {
 } from './scheduleEngine'
 import type { FilterState } from './scheduleEngine'
 import type { XpaditeMeeting, MeetingProviderId, MeetingPlatform } from './meetingsMockData'
+import { ZDate } from './zdate'
 
 type TabKey = ScheduleViewKey   // 'schedule' | 'today' | 'month'
 type MeetingPhase = 'cancelled' | 'live' | 'starting-soon' | 'upcoming' | 'past'
@@ -192,7 +193,7 @@ function MeetingDetail({
 
       <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4" style={{ overscrollBehavior: 'contain' }}>
         <dl className="flex flex-col gap-2.5 text-[12.5px]">
-          <DetailRow label="Date" value={new Date(meeting.startAt).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} />
+          <DetailRow label="Date" value={new ZDate(meeting.startAt).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })} />
           <DetailRow label="Time" value={`${timeRangeLabel(meeting.startAt, meeting.endAt, fmt)} (${fmtDuration(meeting.startAt, meeting.endAt)})`} />
           {meeting.meetingUrl ? (
             <DetailRow label="Meeting Link" value={meeting.meetingUrl} link />
@@ -387,14 +388,14 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   const [saveError, setSaveError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
   // Today tab: the date whose agenda is shown, the month browsed in the mini calendar, and its collapse state.
-  const [todayDate, setTodayDate] = useState(() => startOfDay(new Date()))
-  const [viewMonth, setViewMonth] = useState(() => startOfMonth(new Date()))
+  const [todayDate, setTodayDate] = useState(() => startOfDay(new ZDate()))
+  const [viewMonth, setViewMonth] = useState(() => startOfMonth(new ZDate()))
   const [calExpanded, setCalExpanded] = useState(true)
   // Add/Edit/Delete dialogs (shared by both tabs) and the "jump to this event" signal for the weekly view.
-  const [activeDay, setActiveDay] = useState(() => startOfDay(new Date()))
+  const [activeDay, setActiveDay] = useState(() => startOfDay(new ZDate()))
   const [form, setForm] = useState<FormState>(null)
   // My Schedule's browsed date and tapped date live here (not inside the view) so Today ↔ My Schedule ↔ Month never resets them.
-  const [schedAnchor, setSchedAnchor] = useState(() => startOfDay(new Date()))
+  const [schedAnchor, setSchedAnchor] = useState(() => startOfDay(new ZDate()))
   const [schedSelDay, setSchedSelDay] = useState<Date | null>(null)
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [focus, setFocus] = useState<{ id: string; at: number; nonce: number; quiet?: boolean } | null>(null)
@@ -450,7 +451,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
     [allEvents, parts.category, parts.source, categories],
   )
   const dayEvents = useMemo(() => eventsOnDay(filtered, todayDate), [filtered, todayDate])
-  const todayCount = useMemo(() => eventsOnDay(filtered, new Date(now)).length, [filtered, now])
+  const todayCount = useMemo(() => eventsOnDay(filtered, new ZDate(now)).length, [filtered, now])
 
   // v1.331 — Today selects an event by itself: the one in progress, else the next one, else the most recent past one (pickAutoSelection). It happens
   // ONCE per "view" of a date: when the Today tab is entered (after the events have loaded) and when the shown date changes. Inside a view the user's
@@ -470,11 +471,11 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
     if (autoSelKey) document.querySelector('[data-testid="today-agenda"] [aria-pressed="true"]')?.scrollIntoView({ block: 'nearest' })
   }, [autoSelKey])
   // A date change (midnight) while the Today tab is showing "today" moves it to the new day; a date the user picked stays where they put it.
-  const [nowDayKey, setNowDayKey] = useState(() => dateKey(new Date()))
-  const curDayKey = dateKey(new Date(now))
+  const [nowDayKey, setNowDayKey] = useState(() => dateKey(new ZDate()))
+  const curDayKey = dateKey(new ZDate(now))
   if (curDayKey !== nowDayKey) {
     setNowDayKey(curDayKey)
-    if (dateKey(todayDate) === nowDayKey) { const d = startOfDay(new Date(now)); setTodayDate(d); setViewMonth(startOfMonth(d)) }
+    if (dateKey(todayDate) === nowDayKey) { const d = startOfDay(new ZDate(now)); setTodayDate(d); setViewMonth(startOfMonth(d)) }
   }
   const hasEventsOn = (d: Date) => filtered.some(e => daySlice(e, d) !== null)
 
@@ -575,8 +576,8 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
     attemptRef.current = null
     setToast(editing ? 'Event updated' : 'Event added')
     setFocus({ id, at: fields.startAt, nonce: Date.now() })
-    setTodayDate(startOfDay(new Date(fields.startAt)))
-    setViewMonth(startOfMonth(new Date(fields.startAt)))
+    setTodayDate(startOfDay(new ZDate(fields.startAt)))
+    setViewMonth(startOfMonth(new ZDate(fields.startAt)))
     setTodaySelId(id)
     setDetailOpen(true)
     setForm(null)
@@ -595,8 +596,8 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
       await saveScheduleEvent({ ...cur, startAt, endAt })       // a moved deadline moves its due date (and its task) with it
     } catch (err) { setToast(saveFailureMessage(err)); return }
     setFocus({ id: cur.id, at: startAt, nonce: Date.now(), quiet: true })   // keep it selected, but don't pop the details sheet over the result
-    setTodayDate(startOfDay(new Date(startAt)))
-    setViewMonth(startOfMonth(new Date(startAt)))
+    setTodayDate(startOfDay(new ZDate(startAt)))
+    setViewMonth(startOfMonth(new ZDate(startAt)))
     setToast('Event moved')
   }
 
@@ -655,14 +656,14 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
       clearScheduleFocusRequest()
       if (!ev) { setToast('That deadline no longer exists in My Schedule.'); return }
       setFocus({ id: ev.id, at: ev.startAt, nonce: Date.now() })
-      setTodayDate(startOfDay(new Date(ev.startAt))); setViewMonth(startOfMonth(new Date(ev.startAt))); setTodaySelId(ev.id)
+      setTodayDate(startOfDay(new ZDate(ev.startAt))); setViewMonth(startOfMonth(new ZDate(ev.startAt))); setTodaySelId(ev.id)
       openEdit(ev)
     }, 0)
     return () => window.clearTimeout(t)
   })
 
   const tabCount = (k: TabKey) => (k === 'today' ? todayCount : 0)
-  const isTodayDate = isSameLocalDay(todayDate, new Date(now))
+  const isTodayDate = isSameLocalDay(todayDate, new ZDate(now))
   const agendaLabel = isTodayDate ? 'Today' : todayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
 
   // Phones: the modal covers the whole screen (above the bottom bar). Larger screens: Analytics' sizing — same padding,
@@ -842,12 +843,12 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
                 onViewMonthChange={setViewMonth}
                 selected={todayDate}
                 onSelect={selectTodayDate}
-                today={new Date(now)}
+                today={new ZDate(now)}
                 hasEvents={hasEventsOn}
                 expanded={calExpanded}
                 onToggle={toggleCalendar}
                 weekStart={prefs.weekStart}
-                onToday={() => selectTodayDate(new Date())}
+                onToday={() => selectTodayDate(new ZDate())}
               />
               <div className="flex items-center justify-between gap-2 flex-shrink-0 px-1">
                 <p className="text-[10.5px] font-bold uppercase tracking-wide" style={{ color: '#9ca3af', letterSpacing: '0.06em' }}>
@@ -913,7 +914,8 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
           <EventForm key={lastForm.id} open={!!form} mode={lastForm.data.mode} initial={lastForm.data.initial}
             heading={lastForm.data.mode === 'add' ? lastForm.data.heading : undefined} hint={lastForm.data.mode === 'add' ? lastForm.data.hint : undefined}
             getConflict={formConflictFor} onCancel={() => { setSaveError(null); setForm(null) }} onSubmit={submitForm}
-            savedLocations={savedLocations} onSavedLocationsChange={next => { void setSavedLocations(next) }} saving={saving} saveError={saveError} />
+            savedLocations={savedLocations} onSavedLocationsChange={next => { void setSavedLocations(next) }} saving={saving} saveError={saveError}
+            eventId={lastForm.data.mode === 'edit' ? lastForm.data.id : undefined} />
         )}
         {lastDialog === 'categories' && (
           <ManageCategoriesDialog open={dialog === 'categories'} categories={categories} events={scheduleEvents} onAdd={handleAddCategory} onRename={handleRenameCategory} onRecolor={handleRecolorCategory} onDelete={handleDeleteCategory} onClose={() => setDialog(null)} />

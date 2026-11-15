@@ -1,7 +1,9 @@
 ﻿'use client'
 
 import { useMemo, useEffect, useState, useCallback, useRef } from 'react'
-import { DeadlineCorner, deadlineSquareStyle, deadlineTitle } from './DeadlineMark'
+import { CompletedBadge, deadlineMarkerStyle, deadlineTitle } from './DeadlineMark'
+import { useDeadlines } from './useDeadlines'
+import { markerState } from './deadlineIndex'
 import { useApp } from './AppContext'
 import { GaugeMeter } from './GaugeMeter'
 import { generateShareCardDataUri } from './ShareCardModal'
@@ -514,7 +516,8 @@ function MonthCalendarLarge({
   calData: Record<string, unknown>
   onDayDoubleClick?: (key: string, month: number, day: number) => void
 }) {
-  const { progressColor: _rawColor, isDark, updateDay, setToast, reminders, calData: appCalData, calendarClean, effectiveTimezone, deadlineDays } = useApp()
+  const { progressColor: _rawColor, isDark, updateDay, setToast, reminders, calData: appCalData, calendarClean, effectiveTimezone } = useApp()
+  const deadlines = useDeadlines()
   const progressColor = resolveProgressColor(_rawColor, isDark)
   const gapColor = isDark ? '#1a1a28' : '#ffffff'
   const reminderDates = useUpcomingReminderDates(reminders, appCalData)
@@ -610,9 +613,10 @@ function MonthCalendarLarge({
 
           const todayCell     = isToday(APP_YEAR, month, cell.day, effectiveTimezone)
           const reminderCount = reminderDates.get(cell.key) ?? 0
-          // v1.328 deadline marker (see DeadlineMark.tsx): plain day -> date inside a soft red square; any other day -> small corner square
-          const dls = deadlineDays[cell.key]
-          const plainDl = !!dls && !todayCell && (calendarClean || !rawStreak)
+          // v1.345 deadline marker (see DeadlineMark.tsx): ONE marker per date, in the number's own circle slot; a productivity marker owns its day
+          const dls = deadlines[cell.key]
+          const mState = markerState(dls, calendarClean)
+          const plainDl = !!mState && (calendarClean || !rawStreak)
 
           const prevKey = cell.day > 1 ? dateKey(APP_YEAR, month, cell.day - 1) : null
           const nextKey = cell.day < totalDays ? dateKey(APP_YEAR, month, cell.day + 1) : null
@@ -642,7 +646,6 @@ function MonthCalendarLarge({
                 </div>
               ) : (<>{connLeft}{connRight}</>)}
               <ReminderRing count={reminderCount} />
-              {dls && !plainDl && <DeadlineCorner events={dls} isDark={isDark} pos={!rawHyper && !rawMil && rawGoal ? 'br' : 'tr'} />}
 
               {/* 🔥 Hyper — kept in DOM, fades via xp-cal-fade + opacity */}
               {rawHyper && (
@@ -702,9 +705,10 @@ function MonthCalendarLarge({
                   color: todayCell ? 'var(--xp-acc)' : cell.dow === 0 ? '#f97316' : isDark ? 'rgba(255,255,255,0.70)' : '#374151',
                   fontSize: 14,
                   ...(todayCell ? { background: 'rgba(124,58,237,0.08)', outline: '2px solid var(--xp-acc)', outlineOffset: '-1px' } : {}),
-                  ...(plainDl ? { ...deadlineSquareStyle(isDark), fontSize: 14 } : {}),
+                  ...(plainDl && mState ? { ...deadlineMarkerStyle(mState, isDark, todayCell), fontSize: 14 } : {}),
                 }}>
                   {cell.day}
+                  {plainDl && mState === 'completed' && <CompletedBadge />}
                 </div>
               )}
             </div>

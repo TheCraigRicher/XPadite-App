@@ -13,6 +13,8 @@ import {
 import type { CombinedFilter, ScheduleCategoryId, ScheduleEvent, ScheduleFormErrors, ScheduleFormValues } from './scheduleLogic'
 import { withDateChange, withStartChange } from './scheduleEngine'
 import { useSchedule } from './scheduleContext'
+import { useDeadlineActions, useEventDeadline } from './useDeadlines'
+import { AssignedDateNote, CompleteControl, DueChip } from './DeadlineStatus'
 import { LAYER_ATTR, SheetFrame, useCenteredList, useIsPhone, usePopupBox, useSheetPhase } from './ScheduleSheet'
 
 export { LAYER_ATTR } from './ScheduleSheet'
@@ -32,6 +34,31 @@ export function CategoryDot({ id, size = 10 }: { id: ScheduleCategoryId; size?: 
   const { meta } = useSchedule()
   const c = meta(id)
   return <span aria-hidden="true" style={{ width: size, height: size, borderRadius: 3, background: c.bg, border: `1.5px solid ${c.edge}`, display: 'inline-block', flexShrink: 0 }} />
+}
+
+// ── Deadline completion (v1.345) ────────────────────────────────────────────
+// "Mark Complete" / "Completed" (+ the live status chip) for a SAVED deadline event. The completion is recorded where it is authoritative: on the linked
+// Task Manager task when there is one (so the two always agree), otherwise on the event. Renders nothing for events that are not saved deadlines.
+/** Legacy deadlines only: the assigned calendar date differs from the day the deadline time falls on (see AssignedDateNote). Renders nothing otherwise. */
+function AssignedDateRow({ eventId }: { eventId: string }) {
+  const item = useEventDeadline(eventId)
+  const { fmt } = useSchedule()
+  if (!item || !item.dateMismatch) return null
+  return <AssignedDateNote assignedKey={item.dayKey} dueAt={item.dueAt} tz={item.tz} hour12={fmt !== '24h'} />
+}
+
+export function DeadlineCompletion({ eventId }: { eventId: string }) {
+  const item = useEventDeadline(eventId)
+  const { setDone } = useDeadlineActions()
+  const [busy, setBusy] = useState(false)
+  if (!item) return null
+  const run = async (done: boolean) => { setBusy(true); try { await setDone(item, done) } finally { setBusy(false) } }
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2" data-testid="deadline-completion">
+      <CompleteControl size="sm" done={item.done} busy={busy} onMark={() => { void run(true) }} onReopen={() => { void run(false) }} />
+      <DueChip info={item.info} />
+    </span>
+  )
 }
 
 // ── Event details (sidebar + bottom sheet) ──────────────────────────────────
@@ -81,8 +108,10 @@ export function EventDetails({ ev, onEdit, onDelete, onDuplicate }: { ev: Schedu
               <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true"><path d="M5 21V4M5 4h11l-2 4 2 4H5" /></svg>
               {longDateLabel(ev.endAt)} · {clockLabel(ev.endAt, fmt)}
             </span>
+            <AssignedDateRow eventId={ev.id} />
           </DetailRow>
         )}
+        {ev.isDeadline && !ev.readOnly && <DetailRow label="Status"><DeadlineCompletion eventId={ev.id} /></DetailRow>}
         {(ev.isDeadline || taskSync) && !ev.readOnly && (
           <DetailRow label="Task">
             {ev.taskLink === 'detached' ? (
@@ -443,6 +472,8 @@ interface EventFormProps {
   /** Set while a save is in flight / after it failed, so the form keeps the user's input and says so. */
   saving?: boolean
   saveError?: string | null
+  /** Edit mode: the saved event's id, so a saved deadline can be marked complete from the editor. */
+  eventId?: string
 }
 
 /** Phones: a full-screen panel that slides up and back down. Tablet/desktop: the original centred dialog. */
@@ -453,7 +484,7 @@ export function EventForm(props: EventFormProps) {
   return <EventFormInner {...props} phone={phone} visible={visible} />
 }
 
-function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, heading, hint, phone, visible, savedLocations, onSavedLocationsChange, saving, saveError }: EventFormProps & { phone: boolean; visible: boolean }) {
+function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, heading, hint, phone, visible, savedLocations, onSavedLocationsChange, saving, saveError, eventId }: EventFormProps & { phone: boolean; visible: boolean }) {
   const { fmt } = useSchedule()
   const [showEndDate, setShowEndDate] = useState(() => !!initial.endDate && initial.endDate !== initial.date)
   const [v, setV] = useState<ScheduleFormValues>(initial)
@@ -526,7 +557,10 @@ function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, headin
               + Ends on a different day
             </button>
           )}
-          <DueDatePill on={!!v.isDeadline} onToggle={() => set('isDeadline', !v.isDeadline)} />
+          <div className="flex flex-wrap items-center gap-2">
+            <DueDatePill on={!!v.isDeadline} onToggle={() => set('isDeadline', !v.isDeadline)} />
+            {mode === 'edit' && eventId && v.isDeadline && <DeadlineCompletion eventId={eventId} />}
+          </div>
           <Field label="Category" htmlFor="sch-category">
             <CategorySelect id="sch-category" value={v.category} onChange={c => set('category', c)} />
           </Field>

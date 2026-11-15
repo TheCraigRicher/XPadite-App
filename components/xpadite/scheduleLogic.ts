@@ -3,6 +3,7 @@
 // (tests/schedule/scheduleLogic.test.cjs). Events are plain objects; nothing in this file persists them.
 
 import type { XpaditeMeeting } from './meetingsMockData'
+import { ZDate } from './zdate'
 
 /** The six built-in ids, plus any custom category id (custom ids are generated and never collide with these). */
 export type DefaultCategoryId = 'lecture' | 'meeting' | 'assignment' | 'study' | 'personal' | 'other'
@@ -38,6 +39,8 @@ export interface ScheduleEvent {
   isDeadline?: boolean
   /** v1.328: 'detached' = the user removed this deadline's Task Manager task on purpose (the deadline itself stays). */
   taskLink?: 'linked' | 'detached'
+  /** v1.345: epoch ms the deadline was completed — used ONLY when the event has no linked Task Manager task (the task is the authority otherwise). */
+  completedAt?: number | null
 }
 
 export interface ScheduleCategory {
@@ -128,17 +131,17 @@ export function isSameLocalDay(a: Date, b: Date): boolean {
 
 /** Local midnight of the given date (new object). */
 export function startOfDay(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  return new ZDate(d.getFullYear(), d.getMonth(), d.getDate())
 }
 
 /** The first day of the week (Sunday, or Monday when `weekStart` is 1) on/before `d`, at local midnight. Calendar arithmetic, so month/year/DST boundaries are exact. */
 export function startOfWeek(d: Date, weekStart: WeekStart = 0): Date {
   const back = (d.getDay() - weekStart + 7) % 7
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - back)
+  return new ZDate(d.getFullYear(), d.getMonth(), d.getDate() - back)
 }
 
 export function addDays(d: Date, n: number): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+  return new ZDate(d.getFullYear(), d.getMonth(), d.getDate() + n)
 }
 
 /** The seven days of the week containing `anchor` (Sun → Sat, or Mon → Sun). */
@@ -149,9 +152,9 @@ export function weekDays(anchor: Date, weekStart: WeekStart = 0): Date[] {
 
 /** Same day-of-month in the previous/next month, clamped to that month's length (Jan 31 + 1 → Feb 28/29). */
 export function shiftMonth(d: Date, delta: number): Date {
-  const target = new Date(d.getFullYear(), d.getMonth() + delta, 1)
-  const last = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate()
-  return new Date(target.getFullYear(), target.getMonth(), Math.min(d.getDate(), last))
+  const target = new ZDate(d.getFullYear(), d.getMonth() + delta, 1)
+  const last = new ZDate(target.getFullYear(), target.getMonth() + 1, 0).getDate()
+  return new ZDate(target.getFullYear(), target.getMonth(), Math.min(d.getDate(), last))
 }
 
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -199,7 +202,7 @@ export function hourLabel(h: number, fmt?: TimeFormat | number): string {
 }
 
 export function clockLabel(ts: number, fmt?: TimeFormat | number): string {
-  const d = new Date(ts)
+  const d = new ZDate(ts)
   const h = d.getHours(), m = d.getMinutes()
   if (fmt === '24h') return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
   const h12 = h % 12 === 0 ? 12 : h % 12
@@ -218,7 +221,7 @@ export function durationLabel(startAt: number, endAt: number): string {
 }
 
 export function longDateLabel(ts: number): string {
-  return new Date(ts).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+  return new ZDate(ts).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 // ── Grid layout ─────────────────────────────────────────────────────────────
@@ -237,7 +240,7 @@ export interface PositionedEvent {
 }
 
 function wallMinutes(ts: number): number {
-  const d = new Date(ts)
+  const d = new ZDate(ts)
   return d.getHours() * 60 + d.getMinutes()
 }
 
@@ -394,7 +397,7 @@ export function pickAutoSelection<T extends { id: string; startAt: number; endAt
 }
 
 export function startOfMonth(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), 1)
+  return new ZDate(d.getFullYear(), d.getMonth(), 1)
 }
 
 /**
@@ -403,7 +406,7 @@ export function startOfMonth(d: Date): Date {
  */
 export function monthWeeks(month: Date, weekStart: WeekStart = 0): Date[][] {
   const first = startOfMonth(month)
-  const last = new Date(first.getFullYear(), first.getMonth() + 1, 0)
+  const last = new ZDate(first.getFullYear(), first.getMonth() + 1, 0)
   const start = startOfWeek(first, weekStart)
   const rows = Math.ceil((((first.getDay() - weekStart + 7) % 7) + last.getDate()) / 7)
   return Array.from({ length: rows }, (_, r) => Array.from({ length: 7 }, (_, c) => addDays(start, r * 7 + c)))
@@ -467,12 +470,12 @@ export const MAX_EVENT_DAYS = 7
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
 export function toDateInput(ts: number): string {
-  const d = new Date(ts)
+  const d = new ZDate(ts)
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }
 
 export function toTimeInput(ts: number): string {
-  const d = new Date(ts)
+  const d = new ZDate(ts)
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
 
@@ -483,7 +486,7 @@ export function parseLocal(date: string, time: string): number | null {
   if (!dm || !tm) return null
   const y = +dm[1], mo = +dm[2], d = +dm[3], h = +tm[1], mi = +tm[2]
   if (h > 23 || mi > 59) return null
-  const dt = new Date(y, mo - 1, d, h, mi)
+  const dt = new ZDate(y, mo - 1, d, h, mi)
   // reject rollovers such as 2026-02-31
   if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null
   // reject a wall-clock time that does not exist (the hour skipped when clocks spring forward) instead of silently shifting it
@@ -552,8 +555,8 @@ export function eventToForm(ev: ScheduleEvent): ScheduleFormValues {
 export function blankFormAt(day: Date, startMin: number, durationMins = DEFAULT_PREFS.defaultDurationMins): ScheduleFormValues {
   const sMin = Math.min(Math.max(0, Math.round(startMin)), 24 * 60 - 2)
   const eMin = Math.min(sMin + Math.max(1, durationMins), 24 * 60 - 1)
-  const s = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, sMin)
-  const e = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, eMin)
+  const s = new ZDate(day.getFullYear(), day.getMonth(), day.getDate(), 0, sMin)
+  const e = new ZDate(day.getFullYear(), day.getMonth(), day.getDate(), 0, eMin)
   return {
     title: '', date: toDateInput(s.getTime()), endDate: toDateInput(s.getTime()), start: toTimeInput(s.getTime()), end: toTimeInput(e.getTime()),
     category: 'meeting', location: '', meetingUrl: '', notes: '', reminderMins: null, recurrence: 'none', isDeadline: false,

@@ -7,6 +7,7 @@ import {
   SCHEDULE_CATEGORIES, addDays, clockLabel, eventToForm, parseLocal, startOfDay, longDateLabel, toDateInput, toTimeInput,
 } from './scheduleLogic'
 import type { ScheduleCategory, ScheduleCategoryId, ScheduleEvent, ScheduleFormValues, TimeFormat } from './scheduleLogic'
+import { ZDate } from './zdate'
 
 export const SLOT_MINUTES = 60       // empty-slot click resolution: one whole hour cell
 export const SNAP_MINUTES = 15       // drag-and-drop snapping
@@ -37,7 +38,7 @@ export function findConflicts(c: ConflictCandidate, events: ScheduleEvent[]): Sc
 }
 
 function occupiedLabel(e: ScheduleEvent, candidateStart: number, fmt: TimeFormat): string {
-  const sameDay = (x: number, y: number) => startOfDay(new Date(x)).getTime() === startOfDay(new Date(y)).getTime()
+  const sameDay = (x: number, y: number) => startOfDay(new ZDate(x)).getTime() === startOfDay(new ZDate(y)).getTime()
   if (sameDay(e.startAt, candidateStart) && sameDay(e.startAt, e.endAt - 1)) {
     return `from ${clockLabel(e.startAt, fmt)} to ${clockLabel(e.endAt, fmt)}`
   }
@@ -87,8 +88,8 @@ export function withStartChange(v: ScheduleFormValues, patch: Partial<Pick<Sched
   const dur = oldE - oldS
   let newE = newS + dur
   if (!multiDay) {
-    const d = new Date(newS)
-    newE = Math.min(newE, new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59).getTime())
+    const d = new ZDate(newS)
+    newE = Math.min(newE, new ZDate(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59).getTime())
     if (newE <= newS) return { ...next, endDate: next.date }
   }
   return { ...next, end: toTimeInput(newE), endDate: toDateInput(newE) }
@@ -99,7 +100,7 @@ export function withDateChange(v: ScheduleFormValues, date: string): ScheduleFor
   const a = parseLocal(v.date, '00:00'), b = parseLocal(v.endDate || v.date, '00:00'), n = parseLocal(date, '00:00')
   if (a === null || b === null || n === null) return { ...v, date, endDate: (v.endDate || v.date) === v.date ? date : v.endDate }
   const spanDays = Math.round((b - a) / (24 * 60 * MINUTE_MS))
-  return { ...v, date, endDate: toDateInput(addDays(startOfDay(new Date(n)), spanDays).getTime()) }
+  return { ...v, date, endDate: toDateInput(addDays(startOfDay(new ZDate(n)), spanDays).getTime()) }
 }
 
 /** First free start (15-minute grid) at or after `fromStart` where `durationMs` fits on one day without overlap, searching a week ahead. */
@@ -108,7 +109,7 @@ export function nextFreeStart(events: ScheduleEvent[], fromStart: number, durati
   let t = Math.ceil(fromStart / step) * step
   const limit = fromStart + 7 * 24 * 60 * MINUTE_MS
   for (; t < limit; t += step) {
-    const nextMidnight = addDays(startOfDay(new Date(t)), 1).getTime()
+    const nextMidnight = addDays(startOfDay(new ZDate(t)), 1).getTime()
     if (!allowOvernight && t + durationMs > nextMidnight) continue   // keep a same-day copy on one day
     if (findConflicts({ startAt: t, endAt: t + durationMs, excludeId }, events).length === 0) return t
   }
@@ -125,9 +126,9 @@ export function duplicateFormValues(ev: ScheduleEvent, events: ScheduleEvent[]):
   const durationMs = Math.max(MINUTE_MS, ev.endAt - ev.startAt)
   const overnight = toDateInput(ev.startAt) !== toDateInput(ev.endAt - 1)       // an event that runs past midnight stays one
   const start = nextFreeStart(events, ev.endAt, durationMs, ev.id, overnight) ?? ev.startAt
-  const s = new Date(start)
+  const s = new ZDate(start)
   let end = start + durationMs
-  if (!overnight) end = Math.min(end, new Date(s.getFullYear(), s.getMonth(), s.getDate(), 23, 59).getTime())
+  if (!overnight) end = Math.min(end, new ZDate(s.getFullYear(), s.getMonth(), s.getDate(), 23, 59).getTime())
   if (end <= start) end = start + MINUTE_MS
   return { ...base, date: toDateInput(start), start: toTimeInput(start), endDate: toDateInput(end), end: toTimeInput(end) }
 }
@@ -195,7 +196,7 @@ export function planMove(ev: ScheduleEvent, day: Date, rawStartMin: number, even
   if (!(duration > 0) || snapped < 0 || snapped > DAY_MIN - SNAP_MINUTES) {
     return { ok: false, startAt: ev.startAt, endAt: ev.endAt, block: 'range', conflicts: [], message: 'Drop the event inside the calendar.' }
   }
-  const startAt = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, snapped).getTime()
+  const startAt = new ZDate(day.getFullYear(), day.getMonth(), day.getDate(), 0, snapped).getTime()
   const endAt = startAt + duration
   if (startAt === ev.startAt) return { ok: false, unchanged: true, startAt, endAt, conflicts: [], message: null }
   const conflicts = findConflicts({ startAt, endAt, excludeId: ev.id }, events)

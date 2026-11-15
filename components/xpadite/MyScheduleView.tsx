@@ -29,6 +29,7 @@ import { MonthPicker } from './ScheduleMonthPicker'
 import { buildMonthGrid, monthDayEvents, pickMonthAnchor } from './scheduleMonth'
 import type { MonthCell } from './scheduleMonth'
 import { Chevron, EmptyDetails, EventDetails, EventSheet, FilterSelect, LAYER_ATTR, iconBtn } from './ScheduleParts'
+import { ZDate } from './zdate'
 
 // ── Layout constants ────────────────────────────────────────────────────────
 
@@ -270,8 +271,8 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
   useEffect(() => {
     if (!focus || focus.nonce === focusDoneRef.current) return
     focusDoneRef.current = focus.nonce
-    setAnchor(startOfDay(new Date(focus.at)))
-    setSelectedDay(startOfDay(new Date(focus.at)))
+    setAnchor(startOfDay(new ZDate(focus.at)))
+    setSelectedDay(startOfDay(new ZDate(focus.at)))
   }, [focus, setAnchor, setSelectedDay])
 
   const scrollerRef = useRef<HTMLDivElement>(null)
@@ -297,18 +298,18 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
     () => visible.filter(e => !e.isCancelled && e.endAt >= now).sort((a, b) => a.startAt - b.startAt),
     [visible, now],
   )
-  const today = new Date(now)
+  const today = new ZDate(now)
   const todayIdx = days.findIndex(d => isSameLocalDay(d, today))
   const nowMin = today.getHours() * 60 + today.getMinutes()
 
   // The modal's single add button defaults to the day the user tapped, else today if it's in view, else the first day shown.
-  const monthWeeksGrid = useMemo(() => buildMonthGrid(month ? visible : [], anchor, new Date(now), prefs.weekStart), [month, visible, anchor, now, prefs.weekStart])
+  const monthWeeksGrid = useMemo(() => buildMonthGrid(month ? visible : [], anchor, new ZDate(now), prefs.weekStart), [month, visible, anchor, now, prefs.weekStart])
   const addPool = month ? monthWeeksGrid.flat().filter(c => c.inMonth).map(c => c.date) : days
   const defaultAddDay = selectedDay && addPool.some(d => isSameLocalDay(d, selectedDay))
     ? selectedDay
     : (addPool.find(d => isSameLocalDay(d, today)) ?? addPool[0])
   const defaultAddKey = defaultAddDay.getTime()
-  useEffect(() => { onActiveDayChange(new Date(defaultAddKey)) }, [defaultAddKey, onActiveDayChange])
+  useEffect(() => { onActiveDayChange(new ZDate(defaultAddKey)) }, [defaultAddKey, onActiveDayChange])
   useEffect(() => { onSelectionChange(selectedId) }, [selectedId, onSelectionChange])
 
   // Open scrolled to 5 AM (midnight is one scroll up; the rest of the day is below).
@@ -362,7 +363,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
     if (suppressClickRef.current) return
     setSelectedId(ev.id)
     setSheetOpen(true)
-    setSelectedDay(startOfDay(new Date(ev.startAt)))
+    setSelectedDay(startOfDay(new ZDate(ev.startAt)))
     setSlot(null)
   }
 
@@ -516,7 +517,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
 
   const phoneTodayFilter = (
     <>
-                  <button type="button" onClick={() => { goToDate(new Date()); setSelectedDay(startOfDay(new Date())) }} data-testid="today-btn"
+                  <button type="button" onClick={() => { goToDate(new ZDate()); setSelectedDay(startOfDay(new ZDate())) }} data-testid="today-btn"
                     className="text-[11.5px] min-[361px]:text-[12px] font-semibold flex-shrink-0 px-1 min-[361px]:px-2" style={{ paddingTop: 6, paddingBottom: 6, borderRadius: 8, color: '#7c3aed', background: 'rgba(124,58,237,0.10)', border: '0.5px solid rgba(124,58,237,0.28)' }}>
                     Today
                   </button>
@@ -585,7 +586,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
                 onPrev={() => setAnchor(a => shiftMonth(a, -1))} onNext={() => setAnchor(a => shiftMonth(a, 1))} />
               {!month && <NavGroup label={weekRangeLabel(anchor, prefs.weekStart)} minWidth={92} prevLabel="Previous week" nextLabel="Next week"
                 onPrev={() => setAnchor(a => addDays(a, -7))} onNext={() => setAnchor(a => addDays(a, 7))} />}
-              <button type="button" onClick={() => { goToDate(new Date()); setSelectedDay(startOfDay(new Date())) }}
+              <button type="button" onClick={() => { goToDate(new ZDate()); setSelectedDay(startOfDay(new ZDate())) }}
                 className="text-[12px] font-semibold" style={{ padding: '6px 9px', borderRadius: 8, color: '#7c3aed', background: 'rgba(124,58,237,0.10)', border: '0.5px solid rgba(124,58,237,0.28)' }}>
                 Today
               </button>
@@ -663,7 +664,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
                   {days.map((d, i) => {
                     const isSel = !!selectedDay && isSameLocalDay(d, selectedDay)
                     const dayStart = startOfDay(d).getTime()
-                    const slotHere = slot && isSameLocalDay(new Date(slot.day), d) ? slot : null
+                    const slotHere = slot && isSameLocalDay(new ZDate(slot.day), d) ? slot : null
                     const ghost = drag && drag.dayIdx === i ? drag : null
                     const ghostCat = ghost && dragEv ? categories.find(c => c.id === dragEv.category) : null
                     return (
@@ -680,7 +681,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
                             style={{ top: (slotHere.min / 60) * HOUR_PX, height: (SLOT_MINUTES / 60) * HOUR_PX, background: 'rgba(124,58,237,0.16)', border: '1.5px dashed #7c3aed', borderRadius: 6, zIndex: 1 }}>
                             <button type="button" data-testid="slot-add"
                               onClick={e => { e.stopPropagation(); lastTapRef.current = null; setSlot(null); onAddAt(d, slotHere.min) }}
-                              aria-label={`Add event on ${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} at ${clockLabel(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, slotHere.min).getTime(), fmt)}`}
+                              aria-label={`Add event on ${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} at ${clockLabel(new ZDate(d.getFullYear(), d.getMonth(), d.getDate(), 0, slotHere.min).getTime(), fmt)}`}
                               className="text-[10px] sm:text-[11px] font-bold text-white whitespace-nowrap" style={{ padding: '1px 7px', borderRadius: 6, background: '#7c3aed', lineHeight: '16px' }}>
                               + Add
                             </button>
@@ -719,7 +720,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
                   style={{ top: 56, transform: 'translateX(-50%)', zIndex: 12, maxWidth: '92%', padding: '6px 11px', borderRadius: 10, fontSize: 11.5, fontWeight: 600, boxShadow: '0 8px 22px rgba(0,0,0,0.28)',
                     background: drag.plan.ok ? '#15803d' : drag.plan.unchanged ? '#4b5563' : '#b91c1c', color: '#fff' }}>
                   {drag.plan.ok
-                    ? `Move to ${new Date(drag.plan.startAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · ${timeRangeLabel(drag.plan.startAt, drag.plan.endAt, fmt)}`
+                    ? `Move to ${new ZDate(drag.plan.startAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · ${timeRangeLabel(drag.plan.startAt, drag.plan.endAt, fmt)}`
                     : drag.plan.unchanged ? 'Original position' : drag.plan.message}
                 </div>
               )}
@@ -748,7 +749,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
                 <ul className="flex flex-col gap-1.5">
                   {upcoming.map(ev => (
                     <li key={ev.id}>
-                      <UpcomingRow ev={ev} onPick={() => { selectEvent(ev); goToDate(new Date(ev.startAt)) }} />
+                      <UpcomingRow ev={ev} onPick={() => { selectEvent(ev); goToDate(new ZDate(ev.startAt)) }} />
                     </li>
                   ))}
                 </ul>
@@ -803,7 +804,7 @@ function UpcomingRow({ ev, onPick }: { ev: ScheduleEvent; onPick: () => void }) 
     <button type="button" onClick={onPick} className="w-full text-left"
       style={{ padding: '7px 9px', borderRadius: 9, background: 'var(--xp-bg3)', borderLeft: `3px solid ${cat.edge}` }}>
       <p className="text-[12.5px] font-semibold truncate" style={{ color: 'var(--xp-txt)' }}>{ev.title}</p>
-      <p className="text-[11px] truncate" style={{ color: 'var(--xp-txt3)' }}>{new Date(ev.startAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · {clockLabel(ev.startAt, fmt)}</p>
+      <p className="text-[11px] truncate" style={{ color: 'var(--xp-txt3)' }}>{new ZDate(ev.startAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · {clockLabel(ev.startAt, fmt)}</p>
     </button>
   )
 }

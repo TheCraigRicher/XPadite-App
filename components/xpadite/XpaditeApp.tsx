@@ -31,11 +31,13 @@ import { TrialReminderBanner } from './TrialReminderBanner'
 import { TrialWelcome } from './TrialWelcome'
 import { ActivityManagerModal } from './ActivityManagerModal'
 import { dateKey, todayKey, todayKeyInTz, APP_YEAR } from './utils'
+import { ZDate } from './zdate'
 import { YearShareModal } from './YearProgressShare'
 import type { MobileTab } from './MobileBottomNav'
 import type { XpaditeNotification } from './NotificationsModal'
 import { loadStoredNotifications, saveStoredNotifications } from './NotificationsModal'
 import type { DayData, WorkSession } from './types'
+import { completionPatch } from './dueStatus'
 
 interface XpaditeAppProps {
   email: string
@@ -444,7 +446,7 @@ function MissingTimeChecker() {
 
 function MobileTasksView({ onOpenDay }: { onOpenDay: (key: string, month: number, day: number) => void }) {
   const { calData, updateDay } = useApp()
-  const today = new Date()
+  const today = new ZDate()      // v1.345: "today" in the ACCOUNT timezone, like every other day assignment
   const key = dateKey(today.getFullYear(), today.getMonth(), today.getDate())
   const dayData = calData[key]
   const tasks = dayData?.tasks ?? []
@@ -453,7 +455,7 @@ function MobileTasksView({ onOpenDay }: { onOpenDay: (key: string, month: number
   function toggleTask(taskId: string) {
     updateDay(key, prev => ({
       ...prev,
-      tasks: prev.tasks.map(t => t.id === taskId ? { ...t, done: !t.done } : t),
+      tasks: prev.tasks.map(t => t.id === taskId ? { ...t, ...completionPatch(!t.done) } : t),
     }))
   }
 
@@ -747,7 +749,7 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
       // Close any tab overlay (planner, analytics, ai-coach) in the same batch as opening DayModal
       // React 18 batches these so no intermediate render with transparent DayModal backdrop
       setMobileTab('calendar')
-      const today = new Date()
+      const today = new ZDate()      // v1.345: account timezone
       setModalDay({ key: dateKey(today.getFullYear(), today.getMonth(), today.getDate()), month: today.getMonth(), day: today.getDate(), skipAnim: true })
     } else if (tab === 'analytics') {
       // Same AnalyticsModal as the burger menu's Analytics entry — not a

@@ -57,6 +57,22 @@ export async function upsertUserPreferences(
   if (error) throw error
 }
 
+/**
+ * v1.345 — the ACCOUNT timezone. user_preferences.timezone is the one authoritative value for every device. When the account has none yet (null),
+ * the first device to ask CLAIMS it with its own zone; a device can never overwrite a zone that exists. Atomic without a migration: an insert that
+ * ignores duplicates (no row yet) and an update that only matches `timezone is null` (row, no zone), then a read-back of whoever won.
+ * Returns the account's timezone after the attempt (null when it could not be read).
+ */
+export async function claimAccountTimezone(supabase: Supabase, userId: string, tz: string): Promise<string | null> {
+  const ins = await supabase.from('user_preferences').upsert({ user_id: userId, timezone: tz }, { onConflict: 'user_id', ignoreDuplicates: true })
+  if (ins.error) throw ins.error
+  const upd = await supabase.from('user_preferences').update({ timezone: tz }).eq('user_id', userId).is('timezone', null)
+  if (upd.error) throw upd.error
+  const { data, error } = await supabase.from('user_preferences').select('timezone').eq('user_id', userId).maybeSingle()
+  if (error) throw error
+  return (data?.timezone as string | null) ?? null
+}
+
 // ── Calendar Days ─────────────────────────────────────────────────────────────
 
 export async function fetchCalendarDays(

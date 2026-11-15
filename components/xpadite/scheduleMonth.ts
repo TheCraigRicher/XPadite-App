@@ -4,6 +4,7 @@
 
 import { addDays, daySlice, isSameLocalDay, monthWeeks, startOfDay, startOfMonth } from './scheduleLogic'
 import type { ScheduleEvent, WeekStart } from './scheduleLogic'
+import { ZDate } from './zdate'
 
 export type ScheduleViewKey = 'schedule' | 'today' | 'month'
 export const VIEW_PREF_KEY = 'xp-schedule-view'
@@ -70,7 +71,7 @@ export function chipCapacity(total: number, fits: number): { shown: number; more
 
 /** Month navigation: keep the month's first day, so Jan 31 → Feb never skips a month and years roll over cleanly. */
 export function shiftMonthStart(month: Date, delta: number): Date {
-  return new Date(month.getFullYear(), month.getMonth() + delta, 1)
+  return new ZDate(month.getFullYear(), month.getMonth() + delta, 1)
 }
 
 /** Parse a stored view preference defensively. */
@@ -91,8 +92,8 @@ export function writeViewPref(v: ScheduleViewKey): void {
  * the current weekday, so the visible week stays a sensible one inside the chosen month.
  */
 export function pickMonthAnchor(anchor: Date, year: number, month: number, keepWeekday: boolean): Date {
-  const dim = new Date(year, month + 1, 0).getDate()
-  const d = new Date(year, month, Math.min(anchor.getDate(), dim))
+  const dim = new ZDate(year, month + 1, 0).getDate()
+  const d = new ZDate(year, month, Math.min(anchor.getDate(), dim))
   if (!keepWeekday || d.getDay() === anchor.getDay()) return d
   const fwd = (anchor.getDay() - d.getDay() + 7) % 7
   const cands = [fwd, fwd - 7].map(o => ({ o, date: addDays(d, o) })).filter(c => c.date.getMonth() === month)

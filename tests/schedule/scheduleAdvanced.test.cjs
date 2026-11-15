@@ -12,6 +12,7 @@ const OUT = path.join(ROOT, 'node_modules', '.cache', 'xpadite-schedule-adv'); f
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8')
 const compile = f => fs.writeFileSync(path.join(OUT, f + '.js'), ts.transpileModule(read(`components/xpadite/${f}.ts`), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)
 compile('scheduleLogic'); compile('scheduleEngine')
+compile('zdate'); compile('dueStatus')
 const L = require(path.join(OUT, 'scheduleLogic.js'))
 const E = require(path.join(OUT, 'scheduleEngine.js'))
 // A small in-test fixture of OVERLAPPING events (the built-in sample schedule no longer exists in the app).

@@ -58,7 +58,7 @@ const TIMEZONES: { value: string; label: string }[] = [
 ]
 
 const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
-  { value: AUTO_TIMEZONE, label: 'Automatic — Device Time Zone' },
+  { value: AUTO_TIMEZONE, label: "This Device's Time Zone" },
   ...TIMEZONES,
 ]
 
@@ -666,7 +666,7 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
   // an informed choice, not a leap of faith.
   const detectedTz = detectBrowserTimezone()
   const timezoneOptions = TIMEZONE_OPTIONS.map(o =>
-    o.value === AUTO_TIMEZONE ? { ...o, label: `Automatic — Device Time Zone (${detectedTz})` } : o
+    o.value === AUTO_TIMEZONE ? { ...o, label: `Use this device's time zone (${detectedTz})` } : o
   )
 
   // Capture committed state when modal opens — same live-apply-then-revert
@@ -1212,7 +1212,7 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
                       <p style={{ fontSize: 11.5, fontWeight: 600, color: subtitleColor, marginBottom: 9 }}>{tt('settings.timezone', 'Time Zone')}</p>
                       <SelectMenu
                         value={timezone ?? AUTO_TIMEZONE}
-                        onChange={v => setTimezone(v === AUTO_TIMEZONE ? null : v)}
+                        onChange={v => setTimezone(v === AUTO_TIMEZONE ? detectedTz : v)}   // v1.345: one ACCOUNT timezone — "this device" sets it explicitly (synced to every device), never a per-device guess
                         options={timezoneOptions}
                         isDark={isDark}
                       />
@@ -1284,7 +1284,7 @@ export function SettingsModal({ onClose, onDirtyChange, closeIntent }: {
                 // Reset means Automatic, never a hardcoded concrete value —
                 // null defers back to device-detected language/timezone.
                 setLanguage(null)
-                setTimezone(null)
+                setTimezone(detectedTz)      // v1.345: the account timezone is always explicit
               }}
               style={{ color: isDark ? 'rgba(255,255,255,0.38)' : 'rgba(0,0,0,0.38)' }}
             >

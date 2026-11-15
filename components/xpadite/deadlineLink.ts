@@ -17,12 +17,13 @@
 
 import type { DayData, Task } from './types'
 import type { ScheduleEvent } from './scheduleLogic'
+import { ZDate } from './zdate'
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
 /** Local calendar day of an instant, "YYYY-MM-DD" (the key calendar_days uses). */
 export function dateKeyOf(ts: number): string {
-  const d = new Date(ts)
+  const d = new ZDate(ts)
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }
 
@@ -143,17 +144,24 @@ export function planDeadlineSync(
   taskLink: TaskLink = 'linked',
   syncOn = false,
   createMissing = true,
+  anchored = false,
 ): DeadlineSyncPlan {
   const kind = wantedKind(next, taskLink, syncOn)
-  const targetKey = kind && next ? taskDayFor(next, kind) : null
+  const computedKey = kind && next ? taskDayFor(next, kind) : null
   const wantedId = kind ? (makeId ? makeId(kind) : linkedTaskId(eventId, kind)) : null
 
-  const copies = findCopies(cal, eventId, prevTaskDateKey, targetKey)
+  const copies = findCopies(cal, eventId, prevTaskDateKey, computedKey)
   // several copies (two devices, a stale overwrite, a converted kind): the one holding the user's work wins, then the wanted id, then the due day
-  const score = (c: Copy) => (taskHasProgress(c.task, c.day.tasks) ? 4 : 0) + (c.id === wantedId ? 2 : 0) + (c.key === targetKey ? 1 : 0)
+  const score = (c: Copy) => (taskHasProgress(c.task, c.day.tasks) ? 4 : 0) + (c.id === wantedId ? 2 : 0) + (c.key === computedKey ? 1 : 0)
   let primary: Copy | null = null
   for (const c of copies) if (!primary || score(c) > score(primary)) primary = c
   const others = copies.filter(c => c !== primary)
+  // v1.345 ANCHORING: the day a deadline's task sits on is a stored fact, not something every device re-derives from the instant. When the deadline was NOT
+  // edited (anchored: reconciliation, or a save with the same end), an existing task of the right kind stays exactly where it is — whatever timezone this device
+  // is in — and a missing one is recreated on the day the event row records. Only a user edit of the end recomputes the day (in the account timezone).
+  const targetKey = anchored && kind && computedKey
+    ? (primary && primary.id === wantedId ? primary.key : primary ? computedKey : (prevTaskDateKey ?? computedKey))   // a task of the other kind (deadline <-> event) is a deliberate conversion: new day
+    : computedKey
 
   if (!kind || !wantedId || !targetKey) {
     if (!primary) return { ops: [], taskDateKey: null, outcome: 'none', changed: false, kind: null }
@@ -257,8 +265,8 @@ export function isBackfillEligible(e: Pick<ScheduleEvent, 'endAt' | 'isDeadline'
   // "has no task yet" is judged from the calendar itself when it is available (the event row's task_date_key can be stale after a task was removed)
   if (cal && e.id) { if (findCopies(cal, e.id, e.taskDateKey ?? null, null).length > 0) return false }
   else if (e.taskDateKey) return false
-  const d = new Date(now)
-  return e.endAt >= new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const d = new ZDate(now)
+  return e.endAt >= new ZDate(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
 }
 export const countBackfillEligible = (events: Parameters<typeof isBackfillEligible>[0][], now: number, cal?: Record<string, DayData>): number => events.filter(e => isBackfillEligible(e, now, cal)).length
 
@@ -274,7 +282,7 @@ export function reconcileDeadlines(cal: Record<string, DayData>, events: ReconEv
   const out: ReconcileItem[] = []
   const byId = new Map(events.map(e => [e.id, e]))
   for (const e of events) {
-    const plan = planDeadlineSync(cal, e.id, e, e.taskDateKey ?? null, defaultActId, undefined, e.taskLink ?? 'linked', syncOn, typeof createMissing === 'function' ? createMissing(e) : createMissing)
+    const plan = planDeadlineSync(cal, e.id, e, e.taskDateKey ?? null, defaultActId, undefined, e.taskLink ?? 'linked', syncOn, typeof createMissing === 'function' ? createMissing(e) : createMissing, true)   // anchored: reconciliation never relocates a task
     if (plan.ops.length === 0 || !plan.changed) continue
     out.push({ eventId: e.id, ops: plan.ops, taskDateKey: plan.taskDateKey, reason: plan.outcome })
   }

@@ -13,6 +13,7 @@ const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8').split('\r\n').join
 const js = f => ts.transpileModule(read(f), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX } }).outputText
 const compile = (f, out) => fs.writeFileSync(path.join(OUT, out + '.js'), js(f))
 compile('components/xpadite/scheduleLogic.ts', 'scheduleLogic')
+compile('components/xpadite/zdate.ts', 'zdate'); compile('components/xpadite/dueStatus.ts', 'dueStatus')
 compile('components/xpadite/deadlineLink.ts', 'deadlineLink')
 const L = require(path.join(OUT, 'scheduleLogic.js'))
 const D = require(path.join(OUT, 'deadlineLink.js'))
@@ -161,9 +162,10 @@ test('Task Manager: deadline tasks reuse the existing red urgent styling exactly
   assert.ok(/const urgent = !!task\.isPriority \|\| isDeadlineTask\(task\)/.test(d), 'only DEADLINE tasks (dl-) get the urgent look; ordinary synced event tasks (ev-) do not')
   assert.ok(/urgent \? 'rgba\(239,68,68,0\.28\)'/.test(d) && /const colorOverlay = urgent/.test(d) && /\{urgent && \(/.test(d), 'one shared urgent flag drives border, tint and "!"')
   assert.ok(!/isPriority: !t\.isPriority \|\| |sourceEventId.*isPriority\s*=/.test(d))
-  assert.ok(/<DeadlineInfoLine dueAt=\{deadlineEvent\.endAt\}/.test(d) && (d.match(/>Dismiss<\/button>/g) || []).length === 1, 'the existing popup (single Dismiss) shows the due line')
+  assert.ok(/<DeadlineInfoLine assignedKey=\{dateKey\} dueAt=\{deadlineEvent\.endAt\}/.test(d) && (d.match(/>Dismiss<\/button>/g) || []).length === 1, 'the existing popup (single Dismiss) shows the due line')
   const line = d.slice(d.indexOf('function DeadlineInfoLine'), d.indexOf('function TaskRow'))
-  assert.ok(/DUE_LABEL\[status\]/.test(line) && /longDateLabel\(dueAt\)/.test(line) && /clockLabel\(dueAt, fmt\)/.test(line) && /!done &&/.test(line))
+  // v1.345: the same popup, now driven by the shared status calculation (status chip, due date/time, completion time) in the selected timezone
+  assert.ok(/dueInfo\(\{ dueAt, done, completedAt \}, now, tz\)/.test(line) && /<DueChip info=\{info\}/.test(line) && /formatDueDate\(dueAt, tz\)/.test(line) && /task-due-completed/.test(line))
 })
 
 // ── Phase 7: saved locations ────────────────────────────────────────────────
@@ -195,7 +197,7 @@ test('row <-> event mapping keeps instants (timezone-safe), overnight ends, dead
   assert.equal(row.user_id, 'u1'); assert.equal(row.start_at, new Date(e.startAt).toISOString()); assert.equal(row.end_at, new Date(e.endAt).toISOString())
   assert.equal(row.is_deadline, true); assert.equal(row.task_date_key, '2026-11-10')
   const { user_id, ...rest } = row
-  assert.deepEqual(S.rowToEvent(rest), { ...e, rev: undefined, taskLink: 'linked' })
+  assert.deepEqual(S.rowToEvent(rest), { ...e, rev: undefined, taskLink: 'linked', completedAt: undefined })   // v1.345: completedAt is undefined until migration 026 supplies it
   assert.deepEqual([S.rowToEvent({ ...rest, rev: 7, task_link: 'detached' }).rev, S.rowToEvent({ ...rest, rev: 7, task_link: 'detached' }).taskLink], [7, 'detached'], 'revision + the user\'s Task Manager choice come back from the row')
   assert.equal(S.rowToEvent({ ...rest, task_link: 'garbage' }).taskLink, 'linked')
   assert.equal(S.rowToEvent({ ...rest, recurrence: 'bogus' }).recurrence, 'none')
@@ -260,34 +262,29 @@ test('no demo events exist, so nothing is ever "adopted": only the user own save
 test('Calendar marker is wired into the quarterly cards, the month page and the month zoom; the existing indicators are not removed', () => {
   for (const f of ['MonthCard.tsx', 'MonthFullPage.tsx', 'MonthZoomModal.tsx']) {
     const s = src(f)
-    assert.ok(/from '\.\/DeadlineMark'/.test(s) && /deadlineDays/.test(s) && /DeadlineCorner/.test(s) && /deadlineSquareStyle/.test(s), f)
+    assert.ok(/from '\.\/DeadlineMark'/.test(s) && /useDeadlines\(\)/.test(s) && /markerState\(dls, /.test(s) && /deadlineMarkerStyle\(mState, /.test(s), f)   // v1.345: derived index + single-marker style
     assert.ok(/🔥/.test(s) && /🏆/.test(s) && /🎯/.test(s), `${f}: fire/trophy/target still rendered`)
   }
   assert.ok(/xp-streak-conn/.test(src('MonthCard.tsx')) && /isStreakDay/.test(src('MonthCard.tsx')), 'streak logic untouched')
   assert.ok(!/deadline/i.test(strip(src('productivityEngine.ts'))), 'productivity statistics ignore deadlines')
 })
 
-test('every day-cell branch gets exactly one corner marker (fire / trophy / target / productive|plain), never stacked copies', () => {
-  const count = f => (src(f).match(/<DeadlineCorner events=/g) || []).length
-  assert.equal(count('MonthCard.tsx'), 4, 'quarterly cards: 3 emoji branches + the circle branch')
-  assert.equal(count('MonthZoomModal.tsx'), 4, 'month zoom: 3 emoji branches + the circle branch')
-  assert.equal(count('MonthFullPage.tsx'), 1, 'month page: one shared marker for every state')
-  for (const f of ['MonthCard.tsx', 'MonthZoomModal.tsx']) {
-    const lines = src(f).split('\n')
-    lines.forEach((l, i) => { if (/<DeadlineCorner events=/.test(l)) assert.ok(!/<DeadlineCorner events=/.test(lines[i + 1] || ''), `${f}:${i + 1} duplicated marker`) })
+test('v1.345: no corner squares remain — a day shows exactly one marker (the number-own container) and the completed badge is drawn once per cell', () => {
+  for (const f of ['MonthCard.tsx', 'MonthFullPage.tsx', 'MonthZoomModal.tsx']) {
+    const s = src(f)
+    assert.ok(!/DeadlineCorner|deadlineSquareStyle/.test(s), `${f}: corner marker removed`)
+    assert.equal((s.match(/<CompletedBadge \/>/g) || []).length, 1, `${f}: one badge site`)
   }
+  assert.ok(!/xp-dl-corner/.test(read('app/globals.css')))
 })
 
-test('marker design: translucent red tokens for light and dark, one marker per day, never an absolute square over the number', () => {
+test('marker design: translucent red tokens for upcoming (light and dark), black/white overdue, green completed; the marker lives in the number-own container', () => {
   const dm = src('DeadlineMark.tsx')
-  assert.ok(/rgba\(239,68,68,0\.18\)/.test(dm) && /rgba\(248,113,113,0\.24\)/.test(dm), 'light 0.18, dark 0.24 (inside/near the brief\'s 0.16-0.22)')
-  assert.ok(/color: t\.fg/.test(dm) && /#991b1b/.test(dm) && /#fecaca/.test(dm), 'dark red text on light, pale red on dark (never white on pale red)')
-  assert.ok(/className="xp-dl-corner"/.test(dm) && /pointerEvents: 'none'/.test(dm))
-  const css = read('app/globals.css')
-  assert.ok(/\.xp-dl-corner \{[^}]*width: clamp\(3px, 22%, 13px\)/.test(css) && /\.xp-dl-corner \{\s*position: absolute;\s*top: 0;\s*right: 0;/.test(css) && /data-size="sm"/.test(css) && /zIndex: 0/.test(dm) && /size="sm"/.test(read('components/xpadite/MonthZoomModal.tsx')) && /\.xp-dl-corner\[data-pos="br"\]/.test(css) && /pos="br"/.test(read('components/xpadite/MonthCard.tsx')) && /pos=\{!rawHyper && !rawMil && rawGoal \? 'br' : 'tr'\}/.test(read('components/xpadite/MonthFullPage.tsx')), 'sized from the cell; flush in the corner on phone quarterly cells')
-  assert.equal((dm.match(/export function Deadline/g) || []).length, 1)
+  assert.ok(/rgba\(239,68,68,0\.18\)/.test(dm) && /rgba\(248,113,113,0\.24\)/.test(dm), 'upcoming: light 0.18, dark 0.24 (unchanged)')
+  assert.ok(/#991b1b/.test(dm) && /#fecaca/.test(dm), 'dark red text on light, pale red on dark (never white on pale red)')
+  assert.ok(/pointerEvents: 'none'/.test(dm) && !/export function Deadline/.test(dm.replace(/export \{ deadlineTitle \}/, '')), 'only decorative parts; no absolute square over the number')
   const card = src('MonthCard.tsx')
-  assert.ok(/const plainDl = !!dls && !productive && !todayCell/.test(card) && /\{dls && !plainDl && <DeadlineCorner/.test(card), 'a day shows exactly one of: container square OR corner square')
+  assert.ok(/const plainDl = !!mState && !productive/.test(card), 'a productivity marker owns its day; otherwise exactly one deadline marker')
 })
 
 test('category dropdown is the single selector on every size and matches the approved phone look', () => {

@@ -7,7 +7,7 @@ import { useApp, EMPTY_DAY } from './AppContext'
 import type { Task, TaskSession, Activity, TaskAttachment, DayData, JournalBlock } from './types'
 import { parseJournalDoc, mkId } from './journalUtils'
 import { formatMs, formatHMS, formatTime, formatTime12, isProductiveActivity, APP_YEAR, todayKey, nowH12InTz } from './utils'
-import { dueStatus, DUE_LABEL, isDeadlineTask, isEventTask } from './deadlineLink'
+import { isDeadlineTask, isEventTask } from './deadlineLink'
 import { clockLabel, longDateLabel, timeRangeLabel } from './scheduleLogic'
 import type { TimeFormat } from './scheduleLogic'
 import { ReminderModal } from './ReminderModal'
@@ -19,6 +19,10 @@ import { useEscapeLayer, hasEscapeLayer } from './escapeLayers'
 import dynamic from 'next/dynamic'
 import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
+import { COMPLETED_UNKNOWN, completionPatch, dueInfo, formatDueDate, formatDueTime, taskDueInstant } from './dueStatus'
+import { AssignedDateNote, DueChip } from './DeadlineStatus'
+import { TaskDueDateModal } from './TaskDueDateModal'
+import { useDeadlines } from './useDeadlines'
 
 const JournalEditorEmbed = dynamic(
   () => import('./JournalEditorEmbed').then(m => ({ default: m.JournalEditorEmbed })),
@@ -765,6 +769,7 @@ function TasksDropdown({ onGenerate, onReorder, onMove, onDelete, isDark }: {
 interface TaskMenuProps {
   onEdit: () => void
   onAdjustTime: () => void
+  onDueDate: () => void
   onDuplicate: () => void
   onIncrementSession: () => void
   onDelete: () => void
@@ -785,7 +790,7 @@ interface TaskMenuProps {
   onClose: () => void
 }
 
-function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onIncrementSession, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onPlannerNotes, onChooseColor, onTogglePriority, onTransfer, pasteEnabled, transferDisabled, isChild, isPriority, onClose, menuAnchor, isDark }: TaskMenuProps) {
+function TaskMenu({ onEdit, onAdjustTime, onDueDate, onDuplicate, onIncrementSession, onDelete, onSetReminder, onCopy, onPaste, onCreateSubTask, onPlannerNotes, onChooseColor, onTogglePriority, onTransfer, pasteEnabled, transferDisabled, isChild, isPriority, onClose, menuAnchor, isDark }: TaskMenuProps) {
   useEscapeLayer(true, onClose)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -799,6 +804,7 @@ function TaskMenu({ onEdit, onAdjustTime, onDuplicate, onIncrementSession, onDel
     { icon: '✏️', label: 'Edit Task',        action: onEdit        },
     { icon: '🔔', label: 'Set Reminder',     action: onSetReminder },
     { icon: '🕒', label: 'Adjust Time',      action: onAdjustTime  },
+    { icon: '📆', label: 'Due Date',         action: onDueDate     },
     { icon: '📄', label: 'Duplicate Task',   action: onDuplicate, sep: true },
     { icon: '⏭️', label: 'Increment Session', action: onIncrementSession },
     { icon: '📋', label: 'Copy Task',        action: onCopy        },
@@ -940,16 +946,18 @@ interface TaskRowProps {
   onPlannerNotes?: () => void
 }
 
-/** Due-date line inside the task-title popup: status chip (Due Today / Upcoming / Overdue), full date and exact time. */
-function DeadlineInfoLine({ dueAt, done, now, fmt }: { dueAt: number; done: boolean; now: number; fmt: TimeFormat }) {
-  const status = dueStatus(dueAt, now)
-  const tone = status === 'overdue' ? { fg: '#b91c1c', bg: 'rgba(239,68,68,0.14)', bd: 'rgba(239,68,68,0.45)' }
-    : status === 'today' ? { fg: '#b45309', bg: 'rgba(245,158,11,0.16)', bd: 'rgba(245,158,11,0.5)' }
-    : { fg: '#1d4ed8', bg: 'rgba(59,130,246,0.13)', bd: 'rgba(59,130,246,0.4)' }
+/** Due-date block inside the task-title popup (v1.345): status chip, the original due date/time, and, once completed, the real completion time and how it compared. */
+function DeadlineInfoLine({ dueAt, dateOnly, done, completedAt, now, tz, hour12, assignedKey }: { dueAt: number; dateOnly: boolean; done: boolean; completedAt?: number | null; now: number; tz: string; hour12: boolean; assignedKey?: string }) {
+  const info = dueInfo({ dueAt, done, completedAt }, now, tz)
+  const stamp = (ms: number) => `${formatDueDate(ms, tz)} \u00b7 ${formatDueTime(ms, tz, hour12)}`
   return (
-    <div data-testid="task-due-info" style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--xp-txt2)' }}>
-      {!done && <span data-testid="task-due-status" style={{ padding: '1px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, color: tone.fg, background: tone.bg, border: `0.5px solid ${tone.bd}` }}>{DUE_LABEL[status]}</span>}
-      <span>{longDateLabel(dueAt)} · {clockLabel(dueAt, fmt)}</span>
+    <div data-testid="task-due-info" style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--xp-txt2)' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+        <DueChip info={info} testId="task-due-status" />
+      </div>
+      <div data-testid="task-due-when">Due: {dateOnly ? `${formatDueDate(dueAt, tz)} \u00b7 all day` : stamp(dueAt)}</div>
+      {info.state === 'completed' && typeof completedAt === 'number' && <div data-testid="task-due-completed">Completed: {stamp(completedAt)}</div>}
+      {assignedKey && <AssignedDateNote assignedKey={assignedKey} dueAt={dueAt} tz={tz} hour12={hour12} />}
     </div>
   )
 }
@@ -978,7 +986,7 @@ function TaskRow({
   onTransfer, transferDisabled,
   onPlannerNotes,
 }: TaskRowProps) {
-  const { activities, reminders, isDark, setToast, scheduleEvents, requestScheduleEvent, scheduleTimeFormat } = useApp()
+  const { activities, reminders, isDark, setToast, scheduleEvents, requestScheduleEvent, scheduleTimeFormat, effectiveTimezone } = useApp()
   // v1.328: a task linked to a My Schedule deadline gets the SAME red urgent look as a priority task (applied once, priority value untouched).
   // Two kinds of schedule-linked task (deadlineLink.ts): a DEADLINE task ('dl-', due date) gets the urgent look; an ordinary synced EVENT task ('ev-',
   // start date) keeps the normal look — enabling "Sync with Task Manager" never turns tasks red.
@@ -1018,6 +1026,7 @@ function TaskRow({
   const dotBtnRef = useRef<HTMLButtonElement>(null)
   const [colorPickerOpen, setColorPickerOpen] = useState(false)
   const [adjustOpen,     setAdjustOpen]     = useState(false)
+  const [dueOpen,        setDueOpen]        = useState(false)
   const [emojiOpen,      setEmojiOpen]      = useState(false)
   const [emojiAnchor,    setEmojiAnchor]    = useState<DOMRect | null>(null)
   // Mobile only — position relative to cardRootRef (see getLocalPopoverPos),
@@ -1615,6 +1624,7 @@ function TaskRow({
                 onEdit={() => { startEdit(); setMenuOpen(false) }}
                 onSetReminder={onSetReminder}
                 onAdjustTime={() => setAdjustOpen(true)}
+                onDueDate={() => setDueOpen(true)}
                 onDuplicate={onDuplicate}
                 onIncrementSession={onIncrementSession}
                 onDelete={onDelete}
@@ -1977,6 +1987,8 @@ function TaskRow({
         />
       )}
 
+      {dueOpen && <TaskDueDateModal task={task} dateKey={dateKey} onClose={() => setDueOpen(false)} />}
+
       {adjustOpen && (
         // onSave only persists the data — it must NOT close the modal itself.
         // AdjustTimeModal owns its own close timing (via onClose) so the full
@@ -1997,14 +2009,15 @@ function TaskRow({
         <div style={{ position: 'fixed', inset: 0, zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, background: 'rgba(0,0,0,0.25)' }} onClick={() => setShowPopover(false)}>
           <div style={{ background: isDark ? '#1e1830' : '#ffffff', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.10)'}`, borderRadius: 14, padding: '14px 16px', maxWidth: 320, width: '100%', boxShadow: '0 16px 48px rgba(0,0,0,0.22), 0 4px 16px rgba(0,0,0,0.10)' }} onClick={e => e.stopPropagation()}>
             <p style={{ fontSize: 13, color: isDark ? 'rgba(255,255,255,0.88)' : '#111827', lineHeight: 1.55, wordBreak: 'break-word', fontWeight: 500, margin: 0 }}>{task.text}</p>
-            {deadlineEvent && <DeadlineInfoLine dueAt={deadlineEvent.endAt} done={task.done} now={now} fmt={scheduleTimeFormat} />}
+            {deadlineEvent && <DeadlineInfoLine assignedKey={dateKey} dueAt={deadlineEvent.endAt} dateOnly={false} done={task.done} completedAt={task.completedAt} now={now} tz={effectiveTimezone} hour12={scheduleTimeFormat !== '24h'} />}
+            {!task.sourceEventId && task.due && <DeadlineInfoLine dueAt={taskDueInstant(task.due, effectiveTimezone)} dateOnly={task.due.dateOnly} done={task.done} completedAt={task.completedAt} now={now} tz={effectiveTimezone} hour12={scheduleTimeFormat !== '24h'} />}
             {eventTaskEvent && <EventInfoLine start={eventTaskEvent.startAt} end={eventTaskEvent.endAt} fmt={scheduleTimeFormat} />}
             {task.sourceEventId && (
               <div data-testid="task-deadline-owner" style={{ marginTop: 8, fontSize: 11, color: 'var(--xp-txt3)', lineHeight: 1.45 }}>
                 {isDeadlineTask(task) ? 'The title and due date come from your My Schedule deadline.' : 'The title and time come from your My Schedule event.'}
                 <button type="button" data-testid="edit-in-schedule" onClick={() => { setShowPopover(false); requestScheduleEvent(task.sourceEventId as string) }}
                   style={{ display: 'block', marginTop: 6, fontSize: 11.5, fontWeight: 700, color: '#7c3aed', padding: '3px 0', cursor: 'pointer', background: 'none', border: 'none' }}>
-                  Edit in My Schedule \u2192
+                  Edit in My Schedule &rarr;
                 </button>
               </div>
             )}
@@ -2346,7 +2359,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   const {
     calData, updateDay, flushDays, activeTaskTimer, setActiveTaskTimer,
     activities, activeSession, setActiveSession, selectedActId,
-    reminders, isDark, setToast, sessions, effectiveTimezone, effectiveLocale, detachDeadlineTask, subscribeDaySync, isDayUnsynced,
+    reminders, isDark, setToast, sessions, effectiveTimezone, effectiveLocale, detachDeadlineTask, setDeadlineCompleted, scheduleEvents, subscribeDaySync, isDayUnsynced,
   } = useApp()
 
   useLockBodyScroll()
@@ -2825,7 +2838,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   }
 
   function toggleTask(id: string) {
-    updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === id ? { ...t, done: !t.done } : t) }))
+    updateDay(dateKey, prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === id ? { ...t, ...completionPatch(!t.done) } : t) }))
   }
 
   function deleteTask(id: string) {
@@ -2837,8 +2850,20 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   /** Deleting a deadline task removes only its Task Manager representation: the choice is saved first (so it is never silently recreated),
    *  and the deadline stays in My Schedule and the Calendar. If the choice can not be saved the task is NOT deleted. */
   async function detachLinked(ids: Set<string>): Promise<boolean> {
-    const linked = dayData.tasks.filter(t => ids.has(t.id) && t.sourceEventId).map(t => t.sourceEventId as string)
+    const linkedTasks = dayData.tasks.filter(t => ids.has(t.id) && t.sourceEventId)
+    const linked = linkedTasks.map(t => t.sourceEventId as string)
     if (linked.length === 0) return true
+    // v1.345: the task carried the deadline's completion; once it is gone the event must keep it, so "Add back to Task Manager" can restore it.
+    // SAFEGUARD: if that can not be saved the task is NOT removed (nothing is lost) and the user is told why. Only deadlines that actually need it are
+    // touched: a completed one (to record it) or one whose event still holds an old completion (to clear it).
+    let preserved = true
+    await Promise.all(linkedTasks.map(async t => {
+      const ev = scheduleEvents.find(e => e.id === t.sourceEventId)
+      const want = t.done ? (typeof t.completedAt === 'number' ? t.completedAt : COMPLETED_UNKNOWN) : null
+      if (!ev || (want === null && typeof ev.completedAt !== 'number') || ev.completedAt === want) return
+      try { await setDeadlineCompleted(ev.id, want) } catch { preserved = false }
+    }))
+    if (!preserved) { setToast('Couldn’t keep this deadline’s completed status, so the task was not removed. Check your connection and try again — if it keeps failing, the latest database update has not been applied yet.'); return false }
     try { await Promise.all([...new Set(linked)].map(eid => detachDeadlineTask(eid))) }
     catch { setToast('Couldn\u2019t remove the deadline task \u2014 check your connection and try again.'); return false }
     setToast('Task removed. The event stays in My Schedule \u2014 add the task back from the event\u2019s details.')
@@ -3080,6 +3105,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   }
 
   const isViewingToday = dateKey === todayKey(effectiveTimezone)
+  const { scheduleTimeFormat: dayTimeFmt } = useApp()
+  const dayDeadlines = useDeadlines()[dateKey]   // v1.345: every deadline that falls on this day, with its live status
 
   // Persist for real: queue the pending edits, then wait for the server to CONFIRM every unsynced day
   // (this day and, after a move, its destination). Resolves false — and tells the user — if it did not land;
@@ -3441,6 +3468,23 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
           <div style={{ flex: 1 }} />
           <button onClick={onDashboard} className="flex items-center gap-1.5 text-[10px] sm:text-xs px-2.5 sm:px-3.5 py-1.5 rounded-lg font-medium text-white transition-all hover:opacity-85 flex-shrink-0" style={{ background: '#7c3aed' }}>📊 Today&apos;s Dashboard</button>
         </div>
+
+        {/* v1.345 — every deadline on this day, each with its own status (the calendar cell shows only one marker) */}
+        {dayDeadlines && dayDeadlines.length > 0 && (
+          <div data-testid="day-deadlines" className="flex flex-col gap-1.5 px-4 py-2 flex-shrink-0 overflow-y-auto" style={{ borderBottom: '0.5px solid var(--xp-bdr)', maxHeight: 112 }}>
+            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--xp-txt3)' }}>Deadlines</span>
+            {dayDeadlines.map(it => (
+              <div key={it.id} className="flex flex-col gap-0.5">
+              <div data-testid="day-deadline-row" className="flex items-center gap-2 min-w-0 text-[12px]">
+                <DueChip info={it.info} />
+                <span className="truncate min-w-0" style={{ color: 'var(--xp-txt)' }}>{it.title}</span>
+                <span className="flex-shrink-0" style={{ color: 'var(--xp-txt3)' }}>{it.dateOnly ? 'all day' : formatDueTime(it.dueAt, effectiveTimezone, dayTimeFmt !== '24h')}</span>
+              </div>
+              {it.dateMismatch && <AssignedDateNote assignedKey={it.dayKey} dueAt={it.dueAt} tz={effectiveTimezone} hour12={dayTimeFmt !== '24h'} />}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Scrollable body */}
         <div ref={scrollBodyRef} data-xp-tm-scrollbody className="flex-1 overflow-y-auto" style={{ overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>

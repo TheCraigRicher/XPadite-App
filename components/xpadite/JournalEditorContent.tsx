@@ -6,6 +6,8 @@ import { useEditor, EditorContent } from '@tiptap/react'
 import type { Editor } from '@tiptap/react'
 import { Mark, mergeAttributes } from '@tiptap/core'
 import { XpDivider, dividerCss } from './journalDivider'
+import { XpAlignExt, XP_ALIGNS, currentXpAlign } from './journalAlign'
+import type { XpAlign } from './journalAlign'
 import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
@@ -434,6 +436,7 @@ function useProseEditor({
       Color,
       XpHighlight,
       BoxTitle,
+      XpAlignExt,
       XpDivider,
       XpTable.configure({ resizable: false }),
       TableRow,
@@ -2845,15 +2848,19 @@ export function JournalEditorContent({
   // ── Editor focus tracking ───────────────────────────────────────────────────
   // v1.351: with a divider selected (click it), the dock offers to switch its collapsing on / off; null = no divider selected
   const [dividerSel, setDividerSel] = useState<boolean | null>(null)
+  // v1.352: alignment of the paragraph at the caret (null = no editor focused yet) — state, so the toolbar never reads a ref while rendering
+  const [alignSel, setAlignSel] = useState<XpAlign | null>(null)
   const onEditorFocus = useCallback((editor: Editor) => {
     focusedEditor.current = editor
     setFocusTick(t => t + 1)
+    setAlignSel(currentXpAlign(editor.state))
     setDividerSel(editor.state.selection instanceof NodeSelection && editor.state.selection.node.type.name === 'horizontalRule' ? !!editor.state.selection.node.attrs.collapsible : null)
   }, [])
 
   const onEditorSelectionUpdate = useCallback(() => {
     setFocusTick(t => t + 1)
     const ed = focusedEditor.current
+    setAlignSel(ed && !ed.isDestroyed ? currentXpAlign(ed.state) : null)
     setDividerSel(ed && !ed.isDestroyed && ed.state.selection instanceof NodeSelection && ed.state.selection.node.type.name === 'horizontalRule' ? !!ed.state.selection.node.attrs.collapsible : null)
     if (!ed || ed.state.selection.empty) { setSelectionRect(null); return }
     try {
@@ -2864,6 +2871,13 @@ export function JournalEditorContent({
       }
     } catch { setSelectionRect(null) }
   }, [])
+
+  function pickAlign(v: XpAlign) {
+    const ed = focusedEditor.current
+    if (!ed || ed.isDestroyed) return
+    ed.chain().focus().setXpAlign(v).run()
+    setAlignSel(currentXpAlign(ed.state))
+  }
 
   const isActive = (name: string, attrs?: Record<string, unknown>) => focusedEditor.current?.isActive(name, attrs) ?? false
   const isSubItem = () => {
@@ -5662,6 +5676,9 @@ ${dividerCss('.xp-j-prose')}
                   title="Add emoji"
                   style={{ ...dockBtn(), flexShrink: 0, fontSize: 16, padding: '4px 9px', lineHeight: 1, borderRadius: 8 }}
                 >😊</button>
+
+                {/* v1.352 text alignment — end of the toolbar row, just before Save */}
+                <AlignPicker value={alignSel ?? 'left'} disabled={alignSel === null} onPick={pickAlign} />
               </div>
 
               {/* Right fade + arrow */}
@@ -6119,6 +6136,107 @@ function SectionPicker({ isDark, onPick }: { isDark: boolean; onPick: (c: Sectio
                   ),
                 }} />
                 {c.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── v1.352 text alignment dropdown ───────────────────────────────────────────────────────────────────────────────────────────────
+const ALIGN_LABELS: Record<XpAlign, string> = { left: 'Align Left', center: 'Align Center', right: 'Align Right', justify: 'Justify — Align Both Edges' }
+const ALIGN_LINES: Record<XpAlign, number[][]> = {   // x1,x2 of the four lines of the icon (y = 5, 10, 15, 20 on a 24 grid)
+  left:    [[3, 21], [3, 14], [3, 21], [3, 14]],
+  center:  [[3, 21], [7, 17], [3, 21], [7, 17]],
+  right:   [[3, 21], [10, 21], [3, 21], [10, 21]],
+  justify: [[3, 21], [3, 21], [3, 21], [3, 21]],
+}
+function AlignIcon({ kind, size = 16 }: { kind: XpAlign; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      {ALIGN_LINES[kind].map((l, i) => <line key={i} x1={l[0]} x2={l[1]} y1={5 + i * 5} y2={5 + i * 5} />)}
+    </svg>
+  )
+}
+
+function AlignPicker({ value, disabled, onPick }: { value: XpAlign; disabled: boolean; onPick: (v: XpAlign) => void }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null)
+  const [hot, setHot] = useState(0)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
+  useEscapeLayer(open, e => { e.preventDefault(); setOpen(false); btnRef.current?.focus() })
+
+  useEffect(() => {
+    if (!open) return
+    function outside(e: MouseEvent | TouchEvent) {
+      if (wrapRef.current?.contains(e.target as Node)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', outside)
+    document.addEventListener('touchstart', outside)
+    return () => { document.removeEventListener('mousedown', outside); document.removeEventListener('touchstart', outside) }
+  }, [open])
+  useEffect(() => { if (open) itemRefs.current[hot]?.focus() }, [open, hot])
+
+  function toggle() {
+    if (open) { setOpen(false); return }
+    const r = btnRef.current?.getBoundingClientRect()
+    if (r) setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 216)), bottom: window.innerHeight - r.top + 6 })
+    setHot(Math.max(0, XP_ALIGNS.indexOf(value)))
+    setOpen(true)
+  }
+  function choose(v: XpAlign) { setOpen(false); onPick(v); btnRef.current?.blur() }
+  function onMenuKey(e: React.KeyboardEvent) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHot(h => (h + 1) % XP_ALIGNS.length) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHot(h => (h + XP_ALIGNS.length - 1) % XP_ALIGNS.length) }
+    else if (e.key === 'Home') { e.preventDefault(); setHot(0) }
+    else if (e.key === 'End') { e.preventDefault(); setHot(XP_ALIGNS.length - 1) }
+    else if (e.key === 'Tab') setOpen(false)
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        ref={btnRef} type="button" className="xp-jd-btn" data-testid="align-btn" disabled={disabled}
+        style={{ ...dockBtn(open), flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 8px', opacity: disabled ? 0.5 : 1 }}
+        onMouseDown={e => e.preventDefault()}
+        onClick={toggle}
+        aria-haspopup="menu" aria-expanded={open} aria-label={`Text alignment: ${ALIGN_LABELS[value]}`} title="Text alignment"
+      >
+        <AlignIcon kind={value} />
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
+      </button>
+      {open && pos && (
+        <div
+          role="menu" aria-label="Text alignment" data-testid="align-menu" onKeyDown={onMenuKey}
+          style={{
+            position: 'fixed', bottom: pos.bottom, left: pos.left, zIndex: 9999, width: 208,
+            background: '#160a30', border: '0.5px solid rgba(124,58,237,0.32)', borderRadius: 10,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.65)', padding: 6, display: 'flex', flexDirection: 'column', gap: 2,
+          }}
+        >
+          {XP_ALIGNS.map((a, i) => {
+            const on = a === value
+            return (
+              <button
+                key={a} ref={el => { itemRefs.current[i] = el }} type="button" role="menuitemradio" aria-checked={on}
+                data-testid={`align-${a}`} tabIndex={i === hot ? 0 : -1}
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => choose(a)}
+                onMouseEnter={() => setHot(i)}
+                style={{
+                  ...menuItemStyle(true), display: 'flex', alignItems: 'center', gap: 10, borderRadius: 7, minHeight: 40,
+                  background: on ? 'rgba(124,58,237,0.30)' : i === hot ? 'rgba(124,58,237,0.16)' : 'transparent',
+                  color: on ? '#e9ddff' : 'rgba(255,255,255,0.82)', fontWeight: on ? 700 : 500, outline: 'none',
+                }}
+              >
+                <AlignIcon kind={a} />
+                <span style={{ flex: 1 }}>{ALIGN_LABELS[a]}</span>
+                {on && <span aria-hidden="true" style={{ color: '#c4b5fd' }}>✓</span>}
               </button>
             )
           })}

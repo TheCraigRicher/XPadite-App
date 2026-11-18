@@ -18,6 +18,7 @@ import { buildAttachments, removeAttachmentById, ATTACHMENT_ACCEPT, AttachmentIt
 import type { TaskAttachment } from './types'
 import { useEscapeLayer } from './escapeLayers'
 import { XpDivider, dividerCss } from './journalDivider'
+import { XpAlignExt } from './journalAlign'
 
 const EmojiPickerLib = dynamic(() => import('emoji-picker-react'), { ssr: false })
 
@@ -100,6 +101,7 @@ export function JournalEditorEmbed({
           }
         },
       }).configure({ nested: false }),
+      XpAlignExt.configure({ defaultJustify: false }),   // v1.352: a Planner paragraph's alignment survives being loaded and re-saved here (no default-justify rule in this editor)
       XpDivider,   // v1.347: a Planner divider inside this block's content must survive being loaded and re-saved here
       Placeholder.configure({ placeholder: 'What made today great? Reflections, insights, gratitude…' }),
     ],

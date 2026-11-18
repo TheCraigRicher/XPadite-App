@@ -115,6 +115,8 @@ export const SECTION_COLORS = [
   { key: 'pink',    label: 'Pink'    },
   { key: 'lavender',label: 'Lavender'},
   { key: 'yellow',  label: 'Yellow'  },
+  { key: 'teal',    label: 'Teal'    },
+  { key: 'rosewood',label: 'Rosewood'},
 ] as const
 
 export type SectionColorKey = (typeof SECTION_COLORS)[number]['key']
@@ -157,6 +159,15 @@ export function getSectionStyle(colorKey: string, isDark: boolean): SectionStyle
       d: { background: 'rgba(234,179,8,0.10)',  border: 'rgba(234,179,8,0.28)',  labelColor: '#fbbf24' },
       l: { background: 'rgba(234,179,8,0.08)',  border: 'rgba(202,138,4,0.24)',  labelColor: '#a16207' },
     },
+    // v1.347 — solid pastel fills (light theme) exactly as specified; the dark theme keeps the translucent-tint approach of the colors above.
+    teal: {
+      d: { background: 'rgba(127,207,199,0.12)', border: 'rgba(127,207,199,0.32)', labelColor: '#7fcfc7' },
+      l: { background: '#D7F2F0', border: '#7FCFC7', labelColor: '#0f766e' },
+    },
+    rosewood: {
+      d: { background: 'rgba(200,167,185,0.12)', border: 'rgba(200,167,185,0.32)', labelColor: '#d9b8c9' },
+      l: { background: '#EADDE5', border: '#C8A7B9', labelColor: '#7a4a62' },
+    },
   }
   const entry = map[colorKey] ?? map.plain
   return isDark ? entry.d : entry.l
@@ -177,6 +188,8 @@ export const TABLE_COLOR_HEX: Record<string, { bg: string; text: string }> = {
   pink:     { bg: '#fce7f3', text: '#831843' },
   lavender: { bg: '#ede9fe', text: '#4c1d95' },
   yellow:   { bg: '#fef3c7', text: '#78350f' },
+  teal:     { bg: '#D7F2F0', text: '#134e4a' },
+  rosewood: { bg: '#EADDE5', text: '#4a2a3b' },
 }
 
 export function getTableColor(key: string | undefined) {

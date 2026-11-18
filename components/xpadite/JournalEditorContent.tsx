@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { useEditor, EditorContent } from '@tiptap/react'
 import type { Editor } from '@tiptap/react'
 import { Mark, mergeAttributes } from '@tiptap/core'
+import { XpDivider, dividerCss } from './journalDivider'
 import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
@@ -63,6 +64,14 @@ function fmtShortDate(key: string): string {
 function fmtTransferDate(key: string): string {
   const [y, m, d] = key.split('-').map(Number)
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
+}
+
+/** v1.347: "Nov 17, 2026 | 4:27 pm" — the section's last saved time, in the user's own locale (am/pm lower-cased where the locale uses it). */
+function fmtBlockStamp(ts: number): string {
+  const d = new Date(ts)
+  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).replace(/\s?([AP]M)$/i, (_m, ap: string) => ' ' + ap.toLowerCase())
+  return `${date} | ${time}`
 }
 
 function fmtBlockTime(ts: number): string {
@@ -420,6 +429,7 @@ function useProseEditor({
       Color,
       XpHighlight,
       BoxTitle,
+      XpDivider,
       XpTable.configure({ resizable: false }),
       TableRow,
       TableHeader,
@@ -622,6 +632,7 @@ interface JournalTextBlockProps {
   isDark: boolean
   isOnlyBlock: boolean
   isFirstBlock?: boolean
+  hideStamp?: boolean   // v1.347: the untouched in-memory default section shows no "saved" stamp
   forcedContent?: { content: string; seq: number }
   onContentChange: (id: string, content: string) => void
   onFocus: (editor: Editor) => void
@@ -648,7 +659,7 @@ interface JournalTextBlockProps {
 }
 
 const JournalTextBlock = React.memo(function JournalTextBlock({
-  block, isDark, isOnlyBlock, isFirstBlock = false, forcedContent,
+  block, isDark, isOnlyBlock, isFirstBlock = false, hideStamp = false, forcedContent,
   onContentChange, onFocus, onSelectionUpdate,
   onDelete, onDuplicate, onTransferSection,
   onMoveActivate, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
@@ -1049,14 +1060,14 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
       )}
 
       {/* Section timestamp — bottom-right, quiet metadata */}
-      {isSection && !collapsed && (
-        <div style={{
-          position: 'absolute', bottom: 6, right: 8,
+      {isSection && !collapsed && !hideStamp && (
+        <div data-testid="section-stamp" style={{
+          position: 'absolute', bottom: 6, right: 8, whiteSpace: 'nowrap',
           fontSize: 10, lineHeight: 1, userSelect: 'none', pointerEvents: 'none',
           color: isDark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.20)',
           letterSpacing: '0.01em',
         }}>
-          {fmtBlockTime(block.createdAt)}
+          {fmtBlockStamp(block.updatedAt ?? block.createdAt)}
         </div>
       )}
 
@@ -2177,6 +2188,11 @@ function dockBtn(active = false): React.CSSProperties {
   }
 }
 
+/** v1.347: the compact round header icon buttons — identical to the My Schedule modal's (MeetingsModal). */
+const HDR_ICON_BTN: React.CSSProperties = {
+  width: 30, height: 30, borderRadius: '50%', background: 'rgba(255,255,255,0.14)', color: 'rgba(255,255,255,0.88)', border: '0.5px solid rgba(255,255,255,0.25)',
+}
+
 // ─── Resize system ────────────────────────────────────────────────────────────
 
 type ResizeDir = 'e' | 'w' | 'n' | 's' | 'ne' | 'nw' | 'se' | 'sw'
@@ -2228,6 +2244,9 @@ interface JournalEditorContentProps {
   onEditor?: () => void
   onDirtyChange?: (dirty: boolean) => void
   closeIntent?: 'save' | 'discard' | null
+  /** v1.347: desktop-only Maximize/Restore (owned by the modal shell, like My Schedule). Omitted below 1024px. */
+  maximized?: boolean
+  onToggleMaximize?: () => void
   flushRef?: React.MutableRefObject<(() => void) | null>
   // v1.332: a Note is this same editor with no restrictions (any number of sections); `isNote` only changes the header (no day arrows, "Note" label)
   isNote?: boolean
@@ -2245,7 +2264,7 @@ export function JournalEditorContent({
   onContentChange, onPersist,
   onNavigateDay, onNavigateToday, onBack, onClose,
   onJournalCalendar, onLibrary, onEditor,
-  onDirtyChange, closeIntent, flushRef,
+  onDirtyChange, closeIntent, flushRef, maximized = false, onToggleMaximize,
   isNote = false, onCreateNew, onCreateNote,
 }: JournalEditorContentProps) {
 
@@ -2324,7 +2343,7 @@ export function JournalEditorContent({
     if (!closeIntent) return
     if (closeIntent === 'save') {
       if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
-      const serialized = buildDocStr()
+      const serialized = buildPersistDocStr()
       onPersist(dateKeyRef.current, serialized)
       savedDocRef.current = serialized
       isDirtyRef.current  = false
@@ -2435,6 +2454,9 @@ export function JournalEditorContent({
 
   // ── Refs ────────────────────────────────────────────────────────────────────
   const contentMapRef   = useRef<Map<string, string>>(new Map())
+  const dirtyBlockIdsRef = useRef<Set<string>>(new Set())   // v1.347: sections edited since the last save (see buildPersistDocStr)
+  // v1.347: id of the in-memory default lavender section of a day that has no saved document yet. It is never written until the user edits.
+  const [pristineDefaultId, setPristineDefaultId] = useState<string | null>(null)
   const blocksRef       = useRef<JournalBlock[]>([])
   const focusedEditor   = useRef<Editor | null>(null)
   const saveTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -2499,7 +2521,13 @@ export function JournalEditorContent({
     setVoiceError(null)
 
     const doc = parseJournalDoc(rawContent)
-    const initialBlocks = doc.blocks.length > 0 ? doc.blocks : [createSectionBlock('lavender')]
+    // v1.347: a day with NO saved document at all starts with one lavender section (the same block "+ Section" makes). It lives in memory only:
+    // nothing is persisted until the user edits (the editor only writes from scheduleSave). Any saved document — even an empty-looking one — is
+    // shown exactly as stored; existing unsectioned content is never migrated.
+    const noSavedDoc = !(rawContent ?? '').trim()
+    const initialBlocks = noSavedDoc ? [createSectionBlock('lavender')] : (doc.blocks.length > 0 ? doc.blocks : [createSectionBlock('lavender')])
+    dirtyBlockIdsRef.current.clear()
+    setPristineDefaultId(noSavedDoc ? initialBlocks[0].id : null)
     setBlocks(initialBlocks)
     blocksRef.current = initialBlocks
     contentMapRef.current.clear()
@@ -2577,22 +2605,37 @@ export function JournalEditorContent({
     return JSON.stringify(doc)
   }, [])
 
+  // v1.347 — the section stamp shows the LAST SAVED time: blocks whose content changed since the previous save are stamped here, at the
+  // moment the document is handed to onPersist (autosave, flush, manual save, close). Viewing a section never touches updatedAt.
+  const buildPersistDocStr = useCallback((): string => {
+    const ids = dirtyBlockIdsRef.current
+    if (ids.size > 0) {
+      const ts = Date.now()
+      const next = blocksRef.current.map(b => ids.has(b.id) ? { ...b, updatedAt: ts } : b)
+      blocksRef.current = next
+      setBlocks(next)
+      ids.clear()
+    }
+    return buildDocStr()
+  }, [buildDocStr])
+
   // ── Autosave scheduler ──────────────────────────────────────────────────────
   // Autosave writes to DB for safety but does NOT clear isDirty.
   // Only an explicit "Save Notes" (handleManualSave) clears the dirty flag.
   // This ensures the unsaved-changes dialog always shows when real changes exist.
   const scheduleSave = useCallback(() => {
     if (!isDirtyRef.current) { isDirtyRef.current = true; setIsDirty(true) }
+    setPristineDefaultId(p => (p === null ? p : null))
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
-      const serialized = buildDocStr()
+      const serialized = buildPersistDocStr()
       onPersist(dateKeyRef.current, serialized)
       // Show brief "Saved" indicator but keep dirty — explicit Save Notes resets baseline
       setSaveStatus('saved')
       setTimeout(() => setSaveStatus(s => s === 'saved' ? 'idle' : s), 2200)
       saveTimerRef.current = null
     }, 1500)
-  }, [buildDocStr, onPersist])
+  }, [buildPersistDocStr, onPersist])
 
   // ── Imperative flush: cancel pending autosave and persist immediately ────────
   // Updated each render so the closure always reads latest refs.
@@ -2601,7 +2644,7 @@ export function JournalEditorContent({
     if (!saveTimerRef.current) return
     clearTimeout(saveTimerRef.current)
     saveTimerRef.current = null
-    onPersist(dateKeyRef.current, buildDocStr())
+    onPersist(dateKeyRef.current, buildPersistDocStr())
   }
   // Expose to parent (for modal close) and to pagehide (for tab close).
   if (flushRef) flushRef.current = flushFnRef.current
@@ -2645,10 +2688,18 @@ export function JournalEditorContent({
   const pushHistoryRef = useRef<(immediate?: boolean) => void>(() => {})
   const onBlockContentChange = useCallback((id: string, content: string) => {
     contentMapRef.current.set(id, content)
+    dirtyBlockIdsRef.current.add(id)
     onContentChange(buildDocStr())
     scheduleSave()
     pushHistoryRef.current()
   }, [buildDocStr, onContentChange, scheduleSave])
+
+  // v1.347 — Divider: a real block node at the caret of the last-focused section editor (see journalDivider.ts).
+  function insertDivider() {
+    const ed = focusedEditor.current
+    if (!ed || ed.isDestroyed) { setToast('Click inside a section where the divider should go'); return }
+    ed.chain().focus().insertXpDivider().run()
+  }
 
   // ── Editor focus tracking ───────────────────────────────────────────────────
   const onEditorFocus = useCallback((editor: Editor) => {
@@ -2681,7 +2732,7 @@ export function JournalEditorContent({
   // ── Manual save ─────────────────────────────────────────────────────────────
   function handleManualSave() {
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
-    const serialized = buildDocStr()
+    const serialized = buildPersistDocStr()
     onPersist(dateKeyRef.current, serialized)
     savedDocRef.current = serialized
     isDirtyRef.current  = false
@@ -2725,7 +2776,7 @@ export function JournalEditorContent({
 
   function commitSaveAndExit() {
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null }
-    const serialized = buildDocStr()
+    const serialized = buildPersistDocStr()
     onPersist(dateKeyRef.current, serialized)
     savedDocRef.current = serialized
     isDirtyRef.current  = false
@@ -4206,16 +4257,30 @@ export function JournalEditorContent({
             own mobile Back / desktop-tablet Cancel already handle exiting,
             so × Close there was a redundant second exit control. */}
         {!drawState && (
-          <button
-            onClick={() => guardedNavigate(onClose)}
-            className="hidden sm:block"
-            style={{
-              padding: '5px 10px', borderRadius: 8,
-              border: '0.5px solid rgba(239,68,68,0.28)',
-              background: 'rgba(239,68,68,0.15)', color: '#fca5a5',
-              fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
-            }}
-          >× Close</button>
+          <div className="hidden sm:flex items-center gap-2" style={{ flexShrink: 0 }}>
+            {onToggleMaximize && (
+              <button
+                type="button" onClick={onToggleMaximize} data-testid="planner-maximize-btn"
+                aria-label={maximized ? 'Restore' : 'Maximize'} title={maximized ? 'Restore' : 'Maximize'}
+                className="xp-hdr-btn flex items-center justify-center flex-shrink-0"
+                style={HDR_ICON_BTN}
+              >
+                {maximized ? (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="15" height="15" aria-hidden="true"><path d="M10 4v6H4M10 10 4 4" /><path d="M14 4v6h6M14 10l6-6" /><path d="M10 20v-6H4M10 14l-6 6" /><path d="M14 20v-6h6M14 14l6 6" /></svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="15" height="15" aria-hidden="true"><path d="M4 9V4h5M4 4l6 6" /><path d="M20 9V4h-5M20 4l-6 6" /><path d="M4 15v5h5M4 20l6-6" /><path d="M20 15v5h-5M20 20l-6-6" /></svg>
+                )}
+              </button>
+            )}
+            <button
+              onClick={() => guardedNavigate(onClose)}
+              aria-label="Close" title="Close" data-testid="planner-close-btn"
+              className="xp-hdr-btn flex items-center justify-center flex-shrink-0"
+              style={HDR_ICON_BTN}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12"><line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" /><line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" /></svg>
+            </button>
+          </div>
         )}
       </div>
     </div>
@@ -4316,6 +4381,12 @@ export function JournalEditorContent({
         }
         .xp-j-prose p { margin: 0 0 6px; }
         .xp-j-prose p:last-child { margin-bottom: 0; }
+        .xp-hdr-btn { transition: background-color 120ms ease, transform 120ms ease; }
+        .xp-hdr-btn:hover { background: rgba(255,255,255,0.26) !important; }
+        .xp-hdr-btn:active { transform: scale(0.93); }
+        .xp-hdr-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+        @media (prefers-reduced-motion: reduce) { .xp-hdr-btn { transition: none; } }
+${dividerCss('.xp-j-prose')}
         .xp-j-prose strong { font-weight: 650; }
         .xp-j-prose em { font-style: italic; }
         .xp-j-prose h2 { font-size: 1.30em; font-weight: 700; margin: 0 0 8px; line-height: 1.3; letter-spacing: -0.01em; color: inherit; }
@@ -4674,6 +4745,7 @@ export function JournalEditorContent({
                             isDark={isDark}
                             isOnlyBlock={blocks.length === 1}
                             isFirstBlock={idx === 0}
+                            hideStamp={block.id === pristineDefaultId}
                             forcedContent={{ content: contentMapRef.current.get(block.id) ?? '', seq: historyRestoreSeq }}
                             onContentChange={onBlockContentChange}
                             onFocus={onEditorFocus}
@@ -4860,6 +4932,15 @@ export function JournalEditorContent({
                     insertBlock(createSectionBlock(color), blocks.length - 1)
                   }} />
                 </div>
+                {/* v1.347 Divider — mobile slot (same visibility rule as the mobile + Section slot) */}
+                <div className="xp-jd-sec-mo" style={{ display: 'contents' }}>
+                  <button
+                    className="xp-jd-btn" data-testid="divider-btn" style={dockBtn(false)}
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={insertDivider}
+                    title="Insert a divider at the cursor" aria-label="Insert divider"
+                  >{'—'} Divider</button>
+                </div>
 
                 {/* ⇥ Indent — desktop primary slot (mobile version lives after Undo/Redo) */}
                 <button
@@ -4972,6 +5053,13 @@ export function JournalEditorContent({
                   <SectionPicker isDark={isDark} onPick={color => {
                     insertBlock(createSectionBlock(color), blocks.length - 1)
                   }} />
+                  {/* v1.347 Divider — desktop slot, right beside + Section */}
+                  <button
+                    className="xp-jd-btn" data-testid="divider-btn" style={dockBtn(false)}
+                    onMouseDown={e => e.preventDefault()}
+                    onClick={insertDivider}
+                    title="Insert a divider at the cursor" aria-label="Insert divider"
+                  >{'—'} Divider</button>
                 </div>
 
                 <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />

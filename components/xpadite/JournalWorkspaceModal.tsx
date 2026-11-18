@@ -13,6 +13,7 @@ import { NotesLibrary, MoveToFolderDialog, DragTray, DeleteFolderDialog, DeleteS
 import { exportToTxt, exportToPdf, exportToDocx, makeFilename, type ExportEntry } from './journalExport'
 import { ColorPickerModal } from './ColorPickerModal'
 import { COLOR_PALETTE, normalizeHexColor, hexToRgba } from './utils'
+import { useIsDesktop } from './ScheduleSheet'
 
 const JournalEditorContent = dynamic(
   () => import('./JournalEditorContent').then(m => ({ default: m.JournalEditorContent })),
@@ -90,6 +91,8 @@ const SECTION_ACCENT: Record<string, string> = {
   peach:    '#fb923c',
   pink:     '#f472b6',
   lavender: '#a78bfa',
+  teal:     '#7fcfc7',
+  rosewood: '#c8a7b9',
 }
 
 function accentToBg(hex: string, alpha: number): string {
@@ -1092,6 +1095,10 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   const todayKey  = useMemo(getTodayKey, [])
 
   const [view, setView]             = useState<'calendar' | 'editor' | 'library'>('editor')
+  // v1.347 — Maximize/Restore of the Planner shell: desktop only (>= 1024px), like My Schedule; smaller screens keep their existing layout. A pure style change (nothing remounts), and only the Editor view is ever maximised.
+  const desktop = useIsDesktop()
+  const [maxRequested, setMaxRequested] = useState(false)
+  const maximized = desktop && maxRequested && view === 'editor'
   // v1.330 - Library tabs (Documents = the existing list; Notes; Folders), the folder being browsed, and which document the Editor is on.
   // activeDocId === null -> the editor shows the day's PRIMARY document (calData[editorDate].notes), exactly as before.
   const [libTab, setLibTab]         = useState<'documents' | 'notes'>('documents')
@@ -3134,6 +3141,8 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       onJournalCalendar={() => setView('calendar')}
       onLibrary={() => setView('library')}
       onEditor={() => setView('editor')}
+      maximized={maximized}
+      onToggleMaximize={desktop ? () => setMaxRequested(m => !m) : undefined}
       onDirtyChange={onDirtyChange}
       closeIntent={closeIntent}
       flushRef={editorFlushRef}
@@ -3187,10 +3196,11 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           ? "xp-tab-overlay fixed inset-x-0 top-0 bottom-14 sm:inset-0 z-[49] sm:z-[70] flex flex-col sm:flex-row sm:items-start sm:justify-center sm:overflow-y-auto sm:p-4"
           : "xp-tab-overlay fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto p-3 sm:p-4 pt-4"
         }
-        style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)' }}
+        style={{ background: isDark ? 'rgba(0,0,0,0.82)' : 'rgba(0,0,0,0.55)', ...(maximized ? { padding: 0 } : null) }}
       >
         {/* Shell */}
         <div
+          data-testid="planner-shell" data-maximized={maximized ? 'true' : 'false'}
           className={mobileNavSpace
             ? "xp-tab-shell w-full rounded-none sm:rounded-2xl shadow-2xl overflow-hidden sm:max-w-[640px] lg:max-w-[1296px] xp-j-shell-contained"
             : "xp-tab-shell w-full rounded-2xl shadow-2xl overflow-hidden max-w-[640px] lg:max-w-[1296px]"
@@ -3203,6 +3213,8 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
               : '0 20px 50px rgba(0,0,0,0.12)',
             display: 'flex', flexDirection: 'column',
             ...(mobileNavSpace ? {} : { height: 'calc(100vh - 44px)', maxHeight: 'calc(100vh - 44px)', marginBottom: 24 }),
+            // v1.347 maximised (desktop only): true edge-to-edge, whole viewport — the same treatment as My Schedule
+            ...(maximized ? { maxWidth: '100%', height: '100dvh', maxHeight: '100dvh', marginBottom: 0, borderRadius: 0, border: 'none', boxShadow: 'none' } : null),
           }}
           onClick={e => e.stopPropagation()}
         >

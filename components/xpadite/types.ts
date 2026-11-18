@@ -109,7 +109,7 @@ export interface JournalBlock {
   content?: string      // Tiptap JSON for text/section blocks
   src?: string          // data URL for image/drawing blocks
   thumbnail?: string    // small preview for image/drawing blocks
-  sectionColor?: string // 'blue' | 'green' | 'peach' | 'pink' | 'lavender'
+  sectionColor?: string // 'plain' | 'blue' | 'green' | 'peach' | 'pink' | 'lavender' | 'yellow' | 'teal' | 'rosewood'
   name?: string         // display label for image/drawing
   width?: number        // layout width percent (15–100), default 100
   height?: number       // explicit height in px; undefined = auto (natural image height)

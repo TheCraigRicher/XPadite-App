@@ -70,7 +70,7 @@ test('Divider: a real block node (stored as horizontalRule), no markdown input r
 })
 
 test('Section stamp: "Nov 17, 2026 | 4:27 pm" from the last SAVED time, never reset by viewing', () => {
-  assert.match(editor, /\{fmtBlockStamp\(block\.updatedAt \?\? block\.createdAt\)\}/)
+  assert.match(editor, /fmtBlockStamp\(sectionStampTime\(block\)!\)/)
   assert.ok(editor.includes('function fmtBlockStamp(ts: number): string {\n  return fmtSectionStamp(ts)\n}'))   // v1.348: fixed 12-hour format (see plannerFixes348.test.cjs)
   // every persist path stamps the dirty blocks first; viewing/opening never does
   assert.equal((editor.match(/onPersist\(dateKeyRef\.current, (buildPersistDocStr\(\)|serialized)\)/g) || []).length >= 5, true)
@@ -78,9 +78,9 @@ test('Section stamp: "Nov 17, 2026 | 4:27 pm" from the last SAVED time, never re
   assert.match(editor, /dirtyBlockIdsRef\.current\.add\(id\)/)
   assert.match(editor, /dirtyBlockIdsRef\.current\.clear\(\)/)
   // the stamp keeps its size and far-bottom-right position
-  assert.match(editor, /position: 'absolute', bottom: 6, right: 8, whiteSpace: 'nowrap',\n\s+fontSize: 10,/)
+  assert.match(editor, /position: 'absolute', bottom: 3, right: 5, padding: 3, whiteSpace: 'nowrap',\n\s+fontSize: 10,/)
   // nothing in the app renders a second (left) copy of it: the date at the left of a section is the user's own typed text
-  assert.equal((editor.match(/fmtBlockStamp\(/g) || []).length, 2)
+  assert.equal((editor.match(/fmtBlockStamp\(/g) || []).length, 3)   // v1.349: the definition, the aria-label and the one visible stamp
 })
 
 test('Header: text "× Close" is replaced by the My Schedule style round icons; Maximize/Restore is desktop-only and lives in the shell', () => {

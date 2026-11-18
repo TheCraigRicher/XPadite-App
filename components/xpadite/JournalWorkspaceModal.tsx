@@ -14,6 +14,8 @@ import { exportToTxt, exportToPdf, exportToDocx, makeFilename, type ExportEntry 
 import { ColorPickerModal } from './ColorPickerModal'
 import { COLOR_PALETTE, normalizeHexColor, hexToRgba } from './utils'
 import { useIsDesktop } from './ScheduleSheet'
+import { useEmailShare } from './useEmailShare'
+import { docToEmail } from './emailShare'
 
 const JournalEditorContent = dynamic(
   () => import('./JournalEditorContent').then(m => ({ default: m.JournalEditorContent })),
@@ -922,6 +924,9 @@ interface LibraryCardMenuProps {
   onViewChange: (view: 'main' | 'category') => void
   onRename: () => void
   onExport: () => void
+  pinned: boolean
+  onTogglePin: () => void
+  onEmail: () => void
   onDeleteRequest: () => void
   categories: LibraryCategory[]
   activeLabelIds: string[]
@@ -931,9 +936,11 @@ interface LibraryCardMenuProps {
   wrapperStyle: React.CSSProperties
 }
 
+const PINNED_GROUP = '__pinned__'
+
 function LibraryCardMenu({
   isDark, bdr, isOpen, view, onOpenChange, onViewChange,
-  onRename, onExport, onDeleteRequest,
+  onRename, onExport, pinned, onTogglePin, onEmail, onDeleteRequest,
   categories, activeLabelIds, onToggleLabel, onDeleteLabel, onCreateLabel,
   wrapperStyle,
 }: LibraryCardMenuProps) {
@@ -998,6 +1005,7 @@ function LibraryCardMenu({
 
   return (
     <div ref={ref} style={wrapperStyle} onClick={e => e.stopPropagation()} onTouchEnd={e => e.stopPropagation()}>
+      {pinned && <span data-testid="pin-mark" role="img" aria-label="Pinned" title="Pinned" style={{ position: 'absolute', right: 26, top: 4, fontSize: 11, lineHeight: 1, opacity: 0.75, pointerEvents: 'none' }}>📌</span>}
       <button
         ref={btnRef}
         onClick={handleToggle}
@@ -1024,7 +1032,9 @@ function LibraryCardMenu({
           {view === 'main' && (
             <>
               <button onClick={onRename} style={itemStyle}><span>✏️</span>Rename</button>
+              <button data-testid="doc-pin" onClick={onTogglePin} style={itemStyle}><span>📌</span>{pinned ? 'Unpin' : 'Pin to Top'}</button>
               <button onClick={onExport} style={itemStyle}><span>📤</span>Export</button>
+              <button data-testid="doc-email" onClick={onEmail} style={itemStyle}><span>✉️</span>Send via Email</button>
               <button onClick={() => onViewChange('category')} style={itemStyle}><span>🏷</span>Labels<span style={{ marginLeft: 'auto', opacity: 0.5 }}>›</span></button>
               <div style={dividerStyle} />
               <button onClick={onDeleteRequest} style={{ ...itemStyle, color: '#f87171' }}><span>🗑</span>Delete</button>
@@ -1093,6 +1103,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
 
   const todayDate = useMemo(() => new Date(), [])
   const todayKey  = useMemo(getTodayKey, [])
+  const { share: shareEmail, dialog: emailDialog } = useEmailShare(setToast, isDark)   // v1.349: Send via Email (Library cards)
 
   const [view, setView]             = useState<'calendar' | 'editor' | 'library'>('editor')
   // v1.347 — Maximize/Restore of the Planner shell: desktop only (>= 1024px), like My Schedule; smaller screens keep their existing layout. A pure style change (nothing remounts), and only the Editor view is ever maximised.
@@ -1258,6 +1269,16 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   // Read-modify-write against the doc's own JSON, exactly like commitLibRename
   // does for `title` — reuses the existing per-day persistence/RLS/cross-device
   // pipeline (updateDay) with zero new sync code for this relationship.
+  // v1.349 — Pin to Top / Unpin: one metadata flag in the document's own JSON (like labelIds / folderId), so it rides the existing save + cross-device sync.
+  // Content blocks are never touched; mergeDocMeta (META_KEYS) keeps the flag through every editor autosave.
+  function togglePin(key: string) {
+    updateEntryDoc(key, doc => { const u = { ...doc }; if (u.pinned) delete u.pinned; else u.pinned = true; return u })
+  }
+  // v1.349 — Send via Email: the document's title is the subject, its readable text the body. Read-only: nothing is saved, marked or changed.
+  function emailEntry(key: string) {
+    const e = allEntries.find(x => x.key === key)
+    shareEmail(docToEmail(rawOfKey(key), e?.title ?? 'XPadite note'))
+  }
   function toggleDocLabel(dateKey: string, labelId: string) {
     updateEntryDoc(dateKey, doc => {
       const current = doc.labelIds ?? []
@@ -1522,20 +1543,24 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   // entries within filteredLibraryEntries happen to be ordered.
   const libMonthGroups = useMemo(() => {
     const map = new Map<string, typeof filteredLibraryEntries>()
-    filteredLibraryEntries.forEach(e => {
+    filteredLibraryEntries.filter(e => !e.pinned).forEach(e => {
       const k = `${e.year}-${String(e.month).padStart(2, '0')}`
       if (!map.has(k)) map.set(k, [])
       map.get(k)!.push(e)
     })
-    return [...map.entries()]
+    const months = [...map.entries()]
       .sort((a, b) => b[0].localeCompare(a[0]))
       .map(([key, entries]) => ({ key, label: `${MONTH_NAMES[entries[0].month]} ${entries[0].year}`, entries }))
+    // v1.349: pinned documents (already filtered by the active month/label filters) lead the list as ONE group, each shown once, in the view's own order
+    const pinned = filteredLibraryEntries.filter(e => e.pinned)
+    return pinned.length > 0 ? [{ key: PINNED_GROUP, label: '📌 Pinned', entries: pinned }, ...months] : months
   }, [filteredLibraryEntries])
 
   const [libMonthOverrides, setLibMonthOverrides] = useState<Map<string, boolean>>(new Map())
   function isLibMonthExpanded(key: string, idx: number): boolean {
     if (libMonthOverrides.has(key)) return libMonthOverrides.get(key)!
-    return idx === 0
+    if (key === PINNED_GROUP) return true
+    return idx === (libMonthGroups[0]?.key === PINNED_GROUP ? 1 : 0)   // the latest MONTH stays open by default, with or without the Pinned group above it
   }
   function toggleLibMonth(key: string, idx: number) {
     setLibMonthOverrides(prev => { const next = new Map(prev); next.set(key, !isLibMonthExpanded(key, idx)); return next })
@@ -2322,6 +2347,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onViewChange={setCardMenuView}
                       onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
                       onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      pinned={entry.pinned} onTogglePin={() => { togglePin(entry.dateKey); setCardMenuOpen(null) }} onEmail={() => { emailEntry(entry.dateKey); setCardMenuOpen(null) }}
                       onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       categories={allCategories} activeLabelIds={entry.labelIds}
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
@@ -2474,6 +2500,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onViewChange={setCardMenuView}
                       onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
                       onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      pinned={entry.pinned} onTogglePin={() => { togglePin(entry.dateKey); setCardMenuOpen(null) }} onEmail={() => { emailEntry(entry.dateKey); setCardMenuOpen(null) }}
                       onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       categories={allCategories} activeLabelIds={entry.labelIds}
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
@@ -2545,6 +2572,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onViewChange={setCardMenuView}
                       onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
                       onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      pinned={entry.pinned} onTogglePin={() => { togglePin(entry.dateKey); setCardMenuOpen(null) }} onEmail={() => { emailEntry(entry.dateKey); setCardMenuOpen(null) }}
                       onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       categories={allCategories} activeLabelIds={entry.labelIds}
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
@@ -2659,6 +2687,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
                       onViewChange={setCardMenuView}
                       onRename={() => { handleLibRenameStart(entry.dateKey, entry.title); setCardMenuOpen(null) }}
                       onExport={() => { setExportFormatKeys([entry.dateKey]); setCardMenuOpen(null) }}
+                      pinned={entry.pinned} onTogglePin={() => { togglePin(entry.dateKey); setCardMenuOpen(null) }} onEmail={() => { emailEntry(entry.dateKey); setCardMenuOpen(null) }}
                       onDeleteRequest={() => { setDeleteConfirmKeys([entry.dateKey]); setCardMenuOpen(null) }}
                       categories={allCategories} activeLabelIds={entry.labelIds}
                       onToggleLabel={id => toggleDocLabel(entry.dateKey, id)}
@@ -2731,7 +2760,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           selectMode={isSelectMode && !isExportMode} selected={selectedKeys} onToggle={toggleSelectKey}
           onOpenFolder={setOpenFolderId} onOpen={doOpenEditor}
           onRename={(key, title) => updateEntryDoc(key, doc => { const u = { ...doc }; if (title.trim()) u.title = title.trim(); else delete u.title; return u })}
-          onDelete={key => setDeleteConfirmKeys([key])} onMove={key => setMoveKeys([key])} onUnfile={key => moveDocs([key], null)}
+          onDelete={key => setDeleteConfirmKeys([key])} onMove={key => setMoveKeys([key])} onUnfile={key => moveDocs([key], null)} onTogglePin={togglePin} onEmail={emailEntry}
           onRenameFolder={(id, name) => { const f = journalFolders.find(x => x.id === id); if (f) updateJournalFolder({ ...f, name }) }} onDeleteFolder={id => setDeleteFolderId(id)}
           onDropOnFolder={(key, fid) => onDropOnFolder(key, fid)} dragProps={dragProps} footer={openFolderId ? dragFooter(openFolderId, 14, 18) : null}
         />
@@ -3221,6 +3250,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           {view === 'calendar' ? calendarView : view === 'library' ? libraryView : editorView}
         </div>
       </div>
+      {emailDialog}
     </>
   )
 }

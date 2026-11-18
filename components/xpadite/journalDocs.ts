@@ -63,7 +63,7 @@ export function extractFirstLine(tiptapJson: string | undefined): string {
 // The Planner editor owns a document's CONTENT (blocks, title, timer sessions). The Library owns its ORGANISATION (labelIds, folderId).
 // The editor's serializer never knew about the organisation fields, so every autosave used to drop them. `mergeDocMeta` re-attaches whatever the
 // stored document currently says — so an autosave can never erase a label or a folder — and the editor can stay unaware of them.
-const META_KEYS = ['labelIds', 'folderId'] as const
+const META_KEYS = ['labelIds', 'folderId', 'pinned'] as const
 
 export function mergeDocMeta(incomingRaw: string, storedRaw: string | null | undefined): string {
   const inc = parseObj(incomingRaw)
@@ -161,6 +161,7 @@ export interface LibEntry {
   title: string
   labelIds: string[]
   folderId: string | null    // already validated against the existing folders (a folder that no longer exists reads as unfiled)
+  pinned: boolean            // v1.349: pinned to the top of its Library view
   createdAt: number
 }
 
@@ -175,7 +176,7 @@ export function entryFromRaw(key: string, source: 'day' | 'extra', kind: 'doc' |
   const folder = typeof o?.folderId === 'string' && folderIds.has(o.folderId) ? o.folderId : null
   return {
     key, dateKey: key, docDate, source, kind, year: y, month: m, day: d, title,
-    labelIds: Array.isArray(o?.labelIds) ? (o!.labelIds as string[]) : [], folderId: folder, createdAt,
+    labelIds: Array.isArray(o?.labelIds) ? (o!.labelIds as string[]) : [], folderId: folder, pinned: o?.pinned === true, createdAt,
   }
 }
 

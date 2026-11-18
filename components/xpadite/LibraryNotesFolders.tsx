@@ -120,6 +120,9 @@ function RenameInput({ isDark, initial, onCommit, onCancel }: { isDark: boolean;
   )
 }
 
+/** v1.349: pinned items first; each group keeps the order it already had */
+const pinFirst = <T extends { pinned: boolean }>(a: T[]): T[] => [...a.filter(x => x.pinned), ...a.filter(x => !x.pinned)]
+
 // ─── Document / Note card ─────────────────────────────────────────────────────
 function DocCard({ isDark, entry, menu, onOpen, drag, renaming, onRenameCommit, onRenameCancel, testId, badge, selectMode, checked, onToggle }: {
   isDark: boolean; entry: LibEntry; menu: MenuItem[]; onOpen: () => void; drag?: DragProps; badge?: string
@@ -139,6 +142,7 @@ function DocCard({ isDark, entry, menu, onOpen, drag, renaming, onRenameCommit, 
       onMouseEnter={e => { if (!selectMode) (e.currentTarget as HTMLDivElement).style.background = t.cardHover }}
       onMouseLeave={e => { if (!selectMode) (e.currentTarget as HTMLDivElement).style.background = t.card }}>
       {selectMode ? (onToggle ? <Check isDark={isDark} checked={!!checked} /> : null) : <KebabMenu isDark={isDark} items={menu} label={`${entry.kind === 'note' ? 'Note' : 'Document'} actions`} />}
+      {entry.pinned && <span data-testid="pin-mark" role="img" aria-label="Pinned" title="Pinned" style={{ position: 'absolute', top: 7, left: 8, fontSize: 11, lineHeight: 1, opacity: 0.75, pointerEvents: 'none' }}>📌</span>}
       <div style={iconBox(isDark, t.border)}>
         {entry.kind === 'note' ? '🗒️' : '📝'}
       </div>
@@ -267,12 +271,14 @@ const Unavailable = ({ isDark }: { isDark: boolean }) => (
  * the folder, but never movable INTO one). No nesting: a folder can not contain folders. No "+ Create Note" / "back to Library" controls here — Notes are
  * created from the Planner menu, and the Library tabs are how you return to your documents.
  */
-export function NotesLibrary({ isDark, folders, notes, filedDocs, openFolderId, unavailable, selectMode = false, selected, onToggle, onOpenFolder, onOpen, onRename, onDelete, onMove, onUnfile, onRenameFolder, onDeleteFolder, onDropOnFolder, dragProps, footer }: {
+export function NotesLibrary({ isDark, folders, notes, filedDocs, openFolderId, unavailable, selectMode = false, selected, onToggle, onOpenFolder, onOpen, onRename, onDelete, onMove, onUnfile, onTogglePin, onEmail, onRenameFolder, onDeleteFolder, onDropOnFolder, dragProps, footer }: {
   isDark: boolean; folders: JournalFolder[]; notes: LibEntry[]; filedDocs: LibEntry[]; openFolderId: string | null; unavailable: boolean
   /** v1.333 selection mode (Delete Selected): Notes and folders toggle instead of opening; Planner documents in a folder are not eligible */
   selectMode?: boolean; selected?: Set<string>; onToggle?: (key: string) => void
   onOpenFolder: (id: string | null) => void; onOpen: (key: string) => void
   onRename: (key: string, title: string) => void; onDelete: (key: string) => void; onMove: (key: string) => void; onUnfile: (key: string) => void
+  /** v1.349: Pin to Top / Unpin and Send via Email (both act on the document's own metadata / read it; neither changes content) */
+  onTogglePin: (key: string) => void; onEmail: (key: string) => void
   onRenameFolder: (id: string, name: string) => void; onDeleteFolder: (id: string) => void
   onDropOnFolder: (key: string, folderId: string) => void; dragProps: (key: string) => DragProps; footer?: React.ReactNode
 }) {
@@ -285,6 +291,8 @@ export function NotesLibrary({ isDark, folders, notes, filedDocs, openFolderId, 
   const open = openFolderId ? folders.find(f => f.id === openFolderId) ?? null : null
   const noteMenu = (n: LibEntry, inFolder: boolean): MenuItem[] => [
     { label: 'Rename', icon: '✏️', onClick: () => setRenaming(n.key), testId: 'note-rename' },
+    { label: n.pinned ? 'Unpin' : 'Pin to Top', icon: '📌', onClick: () => onTogglePin(n.key), testId: 'note-pin' },
+    { label: 'Send via Email', icon: '✉️', onClick: () => onEmail(n.key), testId: 'note-email' },
     { label: 'Move to Folder', icon: '📁', onClick: () => onMove(n.key), testId: 'note-move' },
     ...(inFolder ? [{ label: 'Remove from folder', icon: '↩︎', onClick: () => onUnfile(n.key), testId: 'item-unfile' }] : []),
     { label: 'Delete', icon: '🗑', danger: true, onClick: () => onDelete(n.key), testId: 'note-delete' },
@@ -298,7 +306,7 @@ export function NotesLibrary({ isDark, folders, notes, filedDocs, openFolderId, 
   )
 
   if (open) {
-    const inside = notes.filter(n => n.folderId === open.id), legacy = filedDocs.filter(d => d.folderId === open.id)
+    const inside = pinFirst(notes.filter(n => n.folderId === open.id)), legacy = pinFirst(filedDocs.filter(d => d.folderId === open.id))
     const total = inside.length + legacy.length
     return (
       <>
@@ -308,7 +316,7 @@ export function NotesLibrary({ isDark, folders, notes, filedDocs, openFolderId, 
               {inside.map(n => noteCard(n, true))}
               {legacy.map(d => (
                 <DocCard key={d.key} isDark={isDark} entry={d} testId="folder-item-legacy" badge="Planner document" drag={dragProps(d.key)} selectMode={selectMode} onOpen={() => onOpen(d.key)}
-                  menu={[{ label: 'Open', icon: '📖', onClick: () => onOpen(d.key) }, { label: 'Remove from folder', icon: '↩︎', onClick: () => onUnfile(d.key), testId: 'item-unfile' }]} />
+                  menu={[{ label: 'Open', icon: '📖', onClick: () => onOpen(d.key) }, { label: d.pinned ? 'Unpin' : 'Pin to Top', icon: '📌', onClick: () => onTogglePin(d.key), testId: 'note-pin' }, { label: 'Send via Email', icon: '✉️', onClick: () => onEmail(d.key), testId: 'note-email' }, { label: 'Remove from folder', icon: '↩︎', onClick: () => onUnfile(d.key), testId: 'item-unfile' }]} />
               ))}
             </div>
           )}
@@ -319,7 +327,7 @@ export function NotesLibrary({ isDark, folders, notes, filedDocs, openFolderId, 
     )
   }
 
-  const unfiled = notes.filter(n => !n.folderId)
+  const unfiled = pinFirst(notes.filter(n => !n.folderId))
   return (
     <>
       <div data-testid="notes-pane" style={{ flex: 1, overflowY: 'auto', padding: '16px 14px 18px', position: 'relative' }}>

@@ -367,6 +367,15 @@ export function fmtSectionStamp(ts: number): string {
   return `${STAMP_MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} | ${h12}:${String(d.getMinutes()).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`
 }
 
+/** The time a section's bottom-right stamp shows: the user's chosen value if there is one, otherwise the section's ORIGINAL creation time. Returns null when
+ *  neither is a usable time (an older section that never recorded one): the stamp is then hidden — a creation time is never invented. */
+export function sectionStampTime(b: { createdAt?: number; displayAt?: number }): number | null {
+  const ok = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 86_400_000
+  if (ok(b.displayAt)) return b.displayAt
+  if (ok(b.createdAt)) return b.createdAt
+  return null
+}
+
 /** The small star beside an Important section's title: a slightly deeper shade of that section's own pastel (neutral for Plain). */
 export function getImportantStarColor(colorKey: string | undefined, isDark: boolean): string {
   const light: Record<string, string> = {

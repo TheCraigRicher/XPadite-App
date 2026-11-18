@@ -38,7 +38,7 @@ test('stamp: uses the device time zone and never the device locale (en-GB phones
   assert.match(fn, /d\.getHours\(\)/)                       // local time
   assert.match(editor, /function fmtBlockStamp\(ts: number\): string \{\n  return fmtSectionStamp\(ts\)\n\}/)
   // the value shown is still updatedAt ?? createdAt (last saved), and only the colour contrast changed
-  assert.match(editor, /\{fmtBlockStamp\(block\.updatedAt \?\? block\.createdAt\)\}/)
+  assert.match(editor, /fmtBlockStamp\(sectionStampTime\(block\)!\)/)
   assert.match(editor, /fontSize: 10,/)
   assert.match(editor, /color: isDark \? 'rgba\(255,255,255,0\.42\)' : 'rgba\(0,0,0,0\.42\)'/)
 })

@@ -30,8 +30,12 @@ import {
   createDrawingBlock, createImageBlock, mkId, getTableColor,
   mkContentCell, mkImageCell, isSectionEmpty, mergeTiptapContents,
   journalClipboardTextSerializer, transformPastedChecklist,
-  fmtSectionStamp, getImportantStarColor, stripBlockTaskLinks, clearTaskLinksFromSlice,
+  fmtSectionStamp, getImportantStarColor, stripBlockTaskLinks, clearTaskLinksFromSlice, sectionStampTime,
 } from './journalUtils'
+import { SectionStampEditor } from './SectionStampEditor'
+import { useEmailShare } from './useEmailShare'
+import { sectionToEmail } from './emailShare'
+import { hasEscapeLayer } from './escapeLayers'
 import { TransferSectionModal } from './TransferSectionModal'
 import { SendToOptionsModal } from './SendToOptionsModal'
 import {
@@ -679,6 +683,12 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
 }: JournalTextBlockProps) {
   const { updateDay, setToast } = useApp()
+  // v1.349: Send via Email (shared with the Library) and the stamp's date/time editor
+  const { share: shareEmail, dialog: emailDialog } = useEmailShare(setToast, isDark)
+  const [stampRect, setStampRect] = useState<DOMRect | null>(null)
+  const stampTouch = useRef<{ x: number; y: number; moved: boolean } | null>(null)
+  const lastStampTap = useRef<{ t: number; x: number; y: number } | null>(null)
+  const openStampEditor = (el: Element) => setStampRect(r => r ?? el.getBoundingClientRect())
   const [menuOpen,       setMenuOpen]       = useState(false)
   const [showColorPick,  setShowColorPick]  = useState(false)
   const [addingTitle,    setAddingTitle]    = useState(false)
@@ -1099,17 +1109,49 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
         )
       )}
 
-      {/* Section timestamp — bottom-right, quiet metadata */}
-      {isSection && !collapsed && !hideStamp && (
-        <div data-testid="section-stamp" style={{
-          position: 'absolute', bottom: 6, right: 8, whiteSpace: 'nowrap',
-          fontSize: 10, lineHeight: 1, userSelect: 'none', pointerEvents: 'none',
-          color: isDark ? 'rgba(255,255,255,0.42)' : 'rgba(0,0,0,0.42)',   // v1.348: a little more contrast, still quiet metadata
-          letterSpacing: '0.01em',
-        }}>
-          {fmtBlockStamp(block.updatedAt ?? block.createdAt)}
+      {/* Section timestamp — bottom-right, quiet metadata. v1.349: the section's ORIGINAL creation time (or the value the user chose); double-click / double-tap edits it. */}
+      {isSection && !collapsed && !hideStamp && sectionStampTime(block) !== null && (
+        <div
+          data-testid="section-stamp" className="xp-j-stamp" role="button" tabIndex={0}
+          aria-label={`Section date and time ${fmtBlockStamp(sectionStampTime(block)!)}. Press Enter to edit.`}
+          title="Double-click to edit"
+          onMouseDown={e => e.stopPropagation()}
+          onClick={e => e.stopPropagation()}
+          onDoubleClick={e => { e.stopPropagation(); openStampEditor(e.currentTarget) }}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); openStampEditor(e.currentTarget) } }}
+          onTouchStart={e => { e.stopPropagation(); const t = e.touches[0]; stampTouch.current = t ? { x: t.clientX, y: t.clientY, moved: false } : null }}
+          onTouchMove={e => { const s0 = stampTouch.current, t = e.touches[0]; if (s0 && t && Math.hypot(t.clientX - s0.x, t.clientY - s0.y) > 10) s0.moved = true }}
+          onTouchEnd={e => {
+            e.stopPropagation()
+            const s0 = stampTouch.current; stampTouch.current = null
+            if (!s0 || s0.moved) { lastStampTap.current = null; return }      // a scroll / swipe is never a tap
+            const now = Date.now(), lt = lastStampTap.current
+            if (lt && now - lt.t < 350 && Math.hypot(lt.x - s0.x, lt.y - s0.y) < 30) {
+              lastStampTap.current = null
+              if (e.cancelable) e.preventDefault()   // no emulated mouse/click afterwards: it would land on the editor's backdrop and close it at once
+              openStampEditor(e.currentTarget)
+            }
+            else lastStampTap.current = { t: now, x: s0.x, y: s0.y }
+          }}
+          style={{
+            position: 'absolute', bottom: 3, right: 5, padding: 3, whiteSpace: 'nowrap',
+            fontSize: 10, lineHeight: 1, userSelect: 'none', WebkitUserSelect: 'none', touchAction: 'manipulation', cursor: 'default', borderRadius: 4,
+            color: isDark ? 'rgba(255,255,255,0.42)' : 'rgba(0,0,0,0.42)',   // v1.348: a little more contrast, still quiet metadata
+            letterSpacing: '0.01em',
+          }}
+        >
+          {fmtBlockStamp(sectionStampTime(block)!)}
         </div>
       )}
+      {stampRect && sectionStampTime(block) !== null && (
+        <SectionStampEditor
+          isDark={isDark} initialTs={sectionStampTime(block)!} anchor={stampRect} canReset={typeof block.displayAt === 'number'}
+          onSave={ts => { onUpdateBlock?.({ displayAt: ts }); setStampRect(null) }}
+          onReset={() => { onUpdateBlock?.({ displayAt: undefined }); setStampRect(null) }}
+          onCancel={() => setStampRect(null)}
+        />
+      )}
+      {emailDialog}
 
       {/* ⋮ block menu */}
       {hasMenu && (
@@ -1224,6 +1266,9 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                     )}
                     <button onClick={tmOpenSendTo} style={menuItemStyle(isDark)}>
                       📤 Send to…
+                    </button>
+                    <button data-testid="send-email" onClick={() => { setMenuOpen(false); shareEmail(sectionToEmail(block, editor ? serializeJournalContent(editor) : block.content)) }} style={menuItemStyle(isDark)}>
+                      ✉ Send via Email
                     </button>
                     {!!onDelete && !isOnlyBlock && (
                       <button onClick={() => { onDelete(); setMenuOpen(false) }} style={{ ...menuItemStyle(isDark), color: '#f87171' }}>
@@ -2891,6 +2936,7 @@ export function JournalEditorContent({
     const ts = Date.now()
     // v1.348: the copy's checklist items are new items — they carry no Task Manager link (so no false "Sent" badge); the Important flag is kept
     const copy: JournalBlock = { ...stripBlockTaskLinks(original, liveContent), id: mkId(), createdAt: ts, updatedAt: ts }
+    delete copy.displayAt   // v1.349: a duplicate is a new section: its own creation time, not the original's custom stamp
     contentMapRef.current.set(copy.id, copy.content ?? '')
     insertBlock(copy, idx)
   }
@@ -2925,6 +2971,7 @@ export function JournalEditorContent({
 
     if (mode === 'copy') {
       const copy: JournalBlock = { ...stripBlockTaskLinks(block, liveContent), id: mkId(), createdAt: ts, updatedAt: ts }   // v1.348: a copy is new content — no inherited Sent badges
+      delete copy.displayAt   // v1.349: a copy is a new section (see duplicateBlock)
       appendBlockToDay(destKey, copy)
       setToast(`Section copied to ${destLabel} ✓`)
     } else {
@@ -4025,6 +4072,7 @@ export function JournalEditorContent({
         return
       }
       if (e.key !== 'Escape') return
+      if (hasEscapeLayer()) return   // v1.349: an open dialog (stamp editor, email copy box) takes Escape first
       // v1.348: Escape first cancels an active section move (and never also leaves the Planner)
       if (moveModeIdRef.current) {
         e.stopImmediatePropagation()
@@ -4501,6 +4549,8 @@ export function JournalEditorContent({
         }
         .xp-j-prose p { margin: 0 0 6px; }
         .xp-j-prose p:last-child { margin-bottom: 0; }
+        .xp-j-stamp:hover { text-decoration: underline dotted; text-underline-offset: 2px; }
+        .xp-j-stamp:focus-visible { outline: 1.5px solid rgba(124,58,237,0.7); outline-offset: 1px; text-decoration: underline dotted; }
         .xp-hdr-btn { transition: background-color 120ms ease, transform 120ms ease; }
         .xp-hdr-btn:hover { background: rgba(255,255,255,0.26) !important; }
         .xp-hdr-btn:active { transform: scale(0.93); }

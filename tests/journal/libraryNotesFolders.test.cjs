@@ -439,7 +439,7 @@ test('folders organise NOTES only: a Planner document can leave a (v1.330) folde
   assert.ok(!/onMoveToFolder|dragProps\(entry\.dateKey\)|card-move/.test(modal), 'no Move to Folder / drag on Library document cards')
   assert.match(modal, /filedDocEntries = useMemo\(\(\) => allEntries\.filter\(e => e\.kind === 'doc' && e\.folderId\)/)
   const ui = strip(read('components/xpadite/LibraryNotesFolders.tsx'))
-  assert.match(ui, /legacy = filedDocs\.filter\(d => d\.folderId === open\.id\)/); assert.match(ui, /label: 'Remove from folder'/)
+  assert.match(ui, /legacy = pinFirst\(filedDocs\.filter\(d => d\.folderId === open\.id\)\)/); assert.match(ui, /label: 'Remove from folder'/)
   // pure: a doc filed by v1.330 is still listed with its folder; removing it only clears that one field
   const raw = D.withFolder(docRaw([sec('a', 'Plan')], { title: 'Day plan', labelIds: ['L1'] }), 'f1')
   const e = D.buildLibraryEntries({ '2026-11-09': raw }, [], [{ id: 'f1', name: 'Marketing' }])[0]

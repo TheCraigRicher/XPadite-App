@@ -115,6 +115,9 @@ export interface JournalBlock {
   height?: number       // explicit height in px; undefined = auto (natural image height)
   collapsed?: boolean   // section body hidden (presentational only); undefined/false = expanded
   important?: boolean   // v1.348: section marked important (a small star beside the title); undefined/false = not marked
+  // v1.349: `createdAt` is the section's immutable creation time (set once, never rewritten by edits/saves/syncs). `displayAt` is an OPTIONAL user-chosen
+  // value for the bottom-right stamp; when absent the stamp shows createdAt. Clearing displayAt ("Use original") restores the creation time.
+  displayAt?: number
   sourceTaskId?: string // TM source task id — for duplicate-detection only, no sync
   // Mind Mapping Canvas ('drawing' blocks only): the live, editable object list
   // (JSON array of the canvas's own object shape) — `src`/`thumbnail` stay the
@@ -158,6 +161,7 @@ export interface JournalDoc {
   timerSessions?: JournalTimerSession[]
   labelIds?: string[]      // assigned category/label ids (built-in + custom); a doc may have several
   folderId?: string | null // the one folder this doc is organized into; null/undefined = unfiled
+  pinned?: boolean         // v1.349: pinned to the top of its Library view (metadata like labelIds/folderId; absent = not pinned)
 }
 
 // ─── Library organization: Categories/Labels vs Folders ───────────────────────

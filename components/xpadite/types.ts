@@ -114,6 +114,7 @@ export interface JournalBlock {
   width?: number        // layout width percent (15–100), default 100
   height?: number       // explicit height in px; undefined = auto (natural image height)
   collapsed?: boolean   // section body hidden (presentational only); undefined/false = expanded
+  important?: boolean   // v1.348: section marked important (a small star beside the title); undefined/false = not marked
   sourceTaskId?: string // TM source task id — for duplicate-detection only, no sync
   // Mind Mapping Canvas ('drawing' blocks only): the live, editable object list
   // (JSON array of the canvas's own object shape) — `src`/`thumbnail` stay the

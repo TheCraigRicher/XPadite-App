@@ -353,3 +353,87 @@ export function serializeJournalContent(editor: Editor): string {
   if (editor.isEmpty) return ''
   return JSON.stringify(editor.getJSON())
 }
+
+// ─── v1.348: section stamp, Important star, Planner → Task Manager link hygiene ───────────────────────────────────
+
+const STAMP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** The section's bottom-right stamp: always "Nov 17, 2026 | 7:57 pm" — 12-hour clock, lowercase am/pm, no leading zero on the hour, in the user's LOCAL time zone,
+ *  independent of the browser/device locale (the locale-driven version showed "17 Nov 2026 | 19:57" on en-GB devices). Pure formatting: never alters the timestamp. */
+export function fmtSectionStamp(ts: number): string {
+  const d = new Date(ts)
+  const h = d.getHours()
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${STAMP_MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} | ${h12}:${String(d.getMinutes()).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`
+}
+
+/** The small star beside an Important section's title: a slightly deeper shade of that section's own pastel (neutral for Plain). */
+export function getImportantStarColor(colorKey: string | undefined, isDark: boolean): string {
+  const light: Record<string, string> = {
+    plain: '#71717a', blue: '#3b82f6', green: '#1fa34f', peach: '#ef7a2b', pink: '#de4a8f',
+    lavender: '#8b5cf6', yellow: '#cf9f0a', teal: '#2a9d91', rosewood: '#a8678a',
+  }
+  const dark: Record<string, string> = {
+    plain: '#c4c4cf', blue: '#93c5fd', green: '#86efac', peach: '#fdba74', pink: '#f9a8d4',
+    lavender: '#a78bfa', yellow: '#fbbf24', teal: '#7fcfc7', rosewood: '#d9b8c9',
+  }
+  const k = colorKey ?? 'plain'
+  return (isDark ? dark : light)[k] ?? (isDark ? dark.plain : light.plain)
+}
+
+// A checklist item's `xpId` (its Planner → Task Manager identity) and `xpSentTaskId` (the Task Manager task it was sent as) belong to ONE item.
+// Anything that makes a NEW item out of existing content — Enter/split (the editor's keepOnSplit flag), paste, duplicating or copying a section —
+// must not carry them over, or the new item would show a "Sent" badge it never earned and share an identity with the original.
+
+type TaskLinkNode = { type?: string; attrs?: Record<string, unknown>; content?: TaskLinkNode[] }
+
+function stripTaskLinkNodes(node: TaskLinkNode | undefined): boolean {
+  if (!node || typeof node !== 'object') return false
+  let changed = false
+  if (node.type === 'taskItem' && node.attrs && (node.attrs.xpId || node.attrs.xpSentTaskId)) {
+    node.attrs = { ...node.attrs, xpId: null, xpSentTaskId: null }
+    changed = true
+  }
+  if (Array.isArray(node.content)) for (const c of node.content) if (stripTaskLinkNodes(c)) changed = true
+  return changed
+}
+
+/** A Tiptap JSON content string with every checklist item's Task Manager link removed. Returns the input untouched when there is nothing to remove. */
+export function stripTaskLinks(content: string | undefined): string | undefined {
+  if (!content) return content
+  try {
+    const doc = JSON.parse(content)
+    return stripTaskLinkNodes(doc) ? JSON.stringify(doc) : content
+  } catch { return content }
+}
+
+/** A copy of a section block (main content + both split halves) that carries no Task Manager links — for Duplicate and Copy-to-another-date. */
+export function stripBlockTaskLinks(block: JournalBlock, liveContent?: string): JournalBlock {
+  const out: JournalBlock = { ...block, content: stripTaskLinks(liveContent ?? block.content) }
+  if (block.partitions) {
+    const [a, b] = block.partitions
+    out.partitions = [
+      a.kind === 'image' ? a : { ...a, content: stripTaskLinks(a.content) },
+      b.kind === 'image' ? b : { ...b, content: stripTaskLinks(b.content) },
+    ] as typeof block.partitions
+  }
+  return out
+}
+
+/** Pasted checklist items are new items: drop the identity / Sent status they were copied with. */
+export function clearTaskLinksFromSlice(slice: Slice): Slice {
+  function mapFrag(frag: Fragment): { frag: Fragment; changed: boolean } {
+    const nodes: PMNode[] = []; let changed = false
+    frag.forEach(n => { const r = mapNode(n); nodes.push(r.node); if (r.changed) changed = true })
+    return { frag: changed ? Fragment.fromArray(nodes) : frag, changed }
+  }
+  function mapNode(n: PMNode): { node: PMNode; changed: boolean } {
+    let attrs = n.attrs; let changed = false
+    if (n.type.name === 'taskItem' && (attrs.xpId || attrs.xpSentTaskId)) { attrs = { ...attrs, xpId: null, xpSentTaskId: null }; changed = true }
+    const inner = n.content.childCount > 0 ? mapFrag(n.content) : { frag: n.content, changed: false }
+    if (!changed && !inner.changed) return { node: n, changed: false }
+    return { node: n.type.create(attrs, inner.frag, n.marks), changed: true }
+  }
+  const r = mapFrag(slice.content)
+  return r.changed ? new Slice(r.frag, slice.openStart, slice.openEnd) : slice
+}

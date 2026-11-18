@@ -88,7 +88,18 @@ export function JournalEditorEmbed({
         strike: false, code: false, bold: false, italic: false, horizontalRule: false,
       }),
       TaskList,
-      TaskItem.configure({ nested: false }),
+      // v1.348: keep a Planner checkbox's Task Manager link when this editor loads and re-saves it. Without these attributes ProseMirror silently drops them,
+      // so editing a section here erased its "Sent" badges (and the same identity logic as the Planner: a new item made with Enter inherits neither).
+      TaskItem.extend({
+        addAttributes() {
+          return {
+            ...this.parent?.(),
+            subItem: { default: false, parseHTML: (el: HTMLElement) => el.getAttribute('data-sub-item') === 'true', renderHTML: (a: { subItem?: boolean }) => a.subItem ? { 'data-sub-item': 'true' } : {} },
+            xpId: { default: null, keepOnSplit: false, parseHTML: (el: HTMLElement) => el.getAttribute('data-xp-id') || null, renderHTML: (a: { xpId?: string | null }) => a.xpId ? { 'data-xp-id': a.xpId } : {} },
+            xpSentTaskId: { default: null, keepOnSplit: false, parseHTML: (el: HTMLElement) => el.getAttribute('data-xp-sent-task-id') || null, renderHTML: (a: { xpSentTaskId?: string | null }) => a.xpSentTaskId ? { 'data-xp-sent-task-id': a.xpSentTaskId } : {} },
+          }
+        },
+      }).configure({ nested: false }),
       XpDivider,   // v1.347: a Planner divider inside this block's content must survive being loaded and re-saved here
       Placeholder.configure({ placeholder: 'What made today great? Reflections, insights, gratitude…' }),
     ],

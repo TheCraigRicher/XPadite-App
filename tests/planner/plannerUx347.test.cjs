@@ -71,8 +71,7 @@ test('Divider: a real block node (stored as horizontalRule), no markdown input r
 
 test('Section stamp: "Nov 17, 2026 | 4:27 pm" from the last SAVED time, never reset by viewing', () => {
   assert.match(editor, /\{fmtBlockStamp\(block\.updatedAt \?\? block\.createdAt\)\}/)
-  assert.match(editor, /return `\$\{date\} \| \$\{time\}`/)
-  assert.match(editor, /month: 'short', day: 'numeric', year: 'numeric'/)
+  assert.ok(editor.includes('function fmtBlockStamp(ts: number): string {\n  return fmtSectionStamp(ts)\n}'))   // v1.348: fixed 12-hour format (see plannerFixes348.test.cjs)
   // every persist path stamps the dirty blocks first; viewing/opening never does
   assert.equal((editor.match(/onPersist\(dateKeyRef\.current, (buildPersistDocStr\(\)|serialized)\)/g) || []).length >= 5, true)
   assert.ok(!/const serialized = buildDocStr\(\)\n\s+onPersist/.test(editor), 'no persist path may bypass buildPersistDocStr')

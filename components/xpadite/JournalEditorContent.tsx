@@ -30,6 +30,7 @@ import {
   createDrawingBlock, createImageBlock, mkId, getTableColor,
   mkContentCell, mkImageCell, isSectionEmpty, mergeTiptapContents,
   journalClipboardTextSerializer, transformPastedChecklist,
+  fmtSectionStamp, getImportantStarColor, stripBlockTaskLinks, clearTaskLinksFromSlice,
 } from './journalUtils'
 import { TransferSectionModal } from './TransferSectionModal'
 import { SendToOptionsModal } from './SendToOptionsModal'
@@ -66,12 +67,9 @@ function fmtTransferDate(key: string): string {
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
 }
 
-/** v1.347: "Nov 17, 2026 | 4:27 pm" — the section's last saved time, in the user's own locale (am/pm lower-cased where the locale uses it). */
+/** v1.348: "Nov 17, 2026 | 7:57 pm" — the section's last saved time in the user's local time zone, one fixed format on every device (see fmtSectionStamp). */
 function fmtBlockStamp(ts: number): string {
-  const d = new Date(ts)
-  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }).replace(/\s?([AP]M)$/i, (_m, ap: string) => ' ' + ap.toLowerCase())
-  return `${date} | ${time}`
+  return fmtSectionStamp(ts)
 }
 
 function fmtBlockTime(ts: number): string {
@@ -439,7 +437,7 @@ function useProseEditor({
     editorProps: {
       attributes: { class: 'xp-j-prose' },
       clipboardTextSerializer: slice => journalClipboardTextSerializer(slice.content),
-      transformPasted: (slice, view) => transformPastedChecklist(slice, view.state.schema),
+      transformPasted: (slice, view) => clearTaskLinksFromSlice(transformPastedChecklist(slice, view.state.schema)),   // v1.348: pasted checklist items are new items — no inherited Sent status
       handlePaste: onPasteImage ? (_view, event) => {
         const items = event.clipboardData?.items
         if (!items) return false
@@ -627,6 +625,16 @@ function SectionPartitionPane({
   )
 }
 
+/** v1.348: the Important mark — one small solid five-point star, nothing around it. */
+function ImportantStar({ color }: { color: string }) {
+  return (
+    <svg data-testid="important-star" role="img" aria-label="Important" viewBox="0 0 24 24" width="13" height="13"
+      style={{ display: 'inline-block', verticalAlign: '-1px', marginLeft: 6, flexShrink: 0 }}>
+      <polygon fill={color} points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
+    </svg>
+  )
+}
+
 interface JournalTextBlockProps {
   block: JournalBlock
   isDark: boolean
@@ -641,6 +649,10 @@ interface JournalTextBlockProps {
   onDuplicate?: () => void
   onTransferSection?: () => void
   onMoveActivate?: () => void
+  /** v1.348: Move mode is active on THIS section — shows the drag handle (mouse + touch) */
+  moveActive?: boolean
+  onMoveGripStart?: (e: React.MouseEvent | React.TouchEvent) => void
+  onMoveCancel?: () => void
   onResizeActivate?: () => void
   onColorChange?: (color: SectionColorKey) => void
   onNameChange?: (name: string | undefined) => void
@@ -662,7 +674,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
   block, isDark, isOnlyBlock, isFirstBlock = false, hideStamp = false, forcedContent,
   onContentChange, onFocus, onSelectionUpdate,
   onDelete, onDuplicate, onTransferSection,
-  onMoveActivate, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
+  onMoveActivate, moveActive = false, onMoveGripStart, onMoveCancel, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
   onPasteImage, onSplitSection, onMergeSection, onUpdateBlock, onCellResizeStart, onDeleteImageCell, onEditMindMapCell,
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
 }: JournalTextBlockProps) {
@@ -891,6 +903,31 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
       }}
     >
 
+      {/* v1.348 Move mode: a dedicated drag handle (works with mouse AND touch; the editable body is never the drag surface) */}
+      {isSection && moveActive && (
+        <div
+          data-testid="move-grip"
+          onMouseDown={e => { e.stopPropagation(); onMoveGripStart?.(e) }}
+          onTouchStart={e => { e.stopPropagation(); onMoveGripStart?.(e) }}
+          onClick={e => e.stopPropagation()}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, minHeight: 42, margin: '0 0 8px', padding: '6px 10px', borderRadius: 8,
+            background: isDark ? 'rgba(124,58,237,0.22)' : 'rgba(124,58,237,0.12)', border: '1px dashed rgba(124,58,237,0.60)',
+            cursor: 'grab', touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none',
+            color: isDark ? '#ddd6fe' : '#5b21b6', fontSize: 12.5, fontWeight: 600,
+          }}
+        >
+          <span aria-hidden="true" style={{ fontSize: 18, lineHeight: 1, letterSpacing: '-2px' }}>⠿</span>
+          <span style={{ flex: 1, minWidth: 0 }}>Drag here to move</span>
+          <button
+            type="button" data-testid="move-cancel"
+            onMouseDown={e => e.stopPropagation()} onTouchStart={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onMoveCancel?.() }}
+            style={{ border: '0.5px solid rgba(124,58,237,0.5)', background: 'transparent', color: 'inherit', borderRadius: 7, padding: '5px 10px', fontSize: 11.5, cursor: 'pointer', minHeight: 30 }}
+          >Cancel</button>
+        </div>
+      )}
+
       {/* Section header row: ▶ collapse triangle + title (presentational-only collapse) */}
       {isSection ? (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 5 }}>
@@ -942,12 +979,14 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                     fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em',
                     color: isDark ? '#f1f5f9' : '#0f172a',
                     marginBottom: collapsed ? 0 : 6, cursor: 'text',
-                    lineHeight: 1.3,
+                    lineHeight: 1.3, overflowWrap: 'anywhere',
                   }}
-                >{block.name}</div>
+                >{block.name}{block.important && <ImportantStar color={getImportantStarColor(block.sectionColor, isDark)} />}</div>
               )
             ) : (
               /* Faint "+ Add Title" — only visible on hover via CSS */
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+              {block.important && <span style={{ marginRight: 6, marginBottom: 4, display: 'inline-flex' }}><ImportantStar color={getImportantStarColor(block.sectionColor, isDark)} /></span>}
               <div
                 className="xp-j-add-title"
                 onClick={() => setAddingTitle(true)}
@@ -958,6 +997,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                   userSelect: 'none',
                 }}
               >+ Add Title</div>
+              </div>
             )}
           </div>
         </div>
@@ -1064,7 +1104,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
         <div data-testid="section-stamp" style={{
           position: 'absolute', bottom: 6, right: 8, whiteSpace: 'nowrap',
           fontSize: 10, lineHeight: 1, userSelect: 'none', pointerEvents: 'none',
-          color: isDark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.20)',
+          color: isDark ? 'rgba(255,255,255,0.42)' : 'rgba(0,0,0,0.42)',   // v1.348: a little more contrast, still quiet metadata
           letterSpacing: '0.01em',
         }}>
           {fmtBlockStamp(block.updatedAt ?? block.createdAt)}
@@ -1153,6 +1193,9 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                       setMenuOpen(false)
                     }} style={menuItemStyle(isDark)}>
                       ✏ Edit Section
+                    </button>
+                    <button data-testid="important-toggle" onClick={() => { onUpdateBlock?.({ important: block.important ? undefined : true }); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
+                      {block.important ? '★ Remove Important Mark' : '☆ Mark as Important'}
                     </button>
                     <button onClick={() => { setShowTableV2Notice(true); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
                       ▦ Add Table
@@ -1539,12 +1582,14 @@ const SubItemTaskItem = TaskItem.extend({
       // the existing editor.getJSON()/content-string pipeline, no separate store.
       xpId: {
         default: null,
+        keepOnSplit: false,   // v1.348: Enter/split makes a NEW checklist item — it must not inherit this item's identity
         parseHTML: (el: HTMLElement) => el.getAttribute('data-xp-id') || null,
         renderHTML: (attrs: { xpId?: string | null }) => attrs.xpId ? { 'data-xp-id': attrs.xpId } : {},
       },
       // The Task Manager task id this item was last sent as, or null if never sent.
       xpSentTaskId: {
         default: null,
+        keepOnSplit: false,   // v1.348: ...nor its "Sent" status (this was the Sent-badge inheritance bug)
         parseHTML: (el: HTMLElement) => el.getAttribute('data-xp-sent-task-id') || null,
         renderHTML: (attrs: { xpSentTaskId?: string | null }) => attrs.xpSentTaskId ? { 'data-xp-sent-task-id': attrs.xpSentTaskId } : {},
       },
@@ -2405,6 +2450,8 @@ export function JournalEditorContent({
 
   // ── Move / resize mode state ─────────────────────────────────────────────────
   const [moveModeId,   setMoveModeId]   = useState<string | null>(null)
+  const moveModeIdRef = useRef<string | null>(null)
+  useEffect(() => { moveModeIdRef.current = moveModeId }, [moveModeId])   // read by the Escape handler (not written during render)
   const [resizeModeId, setResizeModeId] = useState<string | null>(null)
   // Mirrors resizeModeId for the mount-time-only global keydown handler below
   // (Delete/Backspace while a top-level image/drawing is selected).
@@ -2842,8 +2889,9 @@ export function JournalEditorContent({
     const original = blocksRef.current[idx]
     const liveContent = contentMapRef.current.get(id) ?? original.content ?? ''
     const ts = Date.now()
-    const copy: JournalBlock = { ...original, id: mkId(), content: liveContent, createdAt: ts, updatedAt: ts }
-    contentMapRef.current.set(copy.id, liveContent)
+    // v1.348: the copy's checklist items are new items — they carry no Task Manager link (so no false "Sent" badge); the Important flag is kept
+    const copy: JournalBlock = { ...stripBlockTaskLinks(original, liveContent), id: mkId(), createdAt: ts, updatedAt: ts }
+    contentMapRef.current.set(copy.id, copy.content ?? '')
     insertBlock(copy, idx)
   }
 
@@ -2876,7 +2924,7 @@ export function JournalEditorContent({
     const destLabel = fmtTransferDate(destKey)
 
     if (mode === 'copy') {
-      const copy: JournalBlock = { ...block, id: mkId(), content: liveContent, createdAt: ts, updatedAt: ts }
+      const copy: JournalBlock = { ...stripBlockTaskLinks(block, liveContent), id: mkId(), createdAt: ts, updatedAt: ts }   // v1.348: a copy is new content — no inherited Sent badges
       appendBlockToDay(destKey, copy)
       setToast(`Section copied to ${destLabel} ✓`)
     } else {
@@ -3457,10 +3505,15 @@ export function JournalEditorContent({
   // into a different section). `startBlockMove` (the existing ✥ Move menu
   // flow) and `startImagePressDrag` (direct click/press-drag on an image,
   // below) both funnel into this once a drag is actually underway.
+  // v1.348: one drag machine for mouse AND touch. Differences from v1.347: (1) a touchcancel / Cancel button / Escape ends the drag cleanly instead of
+  // leaving it stuck, (2) the scrollable Planner area auto-scrolls while the pointer rests near its top or bottom edge (the drop slot is recomputed
+  // every frame, so the destination stays correct while the list moves under the finger), (3) the floating preview of a section shows the section.
+  const cancelDragRef = useRef<(() => void) | null>(null)
   function beginBlockDrag(blockId: string, startX: number, startY: number) {
     const container = blockListRef.current
     const blockEl   = container?.querySelector(`[data-block-id="${blockId}"]`) as HTMLElement | null
     if (!blockEl) return
+    cancelDragRef.current?.()   // never two drags at once
 
     const draggedBlock = blocksRef.current.find(b => b.id === blockId)
     const isMediaDrag = draggedBlock?.type === 'image' || draggedBlock?.type === 'drawing'
@@ -3477,12 +3530,14 @@ export function JournalEditorContent({
     setDropIdx(blocksRef.current.findIndex(b => b.id === blockId))
     if (isMediaDrag) { setMoveModeId(blockId); setSelectedBlockId(blockId) }
 
-    function onMove(ev: MouseEvent | TouchEvent) {
+    const scroller = container?.closest('.xp-j-content-scroll') as HTMLElement | null
+    let lastXY = { x: startX, y: startY }
+    let raf = 0
+    let ended = false
+
+    function applyPointer(xy: { x: number; y: number }) {
       const dm = dragMoveRef.current
       if (!dm) return
-      const xy = getEventXY(ev)
-      if (!xy) return
-      if ('touches' in ev) ev.preventDefault() // dragging on touch must not also scroll the page
       setDragPos({ x: xy.x, y: xy.y })
 
       // Image/drawing blocks may additionally target a different section to
@@ -3500,27 +3555,58 @@ export function JournalEditorContent({
       setDropTargetSectionId(overSection)
 
       if (overSection) {
-        // A section drop-target is active — suppress the normal ghost slot so
-        // the two affordances never show at once.
         setSnapGuides([])
       } else {
         setDropIdx(computeDropIdx(blockId, xy.x, xy.y))
-        setSnapGuides(computeAlignGuides(
-          blockId,
-          xy.x - dm.offsetX,
-          xy.y - dm.offsetY,
-          dm.blockW,
-          dm.blockH,
-        ))
+        setSnapGuides(computeAlignGuides(blockId, xy.x - dm.offsetX, xy.y - dm.offsetY, dm.blockW, dm.blockH))
       }
     }
-    function onUp(ev: MouseEvent | TouchEvent) {
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup',   onUp)
-      document.removeEventListener('touchmove', onMove)
-      document.removeEventListener('touchend',  onUp)
-      const xy = getEventXY(ev) ?? { x: startX, y: startY }
 
+    // Edge auto-scroll: speed grows as the pointer nears (or passes) the edge, and stops the moment it moves away or the drag ends.
+    function tick() {
+      raf = 0
+      if (ended || !dragMoveRef.current || !scroller) return
+      const r = scroller.getBoundingClientRect()
+      const ZONE = Math.min(80, r.height * 0.22)
+      let dy = 0
+      if (lastXY.y < r.top + ZONE) dy = -Math.min(24, Math.ceil(((r.top + ZONE - lastXY.y) / ZONE) * 18))
+      else if (lastXY.y > r.bottom - ZONE) dy = Math.min(24, Math.ceil(((lastXY.y - (r.bottom - ZONE)) / ZONE) * 18))
+      if (dy !== 0) {
+        const before = scroller.scrollTop
+        scroller.scrollTop = before + dy
+        if (scroller.scrollTop !== before) applyPointer(lastXY)   // the list moved under the pointer: refresh the destination
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+
+    function onMove(ev: MouseEvent | TouchEvent) {
+      if (!dragMoveRef.current) return
+      const xy = getEventXY(ev)
+      if (!xy) return
+      if ('touches' in ev && ev.cancelable) ev.preventDefault() // dragging on touch must not also scroll the page
+      lastXY = xy
+      applyPointer(xy)
+    }
+    function teardown() {
+      ended = true
+      if (raf) { cancelAnimationFrame(raf); raf = 0 }
+      document.removeEventListener('mousemove',   onMove)
+      document.removeEventListener('mouseup',     onUp)
+      document.removeEventListener('touchmove',   onMove)
+      document.removeEventListener('touchend',    onUp)
+      document.removeEventListener('touchcancel', onCancel)
+      cancelDragRef.current = null
+      dragMoveRef.current = null
+      setDragPos(null)
+      setSnapGuides([])
+      setDropTargetSectionId(null)
+      setMoveModeId(null)
+    }
+    function onCancel() { if (!ended) teardown() }     // nothing is moved
+    function onUp(ev: MouseEvent | TouchEvent) {
+      if (ended) return
+      const xy = getEventXY(ev) ?? lastXY
       if (isMediaDrag) suppressImageClickRef.current = true
 
       if (isMediaDrag && dropTargetSectionIdRef.current) {
@@ -3544,17 +3630,44 @@ export function JournalEditorContent({
         const finalIdx = computeDropIdx(blockId, xy.x, xy.y)
         doMoveBlockToIdx(blockId, finalIdx)
       }
-
-      dragMoveRef.current = null
-      setDragPos(null)
-      setSnapGuides([])
-      setDropTargetSectionId(null)
-      setMoveModeId(null)
+      teardown()
     }
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup',   onUp)
-    document.addEventListener('touchmove', onMove, { passive: false })
-    document.addEventListener('touchend',  onUp)
+    cancelDragRef.current = onCancel
+    document.addEventListener('mousemove',   onMove)
+    document.addEventListener('mouseup',     onUp)
+    document.addEventListener('touchmove',   onMove, { passive: false })
+    document.addEventListener('touchend',    onUp)
+    document.addEventListener('touchcancel', onCancel)
+  }
+
+  // v1.348: the section's drag handle (Move mode). A drag starts only after the pointer travels a few pixels, so a tap on the handle does nothing;
+  // the handle has touch-action:none, so touching it never scrolls the page, while a touch anywhere else scrolls normally.
+  function startGripDrag(blockId: string, e: React.MouseEvent | React.TouchEvent) {
+    const isTouch = 'touches' in e
+    const t = isTouch ? e.touches[0] : e
+    if (!t) return
+    if (!isTouch) e.preventDefault()
+    const sx = t.clientX, sy = t.clientY
+    const THRESHOLD = 6
+    function cleanup() {
+      document.removeEventListener('mousemove',   mv)
+      document.removeEventListener('mouseup',     end)
+      document.removeEventListener('touchmove',   mv)
+      document.removeEventListener('touchend',    end)
+      document.removeEventListener('touchcancel', end)
+    }
+    function mv(ev: MouseEvent | TouchEvent) {
+      const xy = getEventXY(ev)
+      if (!xy) return
+      if ('touches' in ev && ev.cancelable) ev.preventDefault()
+      if (Math.hypot(xy.x - sx, xy.y - sy) >= THRESHOLD) { cleanup(); beginBlockDrag(blockId, sx, sy) }
+    }
+    function end() { cleanup() }
+    document.addEventListener('mousemove',   mv)
+    document.addEventListener('mouseup',     end)
+    document.addEventListener('touchmove',   mv, { passive: false })
+    document.addEventListener('touchend',    end)
+    document.addEventListener('touchcancel', end)
   }
 
   function startBlockMove(blockId: string, e: React.MouseEvent) {
@@ -3912,6 +4025,13 @@ export function JournalEditorContent({
         return
       }
       if (e.key !== 'Escape') return
+      // v1.348: Escape first cancels an active section move (and never also leaves the Planner)
+      if (moveModeIdRef.current) {
+        e.stopImmediatePropagation()
+        cancelDragRef.current?.()
+        setMoveModeId(null)
+        return
+      }
       // The Mind Mapping Canvas has its own Escape behavior (exit text-edit,
       // then deselect) — let its bubble-phase listener handle it instead of
       // navigating back out of the Planner.
@@ -4716,7 +4836,7 @@ ${dividerCss('.xp-j-prose')}
                       colSpan={colSpan}
                       style={{
                         opacity: isDragging ? 0.25 : 1,
-                        cursor: isMoveMode ? (isDragging ? 'grabbing' : 'grab') : undefined,
+                        cursor: isMoveMode && block.type !== 'section' ? (isDragging ? 'grabbing' : 'grab') : undefined,   // v1.348: a section's grab cursor lives on its drag handle
                         transition: isDragging ? 'none' : 'opacity 150ms',
                       }}
                       onClick={isSelectable ? e => {
@@ -4725,7 +4845,7 @@ ${dividerCss('.xp-j-prose')}
                         if (resizeModeId && resizeModeId !== block.id) setResizeModeId(null)
                         setSelectedBlockId(block.id)
                       } : undefined}
-                      onMouseDown={isMoveMode && !isDragging ? e => startBlockMove(block.id, e) : undefined}
+                      onMouseDown={isMoveMode && !isDragging && block.type !== 'section' ? e => startBlockMove(block.id, e) : undefined}   // v1.348: sections drag by their handle only (never from the editable body)
                     >
                       {/* Block content with hover/selection outline */}
                       <div
@@ -4757,6 +4877,9 @@ ${dividerCss('.xp-j-prose')}
                               setMoveModeId(block.id)
                               setSelectedBlockId(block.id)
                             } : undefined}
+                            moveActive={block.type === 'section' && moveModeId === block.id}
+                            onMoveGripStart={e => startGripDrag(block.id, e)}
+                            onMoveCancel={() => { cancelDragRef.current?.(); setMoveModeId(null) }}
                             onResizeActivate={block.type === 'section' ? () => {
                               setResizeModeId(block.id)
                               setSelectedBlockId(block.id)
@@ -5388,6 +5511,17 @@ ${dividerCss('.xp-j-prose')}
                   background: isDark ? 'rgba(18,10,38,0.96)' : 'rgba(255,255,255,0.96)',
                 }}
               >
+                {draggedBlock.type === 'section' && (() => {
+                  const ss = getSectionStyle(draggedBlock.sectionColor ?? 'plain', isDark)
+                  return (
+                    <div data-testid="move-preview" style={{ width: '100%', height: '100%', boxSizing: 'border-box', padding: '10px 12px', background: ss.background, borderLeft: `3px solid ${ss.labelColor}`, overflow: 'hidden' }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: isDark ? '#f1f5f9' : '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {draggedBlock.name || 'Section'}{draggedBlock.important ? ' ★' : ''}
+                      </div>
+                      <div style={{ fontSize: 11.5, marginTop: 4, color: isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.5)' }}>Release to drop here</div>
+                    </div>
+                  )
+                })()}
                 {draggedBlock.src && (
                   <img
                     src={draggedBlock.src}

@@ -150,3 +150,18 @@ export function planEmail(e: Pick<EmailContent, 'subject' | 'body'>): EmailPlan 
     clipboardText: e.body,
   }
 }
+
+/** v1.350 — several Planner sections as ONE email: their text only (no titles, headings, timestamps or dividers), in the order given (the caller passes
+ *  the Planner's own order), a blank line between sections. Empty sections add nothing. Subject = the Planner's title, else a fixed default. */
+export function combineSectionsEmail(blocks: JournalBlock[], liveContent: (b: JournalBlock) => string | undefined, plannerTitle: string): EmailContent {
+  const parts: string[] = []
+  let skippedMedia = false
+  for (const b of blocks) {
+    const e = sectionToEmail(b, liveContent(b))
+    if (e.skippedMedia) skippedMedia = true
+    if (e.body) parts.push(e.body)
+  }
+  const body = parts.join('\n\n')
+  const t = (plannerTitle ?? '').trim()
+  return { subject: (t || 'XPadite Planner Notes').slice(0, SUBJECT_MAX), body, empty: body.trim() === '', skippedMedia }
+}

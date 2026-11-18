@@ -34,8 +34,8 @@ import {
 } from './journalUtils'
 import { SectionStampEditor } from './SectionStampEditor'
 import { useEmailShare } from './useEmailShare'
-import { sectionToEmail } from './emailShare'
-import { hasEscapeLayer } from './escapeLayers'
+import { sectionToEmail, combineSectionsEmail } from './emailShare'
+import { hasEscapeLayer, useEscapeLayer } from './escapeLayers'
 import { TransferSectionModal } from './TransferSectionModal'
 import { SendToOptionsModal } from './SendToOptionsModal'
 import {
@@ -2497,6 +2497,30 @@ export function JournalEditorContent({
   const [moveModeId,   setMoveModeId]   = useState<string | null>(null)
   const moveModeIdRef = useRef<string | null>(null)
   useEffect(() => { moveModeIdRef.current = moveModeId }, [moveModeId])   // read by the Escape handler (not written during render)
+
+  // ── v1.350: Planner-wide menu + temporary section-selection mode ─────────────────────────────────────────────────────────────────────────────
+  // The selection lives ONLY in this component's state: it is never written into the document, never triggers a save, and ends with Cancel / Escape / Continue.
+  // `action` is the one thing a future action (Merge Sections, Assign Labels) has to add: the menu entry, and what Continue does for that action.
+  type PlannerSelectAction = 'email'
+  const [plannerMenu, setPlannerMenu] = useState<{ top: number; left: number } | null>(null)
+  const [selection, setSelection] = useState<{ action: PlannerSelectAction; ids: Set<string> } | null>(null)
+  const selectionRef = useRef(false)   // mirrors `selection !== null` for the Escape handler (kept in step by startSelection / endSelection)
+  const endSelection = () => { selectionRef.current = false; setSelection(null) }
+  const { share: shareEmail, dialog: emailDialog } = useEmailShare(setToast, isDark)
+  useEscapeLayer(plannerMenu !== null, () => setPlannerMenu(null))
+  function openPlannerMenu(el: HTMLElement) {
+    const r = el.getBoundingClientRect(), W = 204
+    setPlannerMenu({ top: r.bottom + 6, left: Math.max(8, Math.min(r.right - W, window.innerWidth - W - 8)) })
+  }
+  function startSelection(action: PlannerSelectAction) {
+    cancelDragRef.current?.(); setMoveModeId(null); setResizeModeId(null); setSelectedBlockId(null); setSelectionRect(null); setPlannerMenu(null)
+    selectionRef.current = true
+    setSelection({ action, ids: new Set() })
+  }
+  const isPickable = (b: JournalBlock) => b.type === 'section' || b.type === 'text'
+  function toggleSelected(id: string) {
+    setSelection(prev => { if (!prev) return prev; const ids = new Set(prev.ids); if (ids.has(id)) ids.delete(id); else ids.add(id); return { ...prev, ids } })
+  }
   const [resizeModeId, setResizeModeId] = useState<string | null>(null)
   // Mirrors resizeModeId for the mount-time-only global keydown handler below
   // (Delete/Backspace while a top-level image/drawing is selected).
@@ -4073,6 +4097,7 @@ export function JournalEditorContent({
       }
       if (e.key !== 'Escape') return
       if (hasEscapeLayer()) return   // v1.349: an open dialog (stamp editor, email copy box) takes Escape first
+      if (selectionRef.current) { e.stopImmediatePropagation(); selectionRef.current = false; setSelection(null); return }   // v1.350: Escape ends section selection
       // v1.348: Escape first cancels an active section move (and never also leaves the Planner)
       if (moveModeIdRef.current) {
         e.stopImmediatePropagation()
@@ -4454,6 +4479,24 @@ export function JournalEditorContent({
     </div>
   )
 
+  // v1.350 — the two selection actions that read the editors' live refs live down here, after every function that writes them
+  function toggleSelectAll() {
+    setSelection(prev => {
+      if (!prev) return prev
+      const all = blocksRef.current.filter(isPickable).map(b => b.id)
+      return { ...prev, ids: prev.ids.size === all.length ? new Set() : new Set(all) }
+    })
+  }
+  function finishSelection() {
+    if (!selection || selection.ids.size === 0) return
+    // the Planner's own order, whatever order the boxes were ticked in; the editors' live text, not the last saved copy
+    const chosen = blocksRef.current.filter(b => selection.ids.has(b.id))
+    const mail = combineSectionsEmail(chosen, b => contentMapRef.current.get(b.id) ?? b.content, titleRef.current)
+    if (mail.empty) { setToast('The selected sections are empty — there is nothing to send.'); return }
+    shareEmail(mail)
+    endSelection()
+  }
+
   // Reads from `blocks` (render state), not blocksRef, since this runs during
   // render itself — getSectionImageCell's ref read is for event handlers only.
   const editingCellData = drawState?.editingCell
@@ -4811,6 +4854,7 @@ ${dividerCss('.xp-j-prose')}
           >
             {/* ── Document title ──────────────────────────────────────────────── */}
             <style>{`.xp-j-title::placeholder{color:${isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.28)'}}`}</style>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 14, borderBottom: `0.5px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.09)'}` }}>
             <input
               className="xp-j-title"
               type="text"
@@ -4832,16 +4876,61 @@ ${dividerCss('.xp-j-prose')}
               }}
               onClick={e => e.stopPropagation()}
               style={{
-                width: '100%', display: 'block',
+                flex: 1, minWidth: 0, display: 'block',
                 fontSize: 20, fontWeight: 700, lineHeight: 1.3,
                 background: 'transparent', border: 'none', outline: 'none',
                 color: isDark ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.86)',
                 padding: '2px 0 10px',
-                marginBottom: 14,
-                borderBottom: `0.5px solid ${isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.09)'}`,
                 boxSizing: 'border-box',
               }}
             />
+            {/* v1.350 — Planner-wide menu (separate from each section's own ⋮): one action for now, built to take more */}
+            {!selection && (
+              <button
+                type="button" data-testid="planner-menu-btn" aria-label="Planner actions" title="Planner actions" aria-haspopup="menu" aria-expanded={plannerMenu !== null}
+                onClick={e => { e.stopPropagation(); if (plannerMenu) setPlannerMenu(null); else openPlannerMenu(e.currentTarget) }}
+                style={{
+                  flexShrink: 0, width: 44, height: 30, marginTop: 0, borderRadius: 15, cursor: 'pointer', fontSize: 16, fontWeight: 700, lineHeight: 1,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  border: `1px solid ${isDark ? 'rgba(167,139,250,0.45)' : 'rgba(124,58,237,0.35)'}`,
+                  background: plannerMenu ? (isDark ? 'rgba(124,58,237,0.25)' : 'rgba(124,58,237,0.10)') : (isDark ? 'rgba(255,255,255,0.05)' : '#ffffff'),
+                  color: isDark ? '#c4b5fd' : '#6d28d9',
+                }}
+              >⋮</button>
+            )}
+            </div>
+            {plannerMenu && (
+              <div role="menu" data-testid="planner-menu" style={{
+                position: 'fixed', top: plannerMenu.top, left: plannerMenu.left, width: 204, zIndex: 9000, overflow: 'hidden', borderRadius: 10,
+                background: isDark ? '#1e1130' : '#fff', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.35)' : 'rgba(0,0,0,0.12)'}`, boxShadow: '0 8px 28px rgba(0,0,0,0.35)',
+              }}>
+                <button role="menuitem" data-testid="planner-menu-email" onClick={e => { e.stopPropagation(); startSelection('email') }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '12px 14px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500, textAlign: 'left', color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)' }}>
+                  <span aria-hidden="true">✉</span>Send via Email
+                </button>
+              </div>
+            )}
+            {plannerMenu && <div onClick={e => { e.stopPropagation(); setPlannerMenu(null) }} style={{ position: 'fixed', inset: 0, zIndex: 8999 }} />}
+            {emailDialog}
+            {/* v1.350 — selection bar: count, Select All, Cancel, Continue (sticky, so it stays reachable on a long Planner) */}
+            {selection && (
+              <div data-testid="select-bar" role="region" aria-label="Select sections" onClick={e => e.stopPropagation()} style={{
+                position: 'sticky', top: -12, zIndex: 6, margin: '-4px -20px 12px', padding: '10px 20px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8,
+                background: isDark ? '#17102e' : '#f5f2ff', borderBottom: `0.5px solid ${isDark ? 'rgba(124,58,237,0.35)' : 'rgba(124,58,237,0.25)'}`,
+              }}>
+                <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: isDark ? '#f1f5f9' : '#0f172a' }}>Select sections</div>
+                  <div data-testid="select-count" aria-live="polite" style={{ fontSize: 11, color: isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.5)' }}>
+                    {selection.ids.size} of {blocks.filter(isPickable).length} selected
+                  </div>
+                </div>
+                <button type="button" data-testid="select-all" onClick={toggleSelectAll} style={{ minHeight: 36, padding: '0 12px', borderRadius: 18, fontSize: 12, fontWeight: 600, cursor: 'pointer', background: 'transparent', color: isDark ? '#c4b5fd' : '#6d28d9', border: '1px solid rgba(124,58,237,0.45)' }}>
+                  {selection.ids.size > 0 && selection.ids.size === blocks.filter(isPickable).length ? 'Deselect All' : 'Select All'}
+                </button>
+                <button type="button" data-testid="select-cancel" onClick={endSelection} style={{ minHeight: 36, padding: '0 12px', borderRadius: 18, fontSize: 12, fontWeight: 600, cursor: 'pointer', background: 'transparent', color: isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)', border: `1px solid ${isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.18)'}` }}>Cancel</button>
+                <button type="button" data-testid="select-continue" disabled={selection.ids.size === 0} onClick={finishSelection} style={{ minHeight: 36, padding: '0 16px', borderRadius: 18, fontSize: 12.5, fontWeight: 700, cursor: selection.ids.size === 0 ? 'not-allowed' : 'pointer', background: '#7c3aed', color: '#fff', border: 'none', opacity: selection.ids.size === 0 ? 0.45 : 1 }}>Continue →</button>
+              </div>
+            )}
 
             <div
               ref={blockListRef}
@@ -4900,6 +4989,7 @@ ${dividerCss('.xp-j-prose')}
                       {/* Block content with hover/selection outline */}
                       <div
                         className={isSelectable ? 'xp-j-blk' : ''}
+                        inert={selection ? true : undefined}
                         style={{
                           position: 'relative',
                           outline: dropTargetSectionId === block.id
@@ -5004,6 +5094,29 @@ ${dividerCss('.xp-j-prose')}
                       ) && (
                         <ResizeHandles onResizeStart={(dir, e) => startBlockResize(block.id, dir, e)} />
                       )}
+                      {/* v1.350 selection overlay: the whole card is one big tap target (nothing underneath can be edited, dragged, collapsed or opened) */}
+                      {selection && (block.type === 'section' || block.type === 'text') && (() => {
+                        const on = selection.ids.has(block.id)
+                        return (
+                          <div
+                            data-testid="select-card" data-selected={on ? 'true' : 'false'} role="checkbox" aria-checked={on} tabIndex={0}
+                            aria-label={`Select ${block.name?.trim() || (block.type === 'section' ? 'section' : 'text')}`}
+                            onClick={e => { e.stopPropagation(); toggleSelected(block.id) }}
+                            onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); toggleSelected(block.id) } }}
+                            style={{
+                              position: 'absolute', inset: 0, zIndex: 4, cursor: 'pointer', borderRadius: 10, touchAction: 'manipulation',
+                              background: on ? 'rgba(124,58,237,0.10)' : 'transparent',
+                              outline: on ? '2px solid rgba(124,58,237,0.85)' : `1.5px dashed ${isDark ? 'rgba(255,255,255,0.22)' : 'rgba(124,58,237,0.30)'}`, outlineOffset: -1,
+                            }}
+                          >
+                            <span aria-hidden="true" style={{
+                              position: 'absolute', left: 8, top: 9, width: 22, height: 22, borderRadius: '50%', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              background: on ? '#7c3aed' : (isDark ? '#1e1b2e' : '#ffffff'), border: `1.5px solid ${on ? '#7c3aed' : (isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.3)')}`,
+                              color: '#fff', fontSize: 13, fontWeight: 800, lineHeight: 1,
+                            }}>{on ? '✓' : ''}</span>
+                          </div>
+                        )
+                      })()}
                     </GridBlockItem>
                   )
 
@@ -5041,8 +5154,8 @@ ${dividerCss('.xp-j-prose')}
             flexShrink: 0, position: 'relative',
             display: 'flex', alignItems: 'stretch',
           }}>
-            {/* Scroll wrapper — clips arrows and fills space left of Save Notes */}
-            <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+            {/* Scroll wrapper — clips arrows and fills space left of Save Notes. v1.350: inert + dimmed while sections are being selected */}
+            <div inert={selection ? true : undefined} style={{ flex: 1, minWidth: 0, position: 'relative', opacity: selection ? 0.4 : 1, transition: 'opacity 120ms' }}>
 
               {/* Left fade + arrow */}
               <div style={{

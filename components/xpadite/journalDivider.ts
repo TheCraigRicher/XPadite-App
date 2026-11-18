@@ -269,14 +269,14 @@ export function dividerCss(scope: string): string {
         ${scope} hr.xp-divider[data-collapsible="true"].xp-div-collapsed {
           background-image:${layers(CHEVRON('9 6 15 12 9 18'))};
         }
-        /* v1.352 — phones only: balance the collapsible divider. The chevron keeps its own 26px gutter on the right, so the left line starts 26px in
-           and is the same length as the right one: dots centred, equal gaps to the dots. Desktop and tablet are unchanged. */
+        /* v1.352/v1.353 — phones only: balance the collapsible divider. Both lines run out to a 17px gutter (equal length, dots centred), and the chevron sits
+           flush with the right edge, about 5px clear of the right line. Desktop and tablet are unchanged. */
         @media (max-width: 767px) {
           ${scope} hr.xp-divider[data-collapsible="true"] {
             background-size:
-              calc(50% - 82px) 1px, calc(50% - 82px) 1px, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 14px 14px;
+              calc(50% - 73px) 1px, calc(50% - 73px) 1px, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 14px 14px;
             background-position:
-              left 26px center, right 26px center, 0 0, 0 0, 0 0, 0 0, 0 0, right 6px center;
+              left 17px center, right 17px center, 0 0, 0 0, 0 0, 0 0, 0 0, right 0 center;
           }
         }
         ${scope} .xp-div-hidden { display: none !important; }

@@ -52,8 +52,8 @@ test('toolbar: one compact dropdown at the end of the toolbar row (after the emo
 })
 
 test('mobile divider: ONLY a phone-width media rule changes the collapsible divider; the base (desktop / tablet) rule is byte-for-byte what v1.351 shipped', () => {
-  assert.match(divider, /@media \(max-width: 767px\) \{\n\s+\$\{scope\} hr\.xp-divider\[data-collapsible="true"\] \{\n\s+background-size:\n\s+calc\(50% - 82px\) 1px, calc\(50% - 82px\) 1px,/)
-  assert.match(divider, /left 26px center, right 26px center,/)
+  assert.match(divider, /@media \(max-width: 767px\) \{\n\s+\$\{scope\} hr\.xp-divider\[data-collapsible="true"\] \{\n\s+background-size:\n\s+calc\(50% - 73px\) 1px, calc\(50% - 73px\) 1px,/)
+  assert.match(divider, /left 17px center, right 17px center, 0 0, 0 0, 0 0, 0 0, 0 0, right 0 center;/)
   // the v1.351 base rule is unchanged
   assert.match(divider, /calc\(50% - 56px\) 1px, calc\(50% - 82px\) 1px, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%, 14px 14px;/)
   assert.match(divider, /left center, right 26px center, 0 0, 0 0, 0 0, 0 0, 0 0, right 6px center;/)

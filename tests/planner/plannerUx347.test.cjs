@@ -51,7 +51,8 @@ test('the Task Manager Journal Notes editor is untouched apart from registering 
 })
 
 test('Divider: a real block node (stored as horizontalRule), no markdown input rule, registered in BOTH editors, inserted at the caret', () => {
-  assert.match(divider, /name: 'horizontalRule'/)
+  assert.match(divider, /const NAME = 'horizontalRule'/)   // v1.351: the node name is one constant (still the standard Tiptap name)
+  assert.match(divider, /name: NAME,/)
   assert.match(divider, /group: 'block'/)
   assert.ok(!/addInputRules/.test(divider), '"---" must stay plain text')
   assert.match(divider, /insertXpDivider/)
@@ -89,7 +90,7 @@ test('Header: text "× Close" is replaced by the My Schedule style round icons; 
   assert.match(editor, /data-testid="planner-close-btn"/)
   assert.match(editor, /width: 30, height: 30, borderRadius: '50%', background: 'rgba\(255,255,255,0\.14\)'/)
   assert.match(editor, /guardedNavigate\(onClose\)/, 'closing still goes through the unsaved-changes guard')
-  assert.match(shell, /const maximized = desktop && maxRequested && view === 'editor'/)
+  assert.match(shell, /const maximized = desktop && maxRequested\b/)   // v1.351: one maximise state for all three tabs
   assert.match(shell, /onToggleMaximize=\{desktop \? \(\) => setMaxRequested\(m => !m\) : undefined\}/)
   assert.match(shell, /maxWidth: '100%', height: '100dvh', maxHeight: '100dvh', marginBottom: 0, borderRadius: 0/)
   // the same size gate My Schedule uses (>= 1024px)

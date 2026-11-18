@@ -68,14 +68,14 @@ test('Planner-wide menu: separate from the section menus, one action, structured
   assert.match(editor, /<span aria-hidden="true">✉<\/span>Send via Email/)
   assert.match(editor, /type PlannerSelectAction = 'email'/)                                   // the one place a future Merge / Labels action is added
   assert.match(editor, /\{!selection && \(\n\s+<button\n\s+type="button" data-testid="planner-menu-btn"/)
-  assert.ok(!/Merge Sections|Assign Labels/.test(editor.slice(editor.indexOf('v1.350 — Planner-wide menu'), editor.indexOf('v1.350 — selection bar'))), 'not in this release')
+  assert.match(editor, /type PlannerSelectAction = 'email' \| 'label' \| 'merge'/)   // v1.351 extended the same mechanism with Assign Label and Merge Sections
   // the title input keeps its own behaviour (Enter still jumps into the first section)
   assert.match(editor, /const firstProse = blockListRef\.current\?\.querySelector\('\.xp-j-prose'\)/)
 })
 
 test('selection mode: temporary state only — never saved, no autosave, no content mutation; everything underneath is inert', () => {
   const part1 = editor.slice(editor.indexOf('function openPlannerMenu'), editor.indexOf('function toggleSelected') + 330)
-  const part2 = editor.slice(editor.indexOf('function toggleSelectAll'), editor.indexOf('// Reads from `blocks` (render state)'))
+  const part2 = editor.slice(editor.indexOf('function toggleSelectAll'), editor.indexOf('// v1.351 — Assign Label'))   // selection helpers only (the v1.351 apply functions that edit the document come after)
   const sel = part1 + part2
   assert.ok(part1.length > 300 && part2.length > 300)
   assert.ok(!/scheduleSave|onPersist|buildDocStr|updateBlock|setBlocks|blocksRef\.current = |onContentChange|setIsDirty|isDirtyRef/.test(sel.replace(/blocksRef\.current\.filter/g, '')), 'selection must not touch the document or the dirty/save machinery')
@@ -91,7 +91,7 @@ test('selection mode: temporary state only — never saved, no autosave, no cont
 })
 
 test('Continue: needs at least one selected section; uses the Planner order and live text; ends selection; never saves', () => {
-  const f = editor.slice(editor.indexOf('function finishSelection'), editor.indexOf('function finishSelection') + 900)
+  const f = editor.slice(editor.indexOf('function finishSelection'), editor.indexOf('function finishSelection') + 2200)
   assert.match(f, /if \(!selection \|\| selection\.ids\.size === 0\) return/)
   assert.match(f, /blocksRef\.current\.filter\(b => selection\.ids\.has\(b\.id\)\)/)           // document order, not tick order
   assert.match(f, /combineSectionsEmail\(chosen, b => contentMapRef\.current\.get\(b\.id\) \?\? b\.content, titleRef\.current\)/)

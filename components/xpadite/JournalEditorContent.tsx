@@ -32,7 +32,10 @@ import {
   journalClipboardTextSerializer, transformPastedChecklist,
   fmtSectionStamp, getImportantStarColor, stripBlockTaskLinks, clearTaskLinksFromSlice, sectionStampTime,
 } from './journalUtils'
+import { NodeSelection } from '@tiptap/pm/state'
 import { SectionStampEditor } from './SectionStampEditor'
+import { LabelPickerDialog, MergeConfirmDialog, NoticeDialog, type LabelOption, type MergeItem } from './PlannerActionDialogs'
+import { mergeProblems, mergeContents } from './plannerMerge'
 import { useEmailShare } from './useEmailShare'
 import { sectionToEmail, combineSectionsEmail } from './emailShare'
 import { hasEscapeLayer, useEscapeLayer } from './escapeLayers'
@@ -644,6 +647,8 @@ interface JournalTextBlockProps {
   isDark: boolean
   isOnlyBlock: boolean
   isFirstBlock?: boolean
+  /** v1.351: the Library's labels, to show this section's assigned label */
+  labelOptions?: LabelOption[]
   hideStamp?: boolean   // v1.347: the untouched in-memory default section shows no "saved" stamp
   forcedContent?: { content: string; seq: number }
   onContentChange: (id: string, content: string) => void
@@ -678,7 +683,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
   block, isDark, isOnlyBlock, isFirstBlock = false, hideStamp = false, forcedContent,
   onContentChange, onFocus, onSelectionUpdate,
   onDelete, onDuplicate, onTransferSection,
-  onMoveActivate, moveActive = false, onMoveGripStart, onMoveCancel, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
+  labelOptions: blockLabelOptions = NO_LABELS, onMoveActivate, moveActive = false, onMoveGripStart, onMoveCancel, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
   onPasteImage, onSplitSection, onMergeSection, onUpdateBlock, onCellResizeStart, onDeleteImageCell, onEditMindMapCell,
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
 }: JournalTextBlockProps) {
@@ -896,6 +901,17 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
     ? getSectionStyle(block.sectionColor ?? 'plain', isDark)
     : null
   const hasTitle  = isSection && !!block.name
+  // v1.351: a subtle tag for the Library label assigned to this section (a label that no longer exists in the Library shows nothing; the id is kept)
+  const sectionLabel = isSection && block.labelId ? blockLabelOptions.find(l => l.id === block.labelId) : undefined
+  const sectionLabelTag = sectionLabel ? (
+    <span data-testid="section-label" title={`Label: ${sectionLabel.name}`} style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: 140, marginLeft: 8, padding: '1px 7px', borderRadius: 9, verticalAlign: '2px',
+      fontSize: 10, fontWeight: 600, letterSpacing: '0', lineHeight: 1.4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      color: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.6)', background: `${sectionLabel.color}22`, border: `0.5px solid ${sectionLabel.color}66`,
+    }}>
+      <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: sectionLabel.color, flexShrink: 0 }} />{sectionLabel.name}
+    </span>
+  ) : null
   const hasMenu   = isSection ? true : canMoveUp || canMoveDown || (!!onDelete && !isOnlyBlock)
   const collapsed = isSection && block.collapsed === true
 
@@ -991,12 +1007,13 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                     marginBottom: collapsed ? 0 : 6, cursor: 'text',
                     lineHeight: 1.3, overflowWrap: 'anywhere',
                   }}
-                >{block.name}{block.important && <ImportantStar color={getImportantStarColor(block.sectionColor, isDark)} />}</div>
+                >{block.name}{block.important && <ImportantStar color={getImportantStarColor(block.sectionColor, isDark)} />}{sectionLabelTag}</div>
               )
             ) : (
               /* Faint "+ Add Title" — only visible on hover via CSS */
               <div style={{ display: 'flex', alignItems: 'center' }}>
               {block.important && <span style={{ marginRight: 6, marginBottom: 4, display: 'inline-flex' }}><ImportantStar color={getImportantStarColor(block.sectionColor, isDark)} /></span>}
+              {sectionLabelTag && <span style={{ marginRight: 6, marginBottom: 4, display: 'inline-flex' }}>{sectionLabelTag}</span>}
               <div
                 className="xp-j-add-title"
                 onClick={() => setAddingTitle(true)}
@@ -2267,6 +2284,9 @@ function menuItemStyle(isDark: boolean): React.CSSProperties {
   }
 }
 
+const NO_LABELS: LabelOption[] = []
+const nowTs = () => Date.now()
+
 function dockBtn(active = false): React.CSSProperties {
   return {
     padding: '5px 11px', borderRadius: 7, cursor: 'pointer',
@@ -2337,6 +2357,8 @@ interface JournalEditorContentProps {
   /** v1.347: desktop-only Maximize/Restore (owned by the modal shell, like My Schedule). Omitted below 1024px. */
   maximized?: boolean
   onToggleMaximize?: () => void
+  /** v1.351: the Library's labels (built-in + custom) offered by Assign Label */
+  labelOptions?: LabelOption[]
   flushRef?: React.MutableRefObject<(() => void) | null>
   // v1.332: a Note is this same editor with no restrictions (any number of sections); `isNote` only changes the header (no day arrows, "Note" label)
   isNote?: boolean
@@ -2354,7 +2376,7 @@ export function JournalEditorContent({
   onContentChange, onPersist,
   onNavigateDay, onNavigateToday, onBack, onClose,
   onJournalCalendar, onLibrary, onEditor,
-  onDirtyChange, closeIntent, flushRef, maximized = false, onToggleMaximize,
+  onDirtyChange, closeIntent, flushRef, maximized = false, onToggleMaximize, labelOptions = NO_LABELS,
   isNote = false, onCreateNew, onCreateNote,
 }: JournalEditorContentProps) {
 
@@ -2501,7 +2523,9 @@ export function JournalEditorContent({
   // ── v1.350: Planner-wide menu + temporary section-selection mode ─────────────────────────────────────────────────────────────────────────────
   // The selection lives ONLY in this component's state: it is never written into the document, never triggers a save, and ends with Cancel / Escape / Continue.
   // `action` is the one thing a future action (Merge Sections, Assign Labels) has to add: the menu entry, and what Continue does for that action.
-  type PlannerSelectAction = 'email'
+  type PlannerSelectAction = 'email' | 'label' | 'merge'
+  type PlannerDialog = { kind: 'label'; ids: string[] } | { kind: 'merge'; ids: string[]; destId: string } | { kind: 'notice'; title: string; message: string[] }
+  const [dlg, setDlg] = useState<PlannerDialog | null>(null)
   const [plannerMenu, setPlannerMenu] = useState<{ top: number; left: number } | null>(null)
   const [selection, setSelection] = useState<{ action: PlannerSelectAction; ids: Set<string> } | null>(null)
   const selectionRef = useRef(false)   // mirrors `selection !== null` for the Escape handler (kept in step by startSelection / endSelection)
@@ -2517,7 +2541,8 @@ export function JournalEditorContent({
     selectionRef.current = true
     setSelection({ action, ids: new Set() })
   }
-  const isPickable = (b: JournalBlock) => b.type === 'section' || b.type === 'text'
+  // Assign Label needs a section title row to show the label on, so unsectioned text is only offered to Send via Email and Merge
+  const isPickable = (b: JournalBlock) => b.type === 'section' || (b.type === 'text' && selection?.action !== 'label')
   function toggleSelected(id: string) {
     setSelection(prev => { if (!prev) return prev; const ids = new Set(prev.ids); if (ids.has(id)) ids.delete(id); else ids.add(id); return { ...prev, ids } })
   }
@@ -2818,14 +2843,18 @@ export function JournalEditorContent({
   }
 
   // ── Editor focus tracking ───────────────────────────────────────────────────
+  // v1.351: with a divider selected (click it), the dock offers to switch its collapsing on / off; null = no divider selected
+  const [dividerSel, setDividerSel] = useState<boolean | null>(null)
   const onEditorFocus = useCallback((editor: Editor) => {
     focusedEditor.current = editor
     setFocusTick(t => t + 1)
+    setDividerSel(editor.state.selection instanceof NodeSelection && editor.state.selection.node.type.name === 'horizontalRule' ? !!editor.state.selection.node.attrs.collapsible : null)
   }, [])
 
   const onEditorSelectionUpdate = useCallback(() => {
     setFocusTick(t => t + 1)
     const ed = focusedEditor.current
+    setDividerSel(ed && !ed.isDestroyed && ed.state.selection instanceof NodeSelection && ed.state.selection.node.type.name === 'horizontalRule' ? !!ed.state.selection.node.attrs.collapsible : null)
     if (!ed || ed.state.selection.empty) { setSelectionRect(null); return }
     try {
       const sel = window.getSelection()
@@ -3134,6 +3163,9 @@ export function JournalEditorContent({
     blocksRef.current = restored
     setBlocks(restored)
     setHistoryRestoreSeq(s => s + 1)
+    dirtyBlockIdsRef.current.clear()   // the restored snapshot already holds each section's own updatedAt: do not re-stamp it as 'edited'
+    onContentChange(buildDocStr())   // v1.351: an Undo / Redo is persisted by the normal autosave, so a reload can never bring the undone state back
+    scheduleSave()
   }
 
   function customRedo() {
@@ -3146,6 +3178,9 @@ export function JournalEditorContent({
     blocksRef.current = restored
     setBlocks(restored)
     setHistoryRestoreSeq(s => s + 1)
+    dirtyBlockIdsRef.current.clear()   // the restored snapshot already holds each section's own updatedAt: do not re-stamp it as 'edited'
+    onContentChange(buildDocStr())   // v1.351: an Undo / Redo is persisted by the normal autosave, so a reload can never bring the undone state back
+    scheduleSave()
   }
 
   pushHistoryRef.current = pushHistory
@@ -4491,10 +4526,79 @@ export function JournalEditorContent({
     if (!selection || selection.ids.size === 0) return
     // the Planner's own order, whatever order the boxes were ticked in; the editors' live text, not the last saved copy
     const chosen = blocksRef.current.filter(b => selection.ids.has(b.id))
+    if (selection.action === 'label') { setDlg({ kind: 'label', ids: chosen.map(b => b.id) }); return }
+    if (selection.action === 'merge') {
+      if (chosen.length < 2) { setToast('Select at least two sections to merge.'); return }
+      const live = (b: JournalBlock) => contentMapRef.current.get(b.id) ?? b.content
+      const problems = mergeProblems(chosen, live)
+      if (problems.length) { setDlg({ kind: 'notice', title: "These sections can't be merged", message: [...problems.map(x => x.reason), 'Nothing was changed.'] }); return }
+      setDlg({ kind: 'merge', ids: chosen.map(b => b.id), destId: chosen[0].id })
+      return
+    }
     const mail = combineSectionsEmail(chosen, b => contentMapRef.current.get(b.id) ?? b.content, titleRef.current)
     if (mail.empty) { setToast('The selected sections are empty — there is nothing to send.'); return }
     shareEmail(mail)
     endSelection()
+  }
+
+  // v1.351 — Assign Label: one coherent update of the chosen sections (the label id only; content, title, colour, dates untouched), saved by the normal autosave
+  function applyLabel(ids: string[], labelId: string | null) {
+    pushHistory(true)
+    const set = new Set(ids)
+    const ts = nowTs()
+    const next = blocksRef.current.map(b => {
+      if (!set.has(b.id) || b.type !== 'section') return b
+      const u: JournalBlock = { ...b, updatedAt: ts }
+      if (labelId) u.labelId = labelId; else delete u.labelId
+      return u
+    })
+    blocksRef.current = next
+    setBlocks(next)
+    onContentChange(buildDocStr())
+    scheduleSave()
+    pushHistory(true)
+  }
+
+  // v1.351 — Merge Sections: ONE document update. The merged text is built and verified first (plannerMerge.mergeContents); only then are the sources removed.
+  // The destination keeps its own id, title, colour, Important mark, label and dates. An editor-wide history entry is pushed before and after, so ↺ Undo
+  // restores the exact pre-merge document for as long as the Planner stays open.
+  function applyMerge(ids: string[], destId: string): { ok: true } | { ok: false; reason: string } {
+    const cur = blocksRef.current
+    const chosen = cur.filter(b => ids.includes(b.id))                // Planner order
+    const dest = chosen.find(b => b.id === destId)
+    const sources = chosen.filter(b => b.id !== destId)
+    if (!dest || sources.length < 1 || chosen.length < 2) return { ok: false, reason: 'Select at least two sections to merge.' }
+    const live = (b: JournalBlock) => contentMapRef.current.get(b.id) ?? b.content ?? ''
+    const problems = mergeProblems(chosen, live)
+    if (problems.length) return { ok: false, reason: problems.map(x => x.reason).join(' ') }
+    const res = mergeContents(live(dest), sources.map(live))
+    if (!res.ok) return res
+    pushHistory(true)                                                // the pre-merge state, exactly
+    const gone = new Set(sources.map(b => b.id))
+    const ts = nowTs()
+    const next = cur.filter(b => !gone.has(b.id)).map(b => b.id === destId ? { ...b, content: res.content, updatedAt: ts } : b)
+    contentMapRef.current.set(destId, res.content)
+    gone.forEach(id => { contentMapRef.current.delete(id); dirtyBlockIdsRef.current.delete(id) })
+    dirtyBlockIdsRef.current.add(destId)
+    blocksRef.current = next
+    setBlocks(next)
+    setHistoryRestoreSeq(s0 => s0 + 1)                               // every editor re-reads its (new) content
+    onContentChange(buildDocStr())
+    scheduleSave()
+    pushHistory(true)
+    return { ok: true }
+  }
+
+  function confirmLabel(id: string | null) {
+    if (dlg?.kind !== 'label') return
+    applyLabel(dlg.ids, id)
+    setDlg(null); endSelection(); setToast(id ? 'Label assigned ✓' : 'Label removed ✓')
+  }
+  function confirmMerge() {
+    if (dlg?.kind !== 'merge') return
+    const r = applyMerge(dlg.ids, dlg.destId)
+    if (r.ok) { setDlg(null); endSelection(); setToast('Sections merged ✓') }
+    else setDlg({ kind: 'notice', title: 'Nothing was merged', message: [r.reason, 'Your sections were not changed.'] })
   }
 
   // Reads from `blocks` (render state), not blocksRef, since this runs during
@@ -4908,10 +5012,38 @@ ${dividerCss('.xp-j-prose')}
                   style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '12px 14px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500, textAlign: 'left', color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)' }}>
                   <span aria-hidden="true">✉</span>Send via Email
                 </button>
+                <button role="menuitem" data-testid="planner-menu-label" onClick={e => { e.stopPropagation(); startSelection('label') }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '12px 14px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500, textAlign: 'left', color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)' }}>
+                  <span aria-hidden="true">🏷</span>Assign Label
+                </button>
+                <button role="menuitem" data-testid="planner-menu-merge" onClick={e => { e.stopPropagation(); startSelection('merge') }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '12px 14px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500, textAlign: 'left', color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)' }}>
+                  <span aria-hidden="true">⧉</span>Merge Sections
+                </button>
               </div>
             )}
             {plannerMenu && <div onClick={e => { e.stopPropagation(); setPlannerMenu(null) }} style={{ position: 'fixed', inset: 0, zIndex: 8999 }} />}
             {emailDialog}
+            {dlg?.kind === 'label' && (() => {
+              const chosen = blocks.filter(b => dlg.ids.includes(b.id))
+              const same = chosen.length > 0 && chosen.every(b => b.labelId && b.labelId === chosen[0].labelId) ? chosen[0].labelId! : null
+              return (
+                <LabelPickerDialog isDark={isDark} labels={labelOptions} count={chosen.length} currentLabelId={same}
+                  onCancel={() => setDlg(null)}
+                  onPick={confirmLabel} />
+              )
+            })()}
+            {dlg?.kind === 'merge' && (
+              <MergeConfirmDialog isDark={isDark} destId={dlg.destId} onDest={id => setDlg({ ...dlg, destId: id })}
+                items={blocks.filter(b => dlg.ids.includes(b.id)).map<MergeItem>(b => ({
+                  id: b.id, kind: b.type === 'section' ? 'section' : 'text', title: (b.name ?? '').trim(), important: !!b.important,
+                  labelName: b.labelId ? (labelOptions.find(l => l.id === b.labelId)?.name ?? null) : null, color: b.sectionColor ?? null, custom: typeof b.displayAt === 'number',
+                }))}
+                undoNote="You can undo this with the ↺ Undo button while this Planner stays open."
+                onCancel={() => setDlg(null)}
+                onConfirm={confirmMerge} />
+            )}
+            {dlg?.kind === 'notice' && <NoticeDialog isDark={isDark} title={dlg.title} message={dlg.message} onClose={() => setDlg(null)} />}
             {/* v1.350 — selection bar: count, Select All, Cancel, Continue (sticky, so it stays reachable on a long Planner) */}
             {selection && (
               <div data-testid="select-bar" role="region" aria-label="Select sections" onClick={e => e.stopPropagation()} style={{
@@ -5006,6 +5138,7 @@ ${dividerCss('.xp-j-prose')}
                             isOnlyBlock={blocks.length === 1}
                             isFirstBlock={idx === 0}
                             hideStamp={block.id === pristineDefaultId}
+                            labelOptions={labelOptions}
                             forcedContent={{ content: contentMapRef.current.get(block.id) ?? '', seq: historyRestoreSeq }}
                             onContentChange={onBlockContentChange}
                             onFocus={onEditorFocus}
@@ -5095,7 +5228,7 @@ ${dividerCss('.xp-j-prose')}
                         <ResizeHandles onResizeStart={(dir, e) => startBlockResize(block.id, dir, e)} />
                       )}
                       {/* v1.350 selection overlay: the whole card is one big tap target (nothing underneath can be edited, dragged, collapsed or opened) */}
-                      {selection && (block.type === 'section' || block.type === 'text') && (() => {
+                      {selection && isPickable(block) && (() => {
                         const on = selection.ids.has(block.id)
                         return (
                           <div
@@ -5226,6 +5359,15 @@ ${dividerCss('.xp-j-prose')}
                     onClick={insertDivider}
                     title="Insert a divider at the cursor" aria-label="Insert divider"
                   >{'—'} Divider</button>
+                  {dividerSel !== null && (
+                    <button
+                      className="xp-jd-btn" data-testid="divider-collapsible-btn" style={dockBtn(dividerSel)}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => focusedEditor.current?.chain().focus().toggleXpDividerCollapsible().run()}
+                      title={dividerSel ? 'This divider collapses the content below it — click to make it decorative only' : 'Make this divider collapse the content below it'}
+                      aria-label="Divider collapsing" aria-pressed={dividerSel}
+                    >{dividerSel ? '⌄ Collapsing: on' : '⌄ Collapsing: off'}</button>
+                  )}
                 </div>
 
                 {/* ⇥ Indent — desktop primary slot (mobile version lives after Undo/Redo) */}
@@ -5346,6 +5488,15 @@ ${dividerCss('.xp-j-prose')}
                     onClick={insertDivider}
                     title="Insert a divider at the cursor" aria-label="Insert divider"
                   >{'—'} Divider</button>
+                  {dividerSel !== null && (
+                    <button
+                      className="xp-jd-btn" data-testid="divider-collapsible-btn" style={dockBtn(dividerSel)}
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => focusedEditor.current?.chain().focus().toggleXpDividerCollapsible().run()}
+                      title={dividerSel ? 'This divider collapses the content below it — click to make it decorative only' : 'Make this divider collapse the content below it'}
+                      aria-label="Divider collapsing" aria-pressed={dividerSel}
+                    >{dividerSel ? '⌄ Collapsing: on' : '⌄ Collapsing: off'}</button>
+                  )}
                 </div>
 
                 <span style={{ width: 1, height: 18, background: dockDiv, flexShrink: 0, margin: '0 2px' }} />

@@ -15,6 +15,7 @@ import { ColorPickerModal } from './ColorPickerModal'
 import { COLOR_PALETTE, normalizeHexColor, hexToRgba } from './utils'
 import { useIsDesktop } from './ScheduleSheet'
 import { useEmailShare } from './useEmailShare'
+import { PlannerHeaderButtons } from './PlannerHeaderButtons'
 import { docToEmail } from './emailShare'
 
 const JournalEditorContent = dynamic(
@@ -1109,7 +1110,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
   // v1.347 — Maximize/Restore of the Planner shell: desktop only (>= 1024px), like My Schedule; smaller screens keep their existing layout. A pure style change (nothing remounts), and only the Editor view is ever maximised.
   const desktop = useIsDesktop()
   const [maxRequested, setMaxRequested] = useState(false)
-  const maximized = desktop && maxRequested && view === 'editor'
+  const maximized = desktop && maxRequested   // v1.351: the same state for Editor, Library and Journal Calendar — it survives switching tabs
   // v1.330 - Library tabs (Documents = the existing list; Notes; Folders), the folder being browsed, and which document the Editor is on.
   // activeDocId === null -> the editor shows the day's PRIMARY document (calData[editorDate].notes), exactly as before.
   const [libTab, setLibTab]         = useState<'documents' | 'notes'>('documents')
@@ -1733,13 +1734,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
               Today
             </button>
           )}
-          <button
-            onClick={doClose}
-            className="hidden sm:block text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
-            style={{ background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}
-          >
-            × Close
-          </button>
+          <PlannerHeaderButtons maximized={maximized} onToggleMaximize={desktop ? () => setMaxRequested(m => !m) : undefined} onClose={doClose} />
         </div>
       </div>
 
@@ -2035,14 +2030,10 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
           )}
         </div>
 
-        {/* Close — hidden on mobile (bottom nav handles close) */}
-        <button
-          onClick={doClose}
-          className="hidden sm:block text-xs px-2.5 py-1.5 rounded-lg hover:opacity-80 flex-shrink-0"
-          style={{ position: 'absolute', right: 20, background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.28)', color: '#fca5a5' }}
-        >
-          × Close
-        </button>
+        {/* Maximize/Restore + Close — round, same as the Editor tab (Close hidden on mobile: the bottom nav handles it) */}
+        <div style={{ position: 'absolute', right: 20 }}>
+          <PlannerHeaderButtons maximized={maximized} onToggleMaximize={desktop ? () => setMaxRequested(m => !m) : undefined} onClose={doClose} />
+        </div>
       </div>
 
       {/* Controls bar — wraps to a second line on narrow viewports instead of scrolling,
@@ -3172,6 +3163,7 @@ export function JournalWorkspaceModal({ onClose, mobileNavSpace, onDirtyChange, 
       onEditor={() => setView('editor')}
       maximized={maximized}
       onToggleMaximize={desktop ? () => setMaxRequested(m => !m) : undefined}
+      labelOptions={allCategories}
       onDirtyChange={onDirtyChange}
       closeIntent={closeIntent}
       flushRef={editorFlushRef}

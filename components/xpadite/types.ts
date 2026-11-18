@@ -118,6 +118,7 @@ export interface JournalBlock {
   // v1.349: `createdAt` is the section's immutable creation time (set once, never rewritten by edits/saves/syncs). `displayAt` is an OPTIONAL user-chosen
   // value for the bottom-right stamp; when absent the stamp shows createdAt. Clearing displayAt ("Use original") restores the creation time.
   displayAt?: number
+  labelId?: string    // v1.351: a Library label (by id) assigned to THIS Planner section; the section stays a Planner section (nothing is created in the Library)
   sourceTaskId?: string // TM source task id — for duplicate-detection only, no sync
   // Mind Mapping Canvas ('drawing' blocks only): the live, editable object list
   // (JSON array of the canvas's own object shape) — `src`/`thumbnail` stay the

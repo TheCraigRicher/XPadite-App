@@ -343,7 +343,7 @@ test('editor (v1.332): Notes have NO section restrictions — the block logic an
   for (const name of ['insertBlock', 'deleteBlock', 'duplicateBlock', 'transferSection', 'handleSplitSection']) assert.ok(!/isNote/.test(fnBody(ed, name)), name + ' ignores isNote')
   assert.ok(!/\bdisabled\b/.test(ed.slice(ed.indexOf('function SectionPicker'), ed.indexOf('function SectionPicker') + 1200)), '+ Section can never be disabled')
   assert.equal((ed.match(/<SectionPicker isDark=\{isDark\} onPick=/g) ?? []).length, 2, '+ Section at both toolbar slots, always active')
-  assert.ok(/onDelete=\{blocks\.length > 1 \? \(\) => deleteBlock\(block\.id\) : undefined\}/.test(ed), 'any section can be deleted (a document always keeps one)')
+  assert.ok(/onDelete=\{\(\) => deleteBlock\(block\.id\)\}/.test(ed), 'any section can be deleted (v1.354: the only section too, after a confirmation; a document always keeps one)')
   assert.ok(!/A Note has a single section/.test(ed))
 })
 

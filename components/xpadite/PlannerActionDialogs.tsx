@@ -1,7 +1,7 @@
 'use client'
 
 // v1.351 — the small dialogs the Planner-wide actions open after "Continue": the label picker (Assign Label), the merge confirmation, and a plain
-// "can't do that" notice. Presentational only: the editor decides and applies; nothing here touches a document.
+// "can't do that" notice (v1.354: and the confirmation for deleting a day's only section). Presentational only: the editor decides and applies; nothing here touches a document.
 import React from 'react'
 import { createPortal } from 'react-dom'
 import { useEscapeLayer } from './escapeLayers'
@@ -107,6 +107,20 @@ export function NoticeDialog({ isDark, title, message, onClose }: { isDark: bool
       <div style={{ fontSize: 15, fontWeight: 700 }}>{title}</div>
       {message.map((m, i) => <div key={i} style={{ fontSize: 12.5, opacity: 0.85 }}>{m}</div>)}
       <button type="button" data-testid="notice-ok" onClick={onClose} style={{ ...btn(isDark, true), alignSelf: 'flex-end' }}>OK</button>
+    </Shell>
+  )
+}
+
+/** v1.354: Delete on a day's ONLY section asks first (deleting it replaces it with an empty section). Cancel is the focused default. */
+export function DeleteOnlySectionDialog({ isDark, onConfirm, onCancel }: { isDark: boolean; onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <Shell isDark={isDark} label="Delete this section?" onClose={onCancel} testId="delete-confirm">
+      <div style={{ fontSize: 15, fontWeight: 700 }}>Delete this section?</div>
+      <div style={{ fontSize: 12.5, opacity: 0.85 }}>This is the only section for this day. Deleting it will remove its contents and replace it with an empty section.</div>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button type="button" autoFocus data-testid="delete-cancel" onClick={onCancel} style={btn(isDark, false)}>Cancel</button>
+        <button type="button" data-testid="delete-confirm-btn" onClick={onConfirm} style={btn(isDark, true, true)}>Delete</button>
+      </div>
     </Shell>
   )
 }

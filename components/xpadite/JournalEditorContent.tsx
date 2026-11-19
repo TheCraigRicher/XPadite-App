@@ -36,7 +36,7 @@ import {
 } from './journalUtils'
 import { NodeSelection } from '@tiptap/pm/state'
 import { SectionStampEditor } from './SectionStampEditor'
-import { LabelPickerDialog, MergeConfirmDialog, NoticeDialog, type LabelOption, type MergeItem } from './PlannerActionDialogs'
+import { LabelPickerDialog, MergeConfirmDialog, NoticeDialog, DeleteOnlySectionDialog, type LabelOption, type MergeItem } from './PlannerActionDialogs'
 import { mergeProblems, mergeContents } from './plannerMerge'
 import { useEmailShare } from './useEmailShare'
 import { sectionToEmail, combineSectionsEmail } from './emailShare'
@@ -693,6 +693,7 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
   const { updateDay, setToast } = useApp()
   // v1.349: Send via Email (shared with the Library) and the stamp's date/time editor
   const { share: shareEmail, dialog: emailDialog } = useEmailShare(setToast, isDark)
+  const [confirmDeleteOnly, setConfirmDeleteOnly] = useState(false)   // v1.354: Delete on a day's only section asks first
   const [stampRect, setStampRect] = useState<DOMRect | null>(null)
   const stampTouch = useRef<{ x: number; y: number; moved: boolean } | null>(null)
   const lastStampTap = useRef<{ t: number; x: number; y: number } | null>(null)
@@ -1172,6 +1173,9 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
         />
       )}
       {emailDialog}
+      {confirmDeleteOnly && (
+        <DeleteOnlySectionDialog isDark={isDark} onCancel={() => setConfirmDeleteOnly(false)} onConfirm={() => { setConfirmDeleteOnly(false); onDelete?.() }} />
+      )}
 
       {/* ⋮ block menu */}
       {hasMenu && (
@@ -1290,8 +1294,8 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                     <button data-testid="send-email" onClick={() => { setMenuOpen(false); shareEmail(sectionToEmail(block, editor ? serializeJournalContent(editor) : block.content)) }} style={menuItemStyle(isDark)}>
                       ✉ Send via Email
                     </button>
-                    {!!onDelete && !isOnlyBlock && (
-                      <button onClick={() => { onDelete(); setMenuOpen(false) }} style={{ ...menuItemStyle(isDark), color: '#f87171' }}>
+                    {!!onDelete && (
+                      <button data-testid="section-delete" onClick={() => { setMenuOpen(false); if (isOnlyBlock) setConfirmDeleteOnly(true); else onDelete() }} style={{ ...menuItemStyle(isDark), color: '#f87171' }}>
                         🗑 Delete
                       </button>
                     )}
@@ -4718,6 +4722,20 @@ export function JournalEditorContent({
         .xp-hdr-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
         @media (prefers-reduced-motion: reduce) { .xp-hdr-btn { transition: none; } }
 ${dividerCss('.xp-j-prose')}
+        /* v1.354 — phones: a collapsible divider in an UNSPLIT Planner section runs out into the section's own padding instead of stopping at the text column.
+           A section pads its text 14px left / 40px right (the 40px keeps the ⋮ menu column clear), and the divider is only as wide as the text column, so its lines
+           were short. Here the box grows 10px left and 26px right (leaving ~4px / ~14px to the section edge); the dots and both lines are laid out in the first
+           (100% - 16px) of that box so they stay centred on the text column, the lines are mirror images, and the chevron sits in the extra right-hand strip,
+           ~5px clear of the right line. Split-section panes and the Journal Notes editor do not match the selector and keep the v1.353 layout. */
+        @media (max-width: 767px) {
+          .xp-j-sec-wrap > div > div > .tiptap > hr.xp-divider[data-collapsible="true"] {
+            margin-left: -10px; margin-right: -26px;
+            background-size:
+              calc(50% - 64px) 1px, calc(50% - 64px) 1px, calc(100% - 16px) 100%, calc(100% - 16px) 100%, calc(100% - 16px) 100%, calc(100% - 16px) 100%, calc(100% - 16px) 100%, 14px 14px;
+            background-position:
+              left center, right 16px center, 0 0, 0 0, 0 0, 0 0, 0 0, right 0 center;
+          }
+        }
         .xp-j-prose strong { font-weight: 650; }
         .xp-j-prose em { font-style: italic; }
         .xp-j-prose h2 { font-size: 1.30em; font-weight: 700; margin: 0 0 8px; line-height: 1.3; letter-spacing: -0.01em; color: inherit; }
@@ -5157,7 +5175,7 @@ ${dividerCss('.xp-j-prose')}
                             onContentChange={onBlockContentChange}
                             onFocus={onEditorFocus}
                             onSelectionUpdate={onEditorSelectionUpdate}
-                            onDelete={blocks.length > 1 ? () => deleteBlock(block.id) : undefined}
+                            onDelete={() => deleteBlock(block.id)}
                             onDuplicate={block.type === 'section' ? () => duplicateBlock(block.id) : undefined}
                             onTransferSection={block.type === 'section' ? () => setTransferBlockId(block.id) : undefined}
                             onMoveActivate={block.type === 'section' ? () => {

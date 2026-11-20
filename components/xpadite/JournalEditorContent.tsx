@@ -8,6 +8,7 @@ import { Mark, mergeAttributes } from '@tiptap/core'
 import { XpDivider, dividerCss } from './journalDivider'
 import { XpAlignExt, XP_ALIGNS, currentXpAlign } from './journalAlign'
 import type { XpAlign } from './journalAlign'
+import { XpIndentExt, indentCss, applyXpIndent } from './journalIndent'
 import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
@@ -442,6 +443,7 @@ function useProseEditor({
       TableRow,
       TableHeader,
       TableCell,
+      XpIndentExt,
     ],
     content: { type: 'doc', content: [{ type: 'paragraph' }] },
     editorProps: {
@@ -3937,15 +3939,19 @@ export function JournalEditorContent({
     setShowEmoji(false)
   }
 
-  // Indent — nests list items; no-op for plain paragraphs (no arbitrary block indent)
+  // Indent / Outdent — v1.355: list items nest / un-nest as before (the first item of a list indents the whole list); ordinary paragraphs and headings
+  // get their own indent level and are never turned into list items (see journalIndent.ts)
   function handleIndent() {
     const ed = focusedEditor.current
-    if (!ed) return
-    if (ed.isActive('taskList')) {
-      ed.chain().focus().sinkListItem('taskItem').run()
-    } else {
-      ed.chain().focus().sinkListItem('listItem').run()
-    }
+    if (!ed || ed.isDestroyed) return
+    ed.view.focus()
+    applyXpIndent(ed, 1)
+  }
+  function handleOutdent() {
+    const ed = focusedEditor.current
+    if (!ed || ed.isDestroyed) return
+    ed.view.focus()
+    applyXpIndent(ed, -1)
   }
 
   // Sub-item — true ON/OFF toggle, distinct from Indent: ON creates an explicit
@@ -4722,6 +4728,7 @@ export function JournalEditorContent({
         .xp-hdr-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
         @media (prefers-reduced-motion: reduce) { .xp-hdr-btn { transition: none; } }
 ${dividerCss('.xp-j-prose')}
+${indentCss('.xp-j-prose')}
         /* v1.354 — phones: a collapsible divider in an UNSPLIT Planner section runs out into the section's own padding instead of stopping at the text column.
            A section pads its text 14px left / 40px right (the 40px keeps the ⋮ menu column clear), and the divider is only as wide as the text column, so its lines
            were short. Here the box grows 10px left and 26px right (leaving ~4px / ~14px to the section edge); the dots and both lines are laid out in the first
@@ -5408,8 +5415,15 @@ ${dividerCss('.xp-j-prose')}
                   style={dockBtn()}
                   onMouseDown={e => e.preventDefault()}
                   onClick={handleIndent}
-                  title="Indent (nest into sub-item)"
+                  title="Indent (text, checklists and lists)"
                 >⇥ Indent</button>
+                <button
+                  className="xp-jd-btn xp-jd-ind-dt" data-testid="outdent-btn"
+                  style={dockBtn()}
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={handleOutdent}
+                  title="Outdent" aria-label="Outdent"
+                >⇤ Outdent</button>
                 {/* ↳ Sub-item — ON/OFF toggle: parent→child hierarchy with connector line, distinct from Indent */}
                 <button
                   className={`xp-jd-btn${isSubItem() ? ' xp-j-active' : ''}`}
@@ -5484,8 +5498,15 @@ ${dividerCss('.xp-j-prose')}
                   style={dockBtn()}
                   onMouseDown={e => e.preventDefault()}
                   onClick={handleIndent}
-                  title="Indent (nest into sub-item)"
+                  title="Indent (text, checklists and lists)"
                 >⇥ Indent</button>
+                <button
+                  className="xp-jd-btn xp-jd-ind-mo" data-testid="outdent-btn-mo"
+                  style={dockBtn()}
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={handleOutdent}
+                  title="Outdent" aria-label="Outdent"
+                >⇤ Outdent</button>
 
                 {/* Upload */}
                 <label style={{ ...dockBtn(), cursor: 'pointer' }} title="Upload image" className="xp-jd-btn">

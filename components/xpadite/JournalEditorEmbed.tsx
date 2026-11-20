@@ -19,6 +19,7 @@ import type { TaskAttachment } from './types'
 import { useEscapeLayer } from './escapeLayers'
 import { XpDivider, dividerCss } from './journalDivider'
 import { XpAlignExt } from './journalAlign'
+import { XpIndentExt, indentCss } from './journalIndent'
 
 const EmojiPickerLib = dynamic(() => import('emoji-picker-react'), { ssr: false })
 
@@ -101,6 +102,7 @@ export function JournalEditorEmbed({
           }
         },
       }).configure({ nested: false }),
+      XpIndentExt,   // v1.355: a Planner paragraph's / list's indent level survives being loaded and re-saved here
       XpAlignExt.configure({ defaultJustify: false }),   // v1.352: a Planner paragraph's alignment survives being loaded and re-saved here (no default-justify rule in this editor)
       XpDivider,   // v1.347: a Planner divider inside this block's content must survive being loaded and re-saved here
       Placeholder.configure({ placeholder: 'What made today great? Reflections, insights, gratitude…' }),
@@ -203,6 +205,7 @@ export function JournalEditorEmbed({
         .xp-je-prose p { margin: 0 0 4px; }
         .xp-je-prose p:last-child { margin-bottom: 0; }
 ${dividerCss('.xp-je-prose')}
+${indentCss('.xp-je-prose')}
         .xp-je-prose ul:not([data-type="taskList"]) { padding-left: 18px; margin: 0 0 4px; list-style: disc; }
         .xp-je-prose ol { padding-left: 20px; margin: 0 0 4px; list-style: decimal; }
         .xp-je-prose li { margin-bottom: 2px; }

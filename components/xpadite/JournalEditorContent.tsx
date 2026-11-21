@@ -9,6 +9,7 @@ import { XpDivider, dividerCss } from './journalDivider'
 import { XpAlignExt, XP_ALIGNS, currentXpAlign } from './journalAlign'
 import type { XpAlign } from './journalAlign'
 import { XpIndentExt, indentCss, applyXpIndent } from './journalIndent'
+import { XpMarkerWidthExt } from './journalMarkerWidth'
 import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
@@ -429,6 +430,7 @@ function useProseEditor({
         listItem: false, // replaced by SubItemListItem below (adds the sub-item attribute)
       }),
       SubItemListItem,
+      XpMarkerWidthExt,   // v1.358: render-only data-xp-mw on numbered lists (widest marker) for the sub-item marker gap
       TaskList,
       SubItemTaskItem.configure({ nested: true }), // nested:true required for checkbox sub-items
       Placeholder.configure({ placeholder }),
@@ -4815,6 +4817,34 @@ ${indentCss('.xp-j-prose')}
             left: -21px; width: 19px;
             clip-path: polygon(0% 42%, 82% 42%, 82% 12%, 100% 50%, 82% 88%, 82% 58%, 0% 58%);
           }
+        }
+        /* v1.358 — marker breathing room for bullet / numbered / lettered sub-items. The browser draws those markers (disc, 1., a.) just left of
+           the item's text, exactly where the connector's arrowhead ends, so they collided. The connector is positioned relative to the <li>, so the
+           <li> and the connector are shifted by the SAME amount in opposite directions: margin-left grows by --xp-sub-marker-gap and the connector's
+           left offset grows by the same amount to the left. The connector therefore stays on exactly the same pixels; only the marker and its
+           text (which wrap together, because the marker belongs to the same <li>) move right. Checkbox sub-items are untouched. Nested levels
+           add the same gap each, so they stay evenly stepped. */
+        /* The gap is chosen per LIST from how wide its widest marker is. journalMarkerWidth.ts (a render-only decoration) sets data-xp-mw = the number of
+           characters in that marker, from the list's START number and item count (numbers) or a–z / aa… (letters), so a list that starts at 10, or grows
+           past 9 items, is covered the same way. No attribute = 1 character (1–9, a–z, bullets) = 16px; each extra character adds 8px. */
+        .xp-j-prose ul, .xp-j-prose ol { --xp-sub-marker-gap: 16px; }
+        .xp-j-prose ol[data-xp-mw="2"] { --xp-sub-marker-gap: 24px; }
+        .xp-j-prose ol[data-xp-mw="3"] { --xp-sub-marker-gap: 32px; }
+        .xp-j-prose ol[data-xp-mw="4"] { --xp-sub-marker-gap: 40px; }
+        .xp-j-prose ol[data-xp-mw="5"], .xp-j-prose ol[data-xp-mw="6"] { --xp-sub-marker-gap: 48px; }
+        .xp-j-prose ul:not([data-type="taskList"]) > li[data-sub-item="true"],
+        .xp-j-prose ol > li[data-sub-item="true"] { margin-left: calc(20px + var(--xp-sub-marker-gap)); }
+        .xp-j-prose ul:not([data-type="taskList"]) > li[data-sub-item="true"]::before,
+        .xp-j-prose ul:not([data-type="taskList"]) > li[data-sub-item="true"]::after,
+        .xp-j-prose ol > li[data-sub-item="true"]::before,
+        .xp-j-prose ol > li[data-sub-item="true"]::after { left: calc(-16px - var(--xp-sub-marker-gap)); }
+        @media (max-width: 640px) {
+          .xp-j-prose ul:not([data-type="taskList"]) > li[data-sub-item="true"],
+          .xp-j-prose ol > li[data-sub-item="true"] { margin-left: calc(24px + var(--xp-sub-marker-gap)); }
+          .xp-j-prose ul:not([data-type="taskList"]) > li[data-sub-item="true"]::before,
+          .xp-j-prose ul:not([data-type="taskList"]) > li[data-sub-item="true"]::after,
+          .xp-j-prose ol > li[data-sub-item="true"]::before,
+          .xp-j-prose ol > li[data-sub-item="true"]::after { left: calc(-21px - var(--xp-sub-marker-gap)); }
         }
         /* Box Title — a text format (toggle mark), not a section or drawn shape.
            Five curated pastel pill treatments (default: purple), each readable

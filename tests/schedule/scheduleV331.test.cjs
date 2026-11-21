@@ -80,7 +80,7 @@ test('Month cells: isPast is strictly "before today" at local midnight boundarie
 test('v1.345: the ONLY completion field on an event is the optional completedAt (used when there is no linked task); the only newer migration is the additive 026', () => {
   const t = strip(src('scheduleLogic.ts')); const iface = t.slice(t.indexOf('export interface ScheduleEvent'), t.indexOf('}', t.indexOf('export interface ScheduleEvent')))
   assert.ok(/completedAt\?: number \| null/.test(iface) && !/isDone|status/i.test(iface.replace(/completedAt\?: number \| null/, '')), 'ScheduleEvent has completedAt and no other completion/status field')
-  assert.deepEqual(fs.readdirSync(path.join(ROOT, 'supabase/migrations')).filter(n => /^02[5-9]_|^03/.test(n)), ['025_journal_documents.sql', '026_deadline_completion.sql'], 'one additive migration (026): database schema, RLS and billing are otherwise untouched')
+  assert.deepEqual(fs.readdirSync(path.join(ROOT, 'supabase/migrations')).filter(n => /^02[5-9]_|^03/.test(n)), ['025_journal_documents.sql', '026_deadline_completion.sql', '027_schedule_reminders_push.sql'], 'v1.356 adds 027 (additive reminders/push tables); one additive migration (026): database schema, RLS and billing are otherwise untouched')
   for (const f of ['scheduleLogic.ts', 'scheduleMonth.ts']) assert.ok(!/supabase|fetch\(|localStorage\.setItem\(.*event/i.test(strip(src(f)).replace(/readViewPref|writeViewPref|VIEW_PREF_KEY|xp-schedule-view/g, '')), f + ' stays pure')
 })
 

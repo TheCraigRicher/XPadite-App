@@ -28,7 +28,7 @@ import { MonthDaySheet, MonthGrid } from './ScheduleMonthGrid'
 import { MonthPicker } from './ScheduleMonthPicker'
 import { buildMonthGrid, monthDayEvents, pickMonthAnchor } from './scheduleMonth'
 import type { MonthCell } from './scheduleMonth'
-import { Chevron, EmptyDetails, EventDetails, EventSheet, FilterSelect, LAYER_ATTR, iconBtn } from './ScheduleParts'
+import { Chevron, EmptyDetails, EventDetails, EventSheet, FilterSelect, LAYER_ATTR, ReminderBell, iconBtn } from './ScheduleParts'
 import { ZDate } from './zdate'
 
 // ── Layout constants ────────────────────────────────────────────────────────
@@ -113,7 +113,7 @@ function Card({ title, right, children, grow = 0, minHeight = 0, maxHeight, test
         <h3 className="text-[13.5px] font-bold" style={{ color: 'var(--xp-txt)' }}>{title}</h3>
         {right}
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col" style={{ overscrollBehavior: 'contain' }}>{children}</div>
+      <div className="flex-1 min-h-0 overflow-y-auto flex flex-col" data-testid={testId ? testId + '-body' : undefined} style={{ overscrollBehavior: 'contain', scrollbarWidth: 'thin', scrollbarColor: 'rgba(124,58,237,0.65) rgba(124,58,237,0.10)' }}>{children}</div>
     </section>
   )
 }
@@ -171,6 +171,7 @@ function EventBlock({ p, dayStart, selected, dragging, past, onSelect, onPress }
         // compact deadline flag: the card keeps its category colours (never turned red)
         <svg data-testid="deadline-flag" viewBox="0 0 24 24" width="10" height="10" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" aria-label="Deadline" className="absolute" style={{ top: 3, right: ev.readOnly ? 14 : 3, color: '#dc2626' }}><path d="M5 21V4M5 4h11l-2 4 2 4H5" /></svg>
       )}
+      {ev.reminderMins !== null && ev.reminderMins !== undefined && heightPx >= 40 && <ReminderBell size={9} style={{ position: 'absolute', bottom: 3, right: 3 }} />}
       {showTime && <span className="xp-sch-ev-sub block truncate">{timeRangeLabel(ev.startAt, ev.endAt, fmt)}</span>}
       {showPlace && <span className="xp-sch-ev-sub hidden sm:block truncate">📍 {ev.location}</span>}
     </button>
@@ -742,7 +743,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
 
           {/* ── Sidebar (large screens): same top and bottom edges as the calendar ── */}
           <aside className="hidden lg:flex flex-col gap-3 w-[296px] flex-shrink-0 min-h-0 overflow-y-auto pr-4" style={{ overscrollBehavior: 'contain' }} aria-label="Schedule details" data-testid="schedule-sidebar">
-            <Card title={`Upcoming (${upcoming.length})`} grow={1} minHeight={120} testId="card-upcoming">
+            <Card title={`Upcoming (${upcoming.length})`} grow={1} minHeight={96} testId="card-upcoming">
               {upcoming.length === 0 ? (
                 <p className="text-[12px] py-2" style={{ color: 'var(--xp-txt3)' }}>Nothing coming up.</p>
               ) : (
@@ -756,13 +757,13 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
               )}
             </Card>
 
-            <Card title="Selected Event" grow={1.25} minHeight={150} testId="card-selected">
+            <Card title="Selected Event" grow={1} minHeight={96} testId="card-selected">
               {selected
                 ? <EventDetails ev={selected} onEdit={() => onEdit(selected)} onDelete={() => onDelete(selected)} onDuplicate={canDuplicate(selected) ? () => onDuplicate(selected) : undefined} />
                 : <EmptyDetails />}
             </Card>
 
-            <Card title="Color Categories" maxHeight="42%" testId="card-categories">
+            <Card title="Color Categories" grow={1} minHeight={96} testId="card-categories">
               <CategoryChecklist hidden={hidden} onToggle={onToggleCategory} />
             </Card>
           </aside>
@@ -804,7 +805,7 @@ function UpcomingRow({ ev, onPick }: { ev: ScheduleEvent; onPick: () => void }) 
     <button type="button" onClick={onPick} className="w-full text-left"
       style={{ padding: '7px 9px', borderRadius: 9, background: 'var(--xp-bg3)', borderLeft: `3px solid ${cat.edge}` }}>
       <p className="text-[12.5px] font-semibold truncate" style={{ color: 'var(--xp-txt)' }}>{ev.title}</p>
-      <p className="text-[11px] truncate" style={{ color: 'var(--xp-txt3)' }}>{new ZDate(ev.startAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · {clockLabel(ev.startAt, fmt)}</p>
+      <p className="text-[11px] flex items-center gap-1" style={{ color: 'var(--xp-txt3)' }}><span className="truncate">{new ZDate(ev.startAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · {clockLabel(ev.startAt, fmt)}</span>{ev.reminderMins !== null && ev.reminderMins !== undefined && <ReminderBell size={10} />}</p>
     </button>
   )
 }

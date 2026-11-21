@@ -19,6 +19,7 @@ import { JournalWorkspaceModal } from './JournalWorkspaceModal'
 import { NotificationsModal } from './NotificationsModal'
 import { SyncModal } from './SyncModal'
 import { MeetingsModal } from './MeetingsModal'
+import { ScheduleReminderAlerts } from './ScheduleReminderAlerts'
 import { HelpFeedbackModal } from './HelpFeedbackModal'
 import { GalleryModal } from './GalleryModal'
 import { SettingsModal } from './SettingsModal'
@@ -1005,6 +1006,7 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
       }}
     >
       <ReminderChecker />
+      <ScheduleReminderAlerts />
       <MissingTimeChecker />
       <AppSidebar
         onGallery={() => setGalleryOpen(true)}

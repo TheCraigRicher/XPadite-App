@@ -193,7 +193,7 @@ test('the removal safeguard, anchored placement and legacy-date note are all wir
   assert.match(read('components/xpadite/ScheduleParts.tsx'), /<AssignedDateRow eventId=\{ev\.id\} \/>/)
   const sql = read('supabase/migrations/026_deadline_completion.sql')
   assert.ok(!new RegExp('holi' + 'day|timezone|user_preferences', 'i').test(sql.replace(/--[^\n]*/g, '')), 'no regional-calendar / timezone / preferences change in the migration')
-  assert.ok(!fs.readdirSync(path.join(ROOT, 'supabase/migrations')).some(n => /^027_/.test(n)), 'no migration 027')
+  assert.ok(!fs.readdirSync(path.join(ROOT, 'supabase/migrations')).some(n => /^028_/.test(n)), 'no migration 028 (v1.356 adds the additive 027 reminders/push tables)')
 })
 
 // ── regression: detaching a LEGACY-MISMATCH deadline must not change its assigned date ─────────────────────────────────────────────

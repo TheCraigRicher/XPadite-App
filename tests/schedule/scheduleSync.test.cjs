@@ -121,7 +121,7 @@ test('Task Manager presentation: ordinary event tasks are NOT urgent/red; deadli
 test('Sync with Task Manager menu item: last entry, sync icon, same menu on every size (incl. maximized)', () => {
   const menu = src('ScheduleMenu.tsx'), m = src('MeetingsModal.tsx')
   const items = [...menu.matchAll(/role="menuitem"/g)].length
-  assert.equal(items, 6, 'Search, Filter, Manage Categories, Duplicate, Preferences, Sync')
+  assert.equal(items, 7, 'Search, Filter, Manage Categories, Duplicate, Preferences, Reminders & sound (v1.356), Sync')
   assert.ok(menu.indexOf('Schedule Preferences') < menu.indexOf('Sync with Task Manager') && /data-testid="menu-sync-task-manager"/.test(menu) && /<svg[^>]*>[\s\S]*Sync with Task Manager/.test(menu))
   assert.ok(/onSync=\{\(\) => setDialog\('sync'\)\}/.test(m) && /<SyncTaskManagerDialog open=\{dialog === 'sync'\}/.test(m), 'one menu, one dialog — no per-size variants')
 })

@@ -5,12 +5,15 @@
 // for this preview and is labelled as not saved. The rules (naming, colours, protected built-ins, replacement on delete)
 // are in scheduleEngine.ts; these components only collect input and show the result.
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { DURATION_CHOICES } from './scheduleLogic'
 import type { ScheduleCategory, ScheduleEvent, SchedulePrefs } from './scheduleLogic'
 import { CATEGORY_NAME_MAX, CATEGORY_SWATCHES, categoryUsage, isHexColor } from './scheduleEngine'
 import { iconBtn, useLayerEscape } from './ScheduleParts'
 import { LAYER_ATTR, SheetFrame, useIsPhone, useSheetPhase } from './ScheduleSheet'
+import { disablePush, enablePush, getPushState, sendTestPush } from '@/lib/push/client'
+import type { PushState } from '@/lib/push/client'
+import { playReminderChime, unlockAudio } from '@/lib/audio/reminderSound'
 
 const field: React.CSSProperties = {
   width: '100%', background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)', borderRadius: 10,
@@ -359,6 +362,111 @@ function PreferencesInner({ prefs, onApply, onClose, phone, visible }: PrefsProp
         <Segmented label="Time format" value={draft.timeFormat} options={[{ value: '12h', label: '12-hour' }, { value: '24h', label: '24-hour' }]} onChange={timeFormat => change({ timeFormat })} />
         <p className="text-[11px]" style={{ color: 'var(--xp-txt3)' }}>Applies to the calendar, agenda, event details and the Start/End time lists.</p>
       </div>
+    </Shell>
+  )
+}
+
+// ── v1.356 — Reminders & sound: turn background reminders on for THIS device, test the chime, test a system notification ─────────────────────────
+export function ReminderSettingsDialog(props: { open?: boolean; onClose: () => void }) {
+  const phone = useIsPhone()
+  const { mounted, visible } = useSheetPhase(props.open ?? true, phone)
+  if (!mounted) return null
+  return <ReminderSettingsInner onClose={props.onClose} phone={phone} visible={visible} />
+}
+
+type Note = { tone: 'ok' | 'warn' | 'info'; text: string }
+
+function ReminderSettingsInner({ onClose, phone, visible }: { onClose: () => void; phone: boolean; visible: boolean }) {
+  useLayerEscape(onClose)
+  const [state, setState] = useState<PushState | null>(null)
+  const [busy, setBusy] = useState<'enable' | 'disable' | 'test' | null>(null)
+  const [enableNote, setEnableNote] = useState<Note | null>(null)
+  const [soundNote, setSoundNote] = useState<Note | null>(null)
+  const [pushNote, setPushNote] = useState<Note | null>(null)
+  useEffect(() => { let alive = true; void getPushState().then(s => { if (alive) setState(s) }); return () => { alive = false } }, [])
+  const refresh = async () => setState(await getPushState())
+
+  async function onEnable() {
+    setBusy('enable'); setEnableNote(null)
+    const r = await enablePush()
+    setBusy(null)
+    if (r.ok) setEnableNote({ tone: 'ok', text: 'Reminders are on for this device.' })
+    else setEnableNote({ tone: r.reason === 'dismissed' ? 'info' : 'warn', text: ({
+      unsupported: 'This browser cannot show background notifications.',
+      'ios-install': 'On iPhone and iPad, add XPadite to your Home Screen first, then open it from there.',
+      denied: 'Notifications are blocked for XPadite. Allow them in your browser or device settings, then come back here.',
+      dismissed: 'No problem — nothing was changed. You can turn reminders on whenever you like.',
+      not_configured: 'Background reminders are not switched on for this XPadite yet. They still appear, with sound, while XPadite is open.',
+      no_service_worker: 'XPadite could not start its notification helper. Reload the page and try again.',
+      server: 'Something went wrong turning reminders on. Please try again.',
+    } as const)[r.reason] })
+    await refresh()
+  }
+  async function onDisable() {
+    setBusy('disable'); setEnableNote(null); setPushNote(null)
+    const ok = await disablePush()
+    setBusy(null)
+    setEnableNote(ok ? { tone: 'info', text: 'Reminders are off for this device.' } : { tone: 'warn', text: 'Could not turn reminders off. Please try again.' })
+    await refresh()
+  }
+  async function onTestSound() {
+    unlockAudio()
+    const r = await playReminderChime()
+    setSoundNote(r === 'played'
+      ? { tone: 'ok', text: 'You should have heard the XPadite reminder chime. If not, check your volume, silent mode and this site’s sound permission.' }
+      : r === 'blocked'
+        ? { tone: 'warn', text: 'Your browser blocked the sound. Tap Test Reminder Sound again, and check the site’s sound setting. Reminders still appear on screen.' }
+        : { tone: 'warn', text: 'This browser cannot play the reminder sound. Reminders still appear on screen.' })
+  }
+  async function onTestPush() {
+    setBusy('test'); setPushNote(null)
+    const r = await sendTestPush()
+    setBusy(null)
+    setPushNote(r === 'sent' ? { tone: 'ok', text: 'Test sent. A system notification should appear in a moment. If it does not, check this device’s notification settings.' }
+      : r === 'too_fast' ? { tone: 'info', text: 'Please wait a few seconds before sending another test.' }
+      : r === 'no_device' ? { tone: 'warn', text: 'This device is not turned on for reminders yet.' }
+      : r === 'not_configured' ? { tone: 'warn', text: 'Background reminders are not switched on for this XPadite yet.' }
+      : { tone: 'warn', text: 'The test could not be sent. Please try again.' })
+  }
+
+  const noteColor = (n: Note) => (n.tone === 'ok' ? '#16a34a' : n.tone === 'warn' ? '#b45309' : 'var(--xp-txt2)')
+  const btn: React.CSSProperties = { padding: '10px 12px', borderRadius: 10, minHeight: 40 }
+  const primary: React.CSSProperties = { ...btn, background: '#7c3aed', color: '#fff', border: 'none' }
+  const secondary: React.CSSProperties = { ...btn, background: 'var(--xp-bg3)', color: 'var(--xp-txt)', border: '0.5px solid var(--xp-bdr2)' }
+
+  let status: string
+  if (!state) status = 'Checking this device…'
+  else if (state.support === 'ios-install') status = 'On iPhone and iPad, reminders when XPadite is closed need XPadite on your Home Screen: tap Share, then Add to Home Screen, and open XPadite from there. Reminders already appear, with sound, while XPadite is open.'
+  else if (state.support === 'unsupported') status = 'This browser cannot show notifications when XPadite is closed. Reminders still appear, with sound, while XPadite is open.'
+  else if (state.permission === 'denied') status = 'Notifications are blocked for XPadite in this browser. To get reminders when XPadite is closed, allow notifications for this site in your browser or device settings.'
+  else if (state.configured === false) status = 'Background reminders are not switched on for this XPadite yet. Reminders still appear, with sound, while XPadite is open.'
+  else if (state.subscribed) status = 'On for this device: you will get a notification at the reminder time even when XPadite is closed.'
+  else status = 'Off for this device. Reminders appear (with sound) while XPadite is open. Turn this on to also get a notification when it is closed.'
+
+  const canEnable = !!state && state.support === 'ok' && state.permission !== 'denied' && state.configured !== false && !state.subscribed
+
+  return (
+    <Shell title="Reminders & sound" onClose={onClose} phone={phone} visible={visible} showClose
+      footer={<button type="button" onClick={onClose} data-testid="reminders-done" className="w-full text-[13px] font-semibold" style={secondary}>Done</button>}>
+      <section className="flex flex-col gap-2" aria-label="Reminders on this device">
+        <h4 className="text-[12.5px] font-bold" style={{ color: 'var(--xp-txt)' }}>Notifications on this device</h4>
+        <p data-testid="reminders-status" className="text-[12px] leading-snug" style={{ color: 'var(--xp-txt2)' }}>{status}</p>
+        <div className="flex gap-2 flex-wrap">
+          {canEnable && <button type="button" data-testid="reminders-enable" disabled={busy !== null} onClick={() => { void onEnable() }} className="text-[13px] font-semibold" style={primary}>{busy === 'enable' ? 'Turning on…' : 'Enable reminders'}</button>}
+          {state?.subscribed && <button type="button" data-testid="reminders-disable" disabled={busy !== null} onClick={() => { void onDisable() }} className="text-[13px] font-medium" style={secondary}>Turn off on this device</button>}
+          {state?.subscribed && <button type="button" data-testid="reminders-test-push" disabled={busy !== null} onClick={() => { void onTestPush() }} className="text-[13px] font-medium" style={secondary}>{busy === 'test' ? 'Sending…' : 'Send test notification'}</button>}
+        </div>
+        {enableNote && <p role="status" data-testid="reminders-enable-note" className="text-[11.5px]" style={{ color: noteColor(enableNote) }}>{enableNote.text}</p>}
+        {pushNote && <p role="status" data-testid="reminders-push-note" className="text-[11.5px]" style={{ color: noteColor(pushNote) }}>{pushNote.text}</p>}
+        <p className="text-[11px] leading-snug" style={{ color: 'var(--xp-txt3)' }}>When XPadite is closed the notification uses your device’s own notification sound. Silent mode, Do Not Disturb and battery-saver settings can mute or delay it, and the exact time is up to your device and browser.</p>
+      </section>
+      <section className="flex flex-col gap-2" aria-label="Reminder sound">
+        <h4 className="text-[12.5px] font-bold" style={{ color: 'var(--xp-txt)' }}>Reminder sound in XPadite</h4>
+        <p className="text-[12px] leading-snug" style={{ color: 'var(--xp-txt2)' }}>The chime plays when a reminder comes due while XPadite is open. Check your volume here — this creates no event and changes nothing.</p>
+        <div><button type="button" data-testid="reminders-test-sound" onClick={() => { void onTestSound() }} className="text-[13px] font-semibold" style={secondary}>Test Reminder Sound</button></div>
+        {soundNote && <p role="status" data-testid="reminders-sound-note" className="text-[11.5px]" style={{ color: noteColor(soundNote) }}>{soundNote.text}</p>}
+        <p className="text-[11px] leading-snug" style={{ color: 'var(--xp-txt3)' }}>Hearing the chime only proves sound works while XPadite is open. It does not prove notifications will arrive when XPadite is closed — use Send test notification for that.</p>
+      </section>
     </Shell>
   )
 }

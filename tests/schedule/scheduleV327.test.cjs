@@ -99,7 +99,7 @@ test('desktop/tablet filter controls are untouched', () => {
   const v = src('MyScheduleView.tsx')
   const rest = v.slice(v.indexOf(') : (\n              <>'), v.indexOf('{/* Grid */}'))
   assert.ok(/<FilterSelect value=\{filter\} onChange=\{onFilterChange\}/.test(rest) && /<CategoryChecklist hidden=\{hidden\} onToggle=\{onToggleCategory\}/.test(rest))
-  assert.ok(/<Card title="Color Categories" maxHeight="42%"/.test(v) && /<CategoryChecklist hidden=\{hidden\} onToggle=\{onToggleCategory\} \/>/.test(v), 'sidebar Color Categories')
+  assert.ok(/<Card title="Color Categories" grow=\{1\} minHeight=\{96\}/.test(v) && /<CategoryChecklist hidden=\{hidden\} onToggle=\{onToggleCategory\} \/>/.test(v), 'sidebar Color Categories')
 })
 
 // ── Task 3: Preferences draft ───────────────────────────────────────────────

@@ -110,9 +110,44 @@ export const RECURRENCE_OPTIONS: { value: ScheduleRecurrence; label: string }[] 
   { value: 'monthly', label: 'Every month' },
 ]
 
+/** v1.356: any reminder up to this many minutes is accepted (the database limit, migration 023: 0–100000). */
+export const REMINDER_MAX_MINUTES = 100000
+
+/** Is this one of the fixed dropdown choices (as opposed to a custom interval)? */
+export function isPresetReminder(mins: number | null | undefined): boolean {
+  return REMINDER_OPTIONS.some(o => o.value === (mins ?? null))
+}
+
+/** Split a total number of minutes into the Days / Hours / Minutes boxes of the custom reminder. */
+export function splitReminderMinutes(total: number): { days: number; hours: number; minutes: number } {
+  const t = Math.max(0, Math.floor(total))
+  return { days: Math.floor(t / DAY_MINUTES), hours: Math.floor((t % DAY_MINUTES) / 60), minutes: t % 60 }
+}
+
+/** Validate the custom Days / Hours / Minutes boxes (strings as typed). Zero is refused: "At start time" already means zero. */
+export function parseCustomReminder(days: string, hours: string, minutes: string): { ok: true; mins: number } | { ok: false; error: string } {
+  const parts = [days, hours, minutes].map(s => (s.trim() === '' ? '0' : s.trim()))
+  if (parts.some(s => !/^\d+$/.test(s))) return { ok: false, error: 'Use whole numbers, zero or more.' }
+  const [d, h, m] = parts.map(Number)
+  const total = d * DAY_MINUTES + h * 60 + m
+  if (total <= 0) return { ok: false, error: 'Enter a time before the event. For no delay choose \u201cAt start time\u201d.' }
+  if (total > REMINDER_MAX_MINUTES) return { ok: false, error: `Choose at most ${REMINDER_MAX_MINUTES} minutes (about 69 days) before the event.` }
+  return { ok: true, mins: total }
+}
+
+/** "1 day 2 hours before", "11 hours 30 minutes before" — the readable form of a custom interval. */
+export function customReminderLabel(mins: number): string {
+  const { days, hours, minutes } = splitReminderMinutes(mins)
+  const bits: string[] = []
+  if (days) bits.push(`${days} ${days === 1 ? 'day' : 'days'}`)
+  if (hours) bits.push(`${hours} ${hours === 1 ? 'hour' : 'hours'}`)
+  if (minutes) bits.push(`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`)
+  return `${bits.join(' ')} before`
+}
+
 export function reminderLabel(mins: number | null | undefined): string | null {
   if (mins === null || mins === undefined) return null
-  return REMINDER_OPTIONS.find(o => o.value === mins)?.label ?? `${mins} minutes before`
+  return REMINDER_OPTIONS.find(o => o.value === mins)?.label ?? customReminderLabel(mins)
 }
 
 export function recurrenceLabel(r: ScheduleRecurrence | undefined): string | null {
@@ -462,7 +497,7 @@ export interface ScheduleFormValues {
   isDeadline?: boolean
 }
 
-export type ScheduleFormErrors = Partial<Record<'title' | 'date' | 'endDate' | 'start' | 'end' | 'meetingUrl', string>>
+export type ScheduleFormErrors = Partial<Record<'title' | 'date' | 'endDate' | 'start' | 'end' | 'meetingUrl' | 'reminder', string>>
 
 /** The longest single event the form accepts (guards against a mistyped end date). */
 export const MAX_EVENT_DAYS = 7
@@ -514,6 +549,7 @@ export function validateScheduleForm(v: ScheduleFormValues): ScheduleFormErrors 
     }
   }
   if (v.meetingUrl.trim() && !safeHttpUrl(v.meetingUrl)) errors.meetingUrl = 'Enter a valid link, e.g. https://meet.google.com/abc-defg-hij'
+  if (v.reminderMins !== null && (!Number.isInteger(v.reminderMins) || v.reminderMins < 0 || v.reminderMins > REMINDER_MAX_MINUTES)) errors.reminder = 'Choose a reminder between 0 and 100000 minutes before the event.'
   return errors
 }
 

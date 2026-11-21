@@ -11,7 +11,7 @@ import { useSchedule } from './scheduleContext'
 import { chipCapacity, multiDayPosition } from './scheduleMonth'
 import type { MonthCell } from './scheduleMonth'
 import { SheetFrame, useIsPhone, useSheetEscape, useSheetPhase } from './ScheduleSheet'
-import { iconBtn } from './ScheduleParts'
+import { ReminderBell, iconBtn } from './ScheduleParts'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const DAY_INITIALS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
@@ -61,6 +61,7 @@ function Chip({ ev, cell, phone, selected, now, onOpen }: { ev: ScheduleEvent; c
         {marks}{ev.title}
       </span>
       {ev.isDeadline && <DeadlineFlag size={phone ? 8 : 10} />}
+      {!phone && ev.reminderMins !== null && ev.reminderMins !== undefined && <ReminderBell size={9} />}
       {!phone && ev.recurrence && ev.recurrence !== 'none' && <span aria-hidden="true" className="flex-shrink-0" style={{ opacity: 0.75 }}>↻</span>}
       {!phone && pos.intoLater && <span aria-hidden="true" className="flex-shrink-0" style={{ opacity: 0.75 }}>▸</span>}
     </button>

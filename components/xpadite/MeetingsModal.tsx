@@ -18,7 +18,7 @@ import { ConfirmDelete, EventDetails, EventForm, FilterSelect, LAYER_ATTR } from
 import { ScheduleMenu } from './ScheduleMenu'
 import { useIsPhone } from './ScheduleMobile'
 import { useIsDesktop } from './ScheduleSheet'
-import { ManageCategoriesDialog, PreferencesDialog, SyncTaskManagerDialog } from './ScheduleDialogs'
+import { ManageCategoriesDialog, PreferencesDialog, ReminderSettingsDialog, SyncTaskManagerDialog } from './ScheduleDialogs'
 import { ScheduleContext, useSchedule } from './scheduleContext'
 import { countBackfillEligible } from './deadlineLink'
 import {
@@ -352,7 +352,7 @@ type FormState =
   | { mode: 'add'; initial: ScheduleFormValues; heading?: string; hint?: string }
   | { mode: 'edit'; id: string; initial: ScheduleFormValues; original: { startAt: number; endAt: number } }
   | null
-type DialogKey = 'categories' | 'prefs' | 'sync' | null
+type DialogKey = 'categories' | 'prefs' | 'sync' | 'reminders' | null
 
 const newEventId = () => `user-sched-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 /** Why a save/delete did not happen, in words a person can act on. Typed errors come from AppContext (code); anything else is a network/server failure. */
@@ -787,6 +787,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
               onDuplicate={() => { if (menuSel) openDuplicate(menuSel) }}
               onPreferences={() => setDialog('prefs')}
               onSync={() => setDialog('sync')}
+              onReminders={() => setDialog('reminders')}
               duplicateHint={duplicateHint}
               onSearch={phone && tab !== 'today' ? () => changePanel('search') : undefined}
               onFilter={phone && tab !== 'today' ? () => changePanel('filter') : undefined}
@@ -920,6 +921,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
         {lastDialog === 'categories' && (
           <ManageCategoriesDialog open={dialog === 'categories'} categories={categories} events={scheduleEvents} onAdd={handleAddCategory} onRename={handleRenameCategory} onRecolor={handleRecolorCategory} onDelete={handleDeleteCategory} onClose={() => setDialog(null)} />
         )}
+        {lastDialog === 'reminders' && <ReminderSettingsDialog open={dialog === 'reminders'} onClose={() => setDialog(null)} />}
         {lastDialog === 'sync' && <SyncTaskManagerDialog open={dialog === 'sync'} enabled={scheduleTaskSync} eligibleCount={countBackfillEligible(persistedEvents, now, calData)} onSave={setScheduleTaskSyncPref} onClose={() => setDialog(null)} />}
         {lastDialog === 'prefs' && <PreferencesDialog open={dialog === 'prefs'} prefs={prefs} onApply={next => { const p = sanitizePrefs(next); setPrefs(p); setScheduleTimeFormat(p.timeFormat); setDialog(null) }} onClose={() => setDialog(null)} />}
         {confirming && <ConfirmDelete ev={confirming} onCancel={() => setConfirmId(null)} onConfirm={confirmDelete} />}

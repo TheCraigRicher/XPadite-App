@@ -6,13 +6,15 @@
 
 import { useEffect, useRef, useState } from 'react'
 import {
-  REMINDER_OPTIONS, RECURRENCE_OPTIONS, filterOptions, formatTimeValue, parseTimeText, timeOptions,
+  REMINDER_OPTIONS, RECURRENCE_OPTIONS, isPresetReminder, splitReminderMinutes, parseCustomReminder, customReminderLabel, filterOptions, formatTimeValue, parseTimeText, timeOptions,
   clockLabel, durationLabel, longDateLabel, meetingLinkLabel, recurrenceLabel, reminderLabel, safeHttpUrl,
   timeRangeLabel, validateScheduleForm, addSavedLocation, normalizeLocation, removeSavedLocation,
 } from './scheduleLogic'
 import type { CombinedFilter, ScheduleCategoryId, ScheduleEvent, ScheduleFormErrors, ScheduleFormValues } from './scheduleLogic'
 import { withDateChange, withStartChange } from './scheduleEngine'
 import { useSchedule } from './scheduleContext'
+import { ZDate, getScheduleTz } from './zdate'
+import { nextOccurrence } from '@/lib/push/reminderDue'
 import { useDeadlineActions, useEventDeadline } from './useDeadlines'
 import { AssignedDateNote, CompleteControl, DueChip } from './DeadlineStatus'
 import { LAYER_ATTR, SheetFrame, useCenteredList, useIsPhone, usePopupBox, useSheetPhase } from './ScheduleSheet'
@@ -72,12 +74,17 @@ export function DetailRow({ label, children }: { label: string; children: React.
   )
 }
 
+/** The current time (a function, so rendering code does not read the clock directly). */
+const nowMs = (): number => Date.now()
+
 export function EventDetails({ ev, onEdit, onDelete, onDuplicate }: { ev: ScheduleEvent; onEdit: () => void; onDelete: () => void; onDuplicate?: () => void }) {
   const { meta, fmt, restoreTask, taskSync } = useSchedule()
   const cat = meta(ev.category)
   const link = safeHttpUrl(ev.meetingUrl)
   const reminder = reminderLabel(ev.reminderMins)
   const repeat = recurrenceLabel(ev.recurrence)
+  const nextRepeatAt = ev.recurrence && ev.recurrence !== 'none' ? nextOccurrence({ startAt: ev.startAt, recurrence: ev.recurrence }, nowMs(), getScheduleTz()) : null
+  const nextRepeat = nextRepeatAt !== null && nextRepeatAt > ev.startAt ? `${new ZDate(nextRepeatAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · ${clockLabel(nextRepeatAt, fmt)}` : null
   return (
     <div className="flex flex-col gap-3" style={{ borderLeft: `3.5px solid ${cat.edge}`, paddingLeft: 11 }}>
       {ev.readOnly && (
@@ -139,7 +146,7 @@ export function EventDetails({ ev, onEdit, onDelete, onDuplicate }: { ev: Schedu
         )}
         {ev.notes && <DetailRow label="Notes"><span className="whitespace-pre-wrap">{ev.notes}</span></DetailRow>}
         {reminder && <DetailRow label="Reminder">{reminder}</DetailRow>}
-        {repeat && <DetailRow label="Repeats">{repeat}</DetailRow>}
+        {repeat && <DetailRow label="Repeats">{repeat}{nextRepeat ? ` · next ${nextRepeat}` : ''}</DetailRow>}
         {ev.sourceLabel && <DetailRow label="Source">{ev.sourceLabel}</DetailRow>}
       </dl>
       {!ev.readOnly && onDuplicate && (
@@ -221,6 +228,15 @@ export function ConfirmDelete({ ev, onCancel, onConfirm }: { ev: ScheduleEvent; 
 const fieldStyle: React.CSSProperties = {
   width: '100%', background: 'var(--xp-bg3)', border: '0.5px solid var(--xp-bdr2)', borderRadius: 10,
   padding: '9px 11px', color: 'var(--xp-txt)', outline: 'none', fontSize: 16 /* ≥16px: no iOS focus-zoom */,
+}
+
+/** v1.356: a subtle bell — this event has a reminder set. Inherits the surrounding text colour, so category colours are untouched. */
+export function ReminderBell({ size = 10, style }: { size?: number; style?: React.CSSProperties }) {
+  return (
+    <svg data-testid="reminder-bell" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" role="img" aria-label="Has a reminder" style={{ opacity: 0.7, flexShrink: 0, ...style }}>
+      <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+    </svg>
+  )
 }
 
 function Field({ label, error, children, htmlFor }: { label: string; error?: string; children: React.ReactNode; htmlFor: string }) {
@@ -490,6 +506,19 @@ function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, headin
   const [v, setV] = useState<ScheduleFormValues>(initial)
   const [errors, setErrors] = useState<ScheduleFormErrors>({})
   const [tried, setTried] = useState(false)
+  // v1.356 custom reminder: the Days / Hours / Minutes boxes (strings, as typed). Custom mode is on when the saved value is not one of the presets.
+  const [customOn, setCustomOn] = useState(() => initial.reminderMins !== null && !isPresetReminder(initial.reminderMins))
+  const [custom, setCustom] = useState(() => {
+    const s = splitReminderMinutes(initial.reminderMins ?? 0)
+    return initial.reminderMins !== null && !isPresetReminder(initial.reminderMins) ? { d: String(s.days), h: String(s.hours), m: String(s.minutes) } : { d: '0', h: '2', m: '0' }
+  })
+  const customParsed = customOn ? parseCustomReminder(custom.d, custom.h, custom.m) : null
+  function setCustomBox(k: 'd' | 'h' | 'm', val: string) {
+    const next = { ...custom, [k]: val.replace(/[^\d]/g, '').slice(0, 6) }
+    setCustom(next)
+    const p = parseCustomReminder(next.d, next.h, next.m)
+    set('reminderMins', p.ok ? p.mins : null)
+  }
   useLayerEscape(onCancel)
   const conflict = getConflict ? getConflict(v) : null
 
@@ -506,6 +535,7 @@ function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, headin
     e.preventDefault()
     setTried(true)
     const errs = validateScheduleForm(v)
+    if (customOn && customParsed && !customParsed.ok) errs.reminder = customParsed.error
     setErrors(errs)
     if (Object.keys(errs).length === 0 && !conflict) onSubmit(v)
   }
@@ -572,9 +602,14 @@ function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, headin
             <textarea id="sch-notes" rows={3} value={v.notes} maxLength={1000} onChange={e => set('notes', e.target.value)} placeholder="Anything to remember…" style={{ ...fieldStyle, resize: 'none' }} />
           </Field>
           <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3">
-            <Field label="Reminder (optional)" htmlFor="sch-reminder">
-              <select id="sch-reminder" value={v.reminderMins === null ? '' : String(v.reminderMins)} onChange={e => set('reminderMins', e.target.value === '' ? null : Number(e.target.value))} style={fieldStyle}>
+            <Field label="Reminder (optional)" htmlFor="sch-reminder" error={errors.reminder}>
+              <select id="sch-reminder" value={customOn ? '__custom' : (v.reminderMins === null ? '' : String(v.reminderMins))} style={fieldStyle}
+                onChange={e => {
+                  if (e.target.value === '__custom') { setCustomOn(true); const p = parseCustomReminder(custom.d, custom.h, custom.m); set('reminderMins', p.ok ? p.mins : null) }
+                  else { setCustomOn(false); set('reminderMins', e.target.value === '' ? null : Number(e.target.value)) }
+                }}>
                 {REMINDER_OPTIONS.map(o => <option key={String(o.value)} value={o.value === null ? '' : String(o.value)}>{o.label}</option>)}
+                <option value="__custom">Custom reminder…</option>
               </select>
             </Field>
             <Field label="Repeat (optional)" htmlFor="sch-repeat">
@@ -583,6 +618,20 @@ function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, headin
               </select>
             </Field>
           </div>
+          {customOn && (
+            <div data-testid="custom-reminder" role="group" aria-label="Custom reminder time before the event" className="flex flex-col gap-1.5" style={{ padding: '10px 11px', borderRadius: 10, background: 'rgba(124,58,237,0.07)', border: '0.5px solid rgba(124,58,237,0.25)' }}>
+              <div className="grid grid-cols-3 gap-2">
+                {([['d', 'Days'], ['h', 'Hours'], ['m', 'Minutes']] as const).map(([k, label]) => (
+                  <label key={k} className="flex flex-col gap-1 text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt2)' }}>{label}
+                    <input data-testid={`custom-reminder-${k}`} inputMode="numeric" pattern="[0-9]*" value={custom[k]} onChange={e => setCustomBox(k, e.target.value)} aria-label={`Reminder ${label.toLowerCase()} before`} style={{ ...fieldStyle, textAlign: 'center' }} />
+                  </label>
+                ))}
+              </div>
+              <p data-testid="custom-reminder-summary" aria-live="polite" className="text-[11.5px]" style={{ color: customParsed && !customParsed.ok ? '#dc2626' : 'var(--xp-txt2)' }}>
+                {customParsed ? (customParsed.ok ? customReminderLabel(customParsed.mins) : customParsed.error) : ''}
+              </p>
+            </div>
+          )}
         </div>
 
         {saveError && (

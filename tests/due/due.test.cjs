@@ -283,7 +283,8 @@ test('migration 026 is additive: one nullable column + one function; nothing dro
 
 test('the app keeps working before migration 026 is applied: events are read without the column, and a missing function never disables the schedule', () => {
   const sd = read('lib/supabase/schedule-data.ts')
-  assert.match(sd, /res\.error\.code === '42703'/)
+  assert.match(sd, /e\.code === '42703'/)   // v1.357: one fallback per optional column (026 completed_at, 028 reminder_alarm)
+  assert.match(sd, /missing\(res\.error, 'completed_at'\)/)
   assert.match(sd, /Omit<ScheduleEventRow, 'rev' \| 'task_link' \| 'completed_at'>/, 'event saves never write the new column')
   const ctx = read('components/xpadite/AppContext.tsx')
   assert.match(ctx, /needs a database update \(migration 026\)/)

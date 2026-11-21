@@ -21,6 +21,8 @@ export interface ScheduleEventRow {
   meeting_url: string | null
   notes: string | null
   reminder_mins: number | null
+  /** v1.357 (migration 028): Persistent Alarm flag; absent until that migration is applied (= Standard Reminder). */
+  reminder_alarm?: boolean | null
   recurrence: string
   is_deadline: boolean
   task_date_key: string | null
@@ -46,6 +48,7 @@ export function rowToEvent(r: ScheduleEventRow): StoredScheduleEvent {
     meetingUrl: r.meeting_url ?? undefined,
     notes: r.notes ?? undefined,
     reminderMins: r.reminder_mins,
+    ...(r.reminder_mins !== null && r.reminder_alarm === true ? { reminderAlarm: true as const } : null),
     recurrence: (RECURRENCES as string[]).includes(r.recurrence) ? (r.recurrence as ScheduleRecurrence) : 'none',
     isDeadline: r.is_deadline ? true : undefined,
     taskDateKey: r.task_date_key,
@@ -67,6 +70,7 @@ export function eventToRow(userId: string, e: StoredScheduleEvent): Omit<Schedul
     meeting_url: e.meetingUrl ?? null,
     notes: e.notes ?? null,
     reminder_mins: e.reminderMins ?? null,
+    reminder_alarm: e.reminderMins !== null && e.reminderMins !== undefined && e.reminderAlarm === true,
     recurrence: e.recurrence ?? 'none',
     is_deadline: !!e.isDeadline,
     task_date_key: e.taskDateKey ?? null,
@@ -81,8 +85,11 @@ export async function fetchScheduleEvents(supabase: Supabase, userId: string): P
     const r = await supabase.from('schedule_events').select(cols).eq('user_id', userId).order('start_at', { ascending: true })
     return { rows: (r.data ?? []) as unknown as ScheduleEventRow[], error: r.error }
   }
-  let res = await read(COLS + ', completed_at')
-  if (res.error && (res.error.code === '42703' || /completed_at/i.test(res.error.message ?? ''))) res = await read(COLS)
+  // v1.357: reminder_alarm comes from migration 028; completed_at from 026. Fall back one column at a time so an older database still loads the whole schedule.
+  const missing = (e: { code?: string; message?: string } | null, col: string) => !!e && (e.code === '42703' || new RegExp(col, 'i').test(e.message ?? ''))
+  let res = await read(COLS + ', completed_at, reminder_alarm')
+  if (missing(res.error, 'reminder_alarm')) res = await read(COLS + ', completed_at')
+  if (missing(res.error, 'completed_at')) res = await read(COLS)
   if (res.error) throw res.error
   return res.rows.map(rowToEvent)
 }

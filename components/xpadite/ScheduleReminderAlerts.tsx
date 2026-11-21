@@ -7,6 +7,8 @@
 //    the same reminder is shown only once;
 //  • the chime plays once per alert; if the browser still blocks sound the card says so (the visual alert is never lost);
 //  • alerts never take focus and never touch any document or event — they are display only.
+// v1.357 — an event whose Reminder type is "Persistent Alarm" rings (one shared audio stream, lib/audio/alarmManager.ts) until Stop Alarm or 5 minutes
+//   after it came due, instead of the single chime. Standard Reminders behave exactly as in v1.356.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from './AppContext'
@@ -14,6 +16,8 @@ import { getScheduleTz } from './zdate'
 import { dueReminders, reminderKey, repeatText, type ReminderEvent, type ReminderRecurrence } from '@/lib/push/reminderDue'
 import { leadText, whenText } from '@/lib/push/payload'
 import { installAudioUnlock, playReminderChime } from '@/lib/audio/reminderSound'
+import { alarmAudio } from '@/lib/audio/alarmSound'
+import { createAlarmManager, type AlarmManager, type AlarmState } from '@/lib/audio/alarmManager'
 
 const SEEN_KEY = 'xp-sched-alerts-v1'
 const SEEN_KEEP_MS = 3 * 86_400_000
@@ -26,7 +30,7 @@ const HIDDEN_TAB_DELAY_MS = 20_000
 const CHIME_GAP_MS = 4000
 let lastChimeAt = 0
 
-interface Alert { key: string; eventId: string; occurrenceAt: number; title: string; body: string; soundBlocked: boolean }
+interface Alert { key: string; eventId: string; occurrenceAt: number; title: string; body: string; soundBlocked: boolean; alarm?: boolean; alarmEnd?: 'stopped' | 'timeout' | 'expired' }
 
 function loadSeen(): Record<string, number> {
   try { const o = JSON.parse(localStorage.getItem(SEEN_KEY) ?? '{}'); return o && typeof o === 'object' ? o : {} } catch { return {} }
@@ -42,6 +46,8 @@ function saveSeen(m: Record<string, number>): void {
 export function ScheduleReminderAlerts() {
   const { scheduleEvents, requestScheduleEvent } = useApp()
   const [alerts, setAlerts] = useState<Alert[]>([])
+  const [ringing, setRinging] = useState<AlarmState[]>([])
+  const alarmsRef = useRef<AlarmManager | null>(null)
   const eventsRef = useRef(scheduleEvents)
   useEffect(() => { eventsRef.current = scheduleEvents }, [scheduleEvents])
   const seenRef = useRef<Record<string, number> | null>(null)
@@ -50,6 +56,25 @@ export function ScheduleReminderAlerts() {
 
   // first interaction unlocks sound for later reminders (browser autoplay policy)
   useEffect(() => installAudioUnlock(), [])
+
+  // v1.357 Persistent Alarm lifecycle: one manager for the app; released (sound off, timer cleared) when this component unmounts
+  useEffect(() => {
+    const m = createAlarmManager({
+      audio: alarmAudio,
+      onChange: setRinging,
+      onEnd: (key, reason) => {
+        if (reason === 'disposed') return
+        if (reason === 'changed') setAlerts(a => a.filter(x => x.key !== key))             // the event was edited / deleted: its alarm card goes too
+        else setAlerts(a => a.map(x => (x.key === key ? { ...x, alarmEnd: reason === 'timeout' ? 'timeout' : 'stopped' } : x)))
+      },
+    })
+    alarmsRef.current = m
+    return () => { m.dispose(); alarmsRef.current = null }
+  }, [])
+  // an event that was deleted, cancelled, switched back to Standard or re-timed stops its alarm at once
+  useEffect(() => {
+    alarmsRef.current?.reconcile(id => scheduleEvents.find(e => e.id === id) ?? null)
+  }, [scheduleEvents])
 
   const raise = useCallback((eventId: string, occurrenceAt: number, minsBefore: number, fallbackTitle?: string, recurrence?: ReminderRecurrence) => {
     // re-read what other tabs have already alerted, so one reminder is announced once per device — not once per open tab
@@ -63,9 +88,18 @@ export function ScheduleReminderAlerts() {
     const tz = getScheduleTz()
     const rec = recurrence ?? ev?.recurrence ?? 'none'
     const body = `${minsBefore <= 0 ? 'Starting now' : `Starts ${leadText(minsBefore)}`} · ${whenText(occurrenceAt, tz)}${rec !== 'none' ? ` · ↻ ${repeatText(rec)}` : ''}`
-    const alert: Alert = { key, eventId, occurrenceAt, title, body, soundBlocked: false }
+    const isAlarm = !!ev && ev.reminderAlarm === true && ev.reminderMins !== null && ev.reminderMins !== undefined
+    const alert: Alert = { key, eventId, occurrenceAt, title, body, soundBlocked: false, alarm: isAlarm }
     setAlerts(a => [...a.filter(x => x.key !== key), alert].slice(-4))
     const now = Date.now()
+    if (isAlarm && ev) {
+      // Persistent Alarm: one shared, controlled stream — no chime. Past its 5 minutes it stays silent (never replays an old alarm).
+      void alarmsRef.current?.start({ key, eventId, occurrenceAt, fireAt: occurrenceAt - minsBefore * 60_000, eventStartAt: ev.startAt, reminderMins: ev.reminderMins ?? 0, recurrence: ev.recurrence ?? 'none' }).then(r => {
+        if (r === 'expired') setAlerts(a => a.map(x => (x.key === key ? { ...x, alarmEnd: 'expired' } : x)))
+      })
+      return
+    }
+    if ((alarmsRef.current?.active().length ?? 0) > 0) return          // an alarm is ringing: never layer a chime over it
     if (now - lastChimeAt < CHIME_GAP_MS) return                      // a chime just played for another reminder: no overlapping sounds
     lastChimeAt = now
     void playReminderChime().then(r => { if (r !== 'played') setAlerts(a => a.map(x => (x.key === key ? { ...x, soundBlocked: true } : x))) })
@@ -129,24 +163,36 @@ export function ScheduleReminderAlerts() {
   if (alerts.length === 0) return null
   return (
     <div data-testid="reminder-alerts" aria-live="polite" style={{ position: 'fixed', right: 12, bottom: 'calc(env(safe-area-inset-bottom, 0px) + 76px)', zIndex: 9990, display: 'flex', flexDirection: 'column', gap: 8, width: 'min(340px, calc(100vw - 24px))', pointerEvents: 'none' }}>
-      {alerts.map(a => (
-        <div key={a.key} role="alert" data-testid="reminder-alert" style={{ pointerEvents: 'auto', background: '#1e1b2e', color: '#f1f5f9', border: '1px solid rgba(167,139,250,0.55)', borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.45)', padding: '11px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {ringing.length > 1 && (
+        <button type="button" data-testid="alarm-stop-all" onClick={() => alarmsRef.current?.stopAll()} style={{ pointerEvents: 'auto', alignSelf: 'flex-end', minHeight: 36, padding: '0 14px', borderRadius: 9, border: 'none', background: '#dc2626', color: '#fff', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}>Stop all alarms</button>
+      )}
+      {alerts.map(a => {
+        const live = ringing.find(r => r.key === a.key)
+        const blocked = a.alarm ? !!live?.blocked : a.soundBlocked
+        return (
+        <div key={a.key} role="alert" data-testid="reminder-alert" data-alarm={a.alarm ? (live ? 'ringing' : 'ended') : undefined} style={{ pointerEvents: 'auto', background: '#1e1b2e', color: '#f1f5f9', border: live ? '1.5px solid #f87171' : '1px solid rgba(167,139,250,0.55)', borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.45)', padding: '11px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-            <span aria-hidden="true" style={{ fontSize: 18, lineHeight: 1.2 }}>🔔</span>
+            <span aria-hidden="true" style={{ fontSize: 18, lineHeight: 1.2 }}>{a.alarm ? '⏰' : '🔔'}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
+              {a.alarm && <div data-testid="alarm-badge" style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.6, color: live ? '#fca5a5' : 'rgba(255,255,255,0.55)' }}>{live ? 'ALARM — RINGING' : 'PERSISTENT ALARM'}</div>}
               <div style={{ fontSize: 13.5, fontWeight: 700, overflowWrap: 'anywhere' }}>{a.title}</div>
               <div style={{ fontSize: 12, opacity: 0.8 }}>{a.body}</div>
             </div>
-            <button type="button" aria-label="Dismiss reminder" data-testid="reminder-dismiss" onClick={() => setAlerts(x => x.filter(y => y.key !== a.key))} style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'transparent', color: 'rgba(255,255,255,0.65)', fontSize: 15, cursor: 'pointer', flexShrink: 0 }}>✕</button>
+            <button type="button" aria-label="Dismiss reminder" data-testid="reminder-dismiss" onClick={() => { alarmsRef.current?.stop(a.key); setAlerts(x => x.filter(y => y.key !== a.key)) }} style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'transparent', color: 'rgba(255,255,255,0.65)', fontSize: 15, cursor: 'pointer', flexShrink: 0 }}>✕</button>
           </div>
-          {a.soundBlocked && (
-            <div data-testid="reminder-sound-blocked" style={{ fontSize: 11, color: '#fcd34d' }}>Sound is blocked by your browser. Tap anywhere in XPadite once to allow it, or use My Schedule → ⋮ → Reminders &amp; sound → Test Reminder Sound.</div>
+          {blocked && (
+            <div data-testid="reminder-sound-blocked" style={{ fontSize: 11, color: '#fcd34d' }}>Sound is blocked by your browser. Tap anywhere in XPadite once to allow it{a.alarm ? ' — the alarm will then start ringing' : ''}, or use My Schedule → ⋮ → Reminders &amp; sound → Test Reminder Sound.</div>
+          )}
+          {a.alarm && a.alarmEnd && (
+            <div data-testid="alarm-ended" style={{ fontSize: 11, opacity: 0.75 }}>{a.alarmEnd === 'timeout' ? 'Alarm stopped automatically after 5 minutes.' : a.alarmEnd === 'expired' ? 'This alarm time has passed — it did not ring.' : 'Alarm stopped.'}</div>
           )}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button type="button" data-testid="reminder-open" onClick={() => { requestScheduleEvent(a.eventId); setAlerts(x => x.filter(y => y.key !== a.key)) }} style={{ minHeight: 34, padding: '0 14px', borderRadius: 9, border: 'none', background: '#7c3aed', color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Open event</button>
+            {live && <button type="button" data-testid="alarm-stop" onClick={() => alarmsRef.current?.stop(a.key)} style={{ minHeight: 40, padding: '0 18px', borderRadius: 9, border: 'none', background: '#dc2626', color: '#fff', fontSize: 13.5, fontWeight: 800, cursor: 'pointer', flex: 1 }}>Stop Alarm</button>}
+            <button type="button" data-testid="reminder-open" onClick={() => { alarmsRef.current?.stop(a.key); requestScheduleEvent(a.eventId); setAlerts(x => x.filter(y => y.key !== a.key)) }} style={{ minHeight: 34, padding: '0 14px', borderRadius: 9, border: 'none', background: '#7c3aed', color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Open event</button>
           </div>
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

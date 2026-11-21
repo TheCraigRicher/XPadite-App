@@ -145,7 +145,7 @@ export function EventDetails({ ev, onEdit, onDelete, onDuplicate }: { ev: Schedu
           </DetailRow>
         )}
         {ev.notes && <DetailRow label="Notes"><span className="whitespace-pre-wrap">{ev.notes}</span></DetailRow>}
-        {reminder && <DetailRow label="Reminder">{reminder}</DetailRow>}
+        {reminder && <DetailRow label="Reminder">{reminder}{ev.reminderAlarm ? ' · Persistent Alarm' : ''}</DetailRow>}
         {repeat && <DetailRow label="Repeats">{repeat}{nextRepeat ? ` · next ${nextRepeat}` : ''}</DetailRow>}
         {ev.sourceLabel && <DetailRow label="Source">{ev.sourceLabel}</DetailRow>}
       </dl>
@@ -630,6 +630,21 @@ function EventFormInner({ mode, initial, onCancel, onSubmit, getConflict, headin
               <p data-testid="custom-reminder-summary" aria-live="polite" className="text-[11.5px]" style={{ color: customParsed && !customParsed.ok ? '#dc2626' : 'var(--xp-txt2)' }}>
                 {customParsed ? (customParsed.ok ? customReminderLabel(customParsed.mins) : customParsed.error) : ''}
               </p>
+            </div>
+          )}
+          {v.reminderMins !== null && (
+            <div data-testid="reminder-type" role="group" aria-label="Reminder type" className="flex items-center gap-x-2 gap-y-1 flex-wrap -mt-1">
+              <span className="text-[11.5px] font-semibold" style={{ color: 'var(--xp-txt2)' }}>Reminder type</span>
+              <div className="flex" style={{ borderRadius: 9, overflow: 'hidden', border: '0.5px solid rgba(124,58,237,0.45)' }}>
+                {([[false, 'Standard'], [true, 'Persistent Alarm']] as const).map(([val, label]) => {
+                  const on = !!v.reminderAlarm === val
+                  return (
+                    <button key={label} type="button" aria-pressed={on} data-testid={val ? 'reminder-type-alarm' : 'reminder-type-standard'} onClick={() => set('reminderAlarm', val)}
+                      style={{ minHeight: 30, padding: '0 10px', border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', background: on ? '#7c3aed' : 'transparent', color: on ? '#fff' : 'var(--xp-txt2)' }}>{val ? '⏰ ' : ''}{label}</button>
+                  )
+                })}
+              </div>
+              {v.reminderAlarm && <span data-testid="reminder-type-hint" className="text-[11px]" style={{ color: 'var(--xp-txt3)' }}>Rings until stopped (max 5 min).</span>}
             </div>
           )}
         </div>

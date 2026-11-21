@@ -68,3 +68,13 @@ export async function playReminderChime(): Promise<SoundResult> {
   CHIME_NOTES.forEach((f, i) => note(f, 0.9 + i * 0.16, 0.6, 0.22))                                       // the figure again, softer
   return 'played'
 }
+
+/** v1.357: the shared context once it is running (resuming it briefly if needed), or why it cannot be — used by the Persistent Alarm. */
+export async function acquireRunningContext(): Promise<{ ctx: AudioContext } | { result: 'blocked' | 'unsupported' }> {
+  const c = getCtx()
+  if (!c) return { result: 'unsupported' }
+  try {
+    if (c.state === 'suspended') await Promise.race([c.resume(), new Promise<void>(r => setTimeout(r, 500))])
+  } catch { /* fall through to the state check */ }
+  return c.state === 'running' ? { ctx: c } : { result: 'blocked' }
+}

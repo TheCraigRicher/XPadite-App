@@ -24,6 +24,8 @@ export interface ScheduleEvent {
   notes?: string
   /** Minutes before the start, 0 = at start time, null/undefined = no reminder. */
   reminderMins?: number | null
+  /** v1.357: true = Persistent Alarm (rings in the open app until stopped, max 5 min). Absent/false = Standard Reminder (every pre-v1.357 event). Only meaningful with a reminder. */
+  reminderAlarm?: boolean
   recurrence?: ScheduleRecurrence
   /** Synced from an external calendar — can be viewed but not edited/deleted here. */
   readOnly?: boolean
@@ -492,6 +494,8 @@ export interface ScheduleFormValues {
   meetingUrl: string
   notes: string
   reminderMins: number | null
+  /** v1.357: Reminder Type — true = Persistent Alarm, false/absent = Standard Reminder. */
+  reminderAlarm?: boolean
   recurrence: ScheduleRecurrence
   /** "Set as Due Date" pill: the end date/time above is the due date/time. */
   isDeadline?: boolean
@@ -565,6 +569,7 @@ export function formToEventFields(v: ScheduleFormValues): Omit<ScheduleEvent, 'i
     meetingUrl: url ?? undefined,
     notes: v.notes.trim() || undefined,
     reminderMins: v.reminderMins,
+    reminderAlarm: v.reminderMins !== null && v.reminderAlarm ? true : undefined,
     recurrence: v.recurrence,
     isDeadline: v.isDeadline ? true : undefined,
   }
@@ -582,6 +587,7 @@ export function eventToForm(ev: ScheduleEvent): ScheduleFormValues {
     meetingUrl: ev.meetingUrl ?? '',
     notes: ev.notes ?? '',
     reminderMins: ev.reminderMins ?? null,
+    reminderAlarm: ev.reminderMins !== null && ev.reminderMins !== undefined && ev.reminderAlarm ? true : false,
     recurrence: ev.recurrence ?? 'none',
     isDeadline: ev.isDeadline ? true : false,
   }

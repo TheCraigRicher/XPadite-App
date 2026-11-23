@@ -42,6 +42,9 @@ import { LabelPickerDialog, MergeConfirmDialog, NoticeDialog, DeleteOnlySectionD
 import { mergeProblems, mergeContents } from './plannerMerge'
 import { useEmailShare } from './useEmailShare'
 import { sectionToEmail, combineSectionsEmail } from './emailShare'
+import { useReadAloud } from './useReadAloud'
+import { buildQueue } from './readAloud'
+import { ReadAloudController } from './ReadAloudController'
 import { hasEscapeLayer, useEscapeLayer } from './escapeLayers'
 import { TransferSectionModal } from './TransferSectionModal'
 import { SendToOptionsModal } from './SendToOptionsModal'
@@ -663,6 +666,8 @@ interface JournalTextBlockProps {
   onSelectionUpdate: () => void
   onDelete?: () => void
   onDuplicate?: () => void
+  /** v1.359: Read Aloud this section (read-only text-to-speech) */
+  onReadAloud?: (id: string) => void
   onTransferSection?: () => void
   onMoveActivate?: () => void
   /** v1.348: Move mode is active on THIS section — shows the drag handle (mouse + touch) */
@@ -689,7 +694,7 @@ interface JournalTextBlockProps {
 const JournalTextBlock = React.memo(function JournalTextBlock({
   block, isDark, isOnlyBlock, isFirstBlock = false, hideStamp = false, forcedContent,
   onContentChange, onFocus, onSelectionUpdate,
-  onDelete, onDuplicate, onTransferSection,
+  onDelete, onDuplicate, onReadAloud, onTransferSection,
   labelOptions: blockLabelOptions = NO_LABELS, onMoveActivate, moveActive = false, onMoveGripStart, onMoveCancel, onResizeActivate, onColorChange, onNameChange, onCollapseToggle,
   onPasteImage, onSplitSection, onMergeSection, onUpdateBlock, onCellResizeStart, onDeleteImageCell, onEditMindMapCell,
   canMoveUp, canMoveDown, onMoveUp, onMoveDown,
@@ -1267,6 +1272,11 @@ const JournalTextBlock = React.memo(function JournalTextBlock({
                     <button data-testid="important-toggle" onClick={() => { onUpdateBlock?.({ important: block.important ? undefined : true }); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
                       {block.important ? '★ Remove Important Mark' : '☆ Mark as Important'}
                     </button>
+                    {!!onReadAloud && (
+                      <button data-testid="read-aloud" onClick={() => { setMenuOpen(false); onReadAloud(block.id) }} style={menuItemStyle(isDark)}>
+                        🔊 Read Aloud
+                      </button>
+                    )}
                     <button onClick={() => { setShowTableV2Notice(true); setMenuOpen(false) }} style={menuItemStyle(isDark)}>
                       ▦ Add Table
                     </button>
@@ -2610,6 +2620,21 @@ export function JournalEditorContent({
   // v1.347: id of the in-memory default lavender section of a day that has no saved document yet. It is never written until the user edits.
   const [pristineDefaultId, setPristineDefaultId] = useState<string | null>(null)
   const blocksRef       = useRef<JournalBlock[]>([])
+  // v1.359 — Read Aloud (text-to-speech). Read-only: it only READS the editors' current text; it never edits, saves or touches history.
+  const readAloud = useReadAloud(setToast)
+  const { start: readStart, stop: readStop } = readAloud
+  const readSection = useCallback((id: string) => {
+    const b = blocksRef.current.find(x => x.id === id)
+    const q = b ? buildQueue([b], x => contentMapRef.current.get(x.id) ?? x.content) : []
+    if (q.length === 0) { setToast('This section has no text to read.'); return }
+    readStart(q, 'section')
+  }, [readStart, setToast])
+  const readAll = useCallback(() => {
+    const q = buildQueue(blocksRef.current, x => contentMapRef.current.get(x.id) ?? x.content)   // this date's sections, in the Planner's own order
+    if (q.length === 0) { setToast('There is nothing to read on this date.'); return }
+    readStart(q, 'all')
+  }, [readStart, setToast])
+  useEffect(() => () => { readStop() }, [dateKey, readStop])   // another date (or closing the Planner) ends the narration
   const focusedEditor   = useRef<Editor | null>(null)
   const saveTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dateKeyRef      = useRef(dateKey)
@@ -5089,6 +5114,10 @@ ${indentCss('.xp-j-prose')}
                   style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '12px 14px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500, textAlign: 'left', color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)' }}>
                   <span aria-hidden="true">⧉</span>Merge Sections
                 </button>
+                <button role="menuitem" data-testid="planner-menu-readall" onClick={e => { e.stopPropagation(); setPlannerMenu(null); readAll() }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '12px 14px', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 500, textAlign: 'left', color: isDark ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.75)' }}>
+                  <span aria-hidden="true">🔊</span>Read All Sections
+                </button>
               </div>
             )}
             {plannerMenu && <div onClick={e => { e.stopPropagation(); setPlannerMenu(null) }} style={{ position: 'fixed', inset: 0, zIndex: 8999 }} />}
@@ -5214,6 +5243,7 @@ ${indentCss('.xp-j-prose')}
                             onSelectionUpdate={onEditorSelectionUpdate}
                             onDelete={() => deleteBlock(block.id)}
                             onDuplicate={block.type === 'section' ? () => duplicateBlock(block.id) : undefined}
+                            onReadAloud={block.type === 'section' ? readSection : undefined}
                             onTransferSection={block.type === 'section' ? () => setTransferBlockId(block.id) : undefined}
                             onMoveActivate={block.type === 'section' ? () => {
                               setMoveModeId(block.id)
@@ -5334,6 +5364,9 @@ ${indentCss('.xp-j-prose')}
               })()}
             </div>
           </div>
+
+          {/* v1.359 Read Aloud bar — floats just above the toolbar (zero layout height), only while narration is active */}
+          <ReadAloudController state={readAloud.state} onPause={readAloud.pause} onResume={readAloud.resume} onStop={readAloud.stop} onRate={readAloud.setRate} />
 
           {/* Listening indicator — small strip directly above the toolbar, only while Mic is active */}
           {isRecording && (

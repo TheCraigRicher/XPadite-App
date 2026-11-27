@@ -11,13 +11,14 @@
 // drag an XPadite event (mouse drag, or long-press on touch) to reschedule it — validated against every other event.
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { SchedulePasteBar } from './SchedulePasteBar'
 import {
   addDays, clockLabel, filterScheduleEvents, hourLabel, isPastEvent, isSameLocalDay, layoutDayEvents, monthYearLabel,
   monthYearShort, shiftMonth, shortDayLabel, splitFilter, startOfDay, timeRangeLabel, weekDays, weekRangeLabel, weekRangeShort,
 } from './scheduleLogic'
 import type { CombinedFilter, ScheduleCategoryId, ScheduleEvent } from './scheduleLogic'
 import {
-  SLOT_MINUTES, canDuplicate, dragBlockReason, isDoubleTap, minutesFromOffset, planMove, snapMinutes,
+  SLOT_MINUTES, canDuplicate, canPasteAt, dragBlockReason, isDoubleTap, minutesFromOffset, planMove, snapMinutes,
 } from './scheduleEngine'
 import type { MovePlan, TapRecord } from './scheduleEngine'
 import { useSchedule } from './scheduleContext'
@@ -212,6 +213,13 @@ export interface MyScheduleViewProps {
   onEdit: (ev: ScheduleEvent) => void
   onDelete: (ev: ScheduleEvent) => void
   onDuplicate: (ev: ScheduleEvent) => void
+  /** v1.360 Copy & Paste: Copy button, the copied event's title (null = nothing copied), Paste into a slot, Cancel copy mode, and the Undo for the latest paste */
+  onCopy: (ev: ScheduleEvent) => void
+  clipTitle: string | null
+  onPasteAt: (day: Date, startMin: number) => void
+  onCancelCopy: () => void
+  undoTitle: string | null
+  onUndo: () => void
   /** Tells the modal which day its add button should default to. */
   onActiveDayChange: (day: Date) => void
   /** Reports which event is selected (the modal's menu needs it for Duplicate). */
@@ -240,7 +248,7 @@ export interface MyScheduleViewProps {
   onSelectedDayChange: React.Dispatch<React.SetStateAction<Date | null>>
 }
 
-export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggleCategory, now, focus, onEdit, onDelete, onDuplicate, onActiveDayChange, onSelectionChange, onAddAt, onMove, onNotice, query, onQueryChange, panel, onPanelChange, hiddenSources, onApplyFilter, mode = 'week', anchor, onAnchorChange: setAnchor, selectedDay, onSelectedDayChange: setSelectedDay }: MyScheduleViewProps) {
+export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggleCategory, now, focus, onEdit, onDelete, onDuplicate, onCopy, clipTitle, onPasteAt, onCancelCopy, undoTitle, onUndo, onActiveDayChange, onSelectionChange, onAddAt, onMove, onNotice, query, onQueryChange, panel, onPanelChange, hiddenSources, onApplyFilter, mode = 'week', anchor, onAnchorChange: setAnchor, selectedDay, onSelectedDayChange: setSelectedDay }: MyScheduleViewProps) {
   const { categories, prefs, fmt } = useSchedule()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const phone = useIsPhone()
@@ -416,7 +424,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
     } else if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       if (cur === null) setSlot({ day: d.getTime(), min: 9 * 60 })
-      else { setSlot(null); onAddAt(d, cur) }
+      else { setSlot(null); if (clipTitle !== null && canPasteAt(new ZDate(d.getFullYear(), d.getMonth(), d.getDate(), 0, cur).getTime(), now)) onPasteAt(d, cur); else onAddAt(d, cur) }
     }
   }
 
@@ -560,6 +568,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
       `}</style>
 
       <div className="xp-sch-root relative flex-1 min-h-0 flex flex-col overflow-hidden">
+        <SchedulePasteBar clipTitle={clipTitle} onCancelCopy={onCancelCopy} undoTitle={undoTitle} onUndo={onUndo} />
         <div className="flex-1 min-h-0 flex">
           {/* ── Main column ── */}
           <div className="flex-1 min-w-0 min-h-0 flex flex-col pl-2 sm:pl-4 pr-2 sm:pr-4 lg:pr-3">
@@ -666,6 +675,8 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
                     const isSel = !!selectedDay && isSameLocalDay(d, selectedDay)
                     const dayStart = startOfDay(d).getTime()
                     const slotHere = slot && isSameLocalDay(new ZDate(slot.day), d) ? slot : null
+                    // v1.360: with an event copied, an eligible (not yet begun) slot offers Paste instead of + Add; a past slot keeps + Add exactly as before
+                    const pasteHere = !!slotHere && clipTitle !== null && canPasteAt(new ZDate(d.getFullYear(), d.getMonth(), d.getDate(), 0, slotHere.min).getTime(), now)
                     const ghost = drag && drag.dayIdx === i ? drag : null
                     const ghostCat = ghost && dragEv ? categories.find(c => c.id === dragEv.category) : null
                     return (
@@ -680,12 +691,20 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
                         {slotHere && (
                           <div data-testid="slot-highlight" className="absolute left-0 right-0 flex items-center justify-center"
                             style={{ top: (slotHere.min / 60) * HOUR_PX, height: (SLOT_MINUTES / 60) * HOUR_PX, background: 'rgba(124,58,237,0.16)', border: '1.5px dashed #7c3aed', borderRadius: 6, zIndex: 1 }}>
-                            <button type="button" data-testid="slot-add"
+                            {pasteHere && (
+                              <button type="button" data-testid="slot-paste"
+                                onClick={e => { e.stopPropagation(); lastTapRef.current = null; setSlot(null); onPasteAt(d, slotHere.min) }}
+                                aria-label={`Paste copied event on ${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} at ${clockLabel(new ZDate(d.getFullYear(), d.getMonth(), d.getDate(), 0, slotHere.min).getTime(), fmt)}`}
+                                className="text-[10px] sm:text-[11px] font-bold text-white whitespace-nowrap" style={{ padding: '1px 7px', borderRadius: 6, background: '#7c3aed', lineHeight: '16px' }}>
+                                Paste
+                              </button>
+                            )}
+                            {!pasteHere && <button type="button" data-testid="slot-add"
                               onClick={e => { e.stopPropagation(); lastTapRef.current = null; setSlot(null); onAddAt(d, slotHere.min) }}
                               aria-label={`Add event on ${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} at ${clockLabel(new ZDate(d.getFullYear(), d.getMonth(), d.getDate(), 0, slotHere.min).getTime(), fmt)}`}
                               className="text-[10px] sm:text-[11px] font-bold text-white whitespace-nowrap" style={{ padding: '1px 7px', borderRadius: 6, background: '#7c3aed', lineHeight: '16px' }}>
                               + Add
-                            </button>
+                            </button>}
                           </div>
                         )}
                         {layouts[i].map(p => (
@@ -759,7 +778,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
 
             <Card title="Selected Event" grow={1} minHeight={96} testId="card-selected">
               {selected
-                ? <EventDetails ev={selected} onEdit={() => onEdit(selected)} onDelete={() => onDelete(selected)} onDuplicate={canDuplicate(selected) ? () => onDuplicate(selected) : undefined} />
+                ? <EventDetails ev={selected} onEdit={() => onEdit(selected)} onDelete={() => onDelete(selected)} onDuplicate={canDuplicate(selected) ? () => onDuplicate(selected) : undefined} onCopy={canDuplicate(selected) ? () => onCopy(selected) : undefined} />
                 : <EmptyDetails />}
             </Card>
 
@@ -792,7 +811,7 @@ export function MyScheduleView({ events, filter, onFilterChange, hidden, onToggl
 
       {/* Details bottom sheet (below lg; the sidebar shows them on large screens) */}
       {selected && sheetOpen && !drag && (
-        <EventSheet ev={selected} onClose={() => { setSheetOpen(false); setSelectedId(null) }} onEdit={() => onEdit(selected)} onDelete={() => onDelete(selected)} onDuplicate={canDuplicate(selected) ? () => onDuplicate(selected) : undefined} />
+        <EventSheet ev={selected} onClose={() => { setSheetOpen(false); setSelectedId(null) }} onEdit={() => onEdit(selected)} onDelete={() => onDelete(selected)} onDuplicate={canDuplicate(selected) ? () => onDuplicate(selected) : undefined} onCopy={canDuplicate(selected) ? () => { onCopy(selected); setSheetOpen(false) } : undefined} />
       )}
     </>
   )

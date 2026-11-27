@@ -77,7 +77,7 @@ export function DetailRow({ label, children }: { label: string; children: React.
 /** The current time (a function, so rendering code does not read the clock directly). */
 const nowMs = (): number => Date.now()
 
-export function EventDetails({ ev, onEdit, onDelete, onDuplicate }: { ev: ScheduleEvent; onEdit: () => void; onDelete: () => void; onDuplicate?: () => void }) {
+export function EventDetails({ ev, onEdit, onDelete, onDuplicate, onCopy }: { ev: ScheduleEvent; onEdit: () => void; onDelete: () => void; onDuplicate?: () => void; onCopy?: () => void }) {
   const { meta, fmt, restoreTask, taskSync } = useSchedule()
   const cat = meta(ev.category)
   const link = safeHttpUrl(ev.meetingUrl)
@@ -149,12 +149,23 @@ export function EventDetails({ ev, onEdit, onDelete, onDuplicate }: { ev: Schedu
         {repeat && <DetailRow label="Repeats">{repeat}{nextRepeat ? ` · next ${nextRepeat}` : ''}</DetailRow>}
         {ev.sourceLabel && <DetailRow label="Source">{ev.sourceLabel}</DetailRow>}
       </dl>
-      {!ev.readOnly && onDuplicate && (
-        <button type="button" onClick={onDuplicate} className="self-start inline-flex items-center gap-1.5 text-[12px] font-semibold"
-          style={{ padding: '6px 11px', borderRadius: 9, background: 'rgba(124,58,237,0.10)', border: '0.5px solid rgba(124,58,237,0.28)', color: '#7c3aed' }}>
-          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h9" strokeLinecap="round" /></svg>
-          Duplicate
-        </button>
+      {!ev.readOnly && (onDuplicate || onCopy) && (
+        <div className="flex flex-wrap items-center gap-2 self-start">
+          {onDuplicate && (
+            <button type="button" onClick={onDuplicate} className="inline-flex items-center gap-1.5 text-[12px] font-semibold"
+              style={{ padding: '6px 11px', borderRadius: 9, background: 'rgba(124,58,237,0.10)', border: '0.5px solid rgba(124,58,237,0.28)', color: '#7c3aed' }}>
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h9" strokeLinecap="round" /></svg>
+              Duplicate
+            </button>
+          )}
+          {onCopy && (
+            <button type="button" data-testid="event-copy" onClick={onCopy} className="inline-flex items-center gap-1.5 text-[12px] font-semibold"
+              style={{ padding: '6px 11px', borderRadius: 9, background: 'rgba(124,58,237,0.10)', border: '0.5px solid rgba(124,58,237,0.28)', color: '#7c3aed' }}>
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h9" strokeLinecap="round" /></svg>
+              Copy
+            </button>
+          )}
+        </div>
       )}
       {ev.readOnly && (
         <p className="text-[11px] leading-snug" style={{ color: 'var(--xp-txt3)' }}>
@@ -187,7 +198,7 @@ export function useLayerEscape(onClose: () => void) {
   }, [onClose])
 }
 
-export function EventSheet({ ev, onClose, onEdit, onDelete, onDuplicate }: { ev: ScheduleEvent; onClose: () => void; onEdit: () => void; onDelete: () => void; onDuplicate?: () => void }) {
+export function EventSheet({ ev, onClose, onEdit, onDelete, onDuplicate, onCopy }: { ev: ScheduleEvent; onClose: () => void; onEdit: () => void; onDelete: () => void; onDuplicate?: () => void; onCopy?: () => void }) {
   useLayerEscape(onClose)
   return (
     <div {...{ [LAYER_ATTR]: '' }} className="lg:hidden absolute inset-0 z-30 flex items-end" style={{ background: 'rgba(0,0,0,0.42)' }} onClick={onClose}>
@@ -203,7 +214,7 @@ export function EventSheet({ ev, onClose, onEdit, onDelete, onDuplicate }: { ev:
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="18" y1="6" x2="6" y2="18" strokeLinecap="round" /><line x1="6" y1="6" x2="18" y2="18" strokeLinecap="round" /></svg>
           </button>
         </div>
-        <EventDetails ev={ev} onEdit={onEdit} onDelete={onDelete} onDuplicate={onDuplicate} />
+        <EventDetails ev={ev} onEdit={onEdit} onDelete={onDelete} onDuplicate={onDuplicate} onCopy={onCopy} />
       </div>
     </div>
   )

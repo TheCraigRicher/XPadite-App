@@ -28,10 +28,10 @@ import {
 } from './scheduleLogic'
 import type { CombinedFilter, ScheduleCategory, ScheduleCategoryId, ScheduleEvent, ScheduleFormValues, SchedulePrefs } from './scheduleLogic'
 import {
-  addCategory, canDuplicate, conflictMessage, deleteCategory, dragBlockReason, duplicateFormValues, findConflicts, formConflict,
+  addCategory, canDuplicate, canPasteAt, conflictMessage, copyEventClip, pasteFromClip, deleteCategory, dragBlockReason, duplicateFormValues, findConflicts, formConflict,
   recolorCategory, renameCategory,
 } from './scheduleEngine'
-import type { FilterState } from './scheduleEngine'
+import type { EventClip, FilterState } from './scheduleEngine'
 import type { XpaditeMeeting, MeetingProviderId, MeetingPlatform } from './meetingsMockData'
 import { ZDate } from './zdate'
 
@@ -411,6 +411,15 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
   if (dialog && dialog !== lastDialog) setLastDialog(dialog)
   // The event selected in the My Schedule tab (the Today tab keeps its own `todaySelId`) — the menu's Duplicate needs it.
   const [weekSelId, setWeekSelId] = useState<string | null>(null)
+  // v1.360 Copy & Paste: the copied event (a snapshot; this session only — gone when My Schedule closes), the latest paste (for Undo) and a guard against double taps
+  const [clip, setClip] = useState<EventClip | null>(null)
+  const [undoPaste, setUndoPaste] = useState<{ id: string; title: string } | null>(null)
+  const pasteBusyRef = useRef(false)
+  useEffect(() => {
+    if (!undoPaste) return
+    const t = window.setTimeout(() => setUndoPaste(null), 8000)
+    return () => window.clearTimeout(t)
+  }, [undoPaste])
   // Search text (shared by the phone slide-down bar and the tablet/desktop field) and the phone's slide-down panel (one at a time).
   const phone = useIsPhone()
   // Desktop-only Maximize/Restore (≥ 1024px). A pure size/style change: nothing remounts, so date, tab, search, filters, selection and scroll all survive.
@@ -545,6 +554,47 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
       mode: 'add', initial: duplicateFormValues(ev, allEvents), heading: 'Duplicate Event',
       hint: `Pick the new date and start time \u2014 the end follows from the original length (${durationLabel(ev.startAt, ev.endAt)}). The original event isn\u2019t changed.`,
     })
+  }
+
+  // ── v1.360 Copy & Paste ──
+  // Copy only remembers a snapshot; the original is never touched. Paste goes through the SAME save path as Add / Duplicate (saveScheduleEvent), so a pasted event is
+  // validated against overlaps, persisted and synced like any new event — and a deadline event gets its own, new Task Manager task (never the original's).
+  function copyEvent(ev: ScheduleEvent) {
+    const c = copyEventClip(ev)
+    if (!c) { setToast('Synced calendar events can\u2019t be copied.'); return }
+    setClip(c)
+    setToast('Event copied. Select an empty time slot to paste.')
+  }
+  function cancelCopy() { setClip(null) }
+
+  async function pasteAt(day: Date, startMin: number) {
+    if (!clip || pasteBusyRef.current) return                    // nothing copied, or the previous paste is still being saved
+    const startAt = new ZDate(day.getFullYear(), day.getMonth(), day.getDate(), 0, startMin).getTime()
+    if (!canPasteAt(startAt, Date.now())) { setToast('That time has already passed. Choose a time that hasn\u2019t started yet.'); return }
+    const ev = pasteFromClip(clip, startAt, newEventId(), categories.map(c => c.id))
+    const conflicts = findConflicts({ startAt: ev.startAt, endAt: ev.endAt }, allEvents)
+    if (conflicts.length > 0) { setToast(conflictMessage(conflicts, startAt, fmt) ?? 'That time is taken.'); return }
+    pasteBusyRef.current = true
+    try {
+      await saveScheduleEvent(ev)                                // resolves only after the server confirmed it
+    } catch (err) {
+      setToast(saveFailureMessage(err))                           // nothing was created; no success message
+      return
+    } finally { pasteBusyRef.current = false }
+    setFocus({ id: ev.id, at: startAt, nonce: Date.now(), quiet: true })
+    setUndoPaste({ id: ev.id, title: ev.title })
+    setToast('Event pasted successfully.')
+  }
+
+  async function undoLastPaste() {
+    const u = undoPaste
+    if (!u || pasteBusyRef.current) return
+    setUndoPaste(null)
+    if (!persistedEvents.some(e => e.id === u.id)) { setToast('That event is already gone.'); return }
+    pasteBusyRef.current = true
+    try { await deleteScheduleEvent(u.id); setToast('Paste undone.') }          // the event and (if one was created) its own linked task
+    catch (err) { setToast(saveFailureMessage(err)) }
+    finally { pasteBusyRef.current = false }
   }
 
   function formConflictFor(v: ScheduleFormValues): string | null {
@@ -820,6 +870,12 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
             onEdit={openEdit}
             onDelete={ev => setConfirmId(ev.id)}
             onDuplicate={openDuplicate}
+            onCopy={copyEvent}
+            clipTitle={clip ? clip.title : null}
+            onPasteAt={(d, m) => { void pasteAt(d, m) }}
+            onCancelCopy={cancelCopy}
+            undoTitle={undoPaste ? undoPaste.title : null}
+            onUndo={() => { void undoLastPaste() }}
             onActiveDayChange={setActiveDay}
             onSelectionChange={setWeekSelId}
             onAddAt={openAddAt}
@@ -901,7 +957,7 @@ export function MeetingsModal({ onClose }: MeetingsModalProps) {
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12"><polyline points="15 18 9 12 15 6" strokeLinecap="round" strokeLinejoin="round" /></svg>
                     Back
                   </button>
-                  <EventDetails ev={selNative} onEdit={() => openEdit(selNative)} onDelete={() => setConfirmId(selNative.id)} onDuplicate={() => openDuplicate(selNative)} />
+                  <EventDetails ev={selNative} onEdit={() => openEdit(selNative)} onDelete={() => setConfirmId(selNative.id)} onDuplicate={() => openDuplicate(selNative)} onCopy={() => copyEvent(selNative)} />
                 </div>
               ) : (
                 <EmptyDetailState />

@@ -355,3 +355,60 @@ export function toggleHiddenCategory(s: FilterState, id: string): FilterState {
   const hidden = s.hidden.includes(id) ? s.hidden.filter(x => x !== id) : [...s.hidden, id]
   return { ...s, filter: !s.hidden.includes(id) && s.filter === id ? 'all' : s.filter, hidden }
 }
+
+// ── v1.360 — Copy & Paste events (pure logic) ───────────────────────────────
+
+/** What a copied event remembers: its content and its LENGTH — never its id, completion, task link, source, read-only flag or any reminder-delivery state. */
+export interface EventClip {
+  title: string
+  category: ScheduleEvent['category']
+  location?: string
+  meetingUrl?: string
+  notes?: string
+  /** the reminder LEAD (minutes before) and alarm type — the trigger time is always derived from the pasted event's own start */
+  reminderMins: number | null
+  reminderAlarm?: boolean
+  recurrence: NonNullable<ScheduleEvent['recurrence']>
+  isDeadline?: boolean
+  durationMs: number
+}
+
+/** A snapshot of `ev` for pasting. Only XPadite's own events can be copied (the same rule as Duplicate); synced / read-only ones give null. */
+export function copyEventClip(ev: ScheduleEvent | null | undefined): EventClip | null {
+  if (!ev || !canDuplicate(ev)) return null
+  const hasReminder = ev.reminderMins !== null && ev.reminderMins !== undefined
+  return {
+    title: ev.title, category: ev.category,
+    ...(ev.location ? { location: ev.location } : null), ...(ev.meetingUrl ? { meetingUrl: ev.meetingUrl } : null), ...(ev.notes ? { notes: ev.notes } : null),
+    reminderMins: hasReminder ? (ev.reminderMins as number) : null,
+    ...(hasReminder && ev.reminderAlarm ? { reminderAlarm: true } : null),
+    recurrence: ev.recurrence ?? 'none',
+    ...(ev.isDeadline ? { isDeadline: true } : null),
+    durationMs: Math.max(MINUTE_MS, ev.endAt - ev.startAt),
+  }
+}
+
+/** A start time may be pasted into only if it has not already begun (the current minute counts as begun). */
+export function canPasteAt(startAt: number, now: number): boolean {
+  return Number.isFinite(startAt) && Number.isFinite(now) && startAt >= now
+}
+
+/**
+ * The NEW event a paste creates: a fresh id, the clip's content, start = the chosen slot, end = start + the ORIGINAL duration (not the slot's length).
+ * Nothing that identifies or tracks the original travels: no completion, no Task Manager link / date, no revision, no source, no cancelled flag —
+ * so the existing save path treats it exactly like a brand-new event (a new deadline event gets its OWN linked task, never the original's).
+ * A category that no longer exists falls back to Meeting.
+ */
+export function pasteFromClip(clip: EventClip, startAt: number, id: string, categoryIds: readonly string[]): ScheduleEvent {
+  const hasReminder = clip.reminderMins !== null
+  return {
+    id, title: clip.title,
+    category: categoryIds.includes(clip.category) ? clip.category : 'meeting',
+    startAt, endAt: startAt + clip.durationMs,
+    ...(clip.location ? { location: clip.location } : null), ...(clip.meetingUrl ? { meetingUrl: clip.meetingUrl } : null), ...(clip.notes ? { notes: clip.notes } : null),
+    reminderMins: hasReminder ? clip.reminderMins : null,
+    ...(hasReminder && clip.reminderAlarm ? { reminderAlarm: true } : null),
+    recurrence: clip.recurrence,
+    ...(clip.isDeadline ? { isDeadline: true } : null),
+  }
+}

@@ -3124,12 +3124,37 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
     dlFallbackRef.current = setTimeout(finishHideDeadlines, 450)     // safety net if the transition-end event never arrives
   }
   useEffect(() => () => { if (dlFallbackRef.current) clearTimeout(dlFallbackRef.current) }, [])
+  // v1.363 — an ANSWERED deadline (Yes or No) leaves the panel on its own. Source of truth = the v1.361 acknowledgment record (item.ack): a deadline with an applicable
+  // answer is simply not listed (so it never comes back after Save / refresh / sign-in / another device, and Cancel — which restores the day snapshot — brings it back).
+  // Nothing extra is stored. While the answer is being applied the row is kept on screen (`keepIds`) so it can slide away instead of vanishing; `goingIds` are the rows
+  // currently collapsing, and `dlAuto` collapses the whole panel when the answered deadline was the last one still asking.
+  const [keepIds, setKeepIds] = useState<string[]>([])
+  const [goingIds, setGoingIds] = useState<string[]>([])
+  const [dlAuto, setDlAuto] = useState(false)
+  const [stickyMulti, setStickyMulti] = useState(false)       // a panel that ever listed several deadlines keeps the several-deadline layout while rows leave (no layout jump)
+  const visibleDeadlines = (dayDeadlines ?? []).filter(d => d.ack === null || keepIds.includes(d.id))
+  const goneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  function finishLeaving() {
+    if (goneTimerRef.current) { clearTimeout(goneTimerRef.current); goneTimerRef.current = null }
+    setKeepIds([]); setGoingIds([]); setDlAuto(false)
+  }
+  useEffect(() => () => { if (goneTimerRef.current) clearTimeout(goneTimerRef.current) }, [])
   async function answerDeadline(it: DeadlineItem, outcome: AckOutcome) {
     if (ackBusyRef.current.has(it.id)) return                      // a rapid second tap on the same deadline does nothing
     ackBusyRef.current.add(it.id); setAckBusy([...ackBusyRef.current])
+    setKeepIds(k => (k.includes(it.id) ? k : [...k, it.id]))       // keep the row mounted while the answer is applied
+    let ok = false
     try {
-      if (!(await acknowledge(it, outcome))) setToast('Could not save your answer. Nothing was changed.')
+      ok = await acknowledge(it, outcome)
+      if (!ok) setToast('Could not save your answer. Nothing was changed.')
     } finally { ackBusyRef.current.delete(it.id); setAckBusy([...ackBusyRef.current]) }
+    if (!ok) { setKeepIds(k => k.filter(x => x !== it.id)); return }
+    const stillAsking = (dayDeadlines ?? []).filter(d => d.ack === null && d.id !== it.id && !goingIds.includes(d.id))
+    if ((dayDeadlines ?? []).filter(d => d.ack === null || keepIds.includes(d.id)).length > 1) setStickyMulti(true)
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { finishLeaving(); return }   // no animation: just go
+    if (stillAsking.length === 0) setDlAuto(true); else setGoingIds(g => [...g, it.id])
+    if (goneTimerRef.current) clearTimeout(goneTimerRef.current)
+    goneTimerRef.current = setTimeout(finishLeaving, 450)           // safety net if no transition-end event arrives
   }
 
   // Persist for real: queue the pending edits, then wait for the server to CONFIRM every unsynced day
@@ -3496,10 +3521,10 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
         {/* v1.345 — every deadline on this day, each with its own status (the calendar cell shows only one marker).
             v1.361 — charcoal panel; once a deadline's time is reached and it is still open, it asks "Did you meet the deadline…?" (Yes / No); one Hide button collapses the
             whole panel for the rest of this Task Manager opening (temporary: nothing is stored and it is back the next time Task Manager opens). */}
-        {dayDeadlines && dayDeadlines.length > 0 && !deadlinesHidden && (
-          <div data-testid="day-deadlines-wrap" data-hiding={dlHiding ? 'true' : 'false'}
-            onTransitionEnd={e => { if (dlHiding && e.target === e.currentTarget && e.propertyName === 'grid-template-rows') finishHideDeadlines() }}
-            style={{ display: 'grid', gridTemplateRows: dlHiding ? '0fr' : '1fr', opacity: dlHiding ? 0 : 1, flexShrink: 0, transition: 'grid-template-rows 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 240ms ease-in-out' }}>
+        {visibleDeadlines.length > 0 && !deadlinesHidden && (
+          <div data-testid="day-deadlines-wrap" data-hiding={dlHiding ? 'true' : 'false'} data-auto-dismiss={dlAuto ? 'true' : 'false'}
+            onTransitionEnd={e => { if (e.target === e.currentTarget && e.propertyName === 'grid-template-rows') { if (dlHiding) finishHideDeadlines(); else if (dlAuto) finishLeaving() } }}
+            style={{ display: 'grid', gridTemplateRows: dlHiding || dlAuto ? '0fr' : '1fr', opacity: dlHiding || dlAuto ? 0 : 1, flexShrink: 0, pointerEvents: dlAuto ? 'none' : undefined, transition: 'grid-template-rows 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 240ms ease-in-out' }}>
             <div style={{ minHeight: 0, overflow: 'hidden' }}>
               <div data-testid="day-deadlines" className="flex flex-col"
                 style={{ background: '#292630', color: '#F5F3F8', borderBottom: '0.5px solid #494451', maxHeight: 'min(46vh, 280px)', overflow: 'hidden', '--xp-txt': '#F5F3F8', '--xp-txt2': '#C4BFCE', '--xp-txt3': '#C4BFCE' } as React.CSSProperties}>
@@ -3507,31 +3532,35 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                     heading + Hide, and every deadline carries its own [status · due time] row so each time stays attached to its own title. */}
                 {(() => {
                   const hour12 = dayTimeFmt !== '24h'
-                  const timeBox = (it: (typeof dayDeadlines)[number]) => (
+                  const timeBox = (it: DeadlineItem) => (
                     <span data-testid="deadline-time" className="flex-shrink-0" style={{ border: '1px solid #8b5cf6', color: '#a78bfa', borderRadius: 6, padding: '0 7px', fontSize: 11.5, fontWeight: 600, lineHeight: '18px' }}>
                       {it.dateOnly ? 'All day' : formatDueTime(it.dueAt, effectiveTimezone, hour12)}
                     </span>
                   )
-                  const single = dayDeadlines.length === 1
+                  const single = visibleDeadlines.length === 1 && !stickyMulti
                   return (
                     <>
                       <div data-testid="day-deadlines-header" className="flex items-center justify-between gap-2 px-4 pt-2.5 pb-1.5 flex-shrink-0">
                         <div className="flex items-center flex-wrap gap-x-2 gap-y-1 min-w-0">
                           <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#C4BFCE' }}>Deadlines Reminder</span>
-                          {single && <><DueChip info={dayDeadlines[0].info} onDark />{timeBox(dayDeadlines[0])}</>}
+                          {single && <><DueChip info={visibleDeadlines[0].info} onDark />{timeBox(visibleDeadlines[0])}</>}
                         </div>
                         <button type="button" data-testid="deadlines-hide" onClick={hideDeadlines} aria-label="Hide the deadlines panel"
                           style={{ minHeight: 28, padding: '0 12px', borderRadius: 8, border: 'none', background: '#7c3aed', color: '#fff', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', flexShrink: 0, alignSelf: 'flex-start' }}>Hide</button>
                       </div>
-                      <div data-testid="day-deadlines-list" className="flex flex-col gap-2 px-4 pb-2.5 overflow-y-auto" style={{ minHeight: 0 }}>
-                        {dayDeadlines.map((it, i) => (
-                          <div key={it.id} data-testid="day-deadline-entry" className="flex flex-col gap-1.5" style={i > 0 ? { borderTop: '1px solid #494451', paddingTop: 8 } : undefined}>
+                      <div data-testid="day-deadlines-list" className="flex flex-col px-4 pb-2.5 overflow-y-auto" style={{ minHeight: 0 }}>
+                        {visibleDeadlines.map((it, i) => (
+                          <div key={it.id} data-testid="day-deadline-wrap" data-leaving={goingIds.includes(it.id) ? 'true' : 'false'}
+                            onTransitionEnd={e => { if (goingIds.includes(it.id) && e.target === e.currentTarget && e.propertyName === 'grid-template-rows') finishLeaving() }}
+                            style={{ display: 'grid', gridTemplateRows: goingIds.includes(it.id) ? '0fr' : '1fr', opacity: goingIds.includes(it.id) ? 0 : 1, pointerEvents: goingIds.includes(it.id) ? 'none' : undefined, transition: 'grid-template-rows 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 240ms ease-in-out' }}>
+                          <div style={{ minHeight: 0, overflow: 'hidden', paddingTop: i > 0 ? 8 : 0 }}>
+                          <div data-testid="day-deadline-entry" className="flex flex-col gap-1.5" style={i > 0 ? { borderTop: '1px solid #494451', paddingTop: 8 } : undefined}>
                             {!single && (
                               <div className="flex items-center flex-wrap gap-x-2 gap-y-1"><DueChip info={it.info} onDark />{timeBox(it)}</div>
                             )}
                             <div data-testid="day-deadline-row" className="min-w-0 text-[13px] font-semibold" style={{ color: '#F5F3F8', overflowWrap: 'anywhere' }}>{it.title}</div>
                             {it.dateMismatch && <AssignedDateNote assignedKey={it.dayKey} dueAt={it.dueAt} tz={effectiveTimezone} hour12={hour12} />}
-                            {it.needsAck && (
+                            {(it.needsAck || keepIds.includes(it.id)) && (
                               <div data-testid="deadline-ack" data-deadline-id={it.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                                 <span data-testid="deadline-ack-question" className="text-[12px]" style={{ color: '#C4BFCE', flex: '1 1 190px', minWidth: 0 }}>
                                   {ackQuestion(it.dueAt, it.dateOnly, Date.now(), effectiveTimezone, hour12)}
@@ -3548,6 +3577,8 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                                 </span>
                               </div>
                             )}
+                          </div>
+                          </div>
                           </div>
                         ))}
                       </div>

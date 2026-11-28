@@ -119,7 +119,7 @@ test('wiring: the panel is charcoal #292630 with the specified colours, one Hide
   const d = read('components/xpadite/DayModal.tsx'), p = d.slice(d.indexOf('data-testid="day-deadlines-wrap"'), d.indexOf('{/* Scrollable body */}'))
   for (const c of ['#292630', '#F5F3F8', '#C4BFCE', '#494451', '#168344', '#C63843', '#7c3aed']) assert.ok(p.includes(c), c)
   assert.equal((p.match(/data-testid="deadlines-hide"/g) || []).length, 1, 'one Hide button for the whole panel'); assert.match(p, />Hide<\/button>/)
-  assert.match(p, /gridTemplateRows: dlHiding \? '0fr' : '1fr'/); assert.match(p, /grid-template-rows 280ms cubic-bezier\(0\.4, 0, 0\.2, 1\), opacity 240ms ease-in-out/)
+  assert.match(p, /gridTemplateRows: dlHiding \|\| dlAuto \? '0fr' : '1fr'/); assert.match(p, /grid-template-rows 280ms cubic-bezier\(0\.4, 0, 0\.2, 1\), opacity 240ms ease-in-out/)
   assert.match(d, /prefers-reduced-motion: reduce/); assert.match(d, /setTimeout\(finishHideDeadlines, 450\)/)
   assert.doesNotMatch(p, /Show deadlines|Deadlines hidden|localStorage|sessionStorage/)
   assert.match(p, /data-testid="deadline-ack-yes"[\s\S]{0,700}#168344[\s\S]{0,700}Yes/); assert.match(p, /data-testid="deadline-ack-no"[\s\S]{0,700}#C63843[\s\S]{0,700}No/)
@@ -140,8 +140,39 @@ test('the v1.360 Copy & Paste and the existing completion / sync code are untouc
 test('v1.362 layout refinement: DEADLINES REMINDER header row (status + purple-outlined time + Hide), title row, question + Yes/No row; one heading/Hide; logic untouched', () => {
   const src = read('components/xpadite/DayModal.tsx')
   assert.match(src, /Deadlines Reminder/); assert.match(src, /data-testid="deadline-time"[\s\S]{0,120}border: '1px solid #8b5cf6'/)
-  assert.match(src, /single && <><DueChip info=\{dayDeadlines\[0\]\.info\} onDark \/>\{timeBox\(dayDeadlines\[0\]\)\}<\/>/, 'single deadline: status + time sit in the heading row')
+  assert.match(src, /single && <><DueChip info=\{visibleDeadlines\[0\]\.info\} onDark \/>\{timeBox\(visibleDeadlines\[0\]\)\}<\/>/, 'single deadline: status + time sit in the heading row')
   assert.match(src, /!single && \(/, 'several deadlines: each carries its own status + time row')
   assert.match(src, /ml-auto/, 'Yes/No stay together on the right'); assert.equal((src.match(/data-testid="deadlines-hide"/g) || []).length, 1)
   assert.match(src, /answerDeadline\(it, 'met'\)/); assert.match(src, /answerDeadline\(it, 'missed'\)/)
+})
+
+// ═══ v1.363 — an answered deadline leaves the panel on its own ═══
+// The panel lists a deadline only while it has NO applicable answer (item.ack === null) — plus the row that is mid-collapse. That rule is the v1.361 record itself, so it needs no
+// extra stored state and follows reopen / reschedule / Cancel exactly like the question does.
+test('v1.363 listing rule: answered (Yes while done, or No) → dismissed; unanswered / reopened after Yes / rescheduled since the answer / copy → listed again; upcoming and checkbox-completed keep their existing listing', () => {
+  const listed = (events, cal, now) => X.buildDeadlineItems(events, cal, TZ, now)['2026-11-27'].filter(i => i.ack === null).map(i => i.id)
+  const e = ev(), due = e.endAt, now = due + 2 * 3600_000
+  const yes = { '2026-11-27': day([task(e, { done: true, completedAt: now })], { ev1: { dueAt: due, outcome: 'met', at: now } }) }
+  const no = { '2026-11-27': day([task(e)], { ev1: { dueAt: due, outcome: 'missed', at: now } }) }
+  assert.deepEqual(listed([e], yes, now), []); assert.deepEqual(listed([e], no, now), [])
+  const noThenLate = { '2026-11-27': day([task(e, { done: true, completedAt: now })], { ev1: { dueAt: due, outcome: 'missed', at: due + MIN } }) }
+  assert.deepEqual(listed([e], noThenLate, now), [], 'No, then completed later: stays dismissed (history keeps "Completed late")')
+  const reopened = { '2026-11-27': day([task(e)], { ev1: { dueAt: due, outcome: 'met', at: now } }) }
+  assert.deepEqual(listed([e], reopened, now), ['ev1'], 'unticked after Yes: eligible again')
+  const moved = ev({ endAt: due + 3 * 3600_000 })
+  assert.deepEqual(listed([moved], no, moved.endAt + MIN), ['ev1'], 'rescheduled since the answer: eligible again')
+  assert.deepEqual(listed([e], { '2026-11-27': day([task(e)]) }, due - 10 * MIN), ['ev1'], 'upcoming: listed as before')
+  assert.deepEqual(listed([e], { '2026-11-27': day([task(e, { done: true, completedAt: due - 30 * MIN })]) }, now), ['ev1'], 'ticked via the checkbox without an answer: listed as before')
+})
+test('v1.363 wiring: rows collapse with the existing 280 ms transition, the last asking row collapses the whole panel, nothing new is stored, Hide is unchanged and Cancel (snapshot restore) is untouched', () => {
+  const src = read('components/xpadite/DayModal.tsx')
+  assert.match(src, /const visibleDeadlines = \(dayDeadlines \?\? \[\]\)\.filter\(d => d\.ack === null \|\| keepIds\.includes\(d\.id\)\)/)
+  assert.match(src, /if \(stillAsking\.length === 0\) setDlAuto\(true\); else setGoingIds/)
+  assert.match(src, /data-testid="day-deadline-wrap"[\s\S]{0,700}grid-template-rows 280ms cubic-bezier\(0\.4, 0, 0\.2, 1\), opacity 240ms ease-in-out/)
+  assert.match(src, /\(\(\) => \{ if \(dlHiding\) finishHideDeadlines\(\)|if \(dlHiding\) finishHideDeadlines\(\); else if \(dlAuto\) finishLeaving\(\)/)
+  assert.match(src, /prefers-reduced-motion: reduce\)'\)\.matches\) \{ finishLeaving\(\); return \}/, 'reduced motion: no animation')
+  const seg = src.slice(src.indexOf('v1.363 — an ANSWERED deadline'), src.indexOf('// Persist for real'))
+  assert.ok(!/localStorage|sessionStorage|supabase|fetch\(/.test(seg), 'no new storage / network for dismissal')
+  assert.match(src, /function discardAndClose\(\) \{\s*if \(openSnapshotRef\.current\) \{\s*updateDay\(dateKey, \(\) => openSnapshotRef\.current!\)/, 'Cancel still restores the day snapshot')
+  assert.match(src, /Deadlines Reminder/)
 })

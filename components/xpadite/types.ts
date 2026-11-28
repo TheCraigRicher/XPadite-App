@@ -34,6 +34,9 @@ export interface DeadlineInfo {
   completedAt: number | null // epoch ms when the user marked it complete
 }
 
+/** v1.361: the user's answer to "Did you meet the deadline…?" for ONE deadline (see deadlineAck.ts). `dueAt` ties it to the exact deadline it was given for. */
+export interface DeadlineAck { dueAt: number; outcome: 'met' | 'missed'; at: number }
+
 export interface DayData {
   productive: boolean
   hyper: boolean
@@ -44,6 +47,8 @@ export interface DayData {
   goal?: boolean
   deadline?: DeadlineInfo
   attachments?: TaskAttachment[]
+  /** v1.361: answers to the deadline question, by deadline item id (event id or task id), for deadlines whose marker sits on this day */
+  deadlineAcks?: Record<string, DeadlineAck>
 }
 
 export type CalendarData = Record<string, DayData>

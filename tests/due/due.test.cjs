@@ -10,7 +10,7 @@ const ROOT = path.resolve(__dirname, '..', '..')
 const OUT = path.join(ROOT, 'node_modules', '.cache', 'xpadite-due'); fs.mkdirSync(OUT, { recursive: true })
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8').split(String.fromCharCode(13, 10)).join(String.fromCharCode(10))   // CRLF checkouts read like LF ones
 const compile = f => fs.writeFileSync(path.join(OUT, f + '.js'), ts.transpileModule(read(`components/xpadite/${f}.ts`), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText)
-compile('dueStatus'); compile('deadlineLink'); compile('deadlineIndex')
+compile('dueStatus'); compile('deadlineLink'); compile('deadlineAck'); compile('deadlineIndex')
 compile('zdate'); compile('dueStatus')
 const D = require(path.join(OUT, 'dueStatus.js'))
 const X = require(path.join(OUT, 'deadlineIndex.js'))
@@ -247,7 +247,7 @@ test('Task Manager: the three-dot menu has NO "Due Date" item (My Schedule manag
   // every other menu item is still there
   for (const l of ['Edit Task', 'Set Reminder', 'Adjust Time', 'Duplicate Task', 'Increment Session', 'Copy Task', 'Paste Task', 'Move Task', 'Create Sub-Task', 'Send to Planner', 'Choose Task Color', 'Delete Task']) assert.ok(dm.includes(`label: '${l}'`) || dm.includes(`'${l}'`), l)
   assert.match(dm, /data-testid="task-due-completed"/)
-  assert.match(dm, /dueInfo\(\{ dueAt, done, completedAt \}, now, tz\)/)
+  assert.match(dm, /dueInfo\(\{ dueAt, done, completedAt(, outcome)? \}, now, tz\)/)
 })
 
 test('the literal "\\u2192" in the Task Manager popup is fixed (JSX text does not interpret escapes)', () => {

@@ -21,7 +21,9 @@ import { Theme } from 'emoji-picker-react'
 import type { EmojiClickData } from 'emoji-picker-react'
 import { COMPLETED_UNKNOWN, completionPatch, dueInfo, formatDueDate, formatDueTime, taskDueInstant } from './dueStatus'
 import { AssignedDateNote, DueChip } from './DeadlineStatus'
-import { useDeadlines } from './useDeadlines'
+import { useDeadlineActions, useDeadlines } from './useDeadlines'
+import { ackQuestion, validAck, type AckOutcome } from './deadlineAck'
+import type { DeadlineItem } from './deadlineIndex'
 
 const JournalEditorEmbed = dynamic(
   () => import('./JournalEditorEmbed').then(m => ({ default: m.JournalEditorEmbed })),
@@ -941,11 +943,13 @@ interface TaskRowProps {
   onTransfer: () => void
   transferDisabled: boolean
   onPlannerNotes?: () => void
+  /** v1.361: the day's recorded answers to the deadline question (for the status line in the task popup) */
+  deadlineAcks?: DayData['deadlineAcks']
 }
 
 /** Due-date block inside the task-title popup (v1.345): status chip, the original due date/time, and, once completed, the real completion time and how it compared. */
-function DeadlineInfoLine({ dueAt, dateOnly, done, completedAt, now, tz, hour12, assignedKey }: { dueAt: number; dateOnly: boolean; done: boolean; completedAt?: number | null; now: number; tz: string; hour12: boolean; assignedKey?: string }) {
-  const info = dueInfo({ dueAt, done, completedAt }, now, tz)
+function DeadlineInfoLine({ dueAt, dateOnly, done, completedAt, outcome, now, tz, hour12, assignedKey }: { dueAt: number; dateOnly: boolean; done: boolean; completedAt?: number | null; outcome?: AckOutcome | null; now: number; tz: string; hour12: boolean; assignedKey?: string }) {
+  const info = dueInfo({ dueAt, done, completedAt, outcome }, now, tz)
   const stamp = (ms: number) => `${formatDueDate(ms, tz)} \u00b7 ${formatDueTime(ms, tz, hour12)}`
   return (
     <div data-testid="task-due-info" style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--xp-txt2)' }}>
@@ -981,7 +985,7 @@ function TaskRow({
   onCopy, onPaste, onCreateSubTask, pasteEnabled,
   onChooseColor, onTogglePriority,
   onTransfer, transferDisabled,
-  onPlannerNotes,
+  onPlannerNotes, deadlineAcks,
 }: TaskRowProps) {
   const { activities, reminders, isDark, setToast, scheduleEvents, requestScheduleEvent, scheduleTimeFormat, effectiveTimezone } = useApp()
   // v1.328: a task linked to a My Schedule deadline gets the SAME red urgent look as a priority task (applied once, priority value untouched).
@@ -2002,8 +2006,8 @@ function TaskRow({
         <div style={{ position: 'fixed', inset: 0, zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, background: 'rgba(0,0,0,0.25)' }} onClick={() => setShowPopover(false)}>
           <div style={{ background: isDark ? '#1e1830' : '#ffffff', border: `0.5px solid ${isDark ? 'rgba(124,58,237,0.30)' : 'rgba(0,0,0,0.10)'}`, borderRadius: 14, padding: '14px 16px', maxWidth: 320, width: '100%', boxShadow: '0 16px 48px rgba(0,0,0,0.22), 0 4px 16px rgba(0,0,0,0.10)' }} onClick={e => e.stopPropagation()}>
             <p style={{ fontSize: 13, color: isDark ? 'rgba(255,255,255,0.88)' : '#111827', lineHeight: 1.55, wordBreak: 'break-word', fontWeight: 500, margin: 0 }}>{task.text}</p>
-            {deadlineEvent && <DeadlineInfoLine assignedKey={dateKey} dueAt={deadlineEvent.endAt} dateOnly={false} done={task.done} completedAt={task.completedAt} now={now} tz={effectiveTimezone} hour12={scheduleTimeFormat !== '24h'} />}
-            {!task.sourceEventId && task.due && <DeadlineInfoLine dueAt={taskDueInstant(task.due, effectiveTimezone)} dateOnly={task.due.dateOnly} done={task.done} completedAt={task.completedAt} now={now} tz={effectiveTimezone} hour12={scheduleTimeFormat !== '24h'} />}
+            {deadlineEvent && <DeadlineInfoLine assignedKey={dateKey} dueAt={deadlineEvent.endAt} dateOnly={false} done={task.done} completedAt={task.completedAt} outcome={validAck(deadlineAcks?.[deadlineEvent.id], deadlineEvent.endAt, task.done)} now={now} tz={effectiveTimezone} hour12={scheduleTimeFormat !== '24h'} />}
+            {!task.sourceEventId && task.due && <DeadlineInfoLine dueAt={taskDueInstant(task.due, effectiveTimezone)} dateOnly={task.due.dateOnly} done={task.done} completedAt={task.completedAt} outcome={validAck(deadlineAcks?.[task.id], taskDueInstant(task.due, effectiveTimezone), task.done)} now={now} tz={effectiveTimezone} hour12={scheduleTimeFormat !== '24h'} />}
             {eventTaskEvent && <EventInfoLine start={eventTaskEvent.startAt} end={eventTaskEvent.endAt} fmt={scheduleTimeFormat} />}
             {task.sourceEventId && (
               <div data-testid="task-deadline-owner" style={{ marginTop: 8, fontSize: 11, color: 'var(--xp-txt3)', lineHeight: 1.45 }}>
@@ -2346,9 +2350,12 @@ interface DayModalProps {
   onSendToPlanner?: (destDateKey: string) => void
   /** True while another screen (the Daily Dashboard) is layered above this window: Escape then belongs to that screen, not to this one. */
   suspended?: boolean
+  /** v1.361: the Deadlines panel was hidden for this Task Manager opening (the parent forgets it when Task Manager closes) */
+  deadlinesHidden?: boolean
+  onHideDeadlines?: () => void
 }
 
-export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyChange, onNavigateDay, onGoToToday, closeIntent, skipEntryAnimation, onSendToPlanner, suspended }: DayModalProps) {
+export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyChange, onNavigateDay, onGoToToday, closeIntent, skipEntryAnimation, onSendToPlanner, suspended, deadlinesHidden = false, onHideDeadlines }: DayModalProps) {
   const {
     calData, updateDay, flushDays, activeTaskTimer, setActiveTaskTimer,
     activities, activeSession, setActiveSession, selectedActId,
@@ -3100,6 +3107,30 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
   const isViewingToday = dateKey === todayKey(effectiveTimezone)
   const { scheduleTimeFormat: dayTimeFmt } = useApp()
   const dayDeadlines = useDeadlines()[dateKey]   // v1.345: every deadline that falls on this day, with its live status
+  // v1.361 — the Deadlines panel: "Did you meet the deadline…?" (Yes / No) per deadline, and a temporary Hide for this Task Manager opening
+  const { acknowledge } = useDeadlineActions()
+  const ackBusyRef = useRef<Set<string>>(new Set())
+  const [ackBusy, setAckBusy] = useState<string[]>([])
+  const [dlHiding, setDlHiding] = useState(false)
+  const dlFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  function finishHideDeadlines() {
+    if (dlFallbackRef.current) { clearTimeout(dlFallbackRef.current); dlFallbackRef.current = null }
+    onHideDeadlines?.()
+  }
+  function hideDeadlines() {
+    if (dlHiding) return
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { finishHideDeadlines(); return }   // no animation: just go
+    setDlHiding(true)
+    dlFallbackRef.current = setTimeout(finishHideDeadlines, 450)     // safety net if the transition-end event never arrives
+  }
+  useEffect(() => () => { if (dlFallbackRef.current) clearTimeout(dlFallbackRef.current) }, [])
+  async function answerDeadline(it: DeadlineItem, outcome: AckOutcome) {
+    if (ackBusyRef.current.has(it.id)) return                      // a rapid second tap on the same deadline does nothing
+    ackBusyRef.current.add(it.id); setAckBusy([...ackBusyRef.current])
+    try {
+      if (!(await acknowledge(it, outcome))) setToast('Could not save your answer. Nothing was changed.')
+    } finally { ackBusyRef.current.delete(it.id); setAckBusy([...ackBusyRef.current]) }
+  }
 
   // Persist for real: queue the pending edits, then wait for the server to CONFIRM every unsynced day
   // (this day and, after a move, its destination). Resolves false — and tells the user — if it did not land;
@@ -3462,20 +3493,52 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
           <button onClick={onDashboard} className="flex items-center gap-1.5 text-[10px] sm:text-xs px-2.5 sm:px-3.5 py-1.5 rounded-lg font-medium text-white transition-all hover:opacity-85 flex-shrink-0" style={{ background: '#7c3aed' }}>📊 Today&apos;s Dashboard</button>
         </div>
 
-        {/* v1.345 — every deadline on this day, each with its own status (the calendar cell shows only one marker) */}
-        {dayDeadlines && dayDeadlines.length > 0 && (
-          <div data-testid="day-deadlines" className="flex flex-col gap-1.5 px-4 py-2 flex-shrink-0 overflow-y-auto" style={{ borderBottom: '0.5px solid var(--xp-bdr)', maxHeight: 112 }}>
-            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--xp-txt3)' }}>Deadlines</span>
-            {dayDeadlines.map(it => (
-              <div key={it.id} className="flex flex-col gap-0.5">
-              <div data-testid="day-deadline-row" className="flex items-center gap-2 min-w-0 text-[12px]">
-                <DueChip info={it.info} />
-                <span className="truncate min-w-0" style={{ color: 'var(--xp-txt)' }}>{it.title}</span>
-                <span className="flex-shrink-0" style={{ color: 'var(--xp-txt3)' }}>{it.dateOnly ? 'all day' : formatDueTime(it.dueAt, effectiveTimezone, dayTimeFmt !== '24h')}</span>
+        {/* v1.345 — every deadline on this day, each with its own status (the calendar cell shows only one marker).
+            v1.361 — charcoal panel; once a deadline's time is reached and it is still open, it asks "Did you meet the deadline…?" (Yes / No); one Hide button collapses the
+            whole panel for the rest of this Task Manager opening (temporary: nothing is stored and it is back the next time Task Manager opens). */}
+        {dayDeadlines && dayDeadlines.length > 0 && !deadlinesHidden && (
+          <div data-testid="day-deadlines-wrap" data-hiding={dlHiding ? 'true' : 'false'}
+            onTransitionEnd={e => { if (dlHiding && e.target === e.currentTarget && e.propertyName === 'grid-template-rows') finishHideDeadlines() }}
+            style={{ display: 'grid', gridTemplateRows: dlHiding ? '0fr' : '1fr', opacity: dlHiding ? 0 : 1, flexShrink: 0, transition: 'grid-template-rows 280ms cubic-bezier(0.4, 0, 0.2, 1), opacity 240ms ease-in-out' }}>
+            <div style={{ minHeight: 0, overflow: 'hidden' }}>
+              <div data-testid="day-deadlines" className="flex flex-col"
+                style={{ background: '#292630', color: '#F5F3F8', borderBottom: '0.5px solid #494451', maxHeight: 'min(46vh, 280px)', overflow: 'hidden', '--xp-txt': '#F5F3F8', '--xp-txt2': '#C4BFCE', '--xp-txt3': '#C4BFCE' } as React.CSSProperties}>
+                <div className="flex items-center justify-between gap-2 px-4 pt-2.5 pb-1.5 flex-shrink-0">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#C4BFCE' }}>Deadlines</span>
+                  <button type="button" data-testid="deadlines-hide" onClick={hideDeadlines} aria-label="Hide the deadlines panel"
+                    style={{ minHeight: 28, padding: '0 12px', borderRadius: 8, border: 'none', background: '#7c3aed', color: '#fff', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>Hide</button>
+                </div>
+                <div data-testid="day-deadlines-list" className="flex flex-col gap-2 px-4 pb-2.5 overflow-y-auto" style={{ minHeight: 0 }}>
+                {dayDeadlines.map((it, i) => (
+                  <div key={it.id} className="flex flex-col gap-1.5" style={i > 0 ? { borderTop: '1px solid #494451', paddingTop: 8 } : undefined}>
+                    <div data-testid="day-deadline-row" className="flex items-start gap-2 min-w-0 text-[12px]">
+                      <DueChip info={it.info} onDark />
+                      <span className="min-w-0 flex-1" style={{ color: '#F5F3F8', overflowWrap: 'anywhere' }}>{it.title}</span>
+                      <span className="flex-shrink-0" style={{ color: '#C4BFCE' }}>{it.dateOnly ? 'all day' : formatDueTime(it.dueAt, effectiveTimezone, dayTimeFmt !== '24h')}</span>
+                    </div>
+                    {it.dateMismatch && <AssignedDateNote assignedKey={it.dayKey} dueAt={it.dueAt} tz={effectiveTimezone} hour12={dayTimeFmt !== '24h'} />}
+                    {it.needsAck && (
+                      <div data-testid="deadline-ack" data-deadline-id={it.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                        <span data-testid="deadline-ack-question" className="text-[12px]" style={{ color: '#C4BFCE', flex: '1 1 190px', minWidth: 0 }}>
+                          {ackQuestion(it.dueAt, it.dateOnly, Date.now(), effectiveTimezone, dayTimeFmt !== '24h')}
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 flex-shrink-0">
+                          <button type="button" data-testid="deadline-ack-yes" disabled={ackBusy.includes(it.id)} onClick={() => { void answerDeadline(it, 'met') }}
+                            style={{ minHeight: 30, padding: '0 12px', borderRadius: 8, border: 'none', background: '#168344', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: ackBusy.includes(it.id) ? 0.6 : 1, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="4 12.5 9.5 18 20 6.5" /></svg>Yes
+                          </button>
+                          <button type="button" data-testid="deadline-ack-no" disabled={ackBusy.includes(it.id)} onClick={() => { void answerDeadline(it, 'missed') }}
+                            style={{ minHeight: 30, padding: '0 12px', borderRadius: 8, border: 'none', background: '#C63843', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: ackBusy.includes(it.id) ? 0.6 : 1, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>No
+                          </button>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                </div>
               </div>
-              {it.dateMismatch && <AssignedDateNote assignedKey={it.dayKey} dueAt={it.dueAt} tz={effectiveTimezone} hour12={dayTimeFmt !== '24h'} />}
-              </div>
-            ))}
+            </div>
           </div>
         )}
 
@@ -3546,7 +3609,7 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
                     blockedByOtherTimer: activeTaskTimer ? activeTaskTimer.taskId !== t.id : !!activeSession,
                     now, isEditing: editingTaskId === t.id,
                     onEditStart: () => setEditingTaskId(t.id), onEditEnd: () => setEditingTaskId(null),
-                    dateKey, expanded: expandedTaskId === t.id,
+                    dateKey, expanded: expandedTaskId === t.id, deadlineAcks: dayData.deadlineAcks,
                     onExpandToggle: () => setExpandedTaskId(prev => prev === t.id ? null : t.id),
                     onToggle: () => toggleTask(t.id), onDelete: () => deleteTask(t.id),
                     onDuplicate: () => duplicateTask(t.id),

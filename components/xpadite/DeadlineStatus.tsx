@@ -14,8 +14,14 @@ const TONES = {
   completed:{ fg: '#15803d', bg: 'rgba(22,163,74,0.14)', bd: 'rgba(22,163,74,0.45)' },
 }
 
-export function DueChip({ info, testId = 'due-chip' }: { info: DueInfo; testId?: string }) {
-  const t = info.state === 'overdue' ? TONES.overdue : info.state === 'completed' ? TONES.completed : info.dueToday ? TONES.today : TONES.upcoming
+// lighter text for the charcoal Deadlines panel (v1.361) — same tints and borders, so each status is still recognisable at a glance
+const TONES_DARK = {
+  upcoming: { ...TONES.upcoming, fg: '#93c5fd' }, today: { ...TONES.today, fg: '#fcd34d' }, overdue: { ...TONES.overdue, fg: '#fca5a5' }, completed: { ...TONES.completed, fg: '#86efac' },
+}
+
+export function DueChip({ info, testId = 'due-chip', onDark = false }: { info: DueInfo; testId?: string; onDark?: boolean }) {
+  const T = onDark ? TONES_DARK : TONES
+  const t = info.state === 'overdue' ? T.overdue : info.state === 'completed' ? T.completed : info.dueToday ? T.today : T.upcoming
   return (
     <span data-testid={testId} data-state={info.state} style={{ display: 'inline-block', padding: '1px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, color: t.fg, background: t.bg, border: `0.5px solid ${t.bd}`, whiteSpace: 'nowrap' }}>{info.label}</span>
   )

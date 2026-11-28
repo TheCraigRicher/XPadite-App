@@ -15,7 +15,11 @@ export type DueTiming = 'early' | 'on-time' | 'late' | 'unknown'
 /** Stored on an event row when a deadline was completed but the moment was never recorded (done before v1.345): "completed", time unknown. Never shown as a time. */
 export const COMPLETED_UNKNOWN = -1
 
-export interface DueSubject { dueAt: number; done: boolean; completedAt?: number | null }
+export interface DueSubject {
+  dueAt: number; done: boolean; completedAt?: number | null
+  /** v1.361: the user's explicit answer for THIS deadline instant (already validated by validAck). 'met' = "I met it" even though it was ticked off after the due time. */
+  outcome?: 'met' | 'missed' | null
+}
 export interface DueInfo {
   state: DueState
   /** Short chip text. */
@@ -98,6 +102,8 @@ export function dueInfo(s: DueSubject, now: number, tz: string): DueInfo {
   const dueDay = dayKeyInTz(s.dueAt, tz)
   if (s.done) {
     const c = s.completedAt
+    // v1.361: "Yes, I met it" — recorded as met, whatever moment it was ticked off at (a completion before the due time is judged as before: early / on time)
+    if (s.outcome === 'met' && !(typeof c === 'number' && Number.isFinite(c) && c <= s.dueAt)) return { state: 'completed', label: 'Met deadline', timing: 'on-time', days: 0 }
     if (typeof c !== 'number' || !Number.isFinite(c)) return { state: 'completed', label: 'Completed', timing: 'unknown', days: 0 }
     const doneDay = dayKeyInTz(c, tz)
     if (c <= s.dueAt) {

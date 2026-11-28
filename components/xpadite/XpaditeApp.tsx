@@ -675,6 +675,8 @@ function ThemedApp(_props: XpaditeAppProps) {
 
   const [toastExiting, setToastExiting]             = useState(false)
   const [modalDay, setModalDay]                     = useState<ModalDay | null>(null)
+  // v1.361: the Task Manager's Deadlines panel was hidden for THIS opening only (reset whenever Task Manager closes; never stored)
+  const [deadlinesHidden, setDeadlinesHidden]       = useState(false)
   const [dashboardDay, setDashboardDay]             = useState<ModalDay | null>(null)
   const [zoomedMonth, setZoomedMonth]               = useState<number | null>(null)
   const [fullPageMonth, setFullPageMonth]           = useState<number | null>(null)
@@ -801,7 +803,7 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
     if (meetingsOpen) setMeetingsOpen(false)
     if (helpOpen) setHelpOpen(false)
     if (whatsNewOpen) setWhatsNewOpen(false)
-    if (modalDay) setModalDay(null)
+    if (modalDay) { setModalDay(null); setDeadlinesHidden(false) }
     executeNav(tab)
   }
 
@@ -1248,6 +1250,8 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
       {modalDay && (
         <DayModal
           key={`day-${modalDay.key}`}
+          deadlinesHidden={deadlinesHidden}
+          onHideDeadlines={() => setDeadlinesHidden(true)}
           dateKey={modalDay.key}
           month={modalDay.month}
           day={modalDay.day}
@@ -1255,6 +1259,7 @@ const [profileCloseIntent, setProfileCloseIntent]       = useState<'save' | 'dis
           onClose={() => {
             const closing = modalDay
             setModalDay(null)
+            setDeadlinesHidden(false)      // v1.361: the Deadlines panel is back the next time Task Manager opens
             setDayModalCloseIntent(null)
             const pending = pendingNavRef.current
             if (pending) {

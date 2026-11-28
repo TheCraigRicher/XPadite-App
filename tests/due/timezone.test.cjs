@@ -10,7 +10,7 @@ const ROOT = path.resolve(__dirname, '..', '..')
 const OUT = path.join(ROOT, 'node_modules', '.cache', 'xpadite-tz'); fs.mkdirSync(OUT, { recursive: true })
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8').split('\r\n').join('\n')
 const js = f => ts.transpileModule(read(f), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
-for (const m of ['zdate', 'dueStatus', 'deadlineLink', 'deadlineIndex', 'scheduleLogic']) fs.writeFileSync(path.join(OUT, m + '.js'), js(`components/xpadite/${m}.ts`))
+for (const m of ['zdate', 'dueStatus', 'deadlineLink', 'deadlineAck', 'deadlineIndex', 'scheduleLogic']) fs.writeFileSync(path.join(OUT, m + '.js'), js(`components/xpadite/${m}.ts`))
 fs.writeFileSync(path.join(OUT, 'core-data.js'), js('lib/supabase/core-data.ts'))
 const Z = require(path.join(OUT, 'zdate.js')), D = require(path.join(OUT, 'dueStatus.js')), L = require(path.join(OUT, 'deadlineLink.js')), X = require(path.join(OUT, 'deadlineIndex.js')), S = require(path.join(OUT, 'scheduleLogic.js'))
 const CD = require(path.join(OUT, 'core-data.js'))

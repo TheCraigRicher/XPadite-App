@@ -165,7 +165,7 @@ test('Task Manager: deadline tasks reuse the existing red urgent styling exactly
   assert.ok(/<DeadlineInfoLine assignedKey=\{dateKey\} dueAt=\{deadlineEvent\.endAt\}/.test(d) && (d.match(/>Dismiss<\/button>/g) || []).length === 1, 'the existing popup (single Dismiss) shows the due line')
   const line = d.slice(d.indexOf('function DeadlineInfoLine'), d.indexOf('function TaskRow'))
   // v1.345: the same popup, now driven by the shared status calculation (status chip, due date/time, completion time) in the selected timezone
-  assert.ok(/dueInfo\(\{ dueAt, done, completedAt \}, now, tz\)/.test(line) && /<DueChip info=\{info\}/.test(line) && /formatDueDate\(dueAt, tz\)/.test(line) && /task-due-completed/.test(line))
+  assert.ok(/dueInfo\(\{ dueAt, done, completedAt(, outcome)? \}, now, tz\)/.test(line) && /<DueChip info=\{info\}/.test(line) && /formatDueDate\(dueAt, tz\)/.test(line) && /task-due-completed/.test(line))
 })
 
 // ── Phase 7: saved locations ────────────────────────────────────────────────

@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useApp } from './AppContext'
 import { deadlineIndex, type DeadlineItem } from './deadlineIndex'
 import { completionPatch, type TaskDue } from './dueStatus'
+import { withAck, type AckOutcome } from './deadlineAck'
 
 export function useDeadlines(): Record<string, DeadlineItem[]> {
   const { calData, scheduleEvents, effectiveTimezone } = useApp()
@@ -18,7 +19,16 @@ export function useDeadlines(): Record<string, DeadlineItem[]> {
     const id = window.setInterval(() => setNow(Date.now()), 30_000)
     return () => window.clearInterval(id)
   }, [])
-  return deadlineIndex(scheduleEvents, calData, effectiveTimezone, now)
+  const index = deadlineIndex(scheduleEvents, calData, effectiveTimezone, now)
+  // v1.361: also refresh at the very moment the next not-yet-reached deadline comes due, so Overdue and the question appear on time without faster polling
+  useEffect(() => {
+    let next = Infinity
+    for (const items of Object.values(index)) for (const it of items) if (!it.done && it.dueAt > now && it.dueAt < next) next = it.dueAt
+    if (!Number.isFinite(next)) return
+    const t = window.setTimeout(() => setNow(Date.now()), Math.min(next - now + 400, 2_000_000_000))
+    return () => window.clearTimeout(t)
+  }, [index, now])
+  return index
 }
 
 /** One deadline by event id (null when it is not a deadline / not found). */
@@ -48,6 +58,18 @@ export function useDeadlineActions() {
     return false
   }, [updateDay, setDeadlineCompleted, setToast])
 
+  /**
+   * Records the user's answer to "Did you meet the deadline…?". Yes completes the deadline through the SAME path as the checkbox / Mark Complete (so the task,
+   * its green state, My Schedule, analytics and the real completion instant all behave exactly as before) and then records the answer; No only records the
+   * answer — the task stays open and unchecked. Nothing is recorded unless the completion itself succeeded.
+   */
+  const acknowledge = useCallback(async (item: DeadlineItem, outcome: AckOutcome): Promise<boolean> => {
+    if (outcome === 'met' && !item.done) { if (!(await setDone(item, true))) return false }
+    const ack = { dueAt: item.dueAt, outcome, at: Date.now() }
+    updateDay(item.dayKey, prev => withAck(prev, item.id, ack))
+    return true
+  }, [setDone, updateDay])
+
   /** Sets (due) or clears (null) a task's OWN due date. Never used for My Schedule deadline tasks — their due date belongs to the event. */
   const setTaskDue = useCallback((dateKey: string, taskId: string, due: TaskDue | null) => {
     updateDay(dateKey, prev => ({
@@ -61,5 +83,5 @@ export function useDeadlineActions() {
     }))
   }, [updateDay])
 
-  return { setDone, setTaskDue }
+  return { setDone, setTaskDue, acknowledge }
 }

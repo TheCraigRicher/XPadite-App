@@ -9,6 +9,7 @@ import type { CalendarData, Task } from './types'
 import type { ScheduleEvent } from './scheduleLogic'
 import { dateKeyOf, linkedTaskId } from './deadlineLink'
 import { dayKeyInTz, dueInfo, taskDueInstant, type DueInfo, type DueState } from './dueStatus'
+import { needsAck, validAck, type AckOutcome } from './deadlineAck'
 
 export interface DeadlineItem {
   /** event id or task id (unique per item). */
@@ -28,6 +29,9 @@ export interface DeadlineItem {
   done: boolean
   completedAt: number | null
   info: DueInfo
+  /** v1.361: the user's applicable answer (met / missed) and whether the "Did you meet the deadline…?" question should be shown now */
+  ack: AckOutcome | null
+  needsAck: boolean
   eventId?: string
   /** The Task Manager task that carries this deadline's completion (when there is one) and the day it lives on. */
   taskId?: string
@@ -35,6 +39,12 @@ export interface DeadlineItem {
 }
 
 type Ev = ScheduleEvent & { taskDateKey?: string | null }
+
+/** info + the applicable answer + whether to ask, for one deadline (the answer is read from the day its marker sits on). */
+function ackFields(cal: CalendarData, dayKey: string, id: string, dueAt: number, done: boolean, completedAt: number | null, now: number, tz: string): { info: DueInfo; ack: AckOutcome | null; needsAck: boolean } {
+  const ack = validAck(cal[dayKey]?.deadlineAcks?.[id], dueAt, done)
+  return { info: dueInfo({ dueAt, done, completedAt, outcome: ack }, now, tz), ack, needsAck: needsAck(done, dueAt, now, ack) }
+}
 
 function linkedTask(cal: CalendarData, ev: Ev, dayKey: string): { task: Task; key: string } | null {
   const id = linkedTaskId(ev.id, 'deadline')
@@ -60,14 +70,14 @@ export function buildDeadlineItems(events: Ev[], cal: CalendarData, tz: string, 
     const dueDay = dayKeyInTz(ev.endAt, tz)
     const done = lt ? !!lt.task.done : typeof ev.completedAt === 'number'      // no linked task: the event row records it (COMPLETED_UNKNOWN = done, time never recorded)
     const completedAt = lt ? (lt.task.done && typeof lt.task.completedAt === 'number' ? lt.task.completedAt : null) : (typeof ev.completedAt === 'number' && ev.completedAt > 0 ? ev.completedAt : null)
-    push({ id: ev.id, source: 'event', title: ev.title, dayKey, dueAt: ev.endAt, dateOnly: false, dueDay, dateMismatch: dayKey !== dueDay, tz, done, completedAt, info: dueInfo({ dueAt: ev.endAt, done, completedAt }, now, tz), eventId: ev.id, taskId: lt?.task.id, taskDateKey: lt?.key })
+    push({ id: ev.id, source: 'event', title: ev.title, dayKey, dueAt: ev.endAt, dateOnly: false, dueDay, dateMismatch: dayKey !== dueDay, tz, done, completedAt, ...ackFields(cal, dayKey, ev.id, ev.endAt, done, completedAt, now, tz), eventId: ev.id, taskId: lt?.task.id, taskDateKey: lt?.key })
   }
   for (const [key, day] of Object.entries(cal)) {
     for (const t of day.tasks ?? []) {
       if (!t.due || t.sourceEventId || !/^\d{4}-\d{2}-\d{2}$/.test(t.due.date)) continue
       const dueAt = taskDueInstant(t.due, tz)
       const completedAt = t.done && typeof t.completedAt === 'number' ? t.completedAt : null
-      push({ id: t.id, source: 'task', title: t.text, dayKey: t.due.date, dueAt, dateOnly: !!t.due.dateOnly, dueDay: t.due.date, dateMismatch: false, tz, done: !!t.done, completedAt, info: dueInfo({ dueAt, done: !!t.done, completedAt }, now, tz), taskId: t.id, taskDateKey: key })
+      push({ id: t.id, source: 'task', title: t.text, dayKey: t.due.date, dueAt, dateOnly: !!t.due.dateOnly, dueDay: t.due.date, dateMismatch: false, tz, done: !!t.done, completedAt, ...ackFields(cal, t.due.date, t.id, dueAt, !!t.done, completedAt, now, tz), taskId: t.id, taskDateKey: key })
     }
   }
   for (const k of Object.keys(out)) out[k].sort((a, b) => a.dueAt - b.dueAt)

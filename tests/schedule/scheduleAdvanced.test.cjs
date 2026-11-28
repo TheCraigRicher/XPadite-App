@@ -231,11 +231,12 @@ test('create: unlimited custom categories with names and distinct colours; the s
   let cats = BASE
   const hexes = E.CATEGORY_SWATCHES
   for (let i = 0; i < hexes.length; i++) cats = addOk(cats, `Custom ${i}`, hexes[i], `cat-${i}`)
-  assert.equal(cats.length, 6 + hexes.length); assert.deepEqual(cats.slice(0, 6).map(c => c.id), BASE.map(c => c.id))
-  assert.ok(cats.slice(6).every(c => !c.builtIn) && cats.slice(0, 6).every(c => c.builtIn))
+  const N = BASE.length
+  assert.equal(cats.length, N + hexes.length); assert.deepEqual(cats.slice(0, N).map(c => c.id), BASE.map(c => c.id))
+  assert.ok(cats.slice(N).every(c => !c.builtIn) && cats.slice(0, N).every(c => c.builtIn))
   // more than the swatches: custom hex values keep working
   for (let i = 0; i < 30; i++) cats = addOk(cats, `More ${i}`, '#' + (0x100000 + i * 0x010203).toString(16).padStart(6, '0'), `m-${i}`)
-  assert.equal(cats.length, 6 + hexes.length + 30)
+  assert.equal(cats.length, N + hexes.length + 30)
   const c = cats.find(x => x.id === 'cat-0'); assert.deepEqual([c.label, c.edge], ['Custom 0', hexes[0]]); assert.match(c.bg, /^#[0-9a-f]{6}$/); assert.match(c.text, /^#[0-9a-f]{6}$/)
   assert.notEqual(c.bg, c.edge); assert.notEqual(c.text, c.bg)
 })

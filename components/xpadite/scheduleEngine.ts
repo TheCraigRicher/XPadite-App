@@ -249,7 +249,7 @@ export function categoryColors(hex: string): { bg: string; edge: string; text: s
 
 export type CategoryResult = { ok: true; categories: ScheduleCategory[]; category?: ScheduleCategory } | { ok: false; error: string }
 
-const BUILT_IN_MSG = "The six built-in categories can't be changed."
+const BUILT_IN_MSG = "The built-in categories can't be changed."
 
 export function addCategory(categories: ScheduleCategory[], name: string, hex: string, id: string): CategoryResult {
   const err = validateCategoryName(name, categories)

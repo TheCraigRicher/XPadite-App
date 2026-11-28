@@ -162,9 +162,10 @@ test('reminder / recurrence labels only appear when set', () => {
 })
 
 // ── categories ──────────────────────────────────────────────────────────────
-test('the six categories keep their agreed names and one colour each', () => {
-  assert.deepEqual(L.SCHEDULE_CATEGORIES.map(c => c.label), ['Lecture / Class', 'Meeting', 'Assignment / Test', 'Study / Focus', 'Personal', 'Other'])
-  assert.equal(new Set(L.SCHEDULE_CATEGORIES.map(c => c.bg)).size, 6)
+test('the built-in categories keep their agreed names and one colour each (v1.362: Assignment renamed, Test/Urgent/Appointment/Work added)', () => {
+  assert.deepEqual(L.SCHEDULE_CATEGORIES.map(c => c.label), ['Lecture / Class', 'Meeting', 'Assignment', 'Test', 'Study / Focus', 'Personal', 'Other', 'Urgent / Priority', 'Appointment', 'Work'])
+  assert.deepEqual(L.SCHEDULE_CATEGORIES.map(c => c.id), ['lecture', 'meeting', 'assignment', 'test', 'study', 'personal', 'other', 'urgent', 'appointment', 'work'], 'the original ids (incl. assignment) are kept')
+  assert.equal(new Set(L.SCHEDULE_CATEGORIES.map(c => c.bg)).size, 10); assert.equal(new Set(L.SCHEDULE_CATEGORIES.map(c => c.edge)).size, 10)
   assert.equal(L.categoryMeta('meeting').label, 'Meeting')
 })
 
@@ -176,9 +177,9 @@ test('there is no built-in sample schedule or mock meeting data any more', () =>
 
 // ── combined filter (categories + sources) ─────────────────────────────────
 const mk = (id, category, source) => ({ id, title: id, category, startAt: 1, endAt: 2, ...(source ? { source } : {}) })
-test('the single dropdown lists All, the six categories, then Google Calendar and Outlook at the bottom', () => {
-  assert.deepEqual(L.FILTER_OPTIONS.map(o => o.label), ['All', 'Lecture / Class', 'Meeting', 'Assignment / Test', 'Study / Focus', 'Personal', 'Other', 'Google Calendar', 'Outlook'])
-  assert.deepEqual(L.FILTER_OPTIONS.map(o => o.value), ['all', 'lecture', 'meeting', 'assignment', 'study', 'personal', 'other', 'google', 'microsoft'])
+test('the single dropdown lists All, the built-in categories, then Google Calendar and Outlook at the bottom', () => {
+  assert.deepEqual(L.FILTER_OPTIONS.map(o => o.label), ['All', 'Lecture / Class', 'Meeting', 'Assignment', 'Test', 'Study / Focus', 'Personal', 'Other', 'Urgent / Priority', 'Appointment', 'Work', 'Google Calendar', 'Outlook'])
+  assert.deepEqual(L.FILTER_OPTIONS.map(o => o.value), ['all', 'lecture', 'meeting', 'assignment', 'test', 'study', 'personal', 'other', 'urgent', 'appointment', 'work', 'google', 'microsoft'])
   assert.deepEqual(L.splitFilter('all'), { category: 'all', source: 'all' }); assert.deepEqual(L.splitFilter('study'), { category: 'study', source: 'all' })
   assert.deepEqual(L.splitFilter('google'), { category: 'all', source: 'google' }); assert.deepEqual(L.splitFilter('microsoft'), { category: 'all', source: 'microsoft' })
 })

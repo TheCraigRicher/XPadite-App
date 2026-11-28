@@ -3503,40 +3503,57 @@ export function DayModal({ dateKey, month, day, onClose, onDashboard, onDirtyCha
             <div style={{ minHeight: 0, overflow: 'hidden' }}>
               <div data-testid="day-deadlines" className="flex flex-col"
                 style={{ background: '#292630', color: '#F5F3F8', borderBottom: '0.5px solid #494451', maxHeight: 'min(46vh, 280px)', overflow: 'hidden', '--xp-txt': '#F5F3F8', '--xp-txt2': '#C4BFCE', '--xp-txt3': '#C4BFCE' } as React.CSSProperties}>
-                <div className="flex items-center justify-between gap-2 px-4 pt-2.5 pb-1.5 flex-shrink-0">
-                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#C4BFCE' }}>Deadlines</span>
-                  <button type="button" data-testid="deadlines-hide" onClick={hideDeadlines} aria-label="Hide the deadlines panel"
-                    style={{ minHeight: 28, padding: '0 12px', borderRadius: 8, border: 'none', background: '#7c3aed', color: '#fff', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>Hide</button>
-                </div>
-                <div data-testid="day-deadlines-list" className="flex flex-col gap-2 px-4 pb-2.5 overflow-y-auto" style={{ minHeight: 0 }}>
-                {dayDeadlines.map((it, i) => (
-                  <div key={it.id} className="flex flex-col gap-1.5" style={i > 0 ? { borderTop: '1px solid #494451', paddingTop: 8 } : undefined}>
-                    <div data-testid="day-deadline-row" className="flex items-start gap-2 min-w-0 text-[12px]">
-                      <DueChip info={it.info} onDark />
-                      <span className="min-w-0 flex-1" style={{ color: '#F5F3F8', overflowWrap: 'anywhere' }}>{it.title}</span>
-                      <span className="flex-shrink-0" style={{ color: '#C4BFCE' }}>{it.dateOnly ? 'all day' : formatDueTime(it.dueAt, effectiveTimezone, dayTimeFmt !== '24h')}</span>
-                    </div>
-                    {it.dateMismatch && <AssignedDateNote assignedKey={it.dayKey} dueAt={it.dueAt} tz={effectiveTimezone} hour12={dayTimeFmt !== '24h'} />}
-                    {it.needsAck && (
-                      <div data-testid="deadline-ack" data-deadline-id={it.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                        <span data-testid="deadline-ack-question" className="text-[12px]" style={{ color: '#C4BFCE', flex: '1 1 190px', minWidth: 0 }}>
-                          {ackQuestion(it.dueAt, it.dateOnly, Date.now(), effectiveTimezone, dayTimeFmt !== '24h')}
-                        </span>
-                        <span className="inline-flex items-center gap-1.5 flex-shrink-0">
-                          <button type="button" data-testid="deadline-ack-yes" disabled={ackBusy.includes(it.id)} onClick={() => { void answerDeadline(it, 'met') }}
-                            style={{ minHeight: 30, padding: '0 12px', borderRadius: 8, border: 'none', background: '#168344', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: ackBusy.includes(it.id) ? 0.6 : 1, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="4 12.5 9.5 18 20 6.5" /></svg>Yes
-                          </button>
-                          <button type="button" data-testid="deadline-ack-no" disabled={ackBusy.includes(it.id)} onClick={() => { void answerDeadline(it, 'missed') }}
-                            style={{ minHeight: 30, padding: '0 12px', borderRadius: 8, border: 'none', background: '#C63843', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: ackBusy.includes(it.id) ? 0.6 : 1, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>No
-                          </button>
-                        </span>
+                {/* v1.362 — layout: [DEADLINES REMINDER · status · due time ........ Hide] / title / [question ...... Yes No]. With several deadlines the pinned header is just the
+                    heading + Hide, and every deadline carries its own [status · due time] row so each time stays attached to its own title. */}
+                {(() => {
+                  const hour12 = dayTimeFmt !== '24h'
+                  const timeBox = (it: (typeof dayDeadlines)[number]) => (
+                    <span data-testid="deadline-time" className="flex-shrink-0" style={{ border: '1px solid #8b5cf6', color: '#a78bfa', borderRadius: 6, padding: '0 7px', fontSize: 11.5, fontWeight: 600, lineHeight: '18px' }}>
+                      {it.dateOnly ? 'All day' : formatDueTime(it.dueAt, effectiveTimezone, hour12)}
+                    </span>
+                  )
+                  const single = dayDeadlines.length === 1
+                  return (
+                    <>
+                      <div data-testid="day-deadlines-header" className="flex items-center justify-between gap-2 px-4 pt-2.5 pb-1.5 flex-shrink-0">
+                        <div className="flex items-center flex-wrap gap-x-2 gap-y-1 min-w-0">
+                          <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#C4BFCE' }}>Deadlines Reminder</span>
+                          {single && <><DueChip info={dayDeadlines[0].info} onDark />{timeBox(dayDeadlines[0])}</>}
+                        </div>
+                        <button type="button" data-testid="deadlines-hide" onClick={hideDeadlines} aria-label="Hide the deadlines panel"
+                          style={{ minHeight: 28, padding: '0 12px', borderRadius: 8, border: 'none', background: '#7c3aed', color: '#fff', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', flexShrink: 0, alignSelf: 'flex-start' }}>Hide</button>
                       </div>
-                    )}
-                  </div>
-                ))}
-                </div>
+                      <div data-testid="day-deadlines-list" className="flex flex-col gap-2 px-4 pb-2.5 overflow-y-auto" style={{ minHeight: 0 }}>
+                        {dayDeadlines.map((it, i) => (
+                          <div key={it.id} data-testid="day-deadline-entry" className="flex flex-col gap-1.5" style={i > 0 ? { borderTop: '1px solid #494451', paddingTop: 8 } : undefined}>
+                            {!single && (
+                              <div className="flex items-center flex-wrap gap-x-2 gap-y-1"><DueChip info={it.info} onDark />{timeBox(it)}</div>
+                            )}
+                            <div data-testid="day-deadline-row" className="min-w-0 text-[13px] font-semibold" style={{ color: '#F5F3F8', overflowWrap: 'anywhere' }}>{it.title}</div>
+                            {it.dateMismatch && <AssignedDateNote assignedKey={it.dayKey} dueAt={it.dueAt} tz={effectiveTimezone} hour12={hour12} />}
+                            {it.needsAck && (
+                              <div data-testid="deadline-ack" data-deadline-id={it.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                                <span data-testid="deadline-ack-question" className="text-[12px]" style={{ color: '#C4BFCE', flex: '1 1 190px', minWidth: 0 }}>
+                                  {ackQuestion(it.dueAt, it.dateOnly, Date.now(), effectiveTimezone, hour12)}
+                                </span>
+                                <span className="inline-flex items-center gap-1.5 flex-shrink-0 ml-auto">
+                                  <button type="button" data-testid="deadline-ack-yes" disabled={ackBusy.includes(it.id)} onClick={() => { void answerDeadline(it, 'met') }}
+                                    style={{ minHeight: 30, padding: '0 12px', borderRadius: 8, border: 'none', background: '#168344', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: ackBusy.includes(it.id) ? 0.6 : 1, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="4 12.5 9.5 18 20 6.5" /></svg>Yes
+                                  </button>
+                                  <button type="button" data-testid="deadline-ack-no" disabled={ackBusy.includes(it.id)} onClick={() => { void answerDeadline(it, 'missed') }}
+                                    style={{ minHeight: 30, padding: '0 12px', borderRadius: 8, border: 'none', background: '#C63843', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: ackBusy.includes(it.id) ? 0.6 : 1, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true"><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>No
+                                  </button>
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )
+                })()}
               </div>
             </div>
           </div>

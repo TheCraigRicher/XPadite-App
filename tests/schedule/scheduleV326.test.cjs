@@ -169,7 +169,7 @@ test('pastel palette: ten soft colours, readable derived text, no clash with the
   const used = new Set(L.SCHEDULE_CATEGORIES.map(c => c.edge)); for (const h of sw) assert.ok(!used.has(h), h)
   const lum = h => { const n = parseInt(h.slice(1), 16); const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4 }; return 0.2126 * f(n >> 16 & 255) + 0.7152 * f(n >> 8 & 255) + 0.0722 * f(n & 255) }
   for (const h of sw) { const c = E.categoryColors(h); const [a, b] = [lum(c.bg), lum(c.text)].sort((x, y) => y - x); assert.ok((a + 0.05) / (b + 0.05) >= 4.5, h) }
-  assert.deepEqual(L.SCHEDULE_CATEGORIES.map(c => c.bg), ['#e4d4fb', '#bff5d9', '#fbd3ea', '#c3e2fb', '#fbf6a8', '#fddbae'], 'the six default colours are unchanged')
+  assert.deepEqual(['lecture', 'meeting', 'assignment', 'study', 'personal', 'other'].map(id => L.SCHEDULE_CATEGORIES.find(c => c.id === id).bg), ['#e4d4fb', '#bff5d9', '#fbd3ea', '#c3e2fb', '#fbf6a8', '#fddbae'], 'the six original default colours are unchanged')
   const old = { id: 'cat-old', label: 'Old', ...E.categoryColors('#ef4444') }
   const cats = [...L.SCHEDULE_CATEGORIES, old]; const added = E.addCategory(cats, 'New', sw[0], 'cat-new')
   assert.equal(added.ok, true); assert.deepEqual(added.categories.find(c => c.id === 'cat-old'), old, 'an existing custom category keeps its colour')

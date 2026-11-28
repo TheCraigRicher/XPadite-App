@@ -3,99 +3,55 @@
 import { useEffect, useState } from 'react'
 import { useApp } from './AppContext'
 import { useLockBodyScroll } from './useLockBodyScroll'
+import { COMING_SOON_ENTRIES, WHATS_NEW_ENTRIES, WHATS_NEW_LAST_UPDATED, formatLastUpdated } from './whatsNewData'
+import type { ComingSoonEntry, WhatsNewEntry } from './whatsNewData'
 
-// ─── Update data ────────────────────────────────────────────────────────────
-// Data-driven so future updates are just new entries here — no UI changes
-// needed. Move an item from 'coming-soon' to 'new' once it ships; the two
-// tabs below just filter this one array by status, they don't have separate
-// hardcoded content.
-
-interface WhatsNewUpdate {
-  id: string
-  title: string
-  description: string
-  icon: string
-  status: 'new' | 'coming-soon'
-  date?: string // optional future field (e.g. a version or ship date), unused for now
-}
-
-const WHATS_NEW_UPDATES: WhatsNewUpdate[] = [
-  {
-    id: 'xpadite-v2',
-    title: 'XPadite V2',
-    description: 'More powerful XPadite features and improvements are coming in V2.',
-    icon: '🚀',
-    status: 'coming-soon',
-  },
-  {
-    id: 'mobile-apps',
-    title: 'iOS & Android Apps',
-    description: 'Native XPadite apps for iOS and Android are coming in the future.',
-    icon: '📱',
-    status: 'coming-soon',
-  },
-]
+// Content lives in whatsNewData.ts (one centralized file; newest entry first, numbered automatically).
 
 type Tab = 'new' | 'coming-soon'
 
-// ─── Status pill ──────────────────────────────────────────────────────────────
+// ─── What's New row: number badge · bold title · description aligned with the title ──────────────────────────
 
-function StatusPill({ status, isDark }: { status: WhatsNewUpdate['status']; isDark: boolean }) {
-  const isNew = status === 'new'
+function ReleaseRow({ entry, n, first, isDark }: { entry: WhatsNewEntry; n: number; first: boolean; isDark: boolean }) {
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center', flexShrink: 0,
-      padding: '2.5px 9px', borderRadius: 20,
-      fontSize: 9.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
-      background: isNew
-        ? (isDark ? 'rgba(124,58,237,0.28)' : 'rgba(124,58,237,0.12)')
-        : (isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.06)'),
-      color: isNew
-        ? (isDark ? '#c4b5fd' : '#7c3aed')
-        : (isDark ? 'rgba(255,255,255,0.50)' : 'rgba(0,0,0,0.45)'),
-      whiteSpace: 'nowrap',
+    <li data-testid="wn-entry" style={{
+      display: 'grid', gridTemplateColumns: '24px minmax(0, 1fr)', columnGap: 12, padding: '13px 0',
+      borderTop: first ? 'none' : `1px solid ${isDark ? 'rgba(255,255,255,0.09)' : 'rgba(124,58,237,0.12)'}`,
     }}>
-      {isNew ? 'New' : 'Coming Soon'}
-    </span>
+      <span data-testid="wn-number" aria-hidden="true" style={{
+        width: 24, height: 24, borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: isDark ? 'rgba(124,58,237,0.26)' : 'rgba(124,58,237,0.12)', color: isDark ? '#c4b5fd' : '#6d28d9', fontSize: 11.5, fontWeight: 700,
+      }}>{n}</span>
+      <div style={{ minWidth: 0 }}>
+        <p data-testid="wn-title" style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.35, color: isDark ? 'rgba(255,255,255,0.92)' : '#2a1f4d', overflowWrap: 'anywhere' }}>{entry.title}</p>
+        <p data-testid="wn-desc" style={{ fontSize: 12.5, lineHeight: 1.5, marginTop: 3, color: isDark ? 'rgba(255,255,255,0.58)' : '#5b5472', overflowWrap: 'anywhere' }}>{entry.description}</p>
+      </div>
+    </li>
   )
 }
 
-// ─── Update card ──────────────────────────────────────────────────────────────
-
-function UpdateCard({ update, isDark, index }: { update: WhatsNewUpdate; isDark: boolean; index: number }) {
+function FileIcon() {
   return (
-    <div
-      className="xp-wn-update-card"
-      style={{
-        display: 'flex', alignItems: 'flex-start', gap: 13,
-        padding: '15px 16px', borderRadius: 16,
-        background: isDark ? 'rgba(255,255,255,0.044)' : '#f8f7fc',
-        border: `1px solid ${isDark ? 'rgba(255,255,255,0.085)' : 'rgba(0,0,0,0.075)'}`,
-        animationDelay: `${index * 45}ms`,
-      }}
-    >
-      <div
-        className="xp-wn-icon-box"
-        style={{
-          width: 38, height: 38, borderRadius: 12, flexShrink: 0,
-          background: isDark ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.10)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 18,
-          animationDelay: `${index * 45 + 80}ms`,
-        }}
-      >
-        {update.icon}
-      </div>
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3.5" y="4" width="17" height="16" rx="2.5" /><line x1="3.5" y1="10" x2="20.5" y2="10" /><line x1="3.5" y1="15" x2="20.5" y2="15" /><line x1="10" y1="10" x2="10" y2="20" />
+    </svg>
+  )
+}
+
+function ComingSoonCard({ entry, isDark }: { entry: ComingSoonEntry; isDark: boolean }) {
+  return (
+    <div data-testid="cs-entry" className="xp-wn-update-card" style={{
+      display: 'flex', alignItems: 'flex-start', gap: 13, padding: '15px 16px', borderRadius: 16,
+      background: isDark ? 'rgba(255,255,255,0.044)' : '#f8f7fc', border: `1px solid ${isDark ? 'rgba(255,255,255,0.085)' : 'rgba(0,0,0,0.075)'}`,
+    }}>
+      <div className="xp-wn-icon-box" style={{
+        width: 38, height: 38, borderRadius: 12, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
+        background: isDark ? 'rgba(124,58,237,0.18)' : 'rgba(124,58,237,0.10)', color: isDark ? '#c4b5fd' : '#7c3aed',
+      }}>{entry.icon === 'table' ? <FileIcon /> : entry.icon}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 13.5, fontWeight: 700, color: isDark ? 'rgba(255,255,255,0.92)' : '#111827', lineHeight: 1.3 }}>
-            {update.title}
-          </span>
-          <StatusPill status={update.status} isDark={isDark} />
-        </div>
-        <p style={{ fontSize: 12, color: isDark ? 'rgba(255,255,255,0.50)' : '#6b7280', lineHeight: 1.5, marginTop: 4 }}>
-          {update.description}
-        </p>
+        <p style={{ fontSize: 13.5, fontWeight: 700, lineHeight: 1.35, color: isDark ? 'rgba(255,255,255,0.92)' : '#2a1f4d', overflowWrap: 'anywhere' }}>{entry.title}</p>
+        <p style={{ fontSize: 12.5, lineHeight: 1.5, marginTop: 4, color: isDark ? 'rgba(255,255,255,0.58)' : '#5b5472', overflowWrap: 'anywhere' }}>{entry.description}</p>
+        {entry.note && <p data-testid="cs-note" style={{ fontSize: 11.5, fontWeight: 600, marginTop: 8, color: isDark ? '#c4b5fd' : '#7c3aed' }}>{entry.note}</p>}
       </div>
     </div>
   )
@@ -179,9 +135,6 @@ export function WhatsNewModal({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const newItems        = WHATS_NEW_UPDATES.filter(u => u.status === 'new')
-  const comingSoonItems = WHATS_NEW_UPDATES.filter(u => u.status === 'coming-soon')
-  const activeItems     = tab === 'new' ? newItems : comingSoonItems
 
   const modalBg = isDark ? '#15102a' : '#f0ecff'
 
@@ -254,8 +207,8 @@ export function WhatsNewModal({ onClose }: { onClose: () => void }) {
           className="w-full max-w-[520px] xp-wn-modal"
           style={{
             display: 'grid',
-            gridTemplateRows: 'auto auto 1fr',
-            maxHeight: 'calc(85vh - 32px)',
+            gridTemplateRows: 'auto auto minmax(0, 1fr)',
+            height: 'min(720px, calc(100dvh - 32px))',
             background: modalBg,
             border: `1px solid ${isDark ? 'rgba(124,58,237,0.36)' : 'rgba(124,58,237,0.18)'}`,
             borderRadius: 24,
@@ -313,29 +266,37 @@ export function WhatsNewModal({ onClose }: { onClose: () => void }) {
           {/* Tabs */}
           <div style={{ padding: '14px 20px 0' }}>
             <TabBar tab={tab} onChange={setTab} isDark={isDark} />
+            {tab === 'new' && WHATS_NEW_ENTRIES.length > 0 && (
+              <p data-testid="wn-updated" style={{ display: 'flex', alignItems: 'center', gap: 7, margin: '13px 2px 0', paddingBottom: 11, fontSize: 12, fontWeight: 600, color: isDark ? 'rgba(255,255,255,0.6)' : '#6b6485', borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.09)' : 'rgba(124,58,237,0.14)'}` }}>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2.5" /><line x1="3.5" y1="10" x2="20.5" y2="10" /><line x1="8" y1="3" x2="8" y2="7" /><line x1="16" y1="3" x2="16" y2="7" /></svg>
+                Last updated: {formatLastUpdated(WHATS_NEW_LAST_UPDATED)}
+              </p>
+            )}
           </div>
 
           {/* Scrollable body — key={tab} replays the content fade/slide on switch */}
           <div
             className="xp-wn-body"
             style={{
-              minHeight: 0, overflowY: 'auto', overflowX: 'hidden',
-              padding: '16px 20px 24px',
+              minHeight: 0, overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch',
+              padding: '6px 20px 24px',
             }}
           >
             <div key={tab} className="xp-wn-tab-content">
-              {activeItems.length === 0 ? (
-                <EmptyState isDark={isDark} />
-              ) : (
+              {tab === 'new' ? (
+                WHATS_NEW_ENTRIES.length === 0 ? <EmptyState isDark={isDark} /> : (
+                  <ol data-testid="wn-list" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                    {WHATS_NEW_ENTRIES.map((e, i) => <ReleaseRow key={e.id} entry={e} n={i + 1} first={i === 0} isDark={isDark} />)}
+                  </ol>
+                )
+              ) : COMING_SOON_ENTRIES.length === 0 ? <EmptyState isDark={isDark} /> : (
                 <>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    {activeItems.map((u, i) => <UpdateCard key={u.id} update={u} isDark={isDark} index={i} />)}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 10 }}>
+                    {COMING_SOON_ENTRIES.map(e => <ComingSoonCard key={e.id} entry={e} isDark={isDark} />)}
                   </div>
-                  {tab === 'coming-soon' && (
-                    <p style={{ textAlign: 'center', fontSize: 11.5, color: isDark ? 'rgba(255,255,255,0.32)' : '#9ca3af', marginTop: 18 }}>
-                      More updates are on the way.
-                    </p>
-                  )}
+                  <p style={{ textAlign: 'center', fontSize: 11.5, color: isDark ? 'rgba(255,255,255,0.32)' : '#9ca3af', marginTop: 18 }}>
+                    More updates are on the way.
+                  </p>
                 </>
               )}
             </div>

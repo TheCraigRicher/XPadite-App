@@ -136,3 +136,12 @@ test('wiring: the hidden flag lives in the parent and is reset on EVERY Task Man
 test('the v1.360 Copy & Paste and the existing completion / sync code are untouched', () => {
   for (const f of ['components/xpadite/MeetingsModal.tsx', 'components/xpadite/MyScheduleView.tsx', 'components/xpadite/SchedulePasteBar.tsx', 'components/xpadite/AppContext.tsx', 'components/xpadite/deadlineLink.ts', 'components/xpadite/scheduleEngine.ts']) assert.doesNotMatch(read(f), /deadlineAcks|deadlineAck\b|needsAck/, f)
 })
+
+test('v1.362 layout refinement: DEADLINES REMINDER header row (status + purple-outlined time + Hide), title row, question + Yes/No row; one heading/Hide; logic untouched', () => {
+  const src = read('components/xpadite/DayModal.tsx')
+  assert.match(src, /Deadlines Reminder/); assert.match(src, /data-testid="deadline-time"[\s\S]{0,120}border: '1px solid #8b5cf6'/)
+  assert.match(src, /single && <><DueChip info=\{dayDeadlines\[0\]\.info\} onDark \/>\{timeBox\(dayDeadlines\[0\]\)\}<\/>/, 'single deadline: status + time sit in the heading row')
+  assert.match(src, /!single && \(/, 'several deadlines: each carries its own status + time row')
+  assert.match(src, /ml-auto/, 'Yes/No stay together on the right'); assert.equal((src.match(/data-testid="deadlines-hide"/g) || []).length, 1)
+  assert.match(src, /answerDeadline\(it, 'met'\)/); assert.match(src, /answerDeadline\(it, 'missed'\)/)
+})

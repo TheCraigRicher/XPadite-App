@@ -6,7 +6,7 @@ import type { XpaditeMeeting } from './meetingsMockData'
 import { ZDate } from './zdate'
 
 /** The six built-in ids, plus any custom category id (custom ids are generated and never collide with these). */
-export type DefaultCategoryId = 'lecture' | 'meeting' | 'assignment' | 'study' | 'personal' | 'other'
+export type DefaultCategoryId = 'lecture' | 'meeting' | 'assignment' | 'test' | 'study' | 'personal' | 'other' | 'urgent' | 'appointment' | 'work'
 export type ScheduleCategoryId = string
 export type ScheduleRecurrence = 'none' | 'daily' | 'weekly' | 'monthly'
 export type ScheduleSource = 'google' | 'microsoft'
@@ -52,22 +52,26 @@ export interface ScheduleCategory {
   bg: string
   edge: string
   text: string
-  /** The six originals - protected from rename / recolour / delete. */
+  /** The built-in categories - protected from rename / recolour / delete. */
   builtIn?: boolean
 }
 
 export const SCHEDULE_CATEGORIES: ScheduleCategory[] = [
   { id: 'lecture',    label: 'Lecture / Class',   bg: '#e4d4fb', edge: '#a78bfa', text: '#4c1d95', builtIn: true },
   { id: 'meeting',    label: 'Meeting',           bg: '#bff5d9', edge: '#34d399', text: '#065f46', builtIn: true },
-  { id: 'assignment', label: 'Assignment / Test', bg: '#fbd3ea', edge: '#f472b6', text: '#831843', builtIn: true },
+  { id: 'assignment', label: 'Assignment',        bg: '#fbd3ea', edge: '#f472b6', text: '#831843', builtIn: true },
+  { id: 'test',       label: 'Test',              bg: '#f3e3c9', edge: '#b87916', text: '#80500b', builtIn: true },
   { id: 'study',      label: 'Study / Focus',     bg: '#c3e2fb', edge: '#60a5fa', text: '#1e3a8a', builtIn: true },
   { id: 'personal',   label: 'Personal',          bg: '#fbf6a8', edge: '#e0b81a', text: '#713f12', builtIn: true },
   { id: 'other',      label: 'Other',             bg: '#fddbae', edge: '#fb923c', text: '#7c2d12', builtIn: true },
+  { id: 'urgent',     label: 'Urgent / Priority', bg: '#ffdada', edge: '#ff0000', text: '#b91c1c', builtIn: true },
+  { id: 'appointment', label: 'Appointment',      bg: '#ccfff9', edge: '#00ffe6', text: '#007d72', builtIn: true },
+  { id: 'work',       label: 'Work',              bg: '#d6deff', edge: '#002fff', text: '#0025ba', builtIn: true },
 ]
 
-/** Looks `id` up in `list` (default: the six built-ins); an unknown id falls back to Other so nothing is ever unstyled. */
+/** Looks `id` up in `list` (default: the built-ins); an unknown id falls back to Other (by id, not by position) so nothing is ever unstyled. */
 export function categoryMeta(id: ScheduleCategoryId, list: ScheduleCategory[] = SCHEDULE_CATEGORIES): ScheduleCategory {
-  return list.find(c => c.id === id) ?? SCHEDULE_CATEGORIES[SCHEDULE_CATEGORIES.length - 1]
+  return list.find(c => c.id === id) ?? SCHEDULE_CATEGORIES.find(c => c.id === 'other')!
 }
 
 // -- Preferences (frontend-only, in memory) ---------------------------------
